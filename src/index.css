@@ -1,0 +1,61 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+:root {
+  --app-brand-primary: #2563EB;
+  --app-brand-secondary: #7C3AED;
+  --app-brand-accent: #22C55E;
+  --app-brand-highlight: #F59E0B;
+  --app-brand-bg-light: #F8FAFC;
+  --app-brand-bg-dark: #0F172A;
+  --app-brand-text: #1E293B;
+  --app-brand-text-light: #64748B;
+  
+  --app-card-bg: #FFFFFF;
+  --app-card-border: #F3F4F6;
+}
+
+:root.dark {
+  --app-brand-primary: #3B82F6;
+  --app-brand-secondary: #8B5CF6;
+  --app-brand-accent: #4ADE80;
+  --app-brand-highlight: #FBBF24;
+  --app-brand-bg-light: #0B1120;
+  --app-brand-bg-dark: #0F172A;
+  --app-brand-text: #F8FAFC;
+  --app-brand-text-light: #94A3B8;
+  
+  --app-card-bg: #1E293B;
+  --app-card-border: #334155;
+}
+
+@theme {
+  --color-brand-primary: var(--app-brand-primary);
+  --color-brand-secondary: var(--app-brand-secondary);
+  --color-brand-accent: var(--app-brand-accent);
+  --color-brand-highlight: var(--app-brand-highlight);
+  --color-brand-bg-light: var(--app-brand-bg-light);
+  --color-brand-bg-dark: var(--app-brand-bg-dark);
+  --color-brand-text: var(--app-brand-text);
+  --color-brand-text-light: var(--app-brand-text-light);
+  
+  --color-card-bg: var(--app-card-bg);
+  --color-card-border: var(--app-card-border);
+  
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+}
+
+@custom-variant dark (&:is(.dark *));
+
+body {
+  background-color: var(--color-brand-bg-light);
+  color: var(--color-brand-text);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+}

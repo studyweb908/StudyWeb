@@ -1,0 +1,6 @@
+{
+  "name": "StudyWeb",
+  "description": "High-Converting Landing Page for StudyWeb",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
