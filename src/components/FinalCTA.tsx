@@ -21,12 +21,18 @@ export default function FinalCTA() {
             </h2>
             
             <div className="flex flex-col sm:flex-row justify-center gap-4 mb-8">
-              <button className="bg-white text-brand-primary hover:bg-gray-50 px-8 py-4 rounded-full text-lg font-bold transition-all shadow-lg flex items-center justify-center gap-2 group transform hover:-translate-y-1">
+              <button 
+                onClick={() => (window as any).openStudyWebAuth?.('signup')}
+                className="bg-white text-brand-primary hover:bg-gray-50 px-8 py-4 rounded-full text-lg font-bold transition-all shadow-lg flex items-center justify-center gap-2 group transform hover:-translate-y-1 cursor-pointer"
+              >
                 <Rocket className="w-5 h-5 group-hover:animate-bounce" />
                 Join Free Now
               </button>
               
-              <button className="bg-white/10 text-white hover:bg-white/20 border border-white/20 px-8 py-4 rounded-full text-lg font-medium transition-all flex items-center justify-center gap-2">
+              <button 
+                onClick={() => (window as any).openStudyWebAuth?.('signup')}
+                className="bg-white/10 text-white hover:bg-white/20 border border-white/20 px-8 py-4 rounded-full text-lg font-medium transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
                 For Parents
               </button>
             </div>

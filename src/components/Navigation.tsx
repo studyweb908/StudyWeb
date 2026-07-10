@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Home, 
@@ -24,10 +24,15 @@ export default function Navigation() {
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [showPassword, setShowPassword] = useState(false);
 
+  const isProgrammaticScrollRef = useRef(false);
+  const scrollTimeoutRef = useRef<any>(null);
+
   // Track the current scrolled section to dynamically highlight active state
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 10);
+      
+      if (isProgrammaticScrollRef.current) return;
       
       if (window.scrollY < 120) {
         setActiveSection('home');
@@ -55,23 +60,166 @@ export default function Navigation() {
       setActiveSection(currentActive);
     };
 
+    const handleOpenAuthModal = (e: Event) => {
+      const customEvent = e as CustomEvent<{ mode?: 'login' | 'signup' }>;
+      const mode = customEvent.detail?.mode || 'login';
+      setAuthMode(mode);
+      setIsAuthModalOpen(true);
+    };
+
+    (window as any).openStudyWebAuth = (mode?: 'login' | 'signup') => {
+      setAuthMode(mode || 'login');
+      setIsAuthModalOpen(true);
+    };
+
     window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    window.addEventListener('open-auth-modal', handleOpenAuthModal);
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('open-auth-modal', handleOpenAuthModal);
+      delete (window as any).openStudyWebAuth;
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
   }, []);
 
+  const handleLinkClick = (e: React.MouseEvent<HTMLAnchorElement>, href: string, key: string) => {
+    e.preventDefault();
+    setActiveSection(key);
+    isProgrammaticScrollRef.current = true;
+    
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+
+    const finishScroll = () => {
+      isProgrammaticScrollRef.current = false;
+    };
+
+    const id = href === '#' ? '' : href.replace('#', '');
+    const el = id ? document.getElementById(id) : null;
+
+    if (href === '#') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (el) {
+      const offset = 80;
+      const bodyRect = document.body.getBoundingClientRect().top;
+      const elementRect = el.getBoundingClientRect().top;
+      const elementPosition = elementRect - bodyRect;
+      const offsetPosition = elementPosition - offset;
+
+      window.scrollTo({
+        top: offsetPosition,
+        behavior: 'smooth'
+      });
+    } else {
+      isProgrammaticScrollRef.current = false;
+      return;
+    }
+
+    // Use debounced scrolling to release lock when scrolling strictly stops
+    const onScrollDebounce = () => {
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+      scrollTimeoutRef.current = setTimeout(() => {
+        window.removeEventListener('scroll', onScrollDebounce);
+        finishScroll();
+      }, 100);
+    };
+
+    window.addEventListener('scroll', onScrollDebounce);
+    
+    // Safety fallback
+    scrollTimeoutRef.current = setTimeout(() => {
+      window.removeEventListener('scroll', onScrollDebounce);
+      finishScroll();
+    }, 1200);
+  };
+
   const navLinks = [
-    { name: 'Home', href: '#', key: 'home' },
-    { name: 'For Students', href: '#for-students', key: 'for-students' },
-    { name: 'Features', href: '#study-tools', key: 'study-tools' },
-    { name: 'Pricing', href: '#pricing', key: 'pricing' },
-    { name: 'Contact', href: '#contact', key: 'contact' },
+    { 
+      name: 'Home', 
+      href: '#', 
+      key: 'home', 
+      icon: <Home className="w-4 h-4" />,
+      colorClass: 'text-blue-600 dark:text-blue-400',
+      bgClass: 'bg-blue-50/90 dark:bg-blue-950/40',
+      borderClass: 'border-blue-100 dark:border-blue-900/30'
+    },
+    { 
+      name: 'For Students', 
+      href: '#for-students', 
+      key: 'for-students', 
+      icon: <GraduationCap className="w-4 h-4" />,
+      colorClass: 'text-indigo-600 dark:text-indigo-400',
+      bgClass: 'bg-indigo-50/90 dark:bg-indigo-950/40',
+      borderClass: 'border-indigo-100 dark:border-indigo-900/30'
+    },
+    { 
+      name: 'Features', 
+      href: '#study-tools', 
+      key: 'study-tools', 
+      icon: <Sparkles className="w-4 h-4" />,
+      colorClass: 'text-amber-600 dark:text-amber-400',
+      bgClass: 'bg-amber-50/90 dark:bg-amber-950/40',
+      borderClass: 'border-amber-100 dark:border-amber-900/30'
+    },
+    { 
+      name: 'Pricing', 
+      href: '#pricing', 
+      key: 'pricing', 
+      icon: <CreditCard className="w-4 h-4" />,
+      colorClass: 'text-emerald-600 dark:text-emerald-400',
+      bgClass: 'bg-emerald-50/90 dark:bg-emerald-950/40',
+      borderClass: 'border-emerald-100 dark:border-emerald-900/30'
+    },
+    { 
+      name: 'Contact', 
+      href: '#contact', 
+      key: 'contact', 
+      icon: <Mail className="w-4 h-4" />,
+      colorClass: 'text-rose-600 dark:text-rose-400',
+      bgClass: 'bg-rose-50/90 dark:bg-rose-950/40',
+      borderClass: 'border-rose-100 dark:border-rose-900/30'
+    },
   ];
 
   const bottomNavLinks = [
-    { name: 'Home', href: '#', icon: <Home className="w-5 h-5" />, key: 'home' },
-    { name: 'Students', href: '#for-students', icon: <GraduationCap className="w-5 h-5" />, key: 'for-students' },
-    { name: 'Features', href: '#study-tools', icon: <Sparkles className="w-5 h-5" />, key: 'study-tools' },
-    { name: 'Pricing', href: '#pricing', icon: <CreditCard className="w-5 h-5" />, key: 'pricing' },
+    { 
+      name: 'Home', 
+      href: '#', 
+      icon: <Home className="w-5 h-5" />, 
+      key: 'home',
+      colorClass: 'text-blue-600 dark:text-blue-400',
+      bgClass: 'bg-blue-50 dark:bg-blue-950/40'
+    },
+    { 
+      name: 'Students', 
+      href: '#for-students', 
+      icon: <GraduationCap className="w-5 h-5" />, 
+      key: 'for-students',
+      colorClass: 'text-indigo-600 dark:text-indigo-400',
+      bgClass: 'bg-indigo-50 dark:bg-indigo-950/40'
+    },
+    { 
+      name: 'Features', 
+      href: '#study-tools', 
+      icon: <Sparkles className="w-5 h-5" />, 
+      key: 'study-tools',
+      colorClass: 'text-amber-600 dark:text-amber-400',
+      bgClass: 'bg-amber-50 dark:bg-amber-950/40'
+    },
+    { 
+      name: 'Pricing', 
+      href: '#pricing', 
+      icon: <CreditCard className="w-5 h-5" />, 
+      key: 'pricing',
+      colorClass: 'text-emerald-600 dark:text-emerald-400',
+      bgClass: 'bg-emerald-50 dark:bg-emerald-950/40'
+    },
     { 
       name: 'Login', 
       onClick: () => { 
@@ -79,7 +227,9 @@ export default function Navigation() {
         setAuthMode('login'); 
       }, 
       icon: <LogIn className="w-5 h-5" />, 
-      key: 'login' 
+      key: 'login',
+      colorClass: 'text-rose-600 dark:text-rose-400',
+      bgClass: 'bg-rose-50 dark:bg-rose-950/40'
     },
   ];
 
@@ -92,8 +242,8 @@ export default function Navigation() {
         transition={{ duration: 0.5 }}
         className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
           isScrolled
-            ? 'bg-card-bg/80 dark:bg-brand-bg-dark/80 backdrop-blur-md shadow-sm py-4 border-b border-card-border/50'
-            : 'bg-transparent py-6'
+            ? 'bg-white/85 dark:bg-slate-950/85 backdrop-blur-md shadow-md py-3 border-b border-slate-200/50 dark:border-slate-850/50'
+            : 'bg-transparent py-5'
         }`}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -106,87 +256,97 @@ export default function Navigation() {
 
             {/* Desktop Navigation Links */}
             <div className="hidden md:flex items-center gap-8">
-              <div className="flex gap-6">
+              <div className="flex gap-2 bg-slate-50 dark:bg-slate-900/60 p-1.5 rounded-full border border-slate-100 dark:border-slate-800/40">
                 {navLinks.map((link) => {
                   const isActive = activeSection === link.key;
                   return (
-                    <a
+                    <motion.a
                       key={link.name}
                       href={link.href}
-                      className={`text-sm font-semibold transition-colors duration-200 relative py-1 ${
+                      onClick={(e) => handleLinkClick(e, link.href, link.key)}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.96 }}
+                      className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all relative isolate group cursor-pointer ${
                         isActive 
-                          ? 'text-brand-primary font-bold' 
-                          : 'text-brand-text-light hover:text-brand-primary'
+                          ? `${link.colorClass} font-extrabold` 
+                          : 'text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
                       }`}
                     >
-                      {link.name}
                       {isActive && (
                         <motion.div 
-                          layoutId="desktopActiveUnderline" 
-                          className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand-primary rounded-full" 
+                          layoutId="desktopActivePill" 
+                          className={`absolute inset-0 ${link.bgClass} rounded-full -z-10 shadow-sm border ${link.borderClass}`} 
+                          transition={{ type: "spring", stiffness: 380, damping: 30 }}
                         />
                       )}
-                    </a>
+                      <span className={`flex items-center justify-center transition-colors duration-200 ${
+                        isActive
+                          ? link.colorClass
+                          : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'
+                      }`}>
+                        {link.icon}
+                      </span>
+                      <span>{link.name}</span>
+                    </motion.a>
                   );
                 })}
               </div>
               <div className="flex items-center gap-4">
                 <ThemeToggle />
-                <button 
+                <motion.button 
                   onClick={() => { setIsAuthModalOpen(true); setAuthMode('login'); }}
-                  className="text-sm font-semibold text-brand-text hover:text-brand-primary transition-colors cursor-pointer"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer focus:outline-none"
                 >
                   Login
-                </button>
-                <button 
+                </motion.button>
+                <motion.button 
                   onClick={() => { setIsAuthModalOpen(true); setAuthMode('signup'); }}
-                  className="bg-brand-primary hover:bg-brand-secondary text-white px-5 py-2.5 rounded-full text-sm font-bold transition-all shadow-md shadow-brand-primary/20 hover:shadow-lg hover:shadow-brand-secondary/30 transform hover:-translate-y-0.5 cursor-pointer"
+                  whileHover={{ y: -1, scale: 1.02 }}
+                  whileTap={{ scale: 0.96 }}
+                  className="bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white px-5 py-2 rounded-full text-xs font-bold transition-all shadow-sm shadow-indigo-600/10 dark:shadow-indigo-500/15 hover:shadow-md hover:shadow-indigo-600/20 dark:hover:shadow-indigo-500/30 cursor-pointer border border-indigo-600/10 dark:border-indigo-400/20 focus:outline-none"
                 >
                   Sign Up
-                </button>
+                </motion.button>
               </div>
             </div>
 
             {/* Mobile Actions Header (Theme toggle & simplified Quick CTA) */}
             <div className="md:hidden flex items-center gap-3">
               <ThemeToggle />
-              <button 
+              <motion.button 
                 onClick={() => { setIsAuthModalOpen(true); setAuthMode('signup'); }}
-                className="bg-brand-primary/10 hover:bg-brand-primary/20 text-brand-primary border border-brand-primary/20 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/50 px-4 py-1.5 rounded-full text-xs font-bold transition-all hover:bg-indigo-100 dark:hover:bg-indigo-900/60 focus:outline-none"
               >
                 Go Pro
-              </button>
+              </motion.button>
             </div>
           </div>
         </div>
       </motion.nav>
 
-      {/* Floating Sticky Mobile Bottom Navigation Bar */}
-      <div className="md:hidden fixed bottom-5 left-4 right-4 z-50">
-        <div className="bg-card-bg/85 dark:bg-brand-bg-dark/85 backdrop-blur-xl border border-card-border/70 rounded-2xl py-2.5 px-3.5 shadow-[0_-8px_32px_rgba(0,0,0,0.06)] dark:shadow-[0_-8px_32px_rgba(0,0,0,0.4)] flex items-center justify-around relative">
+      {/* Fixed Docked Mobile Bottom Navigation Bar */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-t border-slate-200/80 dark:border-slate-800/80 shadow-[0_-8px_32px_rgba(0,0,0,0.04)] dark:shadow-[0_-8px_32px_rgba(0,0,0,0.35)]">
+        <div className="flex items-center justify-around relative max-w-lg mx-auto px-2 pt-2.5 pb-6">
           {bottomNavLinks.map((link) => {
             const isActive = link.key === 'login' ? isAuthModalOpen : activeSection === link.key;
             
             const content = (
               <>
-                {isActive && (
-                  <motion.div
-                    layoutId="activeMobileTabIndicator"
-                    className="absolute inset-0 bg-brand-primary/10 dark:bg-brand-primary/20 rounded-xl"
-                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                  />
-                )}
                 <div className={`transition-all duration-300 relative z-10 ${
                   isActive 
-                    ? 'text-brand-primary scale-110 font-bold' 
-                    : 'text-brand-text-light group-hover:text-brand-text'
+                    ? `${link.colorClass} scale-110 font-bold` 
+                    : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'
                 }`}>
                   {link.icon}
                 </div>
-                <span className={`text-[9px] font-extrabold tracking-tight relative z-10 transition-colors duration-300 ${
+                <span className={`text-[10px] font-extrabold tracking-tight relative z-10 transition-colors duration-300 ${
                   isActive 
-                    ? 'text-brand-primary' 
-                    : 'text-brand-text-light group-hover:text-brand-text'
+                    ? 'text-slate-900 dark:text-slate-100 font-bold' 
+                    : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600'
                 }`}>
                   {link.name}
                 </span>
@@ -195,24 +355,41 @@ export default function Navigation() {
 
             if (link.onClick) {
               return (
-                <button
+                <motion.button
                   key={link.name}
                   onClick={link.onClick}
-                  className="flex flex-col items-center gap-1.5 py-1 px-3 relative cursor-pointer group focus:outline-none"
+                  whileTap={{ scale: 0.92 }}
+                  className="flex-1 flex flex-col items-center justify-center gap-1 py-1 px-1.5 relative cursor-pointer group focus:outline-none"
                 >
+                  {isActive && (
+                    <motion.div
+                      layoutId="activeMobileTabIndicator"
+                      className={`absolute inset-x-2 inset-y-0.5 rounded-2xl ${link.bgClass} border border-slate-100/50 dark:border-slate-850/30 shadow-sm`}
+                      transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                    />
+                  )}
                   {content}
-                </button>
+                </motion.button>
               );
             }
 
             return (
-              <a
+              <motion.a
                 key={link.name}
                 href={link.href}
-                className="flex flex-col items-center gap-1.5 py-1 px-3 relative cursor-pointer group"
+                onClick={(e) => handleLinkClick(e, link.href, link.key)}
+                whileTap={{ scale: 0.92 }}
+                className="flex-1 flex flex-col items-center justify-center gap-1 py-1 px-1.5 relative cursor-pointer group"
               >
+                {isActive && (
+                  <motion.div
+                    layoutId="activeMobileTabIndicator"
+                    className={`absolute inset-x-2 inset-y-0.5 rounded-2xl ${link.bgClass} border border-slate-100/50 dark:border-slate-850/30 shadow-sm`}
+                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                  />
+                )}
                 {content}
-              </a>
+              </motion.a>
             );
           })}
         </div>
@@ -292,6 +469,8 @@ export default function Navigation() {
                 onSubmit={(e) => {
                   e.preventDefault();
                   alert(authMode === 'login' ? 'Successfully logged in to StudyWeb!' : 'Welcome! Your StudyWeb account has been created.');
+                  localStorage.setItem('studyweb_is_logged_in', 'true');
+                  window.dispatchEvent(new CustomEvent('studyweb-login-success'));
                   setIsAuthModalOpen(false);
                 }} 
                 className="space-y-4"
@@ -299,8 +478,8 @@ export default function Navigation() {
                 {authMode === 'signup' && (
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-brand-text">Full Name</label>
-                    <div className="relative">
-                      <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-text-light" />
+                    <div className="relative text-brand-text-light focus-within:text-brand-primary transition-colors duration-200">
+                      <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200" />
                       <input
                         type="text"
                         required
@@ -313,8 +492,8 @@ export default function Navigation() {
 
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-brand-text">Email Address</label>
-                  <div className="relative">
-                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-text-light" />
+                  <div className="relative text-brand-text-light focus-within:text-brand-primary transition-colors duration-200">
+                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200" />
                     <input
                       type="email"
                       required
@@ -333,8 +512,8 @@ export default function Navigation() {
                       </a>
                     )}
                   </div>
-                  <div className="relative">
-                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-text-light" />
+                  <div className="relative text-brand-text-light focus-within:text-brand-primary transition-colors duration-200">
+                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200" />
                     <input
                       type={showPassword ? 'text' : 'password'}
                       required

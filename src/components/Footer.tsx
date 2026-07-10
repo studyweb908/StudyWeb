@@ -40,24 +40,30 @@ export default function Footer() {
             </ul>
           </div>
 
-          <div>
-            <h4 className="font-bold mb-4">Resources</h4>
-            <ul className="space-y-3 text-sm text-white/60">
-              <li><a href="#about" className="hover:text-white transition-colors">Blog</a></li>
-              <li><a href="#for-students" className="hover:text-white transition-colors">Study Guides</a></li>
-              <li><a href="#faq" className="hover:text-white transition-colors">Help Center</a></li>
-              <li><a href="#cta" className="hover:text-white transition-colors">Community</a></li>
+          <div className="opacity-35 pointer-events-none select-none transition-opacity duration-300">
+            <h4 className="font-bold mb-4 flex items-center gap-1.5 text-white/80">
+              Resources
+              <span className="text-[9px] bg-white/10 text-white/60 px-1.5 py-0.5 rounded-md font-semibold tracking-wider uppercase">Soon</span>
+            </h4>
+            <ul className="space-y-3 text-sm text-white/50">
+              <li>Blog</li>
+              <li>Study Guides</li>
+              <li>Help Center</li>
+              <li>Community</li>
             </ul>
           </div>
 
-          <div>
-            <h4 className="font-bold mb-4">Company</h4>
-            <ul className="space-y-3 text-sm text-white/60">
-              <li><a href="#about" className="hover:text-white transition-colors">About Us</a></li>
-              <li><a href="#about" className="hover:text-white transition-colors">Careers</a></li>
-              <li><a href="#contact" className="hover:text-white transition-colors">Privacy Policy</a></li>
-              <li><a href="#contact" className="hover:text-white transition-colors">Terms of Service</a></li>
-              <li><a href="#contact" className="hover:text-white transition-colors">Contact</a></li>
+          <div className="opacity-35 pointer-events-none select-none transition-opacity duration-300">
+            <h4 className="font-bold mb-4 flex items-center gap-1.5 text-white/80">
+              Company
+              <span className="text-[9px] bg-white/10 text-white/60 px-1.5 py-0.5 rounded-md font-semibold tracking-wider uppercase">Soon</span>
+            </h4>
+            <ul className="space-y-3 text-sm text-white/50">
+              <li>About Us</li>
+              <li>Careers</li>
+              <li>Privacy Policy</li>
+              <li>Terms of Service</li>
+              <li>Contact</li>
             </ul>
           </div>
           

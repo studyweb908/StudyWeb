@@ -27,7 +27,10 @@ export default function Hero() {
             </p>
             
             <div className="flex flex-col sm:flex-row justify-center gap-4 mb-10">
-              <button className="group relative bg-brand-primary hover:bg-brand-secondary text-white px-8 py-4 rounded-full text-lg font-medium transition-all shadow-lg shadow-brand-primary/30 hover:shadow-xl hover:shadow-brand-secondary/40 flex items-center justify-center gap-2 transform hover:-translate-y-1 overflow-hidden">
+              <button 
+                onClick={() => (window as any).openStudyWebAuth?.('signup')}
+                className="group relative bg-brand-primary hover:bg-brand-secondary text-white px-8 py-4 rounded-full text-lg font-medium transition-all shadow-lg shadow-brand-primary/30 hover:shadow-xl hover:shadow-brand-secondary/40 flex items-center justify-center gap-2 transform hover:-translate-y-1 overflow-hidden cursor-pointer"
+              >
                 <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-in-out" />
                 <Rocket className="w-5 h-5 relative z-10 group-hover:animate-bounce" />
                 <span className="relative z-10">Join Free</span>

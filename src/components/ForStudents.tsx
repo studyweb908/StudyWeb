@@ -600,12 +600,12 @@ export default function ForStudents() {
             </div>
 
             <div className="pt-4 flex flex-wrap items-center gap-4">
-              <a 
-                href="#cta"
-                className="px-5 py-3 rounded-xl bg-brand-primary hover:bg-brand-secondary text-white text-xs sm:text-sm font-bold shadow-lg shadow-brand-primary/15 hover:shadow-xl hover:shadow-brand-secondary/25 transition-all flex items-center gap-2 group"
+              <button 
+                onClick={() => (window as any).openStudyWebAuth?.('signup')}
+                className="px-5 py-3 rounded-xl bg-brand-primary hover:bg-brand-secondary text-white text-xs sm:text-sm font-bold shadow-lg shadow-brand-primary/15 hover:shadow-xl hover:shadow-brand-secondary/25 transition-all flex items-center gap-2 group cursor-pointer"
               >
                 Join StudyWeb Now <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </a>
+              </button>
               <a 
                 href="#demo"
                 className="px-5 py-3 rounded-xl border border-card-border hover:bg-card-border/30 text-brand-text text-xs sm:text-sm font-bold transition-colors"

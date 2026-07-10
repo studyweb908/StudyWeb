@@ -8,3 +8,27 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 );
+
+// Register Service Worker for Offline Capabilities
+if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then((registration) => {
+        console.log('ServiceWorker registration successful with scope: ', registration.scope);
+      })
+      .catch((err) => {
+        console.warn('ServiceWorker registration failed: ', err);
+      });
+  });
+} else if ('serviceWorker' in navigator) {
+  // In development, also register for testing offline functionality
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then((registration) => {
+        console.log('ServiceWorker registered in development mode: ', registration.scope);
+      })
+      .catch((err) => {
+        console.warn('Dev ServiceWorker registration skipped/failed: ', err);
+      });
+  });
+}

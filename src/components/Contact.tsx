@@ -40,6 +40,7 @@ export default function Contact() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Characters count listener
   useEffect(() => {
@@ -83,8 +84,9 @@ export default function Contact() {
     return newErrors;
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
     const validationErrors = validateForm();
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
@@ -92,9 +94,30 @@ export default function Contact() {
     }
 
     setIsSubmitting(true);
-    // Simulate premium server communication
-    setTimeout(() => {
-      setIsSubmitting(false);
+    try {
+      const response = await fetch('/api/contact', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          role: formData.role,
+          subject: formData.subject,
+          message: formData.message,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const errorMsg = data.details
+          ? `${data.error} (Reason: ${data.details})`
+          : (data.error || 'Failed to submit message to the server.');
+        throw new Error(errorMsg);
+      }
+
       setIsSubmitted(true);
       // Reset form after successful submission
       setFormData({
@@ -105,11 +128,16 @@ export default function Contact() {
         message: '',
         agree: false
       });
-      // Show success for 5 seconds, then reset state
+      // Show success for 6 seconds, then reset state
       setTimeout(() => {
         setIsSubmitted(false);
-      }, 5000);
-    }, 1800);
+      }, 6000);
+    } catch (err: any) {
+      console.error('Contact submission error:', err);
+      setSubmitError(err.message || 'An error occurred while sending your message. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Compact FAQ preview state
@@ -476,6 +504,17 @@ export default function Contact() {
                     </p>
                   )}
                 </div>
+
+                {submitError && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-semibold flex items-start gap-2"
+                  >
+                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <span>{submitError}</span>
+                  </motion.div>
+                )}
 
                 {/* Submit button wrapper */}
                 <div>

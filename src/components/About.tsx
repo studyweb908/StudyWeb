@@ -173,12 +173,12 @@ export default function About() {
                 transition={{ delay: 0.3 }}
                 className="flex flex-wrap items-center gap-4 pt-2"
               >
-                <a
-                  href="#cta"
-                  className="px-6 py-3 bg-brand-primary hover:bg-brand-secondary text-white rounded-xl text-sm font-semibold transition-all duration-300 shadow-lg shadow-brand-primary/20 hover:shadow-xl hover:shadow-brand-secondary/30 hover:-translate-y-0.5 flex items-center gap-2 group"
+                <button
+                  onClick={() => (window as any).openStudyWebAuth?.('signup')}
+                  className="px-6 py-3 bg-brand-primary hover:bg-brand-secondary text-white rounded-xl text-sm font-semibold transition-all duration-300 shadow-lg shadow-brand-primary/20 hover:shadow-xl hover:shadow-brand-secondary/30 hover:-translate-y-0.5 flex items-center gap-2 group cursor-pointer"
                 >
                   Join Now <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </a>
+                </button>
                 <a
                   href="#mission"
                   className="px-6 py-3 border border-card-border hover:bg-card-border/30 text-brand-text rounded-xl text-sm font-semibold transition-all"
@@ -670,72 +670,6 @@ export default function About() {
               </p>
             </motion.div>
 
-          </div>
-        </div>
-      </section>
-
-      {/* =================================================
-          SECTION 8 — CALL TO ACTION
-         ================================================= */}
-      <section id="cta" className="py-24 relative overflow-hidden">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="relative rounded-[36px] overflow-hidden bg-gradient-to-br from-brand-primary to-brand-secondary p-[1px]">
-            
-            {/* Ambient pattern backdrop */}
-            <div className="absolute inset-0 bg-grid-pattern opacity-10 pointer-events-none" />
-            
-            <div className="relative bg-card-bg/95 dark:bg-brand-bg-dark/95 backdrop-blur-3xl px-8 py-16 md:py-24 rounded-[35px] text-center space-y-8">
-              
-              <div className="max-w-2xl mx-auto space-y-4">
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  whileInView={{ opacity: 1, scale: 1 }}
-                  viewport={{ once: true }}
-                  className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-primary/10 text-brand-primary text-xs font-semibold uppercase tracking-wider"
-                >
-                  <Rocket className="w-3.5 h-3.5 animate-bounce" /> Early Access Open
-                </motion.div>
-                
-                <h2 className="text-3xl sm:text-5xl font-extrabold text-brand-text tracking-tight font-display">
-                  Ready to Transform the Way You Study?
-                </h2>
-                
-                <p className="text-base sm:text-lg text-brand-text-light">
-                  Join StudyWeb today and be among the first students to experience a smarter, more organized way to learn with AI.
-                </p>
-              </div>
-
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto">
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  className="w-full sm:w-auto px-8 py-4 bg-brand-primary hover:bg-brand-secondary text-white rounded-2xl font-bold transition-all duration-300 shadow-xl shadow-brand-primary/20 hover:shadow-brand-secondary/30 flex items-center justify-center gap-2 group"
-                >
-                  Join Now
-                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </motion.button>
-                <a
-                  href="#for-students"
-                  className="w-full sm:w-auto px-8 py-4 border border-card-border hover:bg-card-border/30 text-brand-text rounded-2xl font-bold transition-all"
-                >
-                  Explore Features
-                </a>
-              </div>
-
-              {/* Security/Trust line under buttons */}
-              <div className="flex flex-wrap items-center justify-center gap-6 text-xs text-brand-text-light font-medium pt-2">
-                <span className="flex items-center gap-1.5">
-                  <Check className="w-4 h-4 text-emerald-500" /> Free pre-registration
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <Check className="w-4 h-4 text-emerald-500" /> Exclusive premium rewards
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <Check className="w-4 h-4 text-emerald-500" /> Spam-free assurance
-                </span>
-              </div>
-
-            </div>
           </div>
         </div>
       </section>

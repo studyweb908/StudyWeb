@@ -93,7 +93,10 @@ export default function Pricing() {
               </div>
             </div>
             
-            <button className="w-full py-3 px-4 rounded-xl border-2 border-card-border text-brand-text font-bold hover:border-brand-text hover:bg-brand-text hover:text-card-bg transition-all duration-300 mb-8">
+            <button 
+              onClick={() => (window as any).openStudyWebAuth?.('signup')}
+              className="w-full py-3 px-4 rounded-xl border-2 border-card-border text-brand-text font-bold hover:border-brand-text hover:bg-brand-text hover:text-card-bg transition-all duration-300 mb-8 cursor-pointer"
+            >
               Start Free
             </button>
             
@@ -152,7 +155,10 @@ export default function Pricing() {
               </div>
             </div>
             
-            <button className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-brand-primary to-blue-500 text-white font-bold hover:shadow-lg hover:shadow-brand-primary/30 transform transition-all duration-300 mb-8 relative z-10 overflow-hidden group-hover:before:translate-x-full before:absolute before:inset-0 before:bg-white/20 before:skew-x-12 before:-translate-x-full before:transition-transform before:duration-700">
+            <button 
+              onClick={() => (window as any).openStudyWebAuth?.('signup')}
+              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-brand-primary to-blue-500 text-white font-bold hover:shadow-lg hover:shadow-brand-primary/30 transform transition-all duration-300 mb-8 relative z-10 overflow-hidden group-hover:before:translate-x-full before:absolute before:inset-0 before:bg-white/20 before:skew-x-12 before:-translate-x-full before:transition-transform before:duration-700 cursor-pointer"
+            >
               Get Plus
             </button>
             
@@ -212,7 +218,10 @@ export default function Pricing() {
               </div>
             </div>
             
-            <button className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-brand-secondary to-indigo-500 text-white font-bold hover:shadow-lg hover:shadow-brand-secondary/30 transition-all duration-300 mb-8">
+            <button 
+              onClick={() => (window as any).openStudyWebAuth?.('signup')}
+              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-brand-secondary to-indigo-500 text-white font-bold hover:shadow-lg hover:shadow-brand-secondary/30 transition-all duration-300 mb-8 cursor-pointer"
+            >
               Go Pro
             </button>
             
@@ -269,7 +278,10 @@ export default function Pricing() {
               </div>
             </div>
             
-            <button className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-brand-accent to-emerald-500 text-white font-bold hover:shadow-lg hover:shadow-brand-accent/30 transition-all duration-300 mb-8">
+            <button 
+              onClick={() => (window as any).openStudyWebAuth?.('signup')}
+              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-brand-accent to-emerald-500 text-white font-bold hover:shadow-lg hover:shadow-brand-accent/30 transition-all duration-300 mb-8 cursor-pointer"
+            >
               For Parents
             </button>
             
