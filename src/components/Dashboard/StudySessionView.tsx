@@ -12,7 +12,12 @@ import {
   Minimize2, 
   Music,
   CheckCircle,
-  FileText
+  FileText,
+  CloudRain,
+  Wind,
+  Coffee,
+  Headphones,
+  Sliders
 } from 'lucide-react';
 
 export default function StudySessionView() {
@@ -23,6 +28,369 @@ export default function StudySessionView() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [focusNotes, setFocusNotes] = useState('');
   const [audioSource, setAudioSource] = useState('Lo-Fi Study Beats');
+  const [soundscapesEnabled, setSoundscapesEnabled] = useState(true);
+
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const masterGainRef = useRef<GainNode | null>(null);
+  const activeSourcesRef = useRef<any[]>([]);
+  const lofiIntervalRef = useRef<any>(null);
+
+  const stopAllSources = () => {
+    if (lofiIntervalRef.current) {
+      clearInterval(lofiIntervalRef.current);
+      lofiIntervalRef.current = null;
+    }
+    activeSourcesRef.current.forEach(source => {
+      try {
+        if (typeof source.stop === 'function') {
+          source.stop();
+        }
+      } catch (e) {}
+    });
+    activeSourcesRef.current = [];
+  };
+
+  const startSoundscape = (ctx: AudioContext, master: GainNode, sourceName: string) => {
+    stopAllSources();
+
+    if (sourceName === 'Lo-Fi Study Beats') {
+      const chords = [
+        [130.81, 164.81, 196.00, 246.94], // Cmaj7
+        [110.00, 130.81, 164.81, 196.00], // Am7
+        [87.31, 110.00, 130.81, 164.81],  // Fmaj7
+        [98.00, 123.47, 146.83, 174.61]   // G7
+      ];
+      let chordIndex = 0;
+
+      const playLofiBeat = () => {
+        const now = ctx.currentTime;
+        const chordNotes = chords[chordIndex];
+        chordIndex = (chordIndex + 1) % chords.length;
+
+        chordNotes.forEach((freq) => {
+          const osc = ctx.createOscillator();
+          const filter = ctx.createBiquadFilter();
+          const gain = ctx.createGain();
+
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, now);
+          osc.detune.setValueAtTime((Math.random() - 0.5) * 15, now);
+
+          filter.type = 'lowpass';
+          filter.frequency.setValueAtTime(320, now);
+
+          gain.gain.setValueAtTime(0, now);
+          gain.gain.linearRampToValueAtTime(0.05, now + 1.5);
+          gain.gain.setValueAtTime(0.05, now + 4);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 5.8);
+
+          osc.connect(filter);
+          filter.connect(gain);
+          gain.connect(master);
+
+          osc.start(now);
+          osc.stop(now + 6);
+
+          activeSourcesRef.current.push(osc);
+        });
+
+        // Soft vinyl static hiss buffer
+        const bufferSize = ctx.sampleRate * 2.0;
+        const crackleBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = crackleBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          if (Math.random() > 0.9997) {
+            data[i] = (Math.random() - 0.5) * 0.12;
+          } else {
+            data[i] = (Math.random() - 0.5) * 0.004;
+          }
+        }
+        const crackle = ctx.createBufferSource();
+        crackle.buffer = crackleBuffer;
+        crackle.loop = true;
+        
+        const crackleFilter = ctx.createBiquadFilter();
+        crackleFilter.type = 'bandpass';
+        crackleFilter.frequency.setValueAtTime(1000, now);
+        crackleFilter.Q.setValueAtTime(1.0, now);
+        
+        const crackleGain = ctx.createGain();
+        crackleGain.gain.setValueAtTime(0.04, now);
+
+        crackle.connect(crackleFilter);
+        crackleFilter.connect(crackleGain);
+        crackleGain.connect(master);
+        crackle.start(now);
+        activeSourcesRef.current.push(crackle);
+
+        // Schedule gentle kick and snare rhythm
+        for (let beat = 0; beat < 4; beat++) {
+          const beatTime = now + (beat * 1.5);
+
+          if (beat === 0 || beat === 2) {
+            const kickOsc = ctx.createOscillator();
+            const kickGain = ctx.createGain();
+            kickOsc.frequency.setValueAtTime(110, beatTime);
+            kickOsc.frequency.exponentialRampToValueAtTime(40, beatTime + 0.12);
+
+            kickGain.gain.setValueAtTime(0.10, beatTime);
+            kickGain.gain.exponentialRampToValueAtTime(0.001, beatTime + 0.22);
+
+            kickOsc.connect(kickGain);
+            kickGain.connect(master);
+            kickOsc.start(beatTime);
+            kickOsc.stop(beatTime + 0.28);
+            activeSourcesRef.current.push(kickOsc);
+          }
+
+          if (beat === 1 || beat === 3) {
+            const snareNoise = ctx.createBufferSource();
+            snareNoise.buffer = crackleBuffer;
+            const snareFilter = ctx.createBiquadFilter();
+            snareFilter.type = 'bandpass';
+            snareFilter.frequency.setValueAtTime(350, beatTime);
+            snareFilter.Q.setValueAtTime(1.2, beatTime);
+
+            const snareGain = ctx.createGain();
+            snareGain.gain.setValueAtTime(0.035, beatTime);
+            snareGain.gain.exponentialRampToValueAtTime(0.001, beatTime + 0.18);
+
+            snareNoise.connect(snareFilter);
+            snareFilter.connect(snareGain);
+            snareGain.connect(master);
+            snareNoise.start(beatTime);
+            snareNoise.stop(beatTime + 0.22);
+            activeSourcesRef.current.push(snareNoise);
+          }
+        }
+      };
+
+      playLofiBeat();
+      lofiIntervalRef.current = setInterval(playLofiBeat, 6000);
+
+    } else if (sourceName === 'Deep Rain & Thunderstorm') {
+      const now = ctx.currentTime;
+      const bufferSize = ctx.sampleRate * 2;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+
+      const rainSource = ctx.createBufferSource();
+      rainSource.buffer = buffer;
+      rainSource.loop = true;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(500, now);
+
+      const lfo = ctx.createOscillator();
+      lfo.frequency.setValueAtTime(0.08, now);
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.setValueAtTime(120, now);
+      
+      lfo.connect(lfoGain);
+      lfoGain.connect(filter.frequency);
+      lfo.start(now);
+      activeSourcesRef.current.push(lfo);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.18, now);
+
+      rainSource.connect(filter);
+      filter.connect(gain);
+      gain.connect(master);
+      rainSource.start(now);
+      activeSourcesRef.current.push(rainSource);
+
+      const triggerThunder = () => {
+        const tNow = ctx.currentTime;
+        const rumbleOsc = ctx.createOscillator();
+        const rumbleFilter = ctx.createBiquadFilter();
+        const rumbleGain = ctx.createGain();
+
+        rumbleOsc.type = 'sawtooth';
+        rumbleOsc.frequency.setValueAtTime(32, tNow);
+        
+        rumbleFilter.type = 'lowpass';
+        rumbleFilter.frequency.setValueAtTime(65, tNow);
+
+        rumbleGain.gain.setValueAtTime(0, tNow);
+        rumbleGain.gain.linearRampToValueAtTime(0.28, tNow + 1.0);
+        rumbleGain.gain.exponentialRampToValueAtTime(0.001, tNow + 5.5);
+
+        rumbleOsc.connect(rumbleFilter);
+        rumbleFilter.connect(rumbleGain);
+        rumbleGain.connect(master);
+
+        rumbleOsc.start(tNow);
+        rumbleOsc.stop(tNow + 6.0);
+        activeSourcesRef.current.push(rumbleOsc);
+      };
+
+      const thunderTimer = setInterval(() => {
+        if (Math.random() > 0.45) {
+          triggerThunder();
+        }
+      }, 11000);
+
+      activeSourcesRef.current.push({ stop: () => clearInterval(thunderTimer) });
+
+    } else if (sourceName === 'White Noise Fan') {
+      const now = ctx.currentTime;
+      const bufferSize = ctx.sampleRate * 2;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+
+      const fanSource = ctx.createBufferSource();
+      fanSource.buffer = buffer;
+      fanSource.loop = true;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(160, now);
+      filter.Q.setValueAtTime(1.1, now);
+
+      const lfo = ctx.createOscillator();
+      lfo.frequency.setValueAtTime(0.6, now);
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.setValueAtTime(0.015, now);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.32, now);
+
+      lfo.connect(lfoGain);
+      lfoGain.connect(gain.gain);
+      lfo.start(now);
+      activeSourcesRef.current.push(lfo);
+
+      fanSource.connect(filter);
+      filter.connect(gain);
+      gain.connect(master);
+      fanSource.start(now);
+      activeSourcesRef.current.push(fanSource);
+
+    } else if (sourceName === 'Coffee Shop Murmur') {
+      const now = ctx.currentTime;
+      const bufferSize = ctx.sampleRate * 2;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+
+      const humSource = ctx.createBufferSource();
+      humSource.buffer = buffer;
+      humSource.loop = true;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(150, now);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.28, now);
+
+      humSource.connect(filter);
+      filter.connect(gain);
+      gain.connect(master);
+      humSource.start(now);
+      activeSourcesRef.current.push(humSource);
+
+      const playClink = () => {
+        const cNow = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const clinkGain = ctx.createGain();
+
+        osc.type = 'sine';
+        const freq = 1700 + Math.random() * 900;
+        osc.frequency.setValueAtTime(freq, cNow);
+
+        clinkGain.gain.setValueAtTime(0, cNow);
+        clinkGain.gain.linearRampToValueAtTime(0.012, cNow + 0.01);
+        clinkGain.gain.exponentialRampToValueAtTime(0.001, cNow + 0.22);
+
+        osc.connect(clinkGain);
+        clinkGain.connect(master);
+        osc.start(cNow);
+        osc.stop(cNow + 0.28);
+        activeSourcesRef.current.push(osc);
+      };
+
+      const clinkTimer = setInterval(() => {
+        if (Math.random() > 0.4) {
+          playClink();
+        }
+      }, 4500);
+
+      activeSourcesRef.current.push({ stop: () => clearInterval(clinkTimer) });
+    }
+  };
+
+  // Automatically start playing soundscape when focus timer is active and unmuted and soundscapes are enabled
+  useEffect(() => {
+    if (!isActive || isMuted || !soundscapesEnabled) {
+      if (masterGainRef.current && audioCtxRef.current) {
+        masterGainRef.current.gain.setValueAtTime(masterGainRef.current.gain.value, audioCtxRef.current.currentTime);
+        masterGainRef.current.gain.exponentialRampToValueAtTime(0.001, audioCtxRef.current.currentTime + 0.2);
+      }
+      const timer = setTimeout(() => {
+        stopAllSources();
+        if (audioCtxRef.current && audioCtxRef.current.state === 'running') {
+          audioCtxRef.current.suspend();
+        }
+      }, 250);
+      return () => clearTimeout(timer);
+    }
+
+    const initAndStart = async () => {
+      try {
+        if (!audioCtxRef.current) {
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          if (!AudioContextClass) return;
+          audioCtxRef.current = new AudioContextClass();
+        }
+
+        if (audioCtxRef.current.state === 'suspended') {
+          await audioCtxRef.current.resume();
+        }
+
+        if (!masterGainRef.current) {
+          masterGainRef.current = audioCtxRef.current.createGain();
+          masterGainRef.current.connect(audioCtxRef.current.destination);
+        }
+
+        masterGainRef.current.gain.setValueAtTime(0.001, audioCtxRef.current.currentTime);
+        masterGainRef.current.gain.linearRampToValueAtTime(1.0, audioCtxRef.current.currentTime + 0.4);
+
+        startSoundscape(audioCtxRef.current, masterGainRef.current, audioSource);
+      } catch (err) {
+        console.warn('Failed to start ambient audio context:', err);
+      }
+    };
+
+    initAndStart();
+  }, [isActive, isMuted, audioSource, soundscapesEnabled]);
+
+  // Handle automatic play trigger on starting focus timer
+  useEffect(() => {
+    if (isActive && soundscapesEnabled) {
+      setIsMuted(false);
+    }
+  }, [isActive, soundscapesEnabled]);
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      stopAllSources();
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close();
+      }
+    };
+  }, []);
 
   // Load quick-started session parameters from event or localStorage
   useEffect(() => {
@@ -59,28 +427,40 @@ export default function StudySessionView() {
     return () => window.removeEventListener('studyweb_quick_session_start', handleQuickStart);
   }, []);
 
-  // Timer tick
+  // Timer tick - Optimized to avoid drift and interval rebuilding every second
   useEffect(() => {
     let interval: any = null;
-    if (isActive && secondsLeft > 0) {
+    if (isActive) {
       interval = setInterval(() => {
-        setSecondsLeft(prev => prev - 1);
+        setSecondsLeft(prev => {
+          if (prev <= 1) {
+            return 0;
+          }
+          return prev - 1;
+        });
       }, 1000);
-    } else if (secondsLeft === 0) {
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isActive]);
+
+  // Handle Study Session timer completion events
+  useEffect(() => {
+    if (secondsLeft === 0 && isActive) {
       setIsActive(false);
       // Play bell or toggle session
       if (sessionType === 'focus') {
-        alert('🎉 Focus Session Complete! Time for a short break.');
+        (window as any).showToast?.('🎉 Focus Session Complete! Time for a short break.', 'success');
         setSessionType('break');
         setSecondsLeft(5 * 60);
       } else {
-        alert('💪 Break is over! Let\'s lock back in.');
+        (window as any).showToast?.("💪 Break is over! Let's lock back in.", 'success');
         setSessionType('focus');
         setSecondsLeft(25 * 60);
       }
     }
-    return () => clearInterval(interval);
-  }, [isActive, secondsLeft, sessionType]);
+  }, [secondsLeft, isActive, sessionType]);
 
   // Format helper
   const formatTime = (secs: number) => {
@@ -101,6 +481,29 @@ export default function StudySessionView() {
     setSessionType(type);
     setSecondsLeft(minutes * 60);
   };
+
+  const soundscapeOptions = [
+    {
+      name: 'Lo-Fi Study Beats',
+      icon: Headphones,
+      desc: 'Chill warm beats & crackle',
+    },
+    {
+      name: 'Deep Rain & Thunderstorm',
+      icon: CloudRain,
+      desc: 'Relaxing rain & sub rumbles',
+    },
+    {
+      name: 'White Noise Fan',
+      icon: Wind,
+      desc: 'Consistent refreshing hum',
+    },
+    {
+      name: 'Coffee Shop Murmur',
+      icon: Coffee,
+      desc: 'Cozy murmurs & cup clinks',
+    }
+  ];
 
   return (
     <div className={`transition-all duration-300 ${isFullscreen ? 'fixed inset-0 z-50 bg-slate-950 p-6 md:p-12 overflow-y-auto' : 'space-y-6 pb-12'}`}>
@@ -212,28 +615,99 @@ export default function StudySessionView() {
             </div>
           </div>
 
-          {/* AMBIENT MUSIC COMPONENT */}
-          <div className="p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 bg-white dark:bg-slate-900 shadow-sm flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="p-2.5 rounded-xl bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-500 flex-shrink-0 animate-spin-slow">
-                <Music className="w-5 h-5" />
-              </span>
-              <div>
-                <p className="text-xs font-bold text-slate-800 dark:text-white">Ambient Soundscape</p>
-                <p className="text-[10px] text-slate-400 mt-0.5 font-semibold italic">Playing: {audioSource}</p>
+          {/* SOUNDSCAPES & FOCUS AUDIO LIBRARY */}
+          <div className="p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 bg-white dark:bg-slate-900 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className={`p-1.5 rounded-lg text-indigo-500 bg-indigo-500/10 dark:bg-indigo-500/20 ${soundscapesEnabled && isActive && !isMuted ? 'animate-spin-slow' : ''}`}>
+                  <Sliders className="w-4 h-4" />
+                </span>
+                <div>
+                  <h4 className="text-xs font-extrabold text-slate-800 dark:text-white uppercase tracking-wider">Soundscapes</h4>
+                  <p className="text-[9px] text-slate-400 font-semibold">Background focus waves</p>
+                </div>
+              </div>
+
+              {/* GORGEOUS CUSTOM TOGGLE SWITCH */}
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                  {soundscapesEnabled ? 'On' : 'Off'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSoundscapesEnabled(!soundscapesEnabled)}
+                  className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    soundscapesEnabled ? 'bg-indigo-600' : 'bg-slate-200 dark:bg-slate-800'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition duration-200 ease-in-out ${
+                      soundscapesEnabled ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
               </div>
             </div>
 
-            <select
-              value={audioSource}
-              onChange={(e) => setAudioSource(e.target.value)}
-              className="px-3 py-1.5 border border-slate-200 dark:border-slate-800 rounded-lg text-xs bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold focus:outline-none"
-            >
-              <option>Lo-Fi Study Beats</option>
-              <option>Deep Rain & Thunderstorm</option>
-              <option>White Noise Fan</option>
-              <option>Coffee Shop Murmur</option>
-            </select>
+            {/* SOUNDSCAPES LIBRARY GRID */}
+            <div className={`grid grid-cols-2 gap-2 transition-all duration-300 ${!soundscapesEnabled ? 'opacity-40 pointer-events-none' : ''}`}>
+              {soundscapeOptions.map((opt) => {
+                const isSelected = audioSource === opt.name;
+                const IconComponent = opt.icon;
+                const isCurrentlyGenerating = isSelected && soundscapesEnabled && isActive && !isMuted;
+
+                return (
+                  <button
+                    key={opt.name}
+                    type="button"
+                    onClick={() => setAudioSource(opt.name)}
+                    className={`flex flex-col text-left p-2.5 rounded-xl border text-xs transition-all duration-200 cursor-pointer ${
+                      isSelected
+                        ? 'border-indigo-500/80 bg-indigo-50/40 dark:bg-indigo-950/20 text-indigo-900 dark:text-indigo-100 shadow-xs'
+                        : 'border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-950/10 hover:bg-slate-100/50 dark:hover:bg-slate-800/40 text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <span className={`p-1 rounded-lg ${isSelected ? 'bg-indigo-500/10 text-indigo-500' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}`}>
+                        <IconComponent className="w-3.5 h-3.5" />
+                      </span>
+                      {isCurrentlyGenerating && (
+                        <div className="flex items-end gap-0.5 h-3">
+                          <span className="w-0.5 bg-indigo-500 animate-[pulse_0.8s_infinite]" style={{ height: '50%' }}></span>
+                          <span className="w-0.5 bg-indigo-500 animate-[pulse_1.2s_infinite_0.2s]" style={{ height: '90%' }}></span>
+                          <span className="w-0.5 bg-indigo-500 animate-[pulse_1s_infinite_0.4s]" style={{ height: '40%' }}></span>
+                        </div>
+                      )}
+                    </div>
+                    <p className="font-bold text-[10px] leading-tight line-clamp-1">{opt.name}</p>
+                    <p className="text-[8px] text-slate-400 font-medium leading-none mt-0.5 line-clamp-1">{opt.desc}</p>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* STATUS FOOTER */}
+            <div className="text-[9px] font-bold text-slate-400 flex items-center justify-between pt-1 border-t border-slate-100/50 dark:border-slate-850">
+              <span className="flex items-center gap-1">
+                {soundscapesEnabled ? (
+                  isActive ? (
+                    isMuted ? (
+                      <span className="text-rose-500">🔊 Active but muted</span>
+                    ) : (
+                      <span className="text-emerald-500 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+                        Synthesizing frequency...
+                      </span>
+                    )
+                  ) : (
+                    <span>⏱️ Ready for focus start</span>
+                  )
+                ) : (
+                  <span>💤 Disabled</span>
+                )}
+              </span>
+              <span>Stereo Synth</span>
+            </div>
           </div>
         </div>
 
@@ -264,7 +738,7 @@ export default function StudySessionView() {
               <span>Character count: {focusNotes.length}</span>
               <button 
                 onClick={() => {
-                  alert('💡 AI summary drafted! Saved directly to your "Notes" dashboard view.');
+                  (window as any).showToast?.('💡 AI summary drafted! Saved directly to your "Notes" dashboard view.', 'success');
                   setFocusNotes(prev => prev + '\n\n=== AI Summary ===\nKey Concepts captured during active sprint.');
                 }}
                 className="text-xs text-indigo-600 font-bold hover:underline flex items-center gap-1.5"

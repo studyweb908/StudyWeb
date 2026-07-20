@@ -13,7 +13,8 @@ import {
   Lock,
   ArrowRight,
   Eye,
-  EyeOff
+  EyeOff,
+  ImagePlus
 } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 
@@ -23,9 +24,24 @@ export default function Navigation() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [showPassword, setShowPassword] = useState(false);
+  const [profilePic, setProfilePic] = useState<string | null>(null);
 
   const isProgrammaticScrollRef = useRef(false);
   const scrollTimeoutRef = useRef<any>(null);
+
+  const handleProfilePicChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        setProfilePic(result);
+        localStorage.setItem('studyweb_profile_pic', result);
+        localStorage.setItem('studyweb_profile_avatar', result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   // Track the current scrolled section to dynamically highlight active state
   useEffect(() => {
@@ -468,30 +484,70 @@ export default function Navigation() {
               <form 
                 onSubmit={(e) => {
                   e.preventDefault();
-                  alert(authMode === 'login' ? 'Successfully logged in to StudyWeb!' : 'Welcome! Your StudyWeb account has been created.');
-                  localStorage.setItem('studyweb_is_logged_in', 'true');
-                  window.dispatchEvent(new CustomEvent('studyweb-login-success'));
+                  (window as any).showToast?.(
+                    authMode === 'login' 
+                      ? 'Successfully logged in to StudyWeb!' 
+                      : 'Welcome! Your StudyWeb account has been created.', 
+                    'success'
+                  );
+                  
+                  if (authMode === 'signup') {
+                    window.dispatchEvent(new CustomEvent('studyweb-signup-success'));
+                  } else {
+                    localStorage.setItem('studyweb_is_logged_in', 'true');
+                    window.dispatchEvent(new CustomEvent('studyweb-login-success'));
+                  }
                   setIsAuthModalOpen(false);
                 }} 
                 className="space-y-4"
               >
                 {authMode === 'signup' && (
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-brand-text">Full Name</label>
-                    <div className="relative text-brand-text-light focus-within:text-brand-primary transition-colors duration-200">
-                      <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200" />
-                      <input
-                        type="text"
-                        required
-                        placeholder="John Doe"
-                        className="w-full pl-10 pr-4 py-3 rounded-xl border border-card-border bg-card-bg/50 dark:bg-brand-bg-dark/50 backdrop-blur-sm text-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
-                      />
+                  <>
+                    <div className="space-y-1.5 flex flex-col items-center pb-2">
+                      <div className="relative group cursor-pointer w-20 h-20 rounded-full bg-card-bg/50 dark:bg-brand-bg-dark/50 border border-card-border flex items-center justify-center overflow-hidden mb-1">
+                        {profilePic ? (
+                          <img src={profilePic} alt="Profile preview" className="w-full h-full object-cover" />
+                        ) : (
+                          <User className="w-8 h-8 text-brand-text-light group-hover:text-brand-primary transition-colors duration-200" />
+                        )}
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                           <ImagePlus className="w-6 h-6 text-white" />
+                        </div>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleProfilePicChange}
+                          required
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        />
+                      </div>
+                      <label className="text-[10px] font-bold text-brand-text-light text-center">
+                        Upload Profile Picture
+                      </label>
                     </div>
-                  </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-brand-text flex items-center gap-1.5">
+                        <User className="w-3.5 h-3.5 text-brand-text-light" />
+                        Full Name
+                      </label>
+                      <div className="relative text-brand-text-light focus-within:text-brand-primary transition-colors duration-200">
+                        <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200" />
+                        <input
+                          type="text"
+                          required
+                          placeholder="John Doe"
+                          className="w-full pl-10 pr-4 py-3 rounded-xl border border-card-border bg-card-bg/50 dark:bg-brand-bg-dark/50 backdrop-blur-sm text-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
+                        />
+                      </div>
+                    </div>
+                  </>
                 )}
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-brand-text">Email Address</label>
+                  <label className="text-xs font-bold text-brand-text flex items-center gap-1.5">
+                    <Mail className="w-3.5 h-3.5 text-brand-text-light" />
+                    Email Address
+                  </label>
                   <div className="relative text-brand-text-light focus-within:text-brand-primary transition-colors duration-200">
                     <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200" />
                     <input
@@ -505,7 +561,10 @@ export default function Navigation() {
 
                 <div className="space-y-1.5">
                   <div className="flex justify-between items-center">
-                    <label className="text-xs font-bold text-brand-text">Password</label>
+                    <label className="text-xs font-bold text-brand-text flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5 text-brand-text-light" />
+                      Password
+                    </label>
                     {authMode === 'login' && (
                       <a href="#contact" onClick={() => setIsAuthModalOpen(false)} className="text-[10px] text-brand-primary hover:underline font-bold">
                         Forgot Password?

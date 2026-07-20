@@ -25,63 +25,7 @@ export default function QuizCenterView() {
   const [quizFinished, setQuizFinished] = useState(false);
   
   // Custom mock bank
-  const quizBank: Record<string, QuizQuestion[]> = {
-    Biology: [
-      {
-        id: 'b1',
-        question: 'Which of the following cellular processes converts glucose into pyruvate, yielding ATP?',
-        options: ['Krebs Cycle', 'Glycolysis', 'Electron Transport Chain', 'Photosynthesis'],
-        correctIndex: 1,
-        explanation: 'Glycolysis occurs in the cytoplasm and breaks down one glucose molecule into two pyruvates, yielding a net of 2 ATP.'
-      },
-      {
-        id: 'b2',
-        question: 'What organelle is primarily responsible for synthesis of lipids and detoxification of drugs?',
-        options: ['Rough Endoplasmic Reticulum', 'Smooth Endoplasmic Reticulum', 'Golgi Apparatus', 'Lysosome'],
-        correctIndex: 1,
-        explanation: 'The Smooth ER synthesizes lipids, phospholipids, and steroids. It is also key in metabolizing drugs and toxins.'
-      },
-      {
-        id: 'b3',
-        question: 'Which base pairs with Adenine in RNA molecules?',
-        options: ['Thymine', 'Cytosine', 'Guanine', 'Uracil'],
-        correctIndex: 3,
-        explanation: 'In RNA, Thymine is replaced by Uracil, which pairs directly with Adenine.'
-      }
-    ],
-    Mathematics: [
-      {
-        id: 'm1',
-        question: 'Evaluate the derivative of f(x) = 3x^2 + 5x - 7 at x = 2.',
-        options: ['11', '17', '12', '15'],
-        correctIndex: 1,
-        explanation: 'f\'(x) = 6x + 5. Substituting x=2 yields f\'(2) = 6(2) + 5 = 17.'
-      },
-      {
-        id: 'm2',
-        question: 'If log_2(x) = 5, what is the value of x?',
-        options: ['10', '25', '32', '64'],
-        correctIndex: 2,
-        explanation: 'Converting to exponential form: x = 2^5 = 32.'
-      }
-    ],
-    Physics: [
-      {
-        id: 'p1',
-        question: 'What is the work done on an object when a force of 10 N moves it 5 meters in the direction of the force?',
-        options: ['2 Joules', '15 Joules', '50 Joules', '100 Joules'],
-        correctIndex: 2,
-        explanation: 'Work = Force * Distance * cos(theta). Here, Work = 10 N * 5 m * 1 = 50 Joules.'
-      },
-      {
-        id: 'p2',
-        question: 'An object of mass 4 kg is accelerated at 3 m/s^2. What is the net force acting on the object?',
-        options: ['1.33 N', '7 N', '12 N', '24 N'],
-        correctIndex: 2,
-        explanation: 'Newton\'s Second Law: Force = Mass * Acceleration. F = 4 kg * 3 m/s^2 = 12 N.'
-      }
-    ]
-  };
+  const quizBank: Record<string, QuizQuestion[]> = {};
 
   const handleSelectSubject = (subject: string) => {
     setActiveSubject(subject);
@@ -148,26 +92,34 @@ export default function QuizCenterView() {
       {/* VIEW 1: SELECT SUBJECT */}
       {!activeSubject && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {Object.keys(quizBank).map((subject) => (
-              <div
-                key={subject}
-                onClick={() => handleSelectSubject(subject)}
-                className="p-5 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 hover:border-indigo-300 dark:hover:border-indigo-900/60 transition-all cursor-pointer hover:-translate-y-1 group"
-              >
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 dark:bg-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold mb-4">
-                  {subject[0]}
+          {Object.keys(quizBank).length === 0 ? (
+            <div className="text-center py-12 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl bg-slate-50/50 dark:bg-slate-900/50">
+              <Award className="w-12 h-12 text-slate-300 dark:text-slate-700 mx-auto mb-4" />
+              <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">No Quizzes Available</h3>
+              <p className="text-sm text-slate-500 text-center max-w-sm mx-auto mb-6">Create quizzes from your study notes or PDFs using the AI Tutor to test your knowledge.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {Object.keys(quizBank).map((subject) => (
+                <div
+                  key={subject}
+                  onClick={() => handleSelectSubject(subject)}
+                  className="p-5 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 hover:border-indigo-300 dark:hover:border-indigo-900/60 transition-all cursor-pointer hover:-translate-y-1 group"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 dark:bg-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold mb-4">
+                    {subject[0]}
+                  </div>
+                  <h4 className="font-bold text-slate-800 dark:text-slate-100 group-hover:text-indigo-600 transition-colors">{subject} Review</h4>
+                  <p className="text-xs text-slate-400 font-semibold mt-1">{quizBank[subject].length} Interactive Questions</p>
+                  
+                  <div className="flex items-center gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 font-bold mt-4">
+                    <span>Start Quiz</span>
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </div>
                 </div>
-                <h4 className="font-bold text-slate-800 dark:text-slate-100 group-hover:text-indigo-600 transition-colors">{subject} Review</h4>
-                <p className="text-xs text-slate-400 font-semibold mt-1">{quizBank[subject].length} Interactive Questions</p>
-                
-                <div className="flex items-center gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 font-bold mt-4">
-                  <span>Start Quiz</span>
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
           {/* Gamified instructions footer */}
           <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-3">

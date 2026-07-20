@@ -12,6 +12,6 @@ StudyWeb is built not only for students but also for parents who want to support
 
 **Study smarter. Learn faster. Achieve more.**
 ",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

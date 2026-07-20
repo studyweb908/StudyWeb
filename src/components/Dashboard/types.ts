@@ -47,4 +47,5 @@ export interface PDFDocument {
   size: string;
   pages: number;
   highlights: string[];
+  highlightColors?: Record<string, 'yellow' | 'pink' | 'green' | 'blue'>;
 }

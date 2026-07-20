@@ -2,24 +2,22 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Menu, 
   Search, 
-  Bell, 
   Sparkles, 
   FileUp, 
-  ChevronDown,
   ChevronRight,
   Sun,
   Moon,
-  LogOut,
-  User,
-  Settings,
+  Monitor,
   Plus,
   FileText,
   Layers,
   Clock,
   X,
   Maximize2,
-  Minimize2
+  Minimize2,
+  User
 } from 'lucide-react';
+import { useThemeMode } from '../../hooks/useThemeMode';
 
 const tabLabels: Record<string, string> = {
   'dashboard': 'Overview',
@@ -31,7 +29,6 @@ const tabLabels: Record<string, string> = {
   'notes': 'Notes',
   'flashcards': 'Flashcards',
   'quiz-center': 'Quiz Center',
-  'mind-maps': 'Mind Maps',
   'resources': 'Resources',
   'analytics': 'Analytics',
   'achievements': 'Achievements',
@@ -47,25 +44,20 @@ interface HeaderProps {
   onLogout: () => void;
   isFocusMode?: boolean;
   onFocusModeToggle?: () => void;
+  activeWorkspace?: any;
 }
 
-export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab, onLogout, isFocusMode = false, onFocusModeToggle }: HeaderProps) {
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
+export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab, onLogout, isFocusMode = false, onFocusModeToggle, activeWorkspace }: HeaderProps) {
   const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const [isDark, setIsDark] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return document.documentElement.classList.contains('dark');
-    }
-    return false;
-  });
+  const [isMobileSearchExpanded, setIsMobileSearchExpanded] = useState(false);
+  const { themeMode, toggleTheme } = useThemeMode();
+  const [profilePic, setProfilePic] = useState<string | null>(null);
 
   useEffect(() => {
-    const handleThemeChange = () => {
-      setIsDark(document.documentElement.classList.contains('dark'));
-    };
-    window.addEventListener('theme-changed', handleThemeChange);
-    return () => window.removeEventListener('theme-changed', handleThemeChange);
+    const savedPic = localStorage.getItem('studyweb_profile_avatar') || localStorage.getItem('studyweb_profile_pic');
+    if (savedPic) {
+      setProfilePic(savedPic);
+    }
   }, []);
 
   // Quick Add State
@@ -193,35 +185,59 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
     setModalType(null);
   };
 
-  // Simulated live notifications
-  const notifications = [
-    { id: '1', text: '🏆 Weekly leaderboard results are in! You ranked #4.', time: '5m ago', unread: true },
-    { id: '2', text: '🤖 AI Tutor finished analyzing "Biology Chapter 3". Try the custom quiz!', time: '1h ago', unread: true },
-    { id: '3', text: '🔥 Streak warning: complete today\'s target of 30 mins to save your 7-day streak!', time: '4h ago', unread: false },
-  ];
-
   return (
     <header className="sticky top-0 right-0 z-20 w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 shadow-[0_1px_3px_0_rgba(0,0,0,0.05),0_1px_2px_0_rgba(0,0,0,0.03)] dark:shadow-[0_1px_3px_0_rgba(0,0,0,0.3)] px-4 sm:px-6 py-3.5 transition-all duration-300">
+      {/* Mobile search expanded overlay */}
+      {isMobileSearchExpanded && (
+        <div className="absolute inset-0 z-30 bg-white dark:bg-slate-900 px-4 py-2.5 flex items-center gap-3">
+          <Search className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+          <input
+            autoFocus
+            type="text"
+            placeholder="Search notes, flashcards, or ask AI..."
+            className="flex-1 bg-transparent text-sm font-semibold text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none"
+          />
+          <button 
+            onClick={() => setIsMobileSearchExpanded(false)}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-between gap-4">
         {/* Mobile Hamburger & Logo */}
-        <div className="flex items-center gap-3 lg:hidden">
+        <div className="flex items-center gap-3 md:hidden max-w-[60%]">
           <button 
             onClick={onMenuToggle}
-            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className={`p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0 ${isFocusMode ? 'hidden' : ''}`}
           >
             <Menu className="w-6 h-6" />
           </button>
           
-          <div className="flex items-center gap-1.5">
-            <div className="w-7 h-7 rounded-md bg-indigo-600 flex items-center justify-center">
-              <Sparkles className="w-3.5 h-3.5 text-white" />
-            </div>
-            <span className="font-extrabold text-base tracking-tight text-slate-900 dark:text-white">StudyWeb</span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            {activeWorkspace ? (
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-base shrink-0 select-none">{activeWorkspace.emoji || '🧬'}</span>
+                <span className="font-extrabold text-sm tracking-tight text-slate-900 dark:text-white truncate">
+                  {activeWorkspace.name}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 min-w-0">
+                <div className="w-6 h-6 rounded-md flex items-center justify-center overflow-hidden shrink-0">
+                  <img src="/logo.png" alt="StudyWeb Logo" className="w-full h-full object-contain" />
+                </div>
+                <span className="font-extrabold text-sm tracking-tight text-slate-900 dark:text-white truncate">
+                  StudyWeb
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Breadcrumb Navigation Trail - Desktop Only */}
-        <div className="hidden md:flex items-center gap-1.5 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 select-none bg-slate-50 dark:bg-slate-800/40 px-3.5 py-1.5 rounded-xl border border-slate-100 dark:border-slate-800/80">
+        <div className={`${isFocusMode ? 'hidden' : 'hidden md:flex'} items-center gap-1.5 text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 select-none bg-slate-50 dark:bg-slate-800/40 px-3.5 py-1.5 rounded-xl border border-slate-100 dark:border-slate-800/80`}>
           <button 
             onClick={() => setActiveTab('dashboard')}
             className={`transition-colors hover:text-indigo-600 dark:hover:text-indigo-400 font-semibold cursor-pointer ${
@@ -243,7 +259,7 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
         </div>
 
         {/* Search Bar - Expanded on desktop */}
-        <div className="hidden sm:flex flex-1 max-w-md relative">
+        <div className={`${isFocusMode ? 'hidden' : 'hidden md:flex'} flex-1 max-w-md relative`}>
           <Search className={`absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 transition-colors duration-200 ${isSearchFocused ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'}`} />
           <input
             id="header-search-input"
@@ -258,14 +274,7 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
         {/* Metrics, Gamification & Profile Area */}
         <div className="flex items-center gap-3 sm:gap-4 ml-auto">
           {/* Quick Actions Shortcuts (Desktop Only) */}
-          <div className="hidden md:flex items-center gap-2">
-            <button
-              onClick={() => setActiveTab('pdf-chat')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold transition-all cursor-pointer"
-            >
-              <FileUp className="w-3.5 h-3.5 text-slate-500" />
-              <span>Upload PDF</span>
-            </button>
+          <div className={`${isFocusMode ? 'hidden' : 'hidden md:flex'} items-center gap-2`}>
             <button
               onClick={() => setActiveTab('ai-tutor')}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/10 cursor-pointer"
@@ -273,65 +282,6 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
               <Sparkles className="w-3.5 h-3.5" />
               <span>Ask AI</span>
             </button>
-          </div>
-
-          <div className="h-6 w-[1px] bg-slate-200 dark:bg-slate-800 hidden md:block" />
-
-          {/* Quick Add Dropdown */}
-          <div className="relative" ref={quickAddDropdownRef}>
-            <button
-              onClick={() => {
-                setIsQuickAddOpen(!isQuickAddOpen);
-                setIsNotificationsOpen(false);
-                setIsProfileOpen(false);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/15 hover:shadow-indigo-600/25 cursor-pointer relative"
-              title="Quick Add Content"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="hidden xs:inline">Quick Add</span>
-            </button>
-
-            {isQuickAddOpen && (
-              <div className="absolute right-0 mt-3 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl py-2 z-30">
-                <div className="px-4 py-1.5 border-b border-slate-100 dark:border-slate-700 mb-1">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Quick Create</p>
-                </div>
-                
-                <button
-                  onClick={() => {
-                    setIsQuickAddOpen(false);
-                    setModalType('note');
-                  }}
-                  className="w-full px-4 py-2 hover:bg-slate-50 dark:hover:bg-slate-700/50 flex items-center gap-2.5 transition-colors text-slate-700 dark:text-slate-200 font-semibold text-xs text-left cursor-pointer"
-                >
-                  <FileText className="w-4 h-4 text-indigo-500" />
-                  <span>New Note</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setIsQuickAddOpen(false);
-                    setModalType('flashcard');
-                  }}
-                  className="w-full px-4 py-2 hover:bg-slate-50 dark:hover:bg-slate-700/50 flex items-center gap-2.5 transition-colors text-slate-700 dark:text-slate-200 font-semibold text-xs text-left cursor-pointer"
-                >
-                  <Layers className="w-4 h-4 text-emerald-500" />
-                  <span>New Flashcard</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setIsQuickAddOpen(false);
-                    setModalType('session');
-                  }}
-                  className="w-full px-4 py-2 hover:bg-slate-50 dark:hover:bg-slate-700/50 flex items-center gap-2.5 transition-colors text-slate-700 dark:text-slate-200 font-semibold text-xs text-left cursor-pointer"
-                >
-                  <Clock className="w-4 h-4 text-amber-500" />
-                  <span>Start Study Session</span>
-                </button>
-              </div>
-            )}
           </div>
 
           {/* Focus Mode Button */}
@@ -350,131 +300,46 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
 
           {/* Theme Toggle Button */}
           <button
-            onClick={() => {
-              const nextDark = !isDark;
-              setIsDark(nextDark);
-              if (nextDark) {
-                document.documentElement.classList.add('dark');
-                localStorage.setItem('theme', 'dark');
-              } else {
-                document.documentElement.classList.remove('dark');
-                localStorage.setItem('theme', 'light');
-              }
-              window.dispatchEvent(new Event('theme-changed'));
-            }}
-            className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+            onClick={toggleTheme}
+            className="flex items-center gap-1.5 p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer group"
             aria-label="Toggle theme mode"
-            title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            title={`Current: ${themeMode.charAt(0).toUpperCase() + themeMode.slice(1)} Mode`}
           >
-            {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            {themeMode === 'system' ? (
+              <Monitor className="w-5 h-5" />
+            ) : themeMode === 'light' ? (
+              <Sun className="w-5 h-5" />
+            ) : (
+              <Moon className="w-5 h-5" />
+            )}
+            <span className="text-[10px] font-bold uppercase tracking-wider hidden lg:block mr-1 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+              {themeMode}
+            </span>
           </button>
 
-          {/* Notifications Dropdown */}
-          <div className="relative">
-            <button
-              onClick={() => {
-                setIsNotificationsOpen(!isNotificationsOpen);
-                setIsProfileOpen(false);
-              }}
-              className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer relative"
-            >
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-indigo-600 ring-2 ring-white dark:ring-slate-900" />
-            </button>
-
-            {isNotificationsOpen && (
-              <div className="absolute right-0 mt-3 w-80 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl py-2 z-30">
-                <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
-                  <span className="font-bold text-sm text-slate-900 dark:text-white">Notifications</span>
-                  <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full font-bold">2 New</span>
-                </div>
-                <div className="divide-y divide-slate-100 dark:divide-slate-700 max-h-72 overflow-y-auto">
-                  {notifications.map((notif) => (
-                    <div 
-                      key={notif.id} 
-                      className={`p-3.5 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${notif.unread ? 'bg-indigo-500/5' : ''}`}
-                    >
-                      <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed font-medium">{notif.text}</p>
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500 block mt-1">{notif.time}</span>
-                    </div>
-                  ))}
-                </div>
-                <div className="p-2 border-t border-slate-100 dark:border-slate-700 text-center">
-                  <button 
-                    onClick={() => {
-                      setIsNotificationsOpen(false);
-                      setActiveTab('dashboard');
-                    }}
-                    className="text-xs text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
-                  >
-                    Mark all as read
-                  </button>
-                </div>
-              </div>
+          {/* Profile Picture */}
+          <button 
+            onClick={() => setActiveTab('profile')}
+            className="flex items-center justify-center w-10 h-10 rounded-full border-2 border-slate-200 dark:border-slate-800 overflow-hidden cursor-pointer hover:border-indigo-500 dark:hover:border-indigo-400 transition-colors shrink-0"
+            title="Profile Settings"
+          >
+            {profilePic ? (
+              <img src={profilePic} alt="User Profile" className="w-full h-full object-cover" />
+            ) : (
+              <User className="w-5 h-5 text-slate-400" />
             )}
-          </div>
+          </button>
 
-          {/* Profile User Dropdown */}
-          <div className="relative">
-            <button
-              onClick={() => {
-                setIsProfileOpen(!isProfileOpen);
-                setIsNotificationsOpen(false);
-              }}
-              className="flex items-center gap-1.5 p-1 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer text-left"
-            >
-              <img
-                src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120"
-                alt="Alex Avatar"
-                className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-700 object-cover"
-              />
-              <ChevronDown className="w-4 h-4 text-slate-400 hidden xs:block" />
-            </button>
+          {/* Mobile Search Toggle */}
+          <button
+            onClick={() => setIsMobileSearchExpanded(true)}
+            className="md:hidden p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+            title="Search"
+          >
+            <Search className="w-5 h-5" />
+          </button>
 
-            {isProfileOpen && (
-              <div className="absolute right-0 mt-3 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl py-2.5 z-30">
-                <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-700 mb-1">
-                  <p className="font-extrabold text-sm text-slate-900 dark:text-white">Alex Johnson</p>
-                  <p className="text-xs text-slate-400 font-semibold mt-0.5">Grade 11 • AP Classes</p>
-                </div>
-                
-                <button
-                  onClick={() => {
-                    setIsProfileOpen(false);
-                    setActiveTab('profile');
-                  }}
-                  className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-2.5 transition-colors"
-                >
-                  <User className="w-4 h-4 text-slate-400" />
-                  My Profile
-                </button>
 
-                <button
-                  onClick={() => {
-                    setIsProfileOpen(false);
-                    setActiveTab('profile');
-                  }}
-                  className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-2.5 transition-colors"
-                >
-                  <Settings className="w-4 h-4 text-slate-400" />
-                  Account Settings
-                </button>
-
-                <div className="border-t border-slate-100 dark:border-slate-700 my-1.5" />
-
-                <button
-                  onClick={() => {
-                    setIsProfileOpen(false);
-                    onLogout();
-                  }}
-                  className="w-full px-4 py-2.5 text-left text-xs font-extrabold text-rose-500 hover:bg-rose-500/10 flex items-center gap-2.5 transition-colors"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Log Out
-                </button>
-              </div>
-            )}
-          </div>
         </div>
       </div>
 

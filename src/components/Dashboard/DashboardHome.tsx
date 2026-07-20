@@ -14,7 +14,9 @@ import {
   Trophy, 
   Star,
   ChevronRight,
-  Brain
+  Brain,
+  FileText,
+  FileEdit
 } from 'lucide-react';
 import { TaskItem } from './types';
 
@@ -24,12 +26,7 @@ interface DashboardHomeProps {
 
 export default function DashboardHome({ setActiveTab }: DashboardHomeProps) {
   // Local state for interactive tasks
-  const [tasks, setTasks] = useState<TaskItem[]>([
-    { id: '1', title: 'Revise Mitochondria structure & Krebs Cycle', subject: 'Biology', priority: 'High', estimatedTime: '45m', completed: false },
-    { id: '2', title: 'Solve 10 integration problems on parts', subject: 'Mathematics', priority: 'High', estimatedTime: '50m', completed: true },
-    { id: '3', title: 'Write an essay draft on Shakespearian sonnets', subject: 'English', priority: 'Medium', estimatedTime: '30m', completed: false },
-    { id: '4', title: 'Memorize Physics kinematic formulae', subject: 'Physics', priority: 'Low', estimatedTime: '20m', completed: false },
-  ]);
+  const [tasks, setTasks] = useState<TaskItem[]>([]);
 
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskSubject, setNewTaskSubject] = useState('Biology');
@@ -79,7 +76,7 @@ export default function DashboardHome({ setActiveTab }: DashboardHomeProps) {
             <div className="space-y-2">
               <h1 className="text-3xl md:text-4xl font-extrabold text-brand-text dark:text-white tracking-tight font-display leading-tight">
                 Good Morning 👋 <br />
-                Welcome back, Alex
+                Welcome back!
               </h1>
               <p className="text-sm md:text-base text-brand-text-light dark:text-slate-300 leading-relaxed font-medium">
                 "Small daily improvements over time lead to stunning academic results." Your AI Tutor analyzed your math homework. Ready to crush your AP targets?
@@ -110,37 +107,31 @@ export default function DashboardHome({ setActiveTab }: DashboardHomeProps) {
             <div className="relative rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/60 dark:border-slate-800 p-5 space-y-4 shadow-md">
               <div className="flex justify-between items-center">
                 <span className="text-brand-text-light dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider">Today's Target</span>
-                <span className="text-emerald-600 dark:text-emerald-400 text-[10px] font-bold bg-emerald-500/10 px-2 py-0.5 rounded">75% Complete</span>
+                <span className="text-slate-500 dark:text-slate-400 text-[10px] font-bold bg-slate-200/50 dark:bg-slate-800 px-2 py-0.5 rounded">0% Complete</span>
               </div>
               
               {/* Target rings list */}
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-brand-text dark:text-white">Daily Focus Goal</span>
-                  <span className="text-xs text-brand-primary dark:text-indigo-400 font-bold">45 / 60 mins</span>
+                  <span className="text-xs text-slate-500 font-bold">0 / 60 mins</span>
                 </div>
                 <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-brand-primary rounded-full" style={{ width: '75%' }} />
+                  <div className="h-full bg-slate-400 dark:bg-slate-600 rounded-full" style={{ width: '0%' }} />
                 </div>
 
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-brand-text dark:text-white">Quizzes Cleared</span>
-                  <span className="text-xs text-brand-secondary dark:text-violet-400 font-bold">2 / 3 tasks</span>
+                  <span className="text-xs text-slate-500 font-bold">0 tasks</span>
                 </div>
                 <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-brand-secondary rounded-full" style={{ width: '66.6%' }} />
+                  <div className="h-full bg-slate-400 dark:bg-slate-600 rounded-full" style={{ width: '0%' }} />
                 </div>
               </div>
 
               {/* Achievements Highlight */}
-              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-yellow-500/10 flex items-center justify-center">
-                  <Trophy className="w-4.5 h-4.5 text-yellow-600 dark:text-yellow-500" />
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-brand-text dark:text-white">Weekly Streak Secured</p>
-                  <p className="text-[10px] text-brand-text-light dark:text-slate-400">Earned +100 XP today</p>
-                </div>
+              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-center">
+                <p className="text-[10px] text-brand-text-light dark:text-slate-400">Start studying to unlock achievements!</p>
               </div>
             </div>
           </div>
@@ -206,7 +197,7 @@ export default function DashboardHome({ setActiveTab }: DashboardHomeProps) {
                     />
                   </div>
 
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Subject</label>
                       <select
@@ -269,6 +260,11 @@ export default function DashboardHome({ setActiveTab }: DashboardHomeProps) {
 
             {/* Task Checklist Items */}
             <div className="space-y-3">
+              {tasks.length === 0 && (
+                <div className="text-center py-8">
+                  <p className="text-sm font-medium text-slate-500 dark:text-slate-400">No tasks added yet. Start planning!</p>
+                </div>
+              )}
               {tasks.map((task) => (
                 <div
                   key={task.id}
@@ -334,66 +330,8 @@ export default function DashboardHome({ setActiveTab }: DashboardHomeProps) {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Card 1 */}
-              <div className="p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-800/10 flex flex-col justify-between h-44 text-left">
-                <div className="space-y-1">
-                  <div className="flex justify-between items-start">
-                    <span className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 tracking-wider">AP Chemistry</span>
-                    <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
-                      <Clock className="w-3 h-3" /> 2h left
-                    </span>
-                  </div>
-                  <h4 className="font-bold text-sm sm:text-base text-slate-800 dark:text-slate-100 mt-1 line-clamp-1">Chemical Kinetics & Rate Laws</h4>
-                  <p className="text-xs text-slate-400 font-medium line-clamp-1">Module 4 • Lesson 3 of 8</p>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex justify-between text-xs font-bold">
-                    <span className="text-slate-500">Progress</span>
-                    <span className="text-indigo-600 dark:text-indigo-400">62%</span>
-                  </div>
-                  <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-indigo-500 rounded-full" style={{ width: '62%' }} />
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setActiveTab('ai-tutor')}
-                  className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer"
-                >
-                  Resume Lesson
-                </button>
-              </div>
-
-              {/* Card 2 */}
-              <div className="p-5 rounded-2xl border border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-800/10 flex flex-col justify-between h-44 text-left">
-                <div className="space-y-1">
-                  <div className="flex justify-between items-start">
-                    <span className="text-[10px] uppercase font-bold text-violet-600 dark:text-violet-400 tracking-wider">AP Physics 1</span>
-                    <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
-                      <Clock className="w-3 h-3" /> 45m left
-                    </span>
-                  </div>
-                  <h4 className="font-bold text-sm sm:text-base text-slate-800 dark:text-slate-100 mt-1 line-clamp-1">Rotational Dynamics & Torque</h4>
-                  <p className="text-xs text-slate-400 font-medium line-clamp-1">Module 5 • Lesson 6 of 10</p>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex justify-between text-xs font-bold">
-                    <span className="text-slate-500">Progress</span>
-                    <span className="text-violet-600 dark:text-violet-400">80%</span>
-                  </div>
-                  <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-violet-500 rounded-full" style={{ width: '80%' }} />
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setActiveTab('ai-tutor')}
-                  className="w-full py-2 bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer"
-                >
-                  Resume Lesson
-                </button>
+              <div className="md:col-span-2 text-center py-8">
+                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">No active courses. Add a subject to start learning!</p>
               </div>
             </div>
           </div>
@@ -409,38 +347,8 @@ export default function DashboardHome({ setActiveTab }: DashboardHomeProps) {
             </div>
 
             <div className="space-y-4">
-              {/* Insight 1 */}
-              <div className="p-3.5 rounded-xl bg-indigo-500/5 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-900/40 text-xs">
-                <div className="flex items-center gap-1.5 font-bold text-indigo-700 dark:text-indigo-400 mb-1.5">
-                  <AlertCircle className="w-4 h-4" />
-                  <span>Topic Weakness Detected</span>
-                </div>
-                <p className="text-slate-600 dark:text-slate-300 font-medium leading-relaxed">
-                  Your last Math quiz on <strong>Differential Equations</strong> scored 64%. Revise using flashcards before taking the exam.
-                </p>
-                <button
-                  onClick={() => setActiveTab('flashcards')}
-                  className="mt-2 text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
-                >
-                  Open math flashcards &rarr;
-                </button>
-              </div>
-
-              {/* Insight 2 */}
-              <div className="p-3.5 rounded-xl bg-violet-500/5 dark:bg-violet-500/10 border border-violet-100 dark:border-violet-900/40 text-xs">
-                <div className="flex items-center gap-1.5 font-bold text-violet-700 dark:text-violet-400 mb-1.5">
-                  <Star className="w-4 h-4" />
-                  <span>Streak Multiplier Live</span>
-                </div>
-                <p className="text-slate-600 dark:text-slate-300 font-medium leading-relaxed">
-                  Clear 1 more biology homework module today to earn <strong>Double Study Coins (+50 XP)</strong>. Keep the streak hot!
-                </p>
-                <button
-                  onClick={() => setActiveTab('quiz-center')}
-                  className="mt-2 text-[11px] font-bold text-violet-600 dark:text-violet-400 hover:underline"
-                >
-                  Start biology quiz &rarr;
-                </button>
+              <div className="text-center py-4">
+                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Take some quizzes or use flashcards to get personalized AI study recommendations.</p>
               </div>
             </div>
           </div>
@@ -450,26 +358,26 @@ export default function DashboardHome({ setActiveTab }: DashboardHomeProps) {
             <h3 className="font-extrabold text-base text-slate-900 dark:text-white mb-4">Exam Countdown</h3>
             
             <div className="space-y-4">
-              <div className="flex items-center justify-between p-3.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20 text-xs">
-                <div>
-                  <p className="font-bold text-slate-800 dark:text-slate-200">AP Calculus AB Exam</p>
-                  <p className="text-[10px] text-slate-400 font-medium mt-0.5">Focus: Limit Theorems, Integrals</p>
-                </div>
-                <div className="text-right">
-                  <span className="block font-black text-rose-500 text-lg leading-none">24</span>
-                  <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Days left</span>
-                </div>
+              <div className="text-center py-6">
+                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">No upcoming exams tracked.</p>
               </div>
-
-              <div className="flex items-center justify-between p-3.5 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20 text-xs">
-                <div>
-                  <p className="font-bold text-slate-800 dark:text-slate-200">AP Biology Finals</p>
-                  <p className="text-[10px] text-slate-400 font-medium mt-0.5">Focus: Molecular genetics</p>
-                </div>
-                <div className="text-right">
-                  <span className="block font-black text-amber-500 text-lg leading-none">38</span>
-                  <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Days left</span>
-                </div>
+            </div>
+          </div>
+          {/* RECENT DOCUMENTS */}
+          <div className="bg-white dark:bg-slate-900 rounded-[24px] border border-slate-100 dark:border-slate-800/80 p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-extrabold text-base text-slate-900 dark:text-white">Recent Documents</h3>
+              <button 
+                onClick={() => setActiveTab('notes')}
+                className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
+              >
+                View All
+              </button>
+            </div>
+            
+            <div className="space-y-3">
+              <div className="text-center py-6">
+                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">No recent documents.</p>
               </div>
             </div>
           </div>

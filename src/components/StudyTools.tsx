@@ -57,13 +57,6 @@ export default function StudyTools() {
       iconColor: "bg-red-500/10 text-red-500"
     },
     { 
-      icon: Network, 
-      title: "AI Mind Maps", 
-      desc: "Visualize complex historical timelines or system flows with interactive, automated relational maps.",
-      color: "from-cyan-500/10 to-sky-500/5 text-cyan-500 hover:border-cyan-500/30",
-      iconColor: "bg-cyan-500/10 text-cyan-500"
-    },
-    { 
       icon: BarChart3, 
       title: "Progress Analytics", 
       desc: "Deeply analyze your course retention rates, daily streaks, and estimated conceptual readiness scores.",

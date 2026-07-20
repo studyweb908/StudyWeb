@@ -1,47 +1,16 @@
 import { Moon, Sun, Check } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useThemeMode } from '../hooks/useThemeMode';
 
 export default function ThemeToggle() {
-  const [isDark, setIsDark] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const storedPreference = localStorage.getItem('theme');
-      if (storedPreference) {
-        return storedPreference === 'dark';
-      }
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
-    }
-    return false;
-  });
-
+  const { themeMode, isDarkApplied, toggleTheme } = useThemeMode();
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = (e: MediaQueryListEvent) => {
-      if (!localStorage.getItem('theme')) {
-        setIsDark(e.matches);
-      }
-    };
-    
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, []);
-
-  useEffect(() => {
-    if (isDark) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
-    }
-  }, [isDark]);
-
-  const toggleTheme = () => {
-    const newIsDark = !isDark;
-    setIsDark(newIsDark);
-    setToastMessage(`${newIsDark ? 'Dark' : 'Light'} theme preference saved`);
+  const handleToggle = () => {
+    toggleTheme();
+    const newIsDark = !isDarkApplied;
+    setToastMessage(`Theme overridden to ${newIsDark ? 'Dark' : 'Light'} mode`);
     
     setTimeout(() => {
       setToastMessage(null);
@@ -51,11 +20,12 @@ export default function ThemeToggle() {
   return (
     <>
       <button
-        onClick={toggleTheme}
-        className="p-2 rounded-full text-brand-text-light hover:text-brand-primary hover:bg-brand-primary/10 transition-colors flex items-center justify-center focus:outline-none"
+        onClick={handleToggle}
+        className="p-2 rounded-full text-brand-text-light hover:text-brand-primary hover:bg-brand-primary/10 transition-colors flex items-center justify-center focus:outline-none cursor-pointer"
         aria-label="Toggle theme"
+        title={themeMode === 'system' ? 'System Theme (Sync active)' : `Theme override: ${themeMode}`}
       >
-        {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+        {isDarkApplied ? <Sun className="w-5 h-5 text-amber-500" /> : <Moon className="w-5 h-5 text-indigo-500" />}
       </button>
 
       {/* Toast Notification */}
@@ -65,12 +35,12 @@ export default function ThemeToggle() {
             initial={{ opacity: 0, y: 50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 50, scale: 0.9 }}
-            className="fixed bottom-6 right-6 z-[100] flex items-center gap-3 bg-card-bg border border-card-border shadow-xl rounded-xl px-4 py-3"
+            className="fixed bottom-6 right-6 z-[100] flex items-center gap-3 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-xl rounded-xl px-4 py-3"
           >
-            <div className="w-8 h-8 rounded-full bg-brand-primary/20 flex items-center justify-center text-brand-primary">
+            <div className="w-8 h-8 rounded-full bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-500">
               <Check className="w-4 h-4" />
             </div>
-            <span className="text-sm font-medium text-brand-text">
+            <span className="text-sm font-medium text-slate-850 dark:text-slate-100">
               {toastMessage}
             </span>
           </motion.div>

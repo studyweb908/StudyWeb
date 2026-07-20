@@ -12,31 +12,75 @@ import {
   HelpCircle as HelpIcon,
   ChevronLeft,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  BookOpen
 } from 'lucide-react';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Flashcard } from './types';
+
+const DEFAULT_CARDS: Flashcard[] = [
+  {
+    id: 'def-1',
+    category: 'AP Biology',
+    front: 'Mitochondrion',
+    back: 'An organelle found in large numbers in most cells, in which the biochemical processes of respiration and energy production occur.',
+    known: false
+  },
+  {
+    id: 'def-2',
+    category: 'AP Biology',
+    front: 'Ribosome',
+    back: 'A minute particle consisting of RNA and associated proteins found in large numbers in the cytoplasm of living cells. They bind messenger RNA and transfer RNA to synthesize polypeptides and proteins.',
+    known: false
+  },
+  {
+    id: 'def-3',
+    category: 'AP Biology',
+    front: 'Endoplasmic Reticulum',
+    back: 'A network of membranous tubules within the cytoplasm of a eukaryotic cell, continuous with the nuclear membrane. It usually has ribosomes attached and is involved in protein and lipid synthesis.',
+    known: false
+  },
+  {
+    id: 'def-4',
+    category: 'Calculus',
+    front: 'Derivative',
+    back: 'The limit of the ratio of the change in a function to the corresponding change in its independent variable as the latter change approaches zero; represents instantaneous rate of change.',
+    known: false
+  },
+  {
+    id: 'def-5',
+    category: 'Calculus',
+    front: 'Integral',
+    back: 'A mathematical constant or function that represents the area under a curve, computed as the limit of a sum of rectangles.',
+    known: false
+  },
+  {
+    id: 'def-6',
+    category: 'AP Physics',
+    front: 'Entropy',
+    back: 'A thermodynamic quantity representing the unavailability of a system\'s thermal energy for conversion into mechanical work, often interpreted as the degree of disorder or randomness in the system.',
+    known: false
+  }
+];
 
 export default function FlashcardsView() {
   const [activeCategory, setActiveCategory] = useState<string>('AP Biology');
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [showAddCard, setShowAddCard] = useState(false);
+  const [studyMode, setStudyMode] = useState<'classic' | 'vocabulary'>('classic');
+  const [vocabOrder, setVocabOrder] = useState<'term-first' | 'definition-first'>('term-first');
   
   // Custom flashcards
   const [cards, setCards] = useState<Flashcard[]>(() => {
     const saved = localStorage.getItem('studyweb_cards');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.length > 0) return parsed;
       } catch (e) {}
     }
-    return [
-      { id: '1', category: 'AP Biology', front: 'What is the primary product of glycolysis?', back: 'Pyruvate (specifically 2 molecules of Pyruvate, along with a net gain of 2 ATP and 2 NADH)' },
-      { id: '2', category: 'AP Biology', front: 'Which enzyme is responsible for unwinding DNA double helix?', back: 'DNA Helicase' },
-      { id: '3', category: 'Calculus', front: 'State the Chain Rule for derivatives.', back: 'd/dx [f(g(x))] = f\'(g(x)) * g\'(x)' },
-      { id: '4', category: 'Calculus', front: 'What is the limit of (1 + 1/n)^n as n approaches infinity?', back: 'e (approximately 2.71828)' },
-      { id: '5', category: 'AP Physics', front: 'What is the formula for escape velocity of a planet?', back: 'v_e = sqrt(2GM / R), where G is gravitational constant, M is planetary mass, R is planetary radius.' },
-    ];
+    return DEFAULT_CARDS;
   });
 
   // Sync to localStorage
@@ -121,6 +165,32 @@ export default function FlashcardsView() {
 
   const activeCard = filteredCards[currentCardIndex];
   const categories = Array.from(new Set(cards.map(c => c.category)));
+
+  // Dynamic card side text values based on Study Mode and Vocab settings
+  let frontLabel = "Question";
+  let backLabel = "Answer Explained";
+  let frontText = activeCard?.front || '';
+  let backText = activeCard?.back || '';
+  let frontClass = "bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300";
+  let backClass = "bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300";
+
+  if (studyMode === 'vocabulary' && activeCard) {
+    if (vocabOrder === 'term-first') {
+      frontLabel = "Word / Term";
+      backLabel = "Definition";
+      frontText = activeCard.front;
+      backText = activeCard.back;
+      frontClass = "bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 border border-sky-200/50 dark:border-sky-900/55";
+      backClass = "bg-violet-100 dark:bg-violet-950 text-violet-700 dark:text-violet-300 border border-violet-200/50 dark:border-violet-900/55";
+    } else {
+      frontLabel = "Definition";
+      backLabel = "Word / Term";
+      frontText = activeCard.back;
+      backText = activeCard.front;
+      frontClass = "bg-violet-100 dark:bg-violet-950 text-violet-700 dark:text-violet-300 border border-violet-200/50 dark:border-violet-900/55";
+      backClass = "bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 border border-sky-200/50 dark:border-sky-900/55";
+    }
+  }
 
   return (
     <div className="bg-white dark:bg-slate-900 rounded-[24px] border border-slate-100 dark:border-slate-800/80 p-6 shadow-sm text-left max-w-2xl mx-auto text-xs sm:text-sm space-y-6">
@@ -231,8 +301,94 @@ export default function FlashcardsView() {
         ))}
       </div>
 
+      {/* STUDY MODE SWITCHER (CLASSIC VS VOCABULARY) */}
+      <div className="flex items-center justify-between p-1 bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-slate-200/50 dark:border-slate-800 gap-1">
+        <button
+          type="button"
+          onClick={() => {
+            setStudyMode('classic');
+            setIsFlipped(false);
+          }}
+          className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+            studyMode === 'classic'
+              ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm border border-slate-200/30 dark:border-slate-800'
+              : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>Classic Q&A Mode</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setStudyMode('vocabulary');
+            setIsFlipped(false);
+          }}
+          className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+            studyMode === 'vocabulary'
+              ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm border border-slate-200/30 dark:border-slate-800'
+              : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+          }`}
+        >
+          <BookOpen className="w-3.5 h-3.5" />
+          <span>Vocabulary Mode</span>
+        </button>
+      </div>
+
+      {/* VOCABULARY MODE DIRECTION OPTION */}
+      {studyMode === 'vocabulary' && (
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 bg-indigo-50/50 dark:bg-indigo-950/10 rounded-xl border border-indigo-100/40 dark:border-indigo-900/20 gap-2">
+          <div>
+            <p className="font-bold text-slate-700 dark:text-slate-300 text-xs">Vocabulary Mode Options</p>
+            <p className="text-[10px] text-slate-400 font-medium">Toggle card direction to test yourself with word or definition first</p>
+          </div>
+          <div className="flex gap-1 bg-slate-100 dark:bg-slate-950/60 p-0.5 rounded-lg border border-slate-200/40 dark:border-slate-850">
+            <button
+              type="button"
+              onClick={() => {
+                setVocabOrder('term-first');
+                setIsFlipped(false);
+              }}
+              className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${
+                vocabOrder === 'term-first'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Term First
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setVocabOrder('definition-first');
+                setIsFlipped(false);
+              }}
+              className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${
+                vocabOrder === 'definition-first'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Definition First
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* DECK PLAY AREA */}
-      {filteredCards.length > 0 && activeCard ? (
+      {cards.length === 0 ? (
+        <div className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl bg-slate-50/50 dark:bg-slate-900/50">
+          <BookOpen className="w-12 h-12 text-slate-300 dark:text-slate-700 mb-4" />
+          <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">No Flashcards Yet</h3>
+          <p className="text-sm text-slate-500 text-center max-w-sm mb-6">Create a new deck or add cards to start studying efficiently with spaced repetition.</p>
+          <button
+            onClick={() => setShowAddCard(true)}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors cursor-pointer"
+          >
+            Create Your First Card
+          </button>
+        </div>
+      ) : filteredCards.length > 0 && activeCard ? (
         <div className="space-y-6">
           {/* Card Wrapper with 3D Flip style effect */}
           <div 
@@ -257,9 +413,11 @@ export default function FlashcardsView() {
                     transition={{ duration: 0.15 }}
                     className="space-y-2"
                   >
-                    <span className="inline-block px-2.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-[10px] font-extrabold uppercase">Question</span>
+                    <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-extrabold uppercase ${frontClass}`}>
+                      {frontLabel}
+                    </span>
                     <p className="text-sm sm:text-base md:text-lg font-extrabold text-slate-800 dark:text-white leading-relaxed">
-                      {activeCard.front}
+                      {frontText}
                     </p>
                   </motion.div>
                 ) : (
@@ -271,9 +429,11 @@ export default function FlashcardsView() {
                     transition={{ duration: 0.15 }}
                     className="space-y-2"
                   >
-                    <span className="inline-block px-2.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 text-[10px] font-extrabold uppercase">Answer Explained</span>
+                    <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-extrabold uppercase ${backClass}`}>
+                      {backLabel}
+                    </span>
                     <p className="text-xs sm:text-sm font-semibold text-slate-700 dark:text-slate-200 leading-relaxed italic">
-                      {activeCard.back}
+                      {backText}
                     </p>
                   </motion.div>
                 )}
@@ -338,6 +498,44 @@ export default function FlashcardsView() {
           >
             Create the first card
           </button>
+        </div>
+      )}
+
+      {/* PROGRESS CHART */}
+      {filteredCards.length > 0 && (
+        <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
+          <h4 className="font-extrabold text-sm text-slate-900 dark:text-white mb-2 text-center">Deck Progress</h4>
+          <div className="h-48 w-full max-w-sm mx-auto">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={[
+                    { name: 'Mastered', value: filteredCards.filter(c => c.known).length, color: '#10b981' },
+                    { name: 'Needs Review', value: filteredCards.filter(c => !c.known).length, color: '#f43f5e' }
+                  ]}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={50}
+                  outerRadius={70}
+                  paddingAngle={5}
+                  dataKey="value"
+                  stroke="none"
+                >
+                  {[
+                    { name: 'Mastered', value: filteredCards.filter(c => c.known).length, color: '#10b981' },
+                    { name: 'Needs Review', value: filteredCards.filter(c => !c.known).length, color: '#f43f5e' }
+                  ].map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip 
+                   contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                   itemStyle={{ color: '#1e293b', fontSize: '12px', fontWeight: 'bold' }}
+                />
+                <Legend verticalAlign="bottom" height={24} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: '600' }}/>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       )}
     </div>

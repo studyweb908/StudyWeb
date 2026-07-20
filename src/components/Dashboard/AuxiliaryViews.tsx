@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { jsPDF } from 'jspdf';
+import { toPng, toBlob } from 'html-to-image';
+import RichTextEditor from './RichTextEditor';
 import { 
   Calendar, 
   BookOpen, 
@@ -11,6 +14,11 @@ import {
   ListOrdered, 
   User, 
   Users,
+  Pin,
+  PinOff,
+  Copy,
+  FileDown,
+  Tag,
   Search,
   Plus,
   Sparkles,
@@ -31,9 +39,19 @@ import {
   Wifi,
   WifiOff,
   Trash2,
-  Save
+  Save,
+  Monitor,
+  Sun,
+  Moon,
+  Share2,
+  Image,
+  Activity,
+  Zap,
+  Gauge
 } from 'lucide-react';
 import { NoteItem, SubjectMetric } from './types';
+import { useThemeMode } from '../../hooks/useThemeMode';
+import AutoSavingToast from '../AutoSavingToast';
 
 // ==========================================
 // 1. STUDY PLANNER VIEW
@@ -44,13 +62,7 @@ export function StudyPlannerView() {
     if (saved) {
       try { return JSON.parse(saved); } catch (e) {}
     }
-    return [
-      { id: '1', day: 'Monday', action: 'AP Calculus Practice Exam 2', hours: '2h', priority: 'High', completed: false },
-      { id: '2', day: 'Tuesday', action: 'Biology Krebs cycle note synthesis', hours: '1.5h', priority: 'Medium', completed: true },
-      { id: '3', day: 'Wednesday', action: 'Chemistry kinetics homework sheet', hours: '1h', priority: 'High', completed: false },
-      { id: '4', day: 'Thursday', action: 'English Lit essay outline builder', hours: '45m', priority: 'Low', completed: false },
-      { id: '5', day: 'Friday', action: 'Physics Rotational dynamics quiz review', hours: '2h', priority: 'High', completed: false },
-    ];
+    return [];
   });
 
   const [showAddPlan, setShowAddPlan] = useState(false);
@@ -58,11 +70,34 @@ export function StudyPlannerView() {
   const [newDay, setNewDay] = useState('Monday');
   const [newHours, setNewHours] = useState('1h');
   const [newPriority, setNewPriority] = useState('Medium');
+  const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
+
+  // AI Planner States
+  const [showAiPlanner, setShowAiPlanner] = useState(false);
+  const [aiSubjects, setAiSubjects] = useState('');
+  const [aiIntensity, setAiIntensity] = useState('Balanced');
+  const [aiStyle, setAiStyle] = useState('Balanced');
+  const [isGeneratingSchedule, setIsGeneratingSchedule] = useState(false);
+  const [generationStep, setGenerationStep] = useState('');
 
   // Sync tasks
   React.useEffect(() => {
     localStorage.setItem('studyweb_planner_tasks', JSON.stringify(plannerTasks));
   }, [plannerTasks]);
+
+  // Load user workspace titles for subjects prefill
+  React.useEffect(() => {
+    try {
+      const localWs = localStorage.getItem('studyweb_workspaces_v2');
+      if (localWs) {
+        const parsed = JSON.parse(localWs);
+        if (parsed && parsed.length > 0) {
+          const names = parsed.map((w: any) => w.name).join(', ');
+          setAiSubjects(names);
+        }
+      }
+    } catch (e) {}
+  }, []);
 
   // Listen for Quick Action trigger
   React.useEffect(() => {
@@ -73,8 +108,72 @@ export function StudyPlannerView() {
     return () => window.removeEventListener('studyweb_trigger_add_plan', handleTriggerAddPlan);
   }, []);
 
+  const handleGenerateAiSchedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsGeneratingSchedule(true);
+    setGenerationStep('Analyzing syllabus and cognitive load balancing...');
+
+    const steps = [
+      'Analyzing syllabus and cognitive load balancing...',
+      'Structuring Pomodoro study sprints and focus intervals...',
+      'Spacing out review sessions using Leitner algorithms...',
+      'Customizing study priorities based on complexity...',
+      'Syncing your personalized calendar layout...'
+    ];
+
+    let currentStep = 0;
+    const interval = setInterval(() => {
+      currentStep++;
+      if (currentStep < steps.length) {
+        setGenerationStep(steps[currentStep]);
+      }
+    }, 1800);
+
+    try {
+      const activeSubjectsList = aiSubjects.split(',').map(s => s.trim()).filter(Boolean);
+      const res = await fetch('/api/generate-schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subjects: activeSubjectsList,
+          intensity: aiIntensity,
+          style: aiStyle
+        })
+      });
+
+      if (!res.ok) throw new Error('Failed to generate weekly study plan.');
+
+      const data = await res.json();
+      if (data && data.tasks) {
+        setPlannerTasks((prev: any[]) => [...data.tasks, ...prev]);
+        (window as any).showToast?.('AI Weekly Study Schedule generated and synced successfully!', 'success');
+        setShowAiPlanner(false);
+      }
+    } catch (err: any) {
+      console.error(err);
+      (window as any).showToast?.(err.message || 'An unexpected error occurred during AI plan generation.', 'error');
+    } finally {
+      clearInterval(interval);
+      setIsGeneratingSchedule(false);
+    }
+  };
+
+  const [taskToDelete, setTaskToDelete] = useState<any | null>(null);
+
   const toggleTask = (id: string) => {
     setPlannerTasks(plannerTasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
+  };
+
+  const initiateDelete = (e: React.MouseEvent, task: any) => {
+    e.stopPropagation();
+    setTaskToDelete(task);
+  };
+
+  const confirmDelete = () => {
+    if (!taskToDelete) return;
+    setPlannerTasks(plannerTasks.filter(t => t.id !== taskToDelete.id));
+    setSelectedTasks(selectedTasks.filter(tId => tId !== taskToDelete.id));
+    setTaskToDelete(null);
   };
 
   const handleAddTask = (e: React.FormEvent) => {
@@ -95,24 +194,76 @@ export function StudyPlannerView() {
     setShowAddPlan(false);
   };
 
+  const allTaskIds = plannerTasks.map(t => t.id);
+  const isAllSelected = plannerTasks.length > 0 && selectedTasks.length === plannerTasks.length;
+
+  const handleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedTasks([]);
+    } else {
+      setSelectedTasks(allTaskIds);
+    }
+  };
+
+  const handleBulkDelete = () => {
+    if (selectedTasks.length === 0) return;
+    setPlannerTasks(plannerTasks.filter(t => !selectedTasks.includes(t.id)));
+    setSelectedTasks([]);
+  };
+
+  const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const uniqueDaysInTasks = Array.from(new Set(plannerTasks.map((t: any) => t.day))) as string[];
+  const activeDays = dayOrder.filter(day => uniqueDaysInTasks.includes(day));
+  uniqueDaysInTasks.forEach(day => {
+    if (!activeDays.includes(day)) {
+      activeDays.push(day);
+    }
+  });
+
+  const parseHours = (hStr: string): number => {
+    if (!hStr) return 0;
+    const matchH = hStr.match(/(\d+(\.\d+)?)\s*h/i);
+    const matchM = hStr.match(/(\d+)\s*m/i);
+    if (matchH) return parseFloat(matchH[1]);
+    if (matchM) return parseInt(matchM[1]) / 60;
+    const parsed = parseFloat(hStr);
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
   return (
     <div className="bg-white dark:bg-slate-900 rounded-[24px] border border-slate-100 dark:border-slate-800/80 p-6 shadow-sm text-left text-xs sm:text-sm space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h3 className="font-extrabold text-lg text-slate-900 dark:text-white flex items-center gap-2">
-            <Calendar className="w-5.5 h-5.5 text-indigo-500" />
+            <Calendar className="w-5.5 h-5.5 text-indigo-500 animate-pulse" />
             <span>Intelligent Study Planner</span>
           </h3>
-          <p className="text-xs text-slate-400 font-semibold mt-0.5">Your study timeline customized by AI for optimal spaced repetition</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500 font-semibold mt-0.5">Your study timeline customized by AI for optimal spaced repetition</p>
         </div>
         
-        <button
-          onClick={() => setShowAddPlan(!showAddPlan)}
-          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs font-bold transition-all cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add Task</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setShowAiPlanner(!showAiPlanner);
+              setShowAddPlan(false);
+            }}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white text-xs font-bold transition-all cursor-pointer shadow-sm hover:scale-[1.02]"
+          >
+            <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+            <span>AI Auto-Scheduler</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setShowAddPlan(!showAddPlan);
+              setShowAiPlanner(false);
+            }}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-xs font-bold transition-all cursor-pointer shadow-sm hover:scale-[1.02]"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Task</span>
+          </button>
+        </div>
       </div>
 
       <AnimatePresence>
@@ -122,109 +273,454 @@ export function StudyPlannerView() {
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             onSubmit={handleAddTask}
-            className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/30 space-y-3.5 overflow-hidden text-xs"
+            className="p-5 rounded-[20px] border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 space-y-4 overflow-hidden text-xs"
           >
             <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Study Action Item</label>
+              <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Study Action Item</label>
               <input
                 type="text"
                 required
                 placeholder="e.g. Solve AP Calculus derivatives worksheet"
                 value={newAction}
                 onChange={(e) => setNewAction(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none font-medium"
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Select Day</label>
-                <select
-                  value={newDay}
-                  onChange={(e) => setNewDay(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-white focus:outline-none"
-                >
-                  {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(d => (
-                    <option key={d} value={d}>{d}</option>
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+              {/* Day Selector Tabs */}
+              <div className="md:col-span-5">
+                <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Select Day</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {dayOrder.map(day => (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => setNewDay(day)}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer border ${
+                        newDay === day
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                          : 'bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-850 hover:bg-slate-100 dark:hover:bg-slate-900'
+                      }`}
+                    >
+                      {day.substring(0, 3)}
+                    </button>
                   ))}
-                </select>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Study Hours</label>
-                <input
-                  type="text"
-                  required
-                  value={newHours}
-                  onChange={(e) => setNewHours(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-white focus:outline-none"
-                  placeholder="e.g. 1.5h or 45m"
-                />
+              {/* Priority Radio Buttons */}
+              <div className="md:col-span-4">
+                <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Priority Level</label>
+                <div className="flex gap-1.5">
+                  {[
+                    { value: 'High', label: 'High', activeClass: 'bg-rose-500 text-white border-rose-500 ring-rose-500/20', inactiveClass: 'text-rose-600 dark:text-rose-400 bg-rose-50/50 dark:bg-rose-950/20 border-rose-200/40 dark:border-rose-950/40 hover:bg-rose-50' },
+                    { value: 'Medium', label: 'Medium', activeClass: 'bg-amber-500 text-white border-amber-500 ring-amber-500/20', inactiveClass: 'text-amber-600 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-950/20 border-amber-200/40 dark:border-amber-950/40 hover:bg-amber-50' },
+                    { value: 'Low', label: 'Low', activeClass: 'bg-emerald-500 text-white border-emerald-500 ring-emerald-500/20', inactiveClass: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/40 dark:border-emerald-950/40 hover:bg-emerald-50' }
+                  ].map(p => (
+                    <button
+                      key={p.value}
+                      type="button"
+                      onClick={() => setNewPriority(p.value)}
+                      className={`flex-1 py-1.5 rounded-lg text-[11px] font-extrabold transition-all border cursor-pointer text-center ${
+                        newPriority === p.value ? p.activeClass + ' shadow-sm ring-2' : p.inactiveClass
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Priority</label>
-                <select
-                  value={newPriority}
-                  onChange={(e) => setNewPriority(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-white focus:outline-none"
-                >
-                  <option value="High">High Priority</option>
-                  <option value="Medium">Medium Priority</option>
-                  <option value="Low">Low Priority</option>
-                </select>
+              {/* Hours Presets */}
+              <div className="md:col-span-3">
+                <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Study Duration</label>
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    required
+                    value={newHours}
+                    onChange={(e) => setNewHours(e.target.value)}
+                    className="w-20 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-white focus:outline-none font-bold"
+                    placeholder="1h"
+                  />
+                  <div className="flex flex-1 gap-1">
+                    {['30m', '1h', '2h', '3h'].map(preset => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setNewHours(preset)}
+                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                          newHours === preset
+                            ? 'bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 border-indigo-200'
+                            : 'bg-white dark:bg-slate-950 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-850 hover:bg-slate-100 dark:hover:bg-slate-900'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/60">
               <button
                 type="button"
                 onClick={() => setShowAddPlan(false)}
-                className="px-3 py-1.5 rounded-lg border text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
+                className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900 font-semibold cursor-pointer transition-all"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-1.5 rounded-lg bg-indigo-600 text-white font-bold cursor-pointer hover:bg-indigo-700"
+                className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold cursor-pointer transition-all shadow-md shadow-indigo-600/10"
               >
-                Add Study Task
+                Create Task
               </button>
             </div>
           </motion.form>
         )}
-      </AnimatePresence>
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map((day) => {
-          const tasksForDay = plannerTasks.filter(t => t.day === day);
-          return (
-            <div key={day} className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 space-y-3">
-              <span className="font-extrabold text-xs text-indigo-600 dark:text-indigo-400 tracking-wide uppercase">{day}</span>
-              
-              <div className="space-y-2">
-                {tasksForDay.map((task) => (
-                  <div 
-                    key={task.id}
-                    onClick={() => toggleTask(task.id)}
-                    className={`p-2.5 rounded-lg border text-[11px] cursor-pointer transition-all ${
-                      task.completed 
-                        ? 'bg-slate-100 dark:bg-slate-800/40 border-slate-100 dark:border-slate-850 text-slate-400 line-through' 
-                        : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-800 hover:border-indigo-300 font-semibold'
-                    }`}
-                  >
-                    <p className="leading-tight line-clamp-2">{task.action}</p>
-                    <div className="flex justify-between items-center mt-2 text-[9px] text-slate-400 font-bold">
-                      <span>{task.hours}</span>
-                      <span className={task.priority === 'High' ? 'text-rose-500' : 'text-slate-400'}>{task.priority}</span>
+        {showAiPlanner && (
+          <motion.form
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            onSubmit={handleGenerateAiSchedule}
+            className="p-5 rounded-[20px] border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 space-y-4 overflow-hidden text-xs relative"
+          >
+            {isGeneratingSchedule ? (
+              <div className="flex flex-col items-center justify-center py-8 px-4 text-center space-y-4">
+                <div className="relative">
+                  <div className="w-14 h-14 rounded-full border-4 border-indigo-200 dark:border-indigo-950 border-t-indigo-600 dark:border-t-indigo-400 animate-spin"></div>
+                  <Sparkles className="w-6 h-6 text-amber-400 absolute inset-0 m-auto animate-pulse" />
+                </div>
+                <div className="space-y-1.5 max-w-md">
+                  <h4 className="font-extrabold text-slate-800 dark:text-slate-100 text-sm">Synthesizing Your Adaptive Study Schedule</h4>
+                  <p className="text-xs text-indigo-600 dark:text-indigo-400 font-extrabold animate-pulse h-5">{generationStep}</p>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">Gemini is structuring your weekly sessions for maximum cognitive retention based on active-learning methodologies.</p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800/60">
+                  <Brain className="w-5 h-5 text-indigo-500" />
+                  <div>
+                    <h4 className="font-bold text-slate-800 dark:text-white text-xs">AI Personalized Weekly Schedule</h4>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500">Auto-create a scientifically sound, distributed study plan for the week</p>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">What subjects/topics are you focusing on?</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Calculus, Organic Chemistry, World History"
+                    value={aiSubjects}
+                    onChange={(e) => setAiSubjects(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none font-medium"
+                  />
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 font-semibold">Separate multiple subjects with commas. We pre-filled this based on your active workspaces!</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Study Intensity Level</label>
+                    <div className="flex gap-1.5">
+                      {[
+                        { value: 'Low', label: 'Casual', desc: '1-2 tasks/subject' },
+                        { value: 'Balanced', label: 'Balanced', desc: '2-3 tasks/subject' },
+                        { value: 'High', label: 'Intense', desc: '3+ tasks/subject' }
+                      ].map(intensityOpt => (
+                        <button
+                          key={intensityOpt.value}
+                          type="button"
+                          onClick={() => setAiIntensity(intensityOpt.value)}
+                          className={`flex-1 p-2 rounded-xl text-[11px] font-bold border cursor-pointer text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
+                            aiIntensity === intensityOpt.value
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm shadow-indigo-600/10'
+                              : 'bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-850 hover:bg-slate-100 dark:hover:bg-slate-900'
+                          }`}
+                        >
+                          <span>{intensityOpt.label}</span>
+                          <span className={`text-[9px] ${aiIntensity === intensityOpt.value ? 'text-indigo-200' : 'text-slate-400 dark:text-slate-500'}`}>{intensityOpt.desc}</span>
+                        </button>
+                      ))}
                     </div>
                   </div>
-                ))}
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Cognitive Study Style</label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {[
+                        { value: 'Balanced', label: 'Balanced Study' },
+                        { value: 'Pomodoro', label: 'Pomodoro Sprints' },
+                        { value: 'Active Recall', label: 'Active Recall' },
+                        { value: 'Leitner', label: 'Leitner Boxes' }
+                      ].map(styleOpt => (
+                        <button
+                          key={styleOpt.value}
+                          type="button"
+                          onClick={() => setAiStyle(styleOpt.value)}
+                          className={`py-1.5 px-2.5 rounded-lg text-[10px] font-bold border cursor-pointer text-center transition-all ${
+                            aiStyle === styleOpt.value
+                              ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border-indigo-350 dark:border-indigo-850'
+                              : 'bg-white dark:bg-slate-950 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-850 hover:bg-slate-100 dark:hover:bg-slate-900'
+                          }`}
+                        >
+                          {styleOpt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/60">
+                  <button
+                    type="button"
+                    onClick={() => setShowAiPlanner(false)}
+                    className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900 font-semibold cursor-pointer transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex items-center gap-1.5 px-5 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-extrabold cursor-pointer transition-all shadow-md shadow-indigo-600/15"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-200 animate-pulse" />
+                    <span>Generate Schedule</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </motion.form>
+        )}
+      </AnimatePresence>
+
+      {activeDays.length === 0 ? (
+        <div className="text-center py-16 border border-dashed border-slate-200 dark:border-slate-800 rounded-[24px] flex flex-col items-center justify-center p-8 bg-slate-50/20 dark:bg-slate-900/5">
+          <div className="p-4 rounded-full bg-indigo-50 dark:bg-indigo-950/40 mb-4 animate-bounce">
+            <CalendarDays className="w-8 h-8 text-indigo-500" />
+          </div>
+          <h4 className="font-extrabold text-slate-800 dark:text-slate-200 text-base">Your Study Planner is Empty</h4>
+          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5 max-w-sm text-center font-semibold leading-relaxed">
+            Plan your custom timetable! Add specific study tasks and specify which day they belong to, and they will dynamically appear in a beautiful weekly overview.
+          </p>
+        </div>
+      ) : (
+        <div className={`grid grid-cols-1 ${
+          activeDays.length === 1 ? 'md:grid-cols-1 max-w-lg mx-auto' :
+          activeDays.length === 2 ? 'md:grid-cols-2' :
+          activeDays.length === 3 ? 'md:grid-cols-3' :
+          'md:grid-cols-4 lg:grid-cols-5'
+        } gap-6 items-start`}>
+          {activeDays.map((day) => {
+            const tasksForDay = plannerTasks.filter((t: any) => t.day === day);
+            const totalHoursForDay = tasksForDay.reduce((acc: number, t: any) => acc + parseHours(t.hours), 0);
+            const completedCount = tasksForDay.filter((t: any) => t.completed).length;
+            const progressPct = tasksForDay.length > 0 ? (completedCount / tasksForDay.length) * 100 : 0;
+            
+            return (
+              <div 
+                key={day} 
+                className="rounded-[22px] border border-slate-200/60 dark:border-slate-800/80 bg-slate-50/40 dark:bg-slate-900/20 p-5.5 space-y-5 hover:border-slate-300 dark:hover:border-slate-700 transition-all duration-300 shadow-sm flex flex-col hover:shadow-md"
+              >
+                {/* Column Header */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="font-black text-sm text-slate-900 dark:text-slate-100 tracking-wider uppercase flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                      {day}
+                    </span>
+                    <span className="text-xs font-black px-2.5 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400">
+                      {totalHoursForDay > 0 ? `${Number(totalHoursForDay.toFixed(1))}h` : '0h'}
+                    </span>
+                  </div>
+                  
+                  {/* Progress Indicator */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-450 font-bold">
+                      <span>{completedCount}/{tasksForDay.length} Completed</span>
+                      <span>{Math.round(progressPct)}%</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${progressPct}%` }}
+                        transition={{ duration: 0.4, ease: "easeOut" }}
+                        className="h-full bg-indigo-500 rounded-full"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tasks List */}
+                <div className="space-y-3 min-h-[40px]">
+                  <AnimatePresence mode="popLayout">
+                    {tasksForDay.map((task: any) => {
+                      const isHigh = task.priority === 'High';
+                      const isMedium = task.priority === 'Medium';
+                      const borderLeftColor = isHigh 
+                        ? 'border-l-[4px] border-l-rose-500' 
+                        : isMedium 
+                          ? 'border-l-[4px] border-l-amber-500' 
+                          : 'border-l-[4px] border-l-emerald-400';
+
+                      return (
+                        <motion.div 
+                          key={task.id}
+                          layout
+                          initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.8, y: -15, transition: { duration: 0.25, ease: "easeInOut" } }}
+                          onClick={() => toggleTask(task.id)}
+                          className={`group relative p-3.5 rounded-xl border text-xs cursor-pointer transition-all duration-300 ${borderLeftColor} ${
+                            task.completed 
+                              ? 'bg-slate-100/40 dark:bg-slate-950/20 border-slate-100 dark:border-slate-850 text-slate-400/80' 
+                              : 'bg-white dark:bg-slate-950 border-slate-200/50 dark:border-slate-850/60 hover:border-indigo-200 dark:hover:border-indigo-900/60 hover:-translate-y-0.5 shadow-sm hover:shadow'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            {/* Interactive Completion Ring */}
+                            <div className="mt-0.5 relative w-4.5 h-4.5 flex items-center justify-center shrink-0">
+                              <motion.div
+                                className="absolute inset-0 rounded-full border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900"
+                                animate={{
+                                  scale: task.completed ? [1, 1.2, 1] : 1,
+                                  borderColor: task.completed ? '#6366f1' : 'rgba(148, 163, 184, 0.4)',
+                                  backgroundColor: task.completed ? '#6366f1' : 'rgba(255, 255, 255, 0)',
+                                }}
+                                transition={{ duration: 0.2, ease: "easeOut" }}
+                              />
+                              <AnimatePresence>
+                                {task.completed && (
+                                  <motion.div
+                                    initial={{ scale: 0, opacity: 0 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    exit={{ scale: 0, opacity: 0 }}
+                                    className="absolute z-10 text-white flex items-center justify-center"
+                                  >
+                                    <Check className="w-3 h-3 stroke-[4]" />
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
+
+                            <div className="flex-1 min-w-0 pr-4">
+                              <div className="relative inline-block max-w-full">
+                                <p className={`leading-snug text-[13px] transition-colors duration-300 break-words pr-2 ${
+                                  task.completed 
+                                    ? 'text-slate-400/70 dark:text-slate-500/80 font-medium' 
+                                    : 'text-slate-800 dark:text-slate-100 font-extrabold'
+                                }`}>
+                                  {task.action}
+                                </p>
+                                {/* Strike-Through motion line */}
+                                <motion.div
+                                  initial={false}
+                                  animate={{ scaleX: task.completed ? 1 : 0 }}
+                                  className="absolute left-0 top-[50%] h-[1.5px] bg-slate-300 dark:bg-slate-600 rounded"
+                                  style={{ 
+                                    originX: 0,
+                                    width: '100%'
+                                  }}
+                                  transition={{ duration: 0.25, ease: "easeInOut" }}
+                                />
+                              </div>
+
+                              <div className="flex justify-between items-center mt-3 pt-2.5 border-t border-slate-100/40 dark:border-slate-800/30 text-[10px] text-slate-450 dark:text-slate-500 font-bold">
+                                <span className="text-slate-500 dark:text-slate-400">
+                                  {task.hours}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded text-[8.5px] font-black tracking-wider uppercase ${
+                                  isHigh 
+                                    ? 'bg-rose-50 dark:bg-rose-950/20 text-rose-500' 
+                                    : isMedium 
+                                      ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-500' 
+                                      : 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-500'
+                                }`}>
+                                  {task.priority}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Inline Delete Button (shown on hover) */}
+                          <button
+                            onClick={(e) => initiateDelete(e, task)}
+                            className="absolute top-2 right-2 p-1 rounded-md text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Delete task"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {taskToDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setTaskToDelete(null)}
+              className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm"
+            />
+            
+            {/* Modal Body */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+              className="relative w-full max-w-sm overflow-hidden rounded-[24px] border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-xl text-center"
+            >
+              {/* Decorative Warning Icon Container */}
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 dark:bg-rose-950/30 text-rose-500">
+                <Trash2 className="h-6 w-6 animate-pulse" />
+              </div>
+              
+              {/* Title & Description with beautiful typography */}
+              <h4 className="text-base font-black text-slate-900 dark:text-white leading-snug">
+                Delete Study Task?
+              </h4>
+              <p className="mt-2 text-xs font-semibold text-slate-500 dark:text-slate-400 leading-relaxed px-2">
+                Are you sure you want to remove <span className="text-indigo-500 font-extrabold">"{taskToDelete.action}"</span> from your planner? This action cannot be undone.
+              </p>
+              
+              {/* Buttons */}
+              <div className="mt-6 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setTaskToDelete(null)}
+                  className="flex-1 rounded-xl border border-slate-200 dark:border-slate-800 py-2.5 text-xs font-extrabold text-slate-600 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDelete}
+                  className="flex-1 rounded-xl bg-rose-600 hover:bg-rose-700 py-2.5 text-xs font-extrabold text-white cursor-pointer shadow-md shadow-rose-600/10 transition-all hover:scale-[1.02]"
+                >
+                  Delete Task
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -233,13 +729,7 @@ export function StudyPlannerView() {
 // 2. SUBJECTS OVERVIEW VIEW
 // ==========================================
 export function SubjectsView() {
-  const [subjects] = useState<SubjectMetric[]>([
-    { name: 'AP Calculus AB', progress: 84, studyHours: 32, averageScore: 88, weakTopics: ['Implicit Differentiation', 'Related Rates'], recommendedRevision: 'Limit Theorems' },
-    { name: 'AP Biology', progress: 68, studyHours: 24, averageScore: 78, weakTopics: ['Krebs Cycle', 'Calvin Cycle'], recommendedRevision: 'Transcription Regulation' },
-    { name: 'AP Chemistry', progress: 72, studyHours: 28, averageScore: 81, weakTopics: ['Rate Laws', 'Gibbs Free Energy'], recommendedRevision: 'Buffer Solutions' },
-    { name: 'AP Physics 1', progress: 61, studyHours: 19, averageScore: 74, weakTopics: ['Torque & Equilibrium', 'Simple Harmonic Motion'], recommendedRevision: 'Moment of Inertia' },
-    { name: 'Computer Science A', progress: 91, studyHours: 40, averageScore: 94, weakTopics: ['Recursion Trace', '2D Arrays'], recommendedRevision: 'Polymorphism' },
-  ]);
+  const [subjects] = useState<SubjectMetric[]>([]);
 
   return (
     <div className="space-y-6 text-left text-xs sm:text-sm">
@@ -251,8 +741,15 @@ export function SubjectsView() {
         <p className="text-xs text-slate-400 font-semibold mt-0.5">Mastery profiles mapped directly to your AP curriculum parameters</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {subjects.map((sub, idx) => (
+      {subjects.length === 0 ? (
+        <div className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl bg-slate-50/50 dark:bg-slate-900/50">
+          <BookOpen className="w-12 h-12 text-slate-300 dark:text-slate-700 mb-4" />
+          <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">No Subject Analytics Yet</h3>
+          <p className="text-sm text-slate-500 text-center max-w-sm">Complete quizzes, review flashcards, and use the study planner to populate your mastery profiles.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {subjects.map((sub, idx) => (
           <div key={idx} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5 space-y-4 shadow-sm hover:shadow-md transition-all">
             <div className="flex justify-between items-start">
               <div>
@@ -294,7 +791,8 @@ export function SubjectsView() {
             </div>
           </div>
         ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -310,20 +808,111 @@ export function NotesView() {
         return JSON.parse(saved);
       } catch (e) {}
     }
+    // Pre-populate with a gorgeous welcome note if empty
     return [
-      { id: '1', title: 'Cell Biology - Transcription Factors', subject: 'Biology', content: 'Transcription factors are proteins involved in the process of transcribing DNA into RNA. They contain one or more DNA-binding domains...', updatedAt: 'July 5, 2026', aiSummarized: true },
-      { id: '2', title: 'Calculus - Shell Method vs Washer Method', subject: 'Mathematics', content: 'Washer method integrates perpendicular to axis of rotation: V = pi * integral[R(x)^2 - r(x)^2] dx. Shell method integrates parallel: V = 2pi * integral[r(y)*h(y)] dy...', updatedAt: 'July 4, 2026', aiSummarized: false },
-      { id: '3', title: 'Organic Chem - Nucleophilic Substitutions', subject: 'Chemistry', content: 'SN1 reactions are multi-step mechanisms involving carbocation intermediates. Rate is dependent solely on substrate. SN2 reactions are single concert steps...', updatedAt: 'July 2, 2026', aiSummarized: true },
+      {
+        id: 'welcome-note',
+        title: 'Welcome to your Study Notebook 🧬',
+        subject: 'Biology',
+        content: `<h1>Getting Started with Study Notes</h1>
+<p>This is your premium offline-capable study notebook. Here you can write rich classroom notes, format headings, list terms, insert diagrams, and activate specialized AI study aids.</p>
+<p><strong>A Few Core Features to Try:</strong></p>
+<ul>
+  <li>📌 <strong>Pin your Notes:</strong> Click the pin icon in the list or editor to fix active revision sheets at the top of your workspace.</li>
+  <li>🎨 <strong>Color-Code Subjects:</strong> Choose an accent color in the header (Indigo, Emerald, Rose, Amber, Violet) to organize subjects visually.</li>
+  <li>📚 <strong>Study Templates:</strong> Instantly load pre-structured formats like Cornell Notes, AP Syllabus guides, or Vocabulary sheets using the Template dropdown.</li>
+  <li>✨ <strong>Interactive AI Toolkit:</strong> Click the Sparkle button to run real-time bullet expansions, glossary extracts, Cornell summaries, or mock-exam self cards!</li>
+</ul>`,
+        updatedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        isPinned: true,
+        colorCode: 'emerald'
+      } as any
     ];
   });
 
   const [search, setSearch] = useState('');
+  const [activeCategoryFilter, setActiveCategoryFilter] = useState('All');
   const [selectedNote, setSelectedNote] = useState<NoteItem | null>(null);
 
   // Connection and Storage status states
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [simulateOffline, setSimulateOffline] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'offline'>('saved');
+
+  // UI state overlays
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showAiToolkit, setShowAiToolkit] = useState(false);
+  const [showTemplatesMenu, setShowTemplatesMenu] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [aiRunning, setAiRunning] = useState(false);
+  const [aiStatusText, setAiStatusText] = useState('');
+
+  // Study Category lists
+  const SUBJECTS_LIST = ['All', 'Biology', 'Chemistry', 'Physics', 'History', 'Mathematics', 'Computer Science', 'General Study'];
+
+  // Color map mappings
+  const ACCENT_COLORS = [
+    { id: 'indigo', name: 'Indigo Classic', bg: 'bg-indigo-50/60 dark:bg-indigo-950/20', border: 'border-indigo-500', text: 'text-indigo-600 dark:text-indigo-400', dot: 'bg-indigo-500 hover:scale-115' },
+    { id: 'emerald', name: 'Emerald Science', bg: 'bg-emerald-50/60 dark:bg-emerald-950/20', border: 'border-emerald-500', text: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500 hover:scale-115' },
+    { id: 'rose', name: 'Rose Literature', bg: 'bg-rose-50/60 dark:bg-rose-950/20', border: 'border-rose-500', text: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-500 hover:scale-115' },
+    { id: 'amber', name: 'Amber History', bg: 'bg-amber-50/60 dark:bg-amber-950/20', border: 'border-amber-500', text: 'text-amber-600 dark:text-amber-400', dot: 'bg-amber-500 hover:scale-115' },
+    { id: 'violet', name: 'Violet Logic', bg: 'bg-violet-50/60 dark:bg-violet-950/20', border: 'border-violet-500', text: 'text-violet-600 dark:text-violet-400', dot: 'bg-violet-500 hover:scale-115' },
+    { id: 'sky', name: 'Sky Tech', bg: 'bg-sky-50/60 dark:bg-sky-950/20', border: 'border-sky-500', text: 'text-sky-600 dark:text-sky-400', dot: 'bg-sky-500 hover:scale-115' },
+    { id: 'slate', name: 'Slate Draft', bg: 'bg-slate-50/60 dark:bg-slate-800/20', border: 'border-slate-400', text: 'text-slate-600 dark:text-slate-300', dot: 'bg-slate-400 hover:scale-115' }
+  ];
+
+  // Preset Template layout structures
+  const STUDY_TEMPLATES = [
+    {
+      name: '🎓 Cornell Study Sheet',
+      desc: 'Cue column, classroom study note block, and a final concise summary.',
+      content: `<h1>Cornell Notes Study Template</h1>
+<p><strong>Topic / Session:</strong> Transcription Factors & Chromosomes</p>
+<hr />
+<h2>Cues & Recall Questions</h2>
+<ul>
+  <li>How do transcription factors regulate DNA sequence binding?</li>
+  <li>What is the function of enhancer loops?</li>
+  <li>Why are histone modifications crucial for rate levels?</li>
+</ul>
+<hr />
+<h2>Classroom Study Draft</h2>
+<p>Transcription factors (TFs) are specialized regulatory proteins that bind directly to promoters or distant enhancers. They either recruit or block RNA polymerase II, orchestrating cellular transcription speeds. Activators bind enhancers and form complex physical protein-loops which bridge gaps to the promoter site, stabilized by mediator complexes.</p>
+<hr />
+<h2>Concise Summary Digest</h2>
+<p>TFs activate/repress genomic transcription rates by interacting locally with promoters, enhancers, and protein scaffolding blocks to sustain correct systemic operations.</p>`
+    },
+    {
+      name: '📝 Syllabus AP Checklist',
+      desc: 'Confidence checklist aligned with key curriculum concepts.',
+      content: `<h1>Curriculum Checklist Guide</h1>
+<p><strong>Syllabus Unit:</strong> Cell Biology Essentials</p>
+<hr />
+<h3>Cell Structure & Membrane Functions</h3>
+<p>[ ] Map out phospholipid bilayer polar properties and fluidity speeds.</p>
+<p>[ ] Differentiate active transport rules from passive channels.</p>
+<h3>Cellular Energetics & Mitochondria</h3>
+<p>[ ] Outline electron transport chain hydrogen gradients.</p>
+<p>[ ] Explain enzymatic catalyst variables (temperature, pH levels).</p>`
+    },
+    {
+      name: '📚 Vocabulary Terms List',
+      desc: 'Definitions, contextual synonyms, and textbook exam contexts.',
+      content: `<h1>Study Vocabulary Sheet</h1>
+<p><strong>Unit:</strong> Evolutionary Pathways</p>
+<hr />
+<p><strong>1. Phenotypic Plasticity</strong></p>
+<ul>
+  <li><em>Definition:</em> The capacity of a single genetic profile to express different traits in changing environments.</li>
+  <li><em>Exam Context:</em> Environmental sensors trigger methylation modifications without rearranging primary DNA sequences.</li>
+</ul>
+<p><strong>2. Genetic Drift</strong></p>
+<ul>
+  <li><em>Definition:</em> Random fluctuations in gene frequencies over generations.</li>
+  <li><em>Exam Context:</em> Bottleneck bottlenecks reduce biodiversity levels drastically, maximizing allele loss probabilities.</li>
+</ul>`
+    }
+  ];
 
   // Monitor network status
   React.useEffect(() => {
@@ -377,33 +966,164 @@ export function NotesView() {
     return () => window.removeEventListener('studyweb_notes_updated', handleNotesUpdate);
   }, []);
 
-  const handleAiSummarize = () => {
+  // Real-time word, character, and read-time stats calculator
+  const getNoteStats = (htmlContent: string) => {
+    const text = htmlContent ? htmlContent.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').trim() : '';
+    const words = text ? text.split(/\s+/).filter(w => w.length > 0).length : 0;
+    const characters = text.length;
+    const readTime = Math.max(1, Math.ceil(words / 220)); // Average reading speed
+    return { words, characters, readTime };
+  };
+
+  // AI Toolkit Action Handlers
+  const handleAiAction = async (actionType: 'bullets' | 'cornell' | 'glossary' | 'flashcards') => {
     if (!selectedNote) return;
     
     if (effectivelyOffline) {
-      alert('⚠️ Offline Mode is Active! AI Summarization requires an active internet connection. Your local draft has been safely saved in localStorage and is ready for AI compilation once you reconnect.');
+      (window as any).showToast?.('⚠️ Offline Mode is Active! AI Compilation requires an active internet connection. Your local draft has been safely saved in localStorage and is ready for AI compilation once you reconnect.', 'warning');
       return;
     }
 
-    setNotes(notes.map(n => n.id === selectedNote.id ? { ...n, aiSummarized: true, content: n.content + '\n\n=== AI SYNTHESIZED BULLET POINTS ===\n- Transcription factors bind directly to enhancers or promoters.\n- Essential for eukaryotic cell regulation and differentiation.\n- Verified with AP biology syllabus guidelines.' } : n));
-    alert('✨ AI successfully expanded and summarized the selected note!');
+    setAiRunning(true);
+    setShowAiToolkit(false);
+
+    const actionPrompts = {
+      bullets: "Analyze the notes and synthesize a structured set of core takeaway bullet points under a '=== AI SYNTHESIZED BULLET POINTS ===' header.",
+      cornell: "Structure the document note into a classic Cornell study framework containing a '=== CORNELL REVISION SECTION ===' with Cue Column definitions, Detailed Study Notes, and a final concise summary.",
+      glossary: "Extract key academic terminology and definitions from the note and construct a comprehensive '=== AI EXTRACTED KEY GLOSSARY ===' table/list.",
+      flashcards: "Formulate a list of interactive study questions and answers based on the notes content under '=== STUDY SELF-TEST Q&A CARDS ==='."
+    };
+
+    setAiStatusText(`AI is scanning draft content for ${actionType}...`);
+
+    try {
+      const cleanText = selectedNote.content.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').trim();
+      const promptText = `Analyze the student's study note content: "${cleanText}" (Title: "${selectedNote.title}", Subject: "${selectedNote.subject}").\nGenerate a study aid: ${actionPrompts[actionType]}.\nReturn the output directly as clean, beautifully styled HTML formatting (with h3, ul, li, strong, p, etc.) so it can be seamlessly appended inside a rich text content editor. Keep it clean, professional, and readable.`;
+
+      const response = await fetch('/api/ai-tutor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: promptText })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.response) {
+          const generatedHTML = data.response;
+          const separator = `<br/><hr/><br/>`;
+          const updatedContent = selectedNote.content + separator + generatedHTML;
+          
+          setNotes(prevNotes => prevNotes.map(n => n.id === selectedNote.id ? {
+            ...n,
+            content: updatedContent,
+            aiSummarized: true,
+            updatedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+          } : n));
+          
+          setSelectedNote(prev => prev ? { ...prev, content: updatedContent, aiSummarized: true } : null);
+          (window as any).showToast?.('✨ Live AI successfully analyzed your note and appended the custom study aid!', 'success');
+        } else {
+          throw new Error('No content returned');
+        }
+      } else {
+        throw new Error('API server returned error');
+      }
+    } catch (e) {
+      console.warn("API/Gemini key issue or server-offline. Running high-fidelity local semantic parser fallback:", e);
+      
+      const cleanText = selectedNote.content.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').trim();
+      const sentences = cleanText.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 15);
+      const randomWords = cleanText.split(/\s+/).map(w => w.replace(/[^a-zA-Z]/g, '')).filter(w => w.length > 5);
+      const uniqueWords = Array.from(new Set(randomWords)).slice(0, 8);
+
+      let fallbackHTML = '';
+      if (actionType === 'bullets') {
+        fallbackHTML = `
+          <h3>=== AI SYNTHESIZED BULLET POINTS ===</h3>
+          <ul>
+            <li><strong>Key Principle:</strong> ${sentences[0] || 'Draft content represents core structural learning blocks.'}</li>
+            <li><strong>Supporting Detail:</strong> ${sentences[1] || 'Primary definitions must be continuously reviewed with active syllabus metrics.'}</li>
+            <li><strong>Actionable Goal:</strong> ${sentences[2] || 'Focus concepts periodically to strengthen active memory retention.'}</li>
+          </ul>
+        `;
+      } else if (actionType === 'cornell') {
+        fallbackHTML = `
+          <h3>=== CORNELL REVISION SECTION ===</h3>
+          <p><strong>Recall Cues:</strong></p>
+          <ul>
+            <li><em>Core definition of ${uniqueWords[0] || 'Topic'}?</em> Explored below.</li>
+            <li><em>Systemic connection to ${uniqueWords[1] || 'Subject'}?</em> Detailed description.</li>
+          </ul>
+          <p><strong>Note Body:</strong></p>
+          <p>${sentences.slice(0, 2).join('. ') || 'Active class summaries and diagrams form essential foundational units.'}</p>
+          <p><strong>Digest Summary:</strong></p>
+          <p>A systematic review of ${selectedNote.title || 'Note'} focusing on essential structural terms and rules.</p>
+        `;
+      } else if (actionType === 'glossary') {
+        fallbackHTML = `
+          <h3>=== AI EXTRACTED KEY GLOSSARY ===</h3>
+          <ul>
+            <li><strong>${uniqueWords[0] || 'Concept A'}</strong>: Key terminology extracted from notes representing critical parameters.</li>
+            <li><strong>${uniqueWords[1] || 'Concept B'}</strong>: Foundational parameter utilized to relate active structural elements.</li>
+            <li><strong>${uniqueWords[2] || 'Concept C'}</strong>: Active systemic rule governing the subject's behavior.</li>
+          </ul>
+        `;
+      } else {
+        fallbackHTML = `
+          <h3>=== STUDY SELF-TEST Q&A CARDS ===</h3>
+          <p><strong>Q1: What is the main theme behind ${selectedNote.title || 'Note'}?</strong></p>
+          <p><em>Answer:</em> It details: "${sentences[0] || 'Essential topic principles'}".</p>
+          <p><strong>Q2: How do we apply the principles of ${selectedNote.subject || 'this study'}?</strong></p>
+          <p><em>Answer:</em> Key insights involve: "${sentences[1] || 'supporting details and relations'}".</p>
+        `;
+      }
+
+      const updatedContent = selectedNote.content + `<br/><hr/><br/>` + fallbackHTML;
+      setNotes(prevNotes => prevNotes.map(n => n.id === selectedNote.id ? {
+        ...n,
+        content: updatedContent,
+        aiSummarized: true,
+        updatedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      } : n));
+      
+      setSelectedNote(prev => prev ? { ...prev, content: updatedContent, aiSummarized: true } : null);
+      (window as any).showToast?.(`✨ Note successfully enhanced with a custom study aid!\n\n💡 Tip: Configure a valid GEMINI_API_KEY in your settings to activate live LLM capabilities.`, 'success');
+    } finally {
+      setAiRunning(false);
+      setAiStatusText('');
+    }
   };
 
+  // Create empty study notes
   const handleCreateNote = () => {
     const newNote: NoteItem = {
       id: Date.now().toString(),
       title: 'Untitled Study Note',
       subject: 'General Study',
-      content: 'Start drafting your study note here...\nAll edits are instantly saved locally in offline storage.',
+      content: '<h1>Start drafting your study note here...</h1><p>All edits are instantly saved locally in offline storage.</p>',
       updatedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      aiSummarized: false
-    };
+      aiSummarized: false,
+      isPinned: false,
+      colorCode: 'slate'
+    } as any;
     const updatedNotes = [newNote, ...notes];
     setNotes(updatedNotes);
     setSelectedNote(newNote);
     localStorage.setItem('studyweb_selected_note_id', newNote.id);
   };
 
+  // Toggle Golden Pinning
+  const togglePinNote = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setNotes(prev => prev.map(n => n.id === id ? { ...n, isPinned: !(n as any).isPinned } : n));
+  };
+
+  // Update Note Accent Colors
+  const updateNoteColor = (id: string, color: string) => {
+    setNotes(prev => prev.map(n => n.id === id ? { ...n, colorCode: color } : n));
+  };
+
+  // Delete Note
   const handleDeleteNote = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const remaining = notes.filter(n => n.id !== id);
@@ -418,11 +1138,227 @@ export function NotesView() {
     }
   };
 
-  const filteredNotes = notes.filter(n => n.title.toLowerCase().includes(search.toLowerCase()) || n.subject.toLowerCase().includes(search.toLowerCase()));
+  // Load Custom Templates
+  const handleLoadTemplate = (templateContent: string) => {
+    if (!selectedNote) return;
+    if (confirm('Are you sure you want to load this template? It will append/overwrite your current note content.')) {
+      const updated = selectedNote.content === '<h1>Start drafting your study note here...</h1><p>All edits are instantly saved locally in offline storage.</p>' 
+        ? templateContent 
+        : selectedNote.content + '<br/><hr/><br/>' + templateContent;
+        
+      setNotes(prev => prev.map(n => n.id === selectedNote.id ? {
+        ...n,
+        content: updated,
+        updatedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      } : n));
+      setSelectedNote(prev => prev ? { ...prev, content: updated } : null);
+      setShowTemplatesMenu(false);
+    }
+  };
+
+  // Copy Plain Text Content
+  const copyToClipboard = () => {
+    if (!selectedNote) return;
+    const cleanText = selectedNote.content.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').trim();
+    navigator.clipboard.writeText(`${selectedNote.title}\nSubject: ${selectedNote.subject}\n\n${cleanText}`).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  // Export as Markdown File
+  const downloadMarkdown = () => {
+    if (!selectedNote) return;
+    let rawContent = selectedNote.content;
+    rawContent = rawContent.replace(/<h1>(.*?)<\/h1>/gi, '# $1\n');
+    rawContent = rawContent.replace(/<h2>(.*?)<\/h2>/gi, '## $1\n');
+    rawContent = rawContent.replace(/<h3>(.*?)<\/h3>/gi, '### $1\n');
+    rawContent = rawContent.replace(/<p>(.*?)<\/p>/gi, '$1\n');
+    rawContent = rawContent.replace(/<li>(.*?)<\/li>/gi, '- $1\n');
+    rawContent = rawContent.replace(/<br\s*\/?>/gi, '\n');
+    rawContent = rawContent.replace(/&nbsp;/g, ' ');
+    rawContent = rawContent.replace(/<[^>]*>/g, '');
+
+    const blob = new Blob([`# ${selectedNote.title}\nSubject: ${selectedNote.subject}\nLast Updated: ${selectedNote.updatedAt}\n\n${rawContent}`], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(selectedNote.title || 'note').toLowerCase().replace(/[^a-z0-9]/gi, '_')}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setShowExportMenu(false);
+  };
+
+  // Export as High-Quality Styled PDF
+  const downloadPDF = () => {
+    if (!selectedNote) return;
+
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    const PRIMARY_COLOR = [79, 70, 229]; // indigo-600
+    const TEXT_MAIN = [30, 41, 59]; // slate-800
+    const TEXT_MUTED = [100, 116, 139]; // slate-500
+    const LINE_COLOR = [226, 232, 240]; // slate-200
+
+    let currentPage = 1;
+
+    const drawHeaderFooter = (pageNum: number) => {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(TEXT_MUTED[0], TEXT_MUTED[1], TEXT_MUTED[2]);
+      
+      doc.text(`StudyWeb Notebook  |  ${selectedNote.subject || 'General Study'}`, 20, 15);
+      
+      doc.setDrawColor(LINE_COLOR[0], LINE_COLOR[1], LINE_COLOR[2]);
+      doc.setLineWidth(0.2);
+      doc.line(20, 18, 190, 18);
+
+      doc.text(`Page ${pageNum}`, 190, 285, { align: 'right' });
+    };
+
+    drawHeaderFooter(currentPage);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(22);
+    doc.setTextColor(TEXT_MAIN[0], TEXT_MAIN[1], TEXT_MAIN[2]);
+    
+    const wrappedTitle = doc.splitTextToSize(selectedNote.title || 'Untitled Note', 170);
+    doc.text(wrappedTitle, 20, 30);
+    
+    let y = 32 + (wrappedTitle.length * 8);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(TEXT_MUTED[0], TEXT_MUTED[1], TEXT_MUTED[2]);
+    doc.text(`Subject: ${selectedNote.subject || 'General Study'}  •  Last updated: ${selectedNote.updatedAt}`, 20, y);
+    
+    y += 8;
+
+    doc.setDrawColor(LINE_COLOR[0], LINE_COLOR[1], LINE_COLOR[2]);
+    doc.setLineWidth(0.3);
+    doc.line(20, y, 190, y);
+    
+    y += 10;
+
+    let rawContent = selectedNote.content;
+    rawContent = rawContent.replace(/<h1>(.*?)<\/h1>/gi, '\n# $1\n');
+    rawContent = rawContent.replace(/<h2>(.*?)<\/h2>/gi, '\n## $1\n');
+    rawContent = rawContent.replace(/<h3>(.*?)<\/h3>/gi, '\n### $1\n');
+    rawContent = rawContent.replace(/<p>(.*?)<\/p>/gi, '$1\n');
+    rawContent = rawContent.replace(/<li>(.*?)<\/li>/gi, '- $1\n');
+    rawContent = rawContent.replace(/<br\s*\/?>/gi, '\n');
+    rawContent = rawContent.replace(/&nbsp;/g, ' ');
+    rawContent = rawContent.replace(/<[^>]*>/g, '');
+
+    const lines = rawContent.split('\n');
+    
+    doc.setFontSize(10);
+    doc.setTextColor(TEXT_MAIN[0], TEXT_MAIN[1], TEXT_MAIN[2]);
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) {
+        y += 3;
+        continue;
+      }
+
+      if (y > 265) {
+        doc.addPage();
+        currentPage++;
+        drawHeaderFooter(currentPage);
+        y = 25;
+      }
+
+      if (line.startsWith('# ')) {
+        const text = line.substring(2);
+        y += 4;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.setTextColor(PRIMARY_COLOR[0], PRIMARY_COLOR[1], PRIMARY_COLOR[2]);
+        const wrapped = doc.splitTextToSize(text, 170);
+        doc.text(wrapped, 20, y);
+        y += (wrapped.length * 6) + 3;
+        continue;
+      }
+
+      if (line.startsWith('## ')) {
+        const text = line.substring(3);
+        y += 3;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(12);
+        doc.setTextColor(TEXT_MAIN[0], TEXT_MAIN[1], TEXT_MAIN[2]);
+        const wrapped = doc.splitTextToSize(text, 170);
+        doc.text(wrapped, 20, y);
+        y += (wrapped.length * 5) + 2;
+        continue;
+      }
+
+      if (line.startsWith('### ')) {
+        const text = line.substring(4);
+        y += 2;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(TEXT_MAIN[0], TEXT_MAIN[1], TEXT_MAIN[2]);
+        const wrapped = doc.splitTextToSize(text, 170);
+        doc.text(wrapped, 20, y);
+        y += (wrapped.length * 5) + 2;
+        continue;
+      }
+
+      if (line.startsWith('- ')) {
+        const text = line.substring(2);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        doc.setTextColor(TEXT_MAIN[0], TEXT_MAIN[1], TEXT_MAIN[2]);
+        const wrapped = doc.splitTextToSize(text, 162);
+        
+        doc.setFillColor(TEXT_MUTED[0], TEXT_MUTED[1], TEXT_MUTED[2]);
+        doc.circle(23, y - 1, 0.7, 'F');
+        
+        doc.text(wrapped, 26, y);
+        y += (wrapped.length * 5) + 1.5;
+        continue;
+      }
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(TEXT_MAIN[0], TEXT_MAIN[1], TEXT_MAIN[2]);
+      
+      const wrapped = doc.splitTextToSize(line, 170);
+      doc.text(wrapped, 20, y);
+      y += (wrapped.length * 5) + 1.5;
+    }
+
+    const sanitizedFilename = (selectedNote.title || 'note').toLowerCase().replace(/[^a-z0-9]/gi, '_');
+    doc.save(`${sanitizedFilename}_study_note.pdf`);
+    setShowExportMenu(false);
+  };
+
+  // Filter notes based on category and search
+  const filteredNotes = notes.filter(n => {
+    const matchesSearch = n.title.toLowerCase().includes(search.toLowerCase()) || n.subject.toLowerCase().includes(search.toLowerCase());
+    const matchesCategory = activeCategoryFilter === 'All' || n.subject.toLowerCase() === activeCategoryFilter.toLowerCase();
+    return matchesSearch && matchesCategory;
+  }).sort((a, b) => {
+    // Pinned notes bubble to top
+    const aPin = (a as any).isPinned ? 1 : 0;
+    const bPin = (b as any).isPinned ? 1 : 0;
+    return bPin - aPin;
+  });
+
+  // Calculate current selected note metrics
+  const selectedStats = selectedNote ? getNoteStats(selectedNote.content) : { words: 0, characters: 0, readTime: 0 };
+  const currentAccent = selectedNote ? (ACCENT_COLORS.find(c => c.id === (selectedNote as any).colorCode) || ACCENT_COLORS[6]) : ACCENT_COLORS[6];
 
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-[24px] border border-slate-100 dark:border-slate-800/80 p-6 shadow-sm text-left text-xs sm:text-sm space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div className="bg-white dark:bg-slate-900 rounded-[24px] border border-slate-100 dark:border-slate-800/80 p-6 shadow-sm text-left text-xs sm:text-sm space-y-5">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h3 className="font-extrabold text-lg text-slate-900 dark:text-white flex items-center gap-2">
             <FileText className="w-5.5 h-5.5 text-indigo-500" />
@@ -432,7 +1368,7 @@ export function NotesView() {
         </div>
 
         {/* Offline & Connection Controls */}
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
           {/* Simulated Offline Toggle */}
           <button
             onClick={() => setSimulateOffline(!simulateOffline)}
@@ -444,11 +1380,11 @@ export function NotesView() {
             title="Toggle offline simulation to test local caching and offline capabilities"
           >
             {simulateOffline ? <WifiOff className="w-3.5 h-3.5 text-rose-500" /> : <Wifi className="w-3.5 h-3.5 text-emerald-500" />}
-            <span>{simulateOffline ? 'Disable Simulation' : 'Simulate Offline'}</span>
+            <span>{simulateOffline ? 'Offline Active' : 'Simulate Offline'}</span>
           </button>
 
           {/* Search */}
-          <div className="relative w-full sm:w-48">
+          <div className="relative flex-1 md:w-48">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
             <input
               type="text"
@@ -484,66 +1420,109 @@ export function NotesView() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[450px]">
+      {/* Subject Filter Bar */}
+      <div className="flex gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800">
+        {SUBJECTS_LIST.map((subj) => {
+          const isSelected = activeCategoryFilter === subj;
+          return (
+            <button
+              key={subj}
+              onClick={() => setActiveCategoryFilter(subj)}
+              className={`px-3 py-1.5 rounded-full text-[10.5px] font-bold cursor-pointer transition-all border shrink-0 ${
+                isSelected
+                  ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm shadow-indigo-600/10'
+                  : 'bg-slate-50 dark:bg-slate-850 border-slate-200 dark:border-slate-800 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 dark:text-slate-400'
+              }`}
+            >
+              {subj}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Main Grid Workspace */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[500px]">
         {/* Left Column: List */}
-        <div className="border border-slate-100 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col bg-slate-50/50 dark:bg-slate-950/20 p-2.5 h-full">
+        <div className="border border-slate-150 dark:border-slate-850 rounded-2xl overflow-hidden flex flex-col bg-slate-50/50 dark:bg-slate-950/20 p-2.5 h-full">
           <button
             onClick={handleCreateNote}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 mb-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-all cursor-pointer"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 mb-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>Create New Note</span>
+            <span>Create New Study Note</span>
           </button>
 
-          <div className="flex-1 overflow-y-auto space-y-1.5 pr-0.5">
+          <div className="flex-1 overflow-y-auto space-y-2 pr-0.5 custom-scrollbar">
             {filteredNotes.length > 0 ? (
-              filteredNotes.map((note) => (
-                <div
-                  key={note.id}
-                  onClick={() => {
-                    setSelectedNote(note);
-                    localStorage.setItem('studyweb_selected_note_id', note.id);
-                  }}
-                  className={`p-3 rounded-lg border cursor-pointer transition-all flex justify-between items-start group ${
-                    selectedNote?.id === note.id
-                      ? 'bg-indigo-600 text-white border-indigo-600 font-bold'
-                      : 'bg-white dark:bg-slate-800 border-slate-150/80 dark:border-slate-850 hover:bg-slate-100/60 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200'
-                  }`}
-                >
-                  <div className="flex-1 min-w-0 pr-2">
-                    <p className="font-bold text-xs truncate text-left">{note.title || 'Untitled Note'}</p>
-                    <div className="flex justify-between text-[10px] opacity-75 mt-2 font-medium">
-                      <span>{note.subject}</span>
+              filteredNotes.map((note) => {
+                const isSelected = selectedNote?.id === note.id;
+                const noteColor = ACCENT_COLORS.find(c => c.id === (note as any).colorCode) || ACCENT_COLORS[6];
+                return (
+                  <div
+                    key={note.id}
+                    onClick={() => {
+                      setSelectedNote(note);
+                      localStorage.setItem('studyweb_selected_note_id', note.id);
+                    }}
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col group relative ${
+                      isSelected
+                        ? 'bg-white dark:bg-slate-900 border-indigo-500 shadow-md ring-1 ring-indigo-500/10'
+                        : 'bg-white dark:bg-slate-850/80 border-slate-150/80 dark:border-slate-800 hover:bg-slate-100/50 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-200'
+                    }`}
+                    style={{ borderLeftWidth: '4px', borderLeftColor: isSelected ? '#6366f1' : noteColor.border.includes('border-') ? undefined : noteColor.border }}
+                  >
+                    {/* Left Border for custom color accent */}
+                    {!isSelected && (
+                      <div className={`absolute top-0 left-0 bottom-0 w-1 rounded-l-xl ${noteColor.border.replace('border-', 'bg-')}`} />
+                    )}
+
+                    <div className="flex justify-between items-start w-full gap-2">
+                      <p className={`font-bold text-xs truncate flex-1 ${isSelected ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-800 dark:text-slate-100'}`}>
+                        {note.title || 'Untitled Note'}
+                      </p>
+                      
+                      <div className="flex items-center gap-1.5">
+                        {(note as any).isPinned && (
+                          <Pin className="w-3 h-3 text-amber-500 shrink-0 fill-amber-500" />
+                        )}
+                        <button
+                          onClick={(e) => handleDeleteNote(note.id, e)}
+                          className="p-1 rounded text-slate-400 hover:bg-rose-500 hover:text-white transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                          title="Delete Note"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center text-[9.5px] text-slate-400 mt-2 font-semibold">
+                      <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded uppercase tracking-wider text-[8px]">
+                        {note.subject}
+                      </span>
                       <span>{note.updatedAt}</span>
                     </div>
                   </div>
-
-                  <button
-                    onClick={(e) => handleDeleteNote(note.id, e)}
-                    className={`p-1 rounded hover:bg-rose-500 hover:text-white transition-all focus:outline-none ${
-                      selectedNote?.id === note.id 
-                        ? 'text-white/80 group-hover:block hidden' 
-                        : 'text-slate-400 dark:text-slate-500 group-hover:block hidden'
-                    }`}
-                    title="Delete Note"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))
+                );
+              })
             ) : (
-              <p className="text-center text-slate-400 text-xs py-8">No notes found.</p>
+              <div className="text-center py-16 text-slate-400">
+                <FileText className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-700 mb-2" />
+                <p className="text-xs font-semibold">No study notes found.</p>
+                <p className="text-[10px] text-slate-400 mt-1">Try modifying your filter or create a new entry.</p>
+              </div>
             )}
           </div>
         </div>
 
         {/* Right Column: Note detail editor */}
-        <div className="lg:col-span-2 border border-slate-150 dark:border-slate-850 rounded-xl p-5 bg-white dark:bg-slate-900 flex flex-col justify-between h-full overflow-hidden">
+        <div className="lg:col-span-2 border border-slate-150 dark:border-slate-850 rounded-2xl bg-white dark:bg-slate-900 flex flex-col h-full overflow-hidden relative">
           {selectedNote ? (
-            <div className="space-y-4 h-full flex flex-col">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-3 border-b border-slate-100 dark:border-slate-800 gap-3">
-                <div className="flex-1 min-w-0 w-full space-y-2 text-left">
-                  <div className="flex items-center gap-2">
+            <div className="flex-1 flex flex-col h-full overflow-hidden">
+              
+              {/* Header section */}
+              <div className="p-4 border-b border-slate-100 dark:border-slate-800/80 space-y-3 shrink-0">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                  <div className="flex-1 min-w-0 w-full flex items-center gap-2">
                     <input
                       type="text"
                       value={selectedNote.title}
@@ -556,13 +1535,197 @@ export function NotesView() {
                         } : n));
                       }}
                       placeholder="Note Title"
-                      className="w-full font-extrabold text-base text-slate-800 dark:text-white bg-transparent border-b border-transparent hover:border-slate-200 focus:border-indigo-500 focus:outline-none py-0.5 px-1 rounded transition-colors"
+                      className="w-full font-black text-sm sm:text-base text-slate-800 dark:text-white bg-transparent border-b border-transparent hover:border-slate-200 dark:hover:border-slate-800 focus:border-indigo-500 focus:outline-none py-0.5 px-1 rounded transition-colors"
                     />
+
+                    {/* Pin button */}
+                    <button
+                      onClick={() => togglePinNote(selectedNote.id)}
+                      className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                        (selectedNote as any).isPinned 
+                          ? 'bg-amber-500/10 border-amber-300 text-amber-500' 
+                          : 'border-slate-200 dark:border-slate-800 text-slate-400 hover:text-slate-600'
+                      }`}
+                      title={(selectedNote as any).isPinned ? "Unpin Note" : "Pin Note"}
+                    >
+                      <Pin className={`w-3.5 h-3.5 ${(selectedNote as any).isPinned ? 'fill-amber-500' : ''}`} />
+                    </button>
                   </div>
-                  <div className="flex items-center gap-2 text-[10px] text-slate-400 font-bold uppercase text-left">
-                    <span>Subject:</span>
-                    <input
-                      type="text"
+
+                  {/* Actions Row */}
+                  <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                    
+                    {/* Copy button */}
+                    <button
+                      onClick={copyToClipboard}
+                      className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer flex items-center gap-1 transition-all"
+                      title="Copy content as plain text"
+                    >
+                      {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+
+                    {/* Custom Templates Dropdown */}
+                    <div className="relative">
+                      <button
+                        onClick={() => {
+                          setShowTemplatesMenu(!showTemplatesMenu);
+                          setShowExportMenu(false);
+                          setShowAiToolkit(false);
+                        }}
+                        className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-extrabold flex items-center gap-1 transition-all cursor-pointer ${
+                          showTemplatesMenu
+                            ? 'bg-indigo-600 border-indigo-600 text-white'
+                            : 'border-slate-200 dark:border-slate-800 text-slate-600 hover:text-slate-850 dark:text-slate-300 dark:hover:text-white'
+                        }`}
+                      >
+                        <BookOpen className="w-3 h-3" />
+                        <span>Insert Template</span>
+                      </button>
+
+                      <AnimatePresence>
+                        {showTemplatesMenu && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 5 }}
+                            className="absolute right-0 top-9 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl p-2.5 z-40 text-left"
+                          >
+                            <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider mb-2 px-1.5">Pre-Designed Note Frameworks</h4>
+                            <div className="space-y-1.5">
+                              {STUDY_TEMPLATES.map((tmpl) => (
+                                <button
+                                  key={tmpl.name}
+                                  onClick={() => handleLoadTemplate(tmpl.content)}
+                                  className="w-full text-left p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-xs cursor-pointer block"
+                                >
+                                  <p className="font-bold text-slate-800 dark:text-slate-200">{tmpl.name}</p>
+                                  <p className="text-[9.5px] text-slate-400 mt-0.5">{tmpl.desc}</p>
+                                </button>
+                              ))}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                    {/* Export Hub Dropdown */}
+                    <div className="relative">
+                      <button
+                        onClick={() => {
+                          setShowExportMenu(!showExportMenu);
+                          setShowAiToolkit(false);
+                          setShowTemplatesMenu(false);
+                        }}
+                        className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-extrabold flex items-center gap-1 transition-all cursor-pointer ${
+                          showExportMenu
+                            ? 'bg-indigo-600 border-indigo-600 text-white'
+                            : 'border-slate-200 dark:border-slate-800 text-slate-600 hover:text-slate-850 dark:text-slate-300 dark:hover:text-white'
+                        }`}
+                      >
+                        <FileDown className="w-3 h-3" />
+                        <span>Export</span>
+                      </button>
+
+                      <AnimatePresence>
+                        {showExportMenu && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 5 }}
+                            className="absolute right-0 top-9 w-44 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl p-1.5 z-40 text-left"
+                          >
+                            <button
+                              onClick={downloadPDF}
+                              className="w-full text-left p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer flex items-center gap-2"
+                            >
+                              <FileText className="w-3.5 h-3.5 text-indigo-500" />
+                              <span>Save as PDF (.pdf)</span>
+                            </button>
+                            <button
+                              onClick={downloadMarkdown}
+                              className="w-full text-left p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer flex items-center gap-2"
+                            >
+                              <FileDown className="w-3.5 h-3.5 text-indigo-500" />
+                              <span>Download Markdown</span>
+                            </button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                    {/* AI Toolkit Hub */}
+                    <div className="relative">
+                      <button
+                        disabled={aiRunning}
+                        onClick={() => {
+                          setShowAiToolkit(!showAiToolkit);
+                          setShowExportMenu(false);
+                          setShowTemplatesMenu(false);
+                        }}
+                        className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-extrabold flex items-center gap-1 transition-all cursor-pointer ${
+                          showAiToolkit
+                            ? 'bg-indigo-600 border-indigo-600 text-white'
+                            : 'bg-indigo-50 hover:bg-indigo-100 border-indigo-150 text-indigo-600 dark:bg-indigo-950/30 dark:border-indigo-900 dark:text-indigo-300'
+                        }`}
+                        title="AI study assistant enhancements"
+                      >
+                        <Sparkles className="w-3 h-3 text-indigo-500 shrink-0" />
+                        <span>AI Assistant</span>
+                      </button>
+
+                      <AnimatePresence>
+                        {showAiToolkit && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 5 }}
+                            className="absolute right-0 top-9 w-60 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl p-2.5 z-40 text-left"
+                          >
+                            <h4 className="text-[10px] font-black uppercase text-indigo-400 tracking-wider mb-2 px-1.5 flex items-center gap-1">
+                              <Sparkles className="w-3 h-3" />
+                              <span>AI Study Generator</span>
+                            </h4>
+                            <p className="text-[9.5px] text-slate-400 px-1.5 mb-2 font-medium">Inject custom learning expansions directly into this note draft:</p>
+                            
+                            <div className="space-y-1">
+                              <button
+                                onClick={() => handleAiAction('bullets')}
+                                className="w-full text-left p-1.5 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:text-indigo-600 transition-all text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer block"
+                              >
+                                🎯 Continuous Bullet Summary
+                              </button>
+                              <button
+                                onClick={() => handleAiAction('cornell')}
+                                className="w-full text-left p-1.5 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:text-indigo-600 transition-all text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer block"
+                              >
+                                📋 Cornell Revision Column
+                              </button>
+                              <button
+                                onClick={() => handleAiAction('glossary')}
+                                className="w-full text-left p-1.5 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:text-indigo-600 transition-all text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer block"
+                              >
+                                📚 Extract Key Term Glossary
+                              </button>
+                              <button
+                                onClick={() => handleAiAction('flashcards')}
+                                className="w-full text-left p-1.5 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:text-indigo-600 transition-all text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer block"
+                              >
+                                ❓ Self-Test Q&A Cards
+                              </button>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                  </div>
+                </div>
+
+                {/* Subject picker & Color palette accent selection bar */}
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 pt-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase">Subject:</span>
+                    <select
                       value={selectedNote.subject}
                       onChange={(e) => {
                         const updatedSub = e.target.value;
@@ -572,51 +1735,99 @@ export function NotesView() {
                           updatedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                         } : n));
                       }}
-                      placeholder="Subject (e.g. Biology)"
-                      className="bg-transparent border-b border-transparent hover:border-slate-200 focus:border-indigo-500 focus:outline-none py-0.5 px-1 rounded transition-colors font-extrabold"
-                    />
-                    <span className="text-slate-300 dark:text-slate-700">|</span>
-                    <span>Last updated {selectedNote.updatedAt}</span>
+                      className="bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 text-xs py-1 px-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 font-bold"
+                    >
+                      {SUBJECTS_LIST.filter(s => s !== 'All').map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
                   </div>
-                </div>
 
-                <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-center">
-                  <button
-                    onClick={handleAiSummarize}
-                    className={`flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-md transition-all cursor-pointer ${
-                      effectivelyOffline
-                        ? 'bg-slate-100 text-slate-400 cursor-not-allowed dark:bg-slate-800 dark:text-slate-600'
-                        : 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300'
-                    }`}
-                    title={effectivelyOffline ? "AI summary requires internet connection" : "Let AI summarize your draft"}
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>AI Summarize</span>
-                  </button>
+                  {/* Accent Color picker */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase">Accent:</span>
+                    <div className="flex items-center gap-1.5">
+                      {ACCENT_COLORS.map(color => (
+                        <button
+                          key={color.id}
+                          onClick={() => updateNoteColor(selectedNote.id, color.id)}
+                          className={`w-3.5 h-3.5 rounded-full transition-all cursor-pointer ${color.dot} ${
+                            (selectedNote as any).colorCode === color.id 
+                              ? 'ring-2 ring-indigo-500 dark:ring-indigo-400 ring-offset-1 dark:ring-offset-slate-900 scale-110' 
+                              : 'opacity-70 hover:opacity-100'
+                          }`}
+                          title={color.name}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <textarea
-                value={selectedNote.content}
-                onChange={(e) => {
-                  const updatedText = e.target.value;
-                  setNotes(notes.map(n => n.id === selectedNote.id ? { 
-                    ...n, 
-                    content: updatedText,
-                    updatedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                  } : n));
-                }}
-                placeholder="Write your notes here..."
-                className="flex-1 w-full text-xs sm:text-sm text-slate-700 dark:text-slate-200 bg-slate-50/50 dark:bg-slate-900/50 p-3.5 rounded-lg border border-slate-150 dark:border-slate-800 leading-relaxed focus:outline-none resize-none"
-              />
+              {/* Loader screen when AI compiles */}
+              <AnimatePresence>
+                {aiRunning && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="absolute inset-0 bg-white/90 dark:bg-slate-950/90 z-30 flex flex-col items-center justify-center space-y-4"
+                  >
+                    <div className="p-4 bg-indigo-500/10 rounded-full text-indigo-500 animate-pulse">
+                      <Sparkles className="w-8 h-8 animate-spin" />
+                    </div>
+                    <div className="text-center">
+                      <p className="font-extrabold text-sm text-slate-850 dark:text-slate-100">{aiStatusText}</p>
+                      <p className="text-slate-400 text-[10.5px] font-semibold mt-1">Analyzing concepts and structure blocks...</p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Rich text Editor wrapper */}
+              <div className="flex-1 min-h-0 w-full text-left overflow-y-auto">
+                <RichTextEditor
+                  initialValue={selectedNote.content}
+                  noteId={selectedNote.id}
+                  onChange={(updatedText) => {
+                    setNotes(notes.map(n => n.id === selectedNote.id ? { 
+                      ...n, 
+                      content: updatedText,
+                      updatedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                    } : n));
+                  }}
+                  placeholder="Write your notes here..."
+                />
+              </div>
+
+              {/* Bottom statistics and metadata bar */}
+              <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-800/80 shrink-0 bg-slate-50/50 dark:bg-slate-950/20 text-slate-400 text-[10px] font-bold flex flex-wrap justify-between items-center gap-2">
+                <div className="flex items-center gap-3">
+                  <span className="flex items-center gap-1 bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-slate-200/50 dark:border-slate-800">
+                    Words: <strong className="text-slate-600 dark:text-slate-300">{selectedStats.words}</strong>
+                  </span>
+                  <span className="flex items-center gap-1 bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-slate-200/50 dark:border-slate-800">
+                    Characters: <strong className="text-slate-600 dark:text-slate-300">{selectedStats.characters}</strong>
+                  </span>
+                  <span className="flex items-center gap-1 bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-slate-200/50 dark:border-slate-800">
+                    <Clock className="w-3 h-3 text-slate-400" />
+                    Read Time: <strong className="text-slate-600 dark:text-slate-300">{selectedStats.readTime} min</strong>
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 uppercase text-[9px]">
+                  <span className={`w-1.5 h-1.5 rounded-full ${currentAccent.dot}`} />
+                  <span>Organized inside {selectedNote.subject}</span>
+                </div>
+              </div>
+
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-full py-24 text-center space-y-3">
-              <FileText className="w-10 h-10 text-slate-300" />
-              <p className="text-slate-400 text-xs">Select a note from the left panel to begin editing or click the button to create one.</p>
+              <FileText className="w-10 h-10 text-slate-300 dark:text-slate-700" />
+              <p className="text-slate-400 text-xs font-semibold">Select a note from the left panel to begin editing or click the button to create one.</p>
               <button
                 onClick={handleCreateNote}
-                className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 transition-all cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-700 transition-all cursor-pointer shadow-md shadow-indigo-600/15"
               >
                 Create Note
               </button>
@@ -624,96 +1835,7 @@ export function NotesView() {
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-// ==========================================
-// 4. MIND MAPS VIEW
-// ==========================================
-export function MindMapsView() {
-  const [expandedNode, setExpandedNode] = useState<string | null>(null);
-
-  return (
-    <div className="bg-white dark:bg-slate-900 rounded-[24px] border border-slate-100 dark:border-slate-800/80 p-6 shadow-sm text-left text-xs sm:text-sm space-y-6">
-      <div>
-        <h3 className="font-extrabold text-lg text-slate-900 dark:text-white flex items-center gap-2">
-          <Network className="w-5.5 h-5.5 text-indigo-500" />
-          <span>Interactive AI Mind Map Canvas</span>
-        </h3>
-        <p className="text-xs text-slate-400 font-semibold mt-0.5">Visual conceptual maps generated dynamically from notes</p>
-      </div>
-
-      <div className="relative w-full h-[400px] border border-slate-150 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/20 rounded-2xl overflow-hidden flex items-center justify-center">
-        
-        {/* Interactive SVG Nodes */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none">
-          {/* Main lines */}
-          <line x1="50%" y1="50%" x2="25%" y2="25%" stroke="#4F46E5" strokeWidth="2.5" strokeDasharray="5,5" />
-          <line x1="50%" y1="50%" x2="75%" y2="25%" stroke="#4F46E5" strokeWidth="2.5" strokeDasharray="5,5" />
-          <line x1="50%" y1="50%" x2="50%" y2="80%" stroke="#4F46E5" strokeWidth="2.5" strokeDasharray="5,5" />
-        </svg>
-
-        {/* Central Core Node */}
-        <div 
-          onClick={() => setExpandedNode('root')}
-          className="absolute z-10 p-5 rounded-2xl bg-indigo-600 text-white font-extrabold shadow-lg shadow-indigo-600/30 text-center cursor-pointer hover:scale-105 transition-transform"
-        >
-          <Brain className="w-5 h-5 mx-auto mb-1" />
-          <p className="text-xs">Cell Biology</p>
-          <span className="block text-[9px] opacity-75 font-bold uppercase tracking-wider">AP Target 1</span>
-        </div>
-
-        {/* Secondary Node Left */}
-        <div 
-          onClick={() => setExpandedNode('glycolysis')}
-          className="absolute left-[15%] top-[15%] z-10 p-4 rounded-xl bg-slate-900 dark:bg-slate-800 text-white font-bold border border-indigo-500/20 text-center cursor-pointer hover:scale-105 transition-transform"
-        >
-          <p className="text-xs text-indigo-400">Glycolysis</p>
-          <span className="block text-[8px] text-slate-400">Yields: 2 ATP, 2 NADH</span>
-        </div>
-
-        {/* Secondary Node Right */}
-        <div 
-          onClick={() => setExpandedNode('transcription')}
-          className="absolute right-[15%] top-[15%] z-10 p-4 rounded-xl bg-slate-900 dark:bg-slate-800 text-white font-bold border border-indigo-500/20 text-center cursor-pointer hover:scale-105 transition-transform"
-        >
-          <p className="text-xs text-violet-400">Transcription</p>
-          <span className="block text-[8px] text-slate-400">Inside Nucleus</span>
-        </div>
-
-        {/* Secondary Node Bottom */}
-        <div 
-          onClick={() => setExpandedNode('mitochondria')}
-          className="absolute bottom-[10%] z-10 p-4 rounded-xl bg-slate-900 dark:bg-slate-800 text-white font-bold border border-indigo-500/20 text-center cursor-pointer hover:scale-105 transition-transform"
-        >
-          <p className="text-xs text-emerald-400">Mitochondria</p>
-          <span className="block text-[8px] text-slate-400">ETC Generator</span>
-        </div>
-
-        {/* Detail Panel Popup */}
-        <AnimatePresence>
-          {expandedNode && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 20 }}
-              className="absolute bottom-4 right-4 max-w-xs p-4 bg-white dark:bg-slate-900 border border-indigo-500/30 rounded-xl shadow-xl space-y-2 text-xs"
-            >
-              <div className="flex justify-between items-center pb-1.5 border-b font-extrabold text-slate-800 dark:text-white uppercase">
-                <span>AI Core definition</span>
-                <button onClick={() => setExpandedNode(null)} className="text-slate-400 hover:text-slate-600 font-bold">&times;</button>
-              </div>
-              <p className="text-slate-600 dark:text-slate-300 leading-relaxed font-semibold">
-                {expandedNode === 'root' && "General cellular mechanics outlining biosynthesis pathways and Krebs synthesis structures."}
-                {expandedNode === 'glycolysis' && "The chemical breakdown of glucose into pyruvic acid, occurring anaerobic inside human muscle structures."}
-                {expandedNode === 'transcription' && "The biological process by which chemical DNA code sequences are replicated into RNA copies by polymerase catalysts."}
-                {expandedNode === 'mitochondria' && "ATP Synthesis factory responsible for active phosphorylation and energy surge cycles."}
-              </p>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+      <AutoSavingToast isSaving={saveStatus === 'saving'} />
     </div>
   );
 }
@@ -753,7 +1875,7 @@ export function ResourcesView() {
             </div>
 
             <button 
-              onClick={() => alert('📥 Material download started successfully.')}
+              onClick={() => (window as any).showToast?.('📥 Material download started successfully.', 'success')}
               className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
             >
               <Download className="w-4.5 h-4.5" />
@@ -1000,141 +2122,806 @@ interface ProfileViewProps {
   setSessionTimeout: (timeout: number) => void;
 }
 
+const PRESET_AVATARS = [
+  { id: '1', url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120', name: 'Alex' },
+  { id: '2', url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=120', name: 'James' },
+  { id: '3', url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=120', name: 'Sophia' },
+  { id: '4', url: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=120', name: 'Marcus' }
+];
+
+const MASCOTS = [
+  { id: 'athena', name: 'Athena the Owl', desc: 'Socratic Academic Advisor', role: 'Explains complex theory and logic with deep research contexts.' },
+  { id: 'nova', name: 'Nova the Rocket', desc: 'Hyper-Focus Speed Partner', role: 'Excellent for high-speed custom flashcard sprint drills.' },
+  { id: 'sparky', name: 'Sparky the Mech', desc: 'Analytical Formula Guide', role: 'Structures mathematical axioms, chemistry structures, and study pathways.' }
+];
+
 export function ProfileView({ sessionTimeout, setSessionTimeout }: ProfileViewProps) {
+  const { themeMode, setThemeMode } = useThemeMode();
   const [activeProfileTab, setActiveProfileTab] = useState<'overview' | 'preferences'>('overview');
+  
+  // Custom success toast state
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  
+  const triggerToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(prev => prev === msg ? null : prev);
+    }, 3000);
+  };
+
+  // Editable profile states with localStorage persistence
+  const [studentName, setStudentName] = useState(() => {
+    return localStorage.getItem('studyweb_profile_name') || 'Alex Johnson';
+  });
+  const [classBoard, setClassBoard] = useState(() => {
+    return localStorage.getItem('studyweb_profile_class_board') || 'Advanced Placement AP US Curriculum';
+  });
+  const [schoolDivision, setSchoolDivision] = useState(() => {
+    return localStorage.getItem('studyweb_profile_school') || 'Milton Academy Honors Division';
+  });
+  
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [editName, setEditName] = useState(studentName);
+  const [editClassBoard, setEditClassBoard] = useState(classBoard);
+  const [editSchool, setEditSchool] = useState(schoolDivision);
+
+  const saveProfileDetails = () => {
+    if (!editName.trim()) return;
+    setStudentName(editName);
+    setClassBoard(editClassBoard);
+    setSchoolDivision(editSchool);
+    localStorage.setItem('studyweb_profile_name', editName);
+    localStorage.setItem('studyweb_profile_class_board', editClassBoard);
+    localStorage.setItem('studyweb_profile_school', editSchool);
+    setIsEditingDetails(false);
+    triggerToast('✨ Scholar profile details successfully updated!');
+  };
+
+  // Real-time state synchronization using localStorage
+  const [avatarUrl, setAvatarUrl] = useState(() => {
+    return localStorage.getItem('studyweb_profile_avatar') || PRESET_AVATARS[0].url;
+  });
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  
+  const [activeMascot, setActiveMascot] = useState(() => {
+    return localStorage.getItem('studyweb_profile_mascot') || 'athena';
+  });
+  
+  const [dailyGoalMinutes, setDailyGoalMinutes] = useState(() => {
+    return Number(localStorage.getItem('studyweb_profile_daily_goal')) || 60;
+  });
+
+  const [cognitiveStyle, setCognitiveStyle] = useState(() => {
+    return localStorage.getItem('studyweb_profile_cognitive_style') || 'Visual & Active Spaced Recall';
+  });
+
+  const [learningVoice, setLearningVoice] = useState(() => {
+    return localStorage.getItem('studyweb_profile_voice_style') || 'Calm Academic Tutor voice';
+  });
+
+  // Account deletion states
+  const [showDeleteConfirmStep1, setShowDeleteConfirmStep1] = useState(false);
+  const [showDeleteConfirmStep2, setShowDeleteConfirmStep2] = useState(false);
+  const [deleteInputText, setDeleteInputText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteAccount = () => {
+    setIsDeleting(true);
+    setTimeout(() => {
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.reload();
+    }, 1500);
+  };
+
+  const saveAvatar = (url: string) => {
+    setAvatarUrl(url);
+    localStorage.setItem('studyweb_profile_avatar', url);
+    setShowAvatarPicker(false);
+    triggerToast('🖼️ Profile avatar successfully updated!');
+  };
+
+  const saveMascot = (id: string) => {
+    setActiveMascot(id);
+    localStorage.setItem('studyweb_profile_mascot', id);
+    const mascotName = MASCOTS.find(m => m.id === id)?.name || 'Companion';
+    triggerToast(`🦉 ${mascotName} set as your active learning partner!`);
+  };
+
+  const saveDailyGoal = (min: number) => {
+    setDailyGoalMinutes(min);
+    localStorage.setItem('studyweb_profile_daily_goal', String(min));
+    triggerToast(`📅 Daily focus target set to ${min} minutes!`);
+  };
+
+  const saveCognitiveStyle = (style: string) => {
+    setCognitiveStyle(style);
+    localStorage.setItem('studyweb_profile_cognitive_style', style);
+    triggerToast('🧠 Cognitive learning profile optimized!');
+  };
+
+  const saveLearningVoice = (voice: string) => {
+    setLearningVoice(voice);
+    localStorage.setItem('studyweb_profile_voice_style', voice);
+    triggerToast('🎙️ AI Tutor vocal profile synthesized!');
+  };
+
+  const handleTimeoutChange = (val: number) => {
+    setSessionTimeout(val);
+    triggerToast(`⏱️ Auto-logout security interval updated to ${val}s!`);
+  };
+
+  const handleThemeChange = (mode: any) => {
+    setThemeMode(mode);
+    triggerToast(`🎨 Workspace visual style synced to ${mode === 'system' ? 'System theme' : mode + ' mode'}!`);
+  };
 
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-[24px] border border-slate-100 dark:border-slate-800/80 p-6 shadow-sm text-left text-xs sm:text-sm space-y-6">
-      <div className="flex items-center gap-4 pb-4 border-b border-slate-100 dark:border-slate-800/60">
-        <img
-          src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120"
-          alt="Alex Avatar"
-          className="w-16 h-16 rounded-2xl border object-cover shadow"
-        />
-        <div>
-          <h3 className="font-extrabold text-lg text-slate-900 dark:text-white">Alex Johnson</h3>
-          <p className="text-xs text-slate-400 font-semibold">Grade 11 Honors Scholar • AP Board Coordinator</p>
-          <span className="inline-block mt-1.5 text-[9px] bg-indigo-500/10 text-indigo-500 font-bold px-2 py-0.5 rounded">Premium Plan Active</span>
-        </div>
-      </div>
+    <div className="bg-slate-50/50 dark:bg-slate-950/20 rounded-[28px] p-1.5 space-y-6 text-left text-xs sm:text-sm relative">
+      
+      {/* FLOATING NOTIFICATION TOAST */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className="fixed top-6 right-6 z-[120] flex items-center gap-2.5 bg-slate-900/95 dark:bg-slate-800/95 text-white border border-slate-700/60 shadow-2xl px-4 py-3 rounded-2xl max-w-sm"
+          >
+            <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="text-[11px] sm:text-xs font-black tracking-wide">{toastMessage}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Profile Inner Tabs */}
-      <div className="flex gap-6 border-b border-slate-100 dark:border-slate-800 pb-px">
-        <button
-          onClick={() => setActiveProfileTab('overview')}
-          className={`pb-3 px-1 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 focus:outline-none ${
-            activeProfileTab === 'overview'
-              ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-              : 'border-transparent text-slate-400 hover:text-slate-650 dark:hover:text-slate-300'
-          }`}
-        >
-          <User className="w-4 h-4" />
-          <span>Profile Overview</span>
-        </button>
-        <button
-          onClick={() => setActiveProfileTab('preferences')}
-          className={`pb-3 px-1 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 focus:outline-none ${
-            activeProfileTab === 'preferences'
-              ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-              : 'border-transparent text-slate-400 hover:text-slate-650 dark:hover:text-slate-300'
-          }`}
-        >
-          <Settings className="w-4 h-4" />
-          <span>Account Preferences</span>
-        </button>
-      </div>
-
-      {activeProfileTab === 'overview' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-4">
-            <p className="font-bold text-slate-800 dark:text-white">Core Account Details</p>
-            <div className="space-y-3">
-              <div>
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Email address</span>
-                <p className="font-bold text-slate-700 dark:text-slate-300">studyweb908@gmail.com</p>
-              </div>
-              <div>
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Syllabus Class Board</span>
-                <p className="font-bold text-slate-700 dark:text-slate-300">Advanced Placement AP US Curriculum</p>
-              </div>
-              <div>
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Daily Study Goal Target</span>
-                <p className="font-bold text-slate-700 dark:text-slate-300">60 minutes focus sessions daily</p>
+      {/* PROFILE HEADER HERO CARD with beautiful glowing backdrop */}
+      <div className="relative overflow-hidden rounded-[24px] bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/85 p-6 sm:p-8 shadow-sm">
+        <div className="absolute top-0 right-0 -mt-10 -mr-10 w-44 h-44 bg-gradient-to-tr from-indigo-500/10 to-violet-500/10 dark:from-indigo-500/5 dark:to-violet-500/5 rounded-full blur-2xl pointer-events-none" />
+        
+        <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 relative z-10">
+          
+          {/* Interactive customizable avatar with popup selection */}
+          <div className="relative shrink-0">
+            <div 
+              onClick={() => setShowAvatarPicker(!showAvatarPicker)}
+              className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl overflow-hidden border-2 border-indigo-500/20 dark:border-indigo-500/40 cursor-pointer hover:scale-105 active:scale-95 transition-all shadow-md group relative"
+              title="Click to change your avatar"
+            >
+              <img
+                src={avatarUrl}
+                alt={studentName}
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+              <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <span className="text-[10px] text-white font-extrabold uppercase tracking-widest bg-indigo-600/80 px-2 py-1 rounded-md">Change</span>
               </div>
             </div>
+
+            {/* Avatar Picker Drawer dropdown */}
+            <AnimatePresence>
+              {showAvatarPicker && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  className="absolute left-0 mt-3 p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-2xl shadow-xl z-50 w-56 grid grid-cols-4 gap-2"
+                >
+                  <p className="col-span-4 text-[9px] text-slate-400 font-extrabold uppercase tracking-wider mb-1">Select Avatar:</p>
+                  {PRESET_AVATARS.map((av) => (
+                    <button
+                      key={av.id}
+                      onClick={() => saveAvatar(av.url)}
+                      className={`w-10 h-10 rounded-xl overflow-hidden border transition-all hover:scale-110 relative ${avatarUrl === av.url ? 'border-indigo-500 ring-2 ring-indigo-500/20' : 'border-transparent'}`}
+                    >
+                      <img src={av.url} alt={av.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      {avatarUrl === av.url && (
+                        <div className="absolute inset-0 bg-indigo-600/25 flex items-center justify-center">
+                          <Check className="w-4.5 h-4.5 text-white" />
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
-          <div className="space-y-4">
-            <p className="font-bold text-slate-800 dark:text-white">Study Preferences Mode</p>
-            <div className="space-y-3">
-              <div>
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">AI Learning Voice Style</span>
-                <p className="font-bold text-slate-700 dark:text-slate-300">Calm Academic Tutor voice</p>
-              </div>
-              <div>
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Cognitive Learning Style</span>
-                <p className="font-bold text-indigo-600">Visual & Active Spaced Recall</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-6">
-          <div>
-            <h4 className="font-bold text-base text-slate-800 dark:text-white">Secure Session Auto-Logout</h4>
-            <p className="text-xs text-slate-400 font-semibold mt-0.5">Protect your account by automatically ending your session after a period of inactivity.</p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {[
-              { label: "Short Test (30s)", value: 30, desc: "Warns at 15s. Ideal for testing session expiry quickly." },
-              { label: "Standard (60s)", value: 60, desc: "Warns at 30s. Balance between protection and utility." },
-              { label: "Relaxed (5m / 300s)", value: 300, desc: "Warns at 150s. Suitable for continuous study." }
-            ].map((option) => (
-              <button
-                key={option.value}
-                onClick={() => setSessionTimeout(option.value)}
-                className={`p-5 rounded-2xl border text-left cursor-pointer transition-all flex flex-col justify-between focus:outline-none ${
-                  sessionTimeout === option.value
-                    ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-lg shadow-indigo-600/10'
-                    : 'bg-white dark:bg-slate-900 border-slate-150 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:border-indigo-300 dark:hover:border-indigo-800'
-                }`}
-              >
-                <div className="space-y-1">
-                  <p className={`font-black text-xs uppercase tracking-wide ${sessionTimeout === option.value ? 'text-indigo-200' : 'text-indigo-600 dark:text-indigo-400'}`}>
-                    {option.label}
-                  </p>
-                  <p className="font-bold text-sm tracking-tight leading-tight mt-1">{option.value} Seconds Inactivity</p>
+          <div className="flex-1 text-center sm:text-left space-y-2">
+            {isEditingDetails ? (
+              <div className="space-y-3 max-w-md p-4 bg-slate-50 dark:bg-slate-950/40 rounded-2xl border border-slate-150/40 dark:border-slate-850">
+                <p className="text-[9px] font-black uppercase text-indigo-500 tracking-wider">Edit Profile Details</p>
+                <div>
+                  <label className="text-[9px] uppercase font-bold text-slate-400">Student Name</label>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold mt-1 text-xs text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
                 </div>
-                <p className={`text-[10px] mt-4 leading-relaxed ${sessionTimeout === option.value ? 'text-indigo-100 opacity-90' : 'text-slate-400'}`}>
-                  {option.desc}
-                </p>
-              </button>
-            ))}
-          </div>
-
-          {/* Timing Parameters Details Card */}
-          <div className="bg-slate-50 dark:bg-slate-950/80 rounded-2xl p-5 border border-slate-150 dark:border-slate-800/80 space-y-4">
-            <div className="flex items-center gap-2">
-              <Clock className="w-5 h-5 text-indigo-500" />
-              <p className="font-bold text-sm text-slate-800 dark:text-white">Active Session Config Details</p>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-semibold">
-              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800/60">
-                <span className="text-[10px] uppercase font-bold text-slate-400">Session Timeout</span>
-                <p className="text-sm font-black text-slate-800 dark:text-white mt-0.5">{sessionTimeout} seconds</p>
-                <p className="text-[10px] text-slate-400 font-medium mt-1">If no activity is detected, you will be automatically logged out.</p>
+                <div>
+                  <label className="text-[9px] uppercase font-bold text-slate-400">Curriculum / Class Board</label>
+                  <input
+                    type="text"
+                    value={editClassBoard}
+                    onChange={(e) => setEditClassBoard(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold mt-1 text-xs text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] uppercase font-bold text-slate-400">School Division</label>
+                  <input
+                    type="text"
+                    value={editSchool}
+                    onChange={(e) => setEditSchool(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold mt-1 text-xs text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+                <div className="flex gap-2 pt-1 justify-end">
+                  <button
+                    onClick={() => {
+                      setIsEditingDetails(false);
+                      setEditName(studentName);
+                      setEditClassBoard(classBoard);
+                      setEditSchool(schoolDivision);
+                    }}
+                    className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-850 dark:hover:bg-slate-850 text-slate-600 dark:text-slate-300 rounded-lg text-[10px] font-bold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={saveProfileDetails}
+                    className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-black flex items-center gap-1 shadow-sm"
+                  >
+                    <Save className="w-3 h-3" />
+                    <span>Save Changes</span>
+                  </button>
+                </div>
               </div>
-              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800/60">
-                <span className="text-[10px] uppercase font-bold text-slate-400">Warning Trigger</span>
-                <p className="text-sm font-black text-amber-500 dark:text-amber-400 mt-0.5">{Math.round(sessionTimeout / 2)} seconds</p>
-                <p className="text-[10px] text-slate-400 font-medium mt-1">A modal will prompt you to extend the session after this point.</p>
+            ) : (
+              <div className="space-y-1">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-center sm:justify-start gap-2">
+                  <h3 className="font-extrabold text-xl text-slate-900 dark:text-white tracking-tight">{studentName}</h3>
+                  <div className="flex justify-center items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1 text-[9px] bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-extrabold px-2.5 py-0.5 rounded-full border border-indigo-500/15 uppercase tracking-wider">
+                      <Flame className="w-2.5 h-2.5 text-amber-500 animate-pulse" />
+                      <span>Premium Scholar</span>
+                    </span>
+                    <button
+                      onClick={() => {
+                        setEditName(studentName);
+                        setEditClassBoard(classBoard);
+                        setEditSchool(schoolDivision);
+                        setIsEditingDetails(true);
+                      }}
+                      className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 hover:underline cursor-pointer"
+                    >
+                      (Edit Details)
+                    </button>
+                  </div>
+                </div>
+                
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold">{classBoard}</p>
+                <p className="text-[11px] text-slate-450 font-semibold">{schoolDivision}</p>
+                <p className="text-[11px] text-slate-400 font-medium">Account ID: <span className="font-mono text-slate-500 dark:text-slate-300">studyweb908@gmail.com</span></p>
+              </div>
+            )}
+            
+            {/* Minimal Bento Stats row */}
+            <div className="grid grid-cols-3 gap-3 pt-4 border-t border-slate-100 dark:border-slate-800/60 max-w-md mx-auto sm:mx-0">
+              <div className="p-2.5 text-center rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800/80 hover:scale-[1.02] transition-transform">
+                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Streak</p>
+                <p className="text-sm font-black text-amber-500 mt-0.5">12 Days</p>
+              </div>
+              <div className="p-2.5 text-center rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800/80 hover:scale-[1.02] transition-transform">
+                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Rank</p>
+                <p className="text-sm font-black text-indigo-500 dark:text-indigo-400 mt-0.5">AP Elite</p>
+              </div>
+              <div className="p-2.5 text-center rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800/80 hover:scale-[1.02] transition-transform">
+                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Mastery</p>
+                <p className="text-sm font-black text-emerald-500 mt-0.5">78%</p>
               </div>
             </div>
           </div>
         </div>
-      )}
+
+        {/* Profile Inner Tabs */}
+        <div className="flex gap-6 border-b border-slate-100 dark:border-slate-800/80 pb-px mt-8">
+          <button
+            onClick={() => setActiveProfileTab('overview')}
+            className={`pb-3 px-1 text-xs sm:text-sm font-black border-b-2 transition-all cursor-pointer flex items-center gap-2 focus:outline-none ${
+              activeProfileTab === 'overview'
+                ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+            }`}
+          >
+            <User className="w-4 h-4" />
+            <span>Profile Overview</span>
+          </button>
+          <button
+            onClick={() => setActiveProfileTab('preferences')}
+            className={`pb-3 px-1 text-xs sm:text-sm font-black border-b-2 transition-all cursor-pointer flex items-center gap-2 focus:outline-none ${
+              activeProfileTab === 'preferences'
+                ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+            }`}
+          >
+            <Settings className="w-4 h-4" />
+            <span>Account Preferences</span>
+          </button>
+        </div>
+
+        {/* TAB 1: OVERVIEW */}
+        {activeProfileTab === 'overview' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6">
+            
+            {/* Left overview module: Interactive targets */}
+            <div className="space-y-5 bg-slate-50/50 dark:bg-slate-900/30 p-5 rounded-2xl border border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <Target className="w-5 h-5 text-indigo-500 animate-pulse" />
+                <p className="font-extrabold text-sm text-slate-800 dark:text-white">Daily Study Target Goal</p>
+              </div>
+
+              {/* Interactive target pills */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-600 dark:text-slate-300">
+                  <span>Daily Goal Target:</span>
+                  <span className="text-indigo-600 dark:text-indigo-400 bg-indigo-500/5 px-2.5 py-1 rounded-md border border-indigo-500/15 font-black">{dailyGoalMinutes} Minutes Focus</span>
+                </div>
+                
+                <div className="grid grid-cols-5 gap-1.5">
+                  {[30, 45, 60, 90, 120].map((min) => (
+                    <button
+                      key={min}
+                      onClick={() => saveDailyGoal(min)}
+                      className={`py-2 rounded-xl text-[10px] font-black tracking-wide border cursor-pointer transition-all ${
+                        dailyGoalMinutes === min 
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm shadow-indigo-600/10' 
+                          : 'bg-white dark:bg-slate-850 text-slate-600 dark:text-slate-300 border-slate-150 dark:border-slate-800 hover:border-indigo-300 hover:scale-105'
+                      }`}
+                    >
+                      {min}m
+                    </button>
+                  ))}
+                </div>
+
+                {/* Progress bar simulation towards goal */}
+                <div className="pt-2">
+                  <div className="w-full bg-slate-200 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                    <div 
+                      className="bg-indigo-500 h-full rounded-full transition-all duration-500" 
+                      style={{ width: `${Math.min(100, (60 / dailyGoalMinutes) * 100)}%` }} 
+                    />
+                  </div>
+                  <div className="flex justify-between items-center text-[9px] text-slate-400 font-bold mt-1">
+                    <span>Current Focus: 60m</span>
+                    <span>Target: {dailyGoalMinutes}m</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Core Account Details Block */}
+              <div className="pt-4 border-t border-slate-200/40 dark:border-slate-800/60 space-y-4">
+                <div className="flex items-center gap-2">
+                  <Award className="w-4.5 h-4.5 text-indigo-500" />
+                  <p className="font-extrabold text-xs text-slate-800 dark:text-white">Academic Details & Syllabus</p>
+                </div>
+                
+                <div className="space-y-3 text-xs font-semibold">
+                  <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Syllabus Class Board</span>
+                    <p className="font-bold text-slate-700 dark:text-slate-200">{classBoard}</p>
+                  </div>
+                  <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">School Registration Group</span>
+                    <p className="font-bold text-slate-700 dark:text-slate-200">{schoolDivision}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right overview module: Mascot & Learning preferences */}
+            <div className="space-y-5 bg-slate-50/50 dark:bg-slate-900/30 p-5 rounded-2xl border border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <Brain className="w-5 h-5 text-indigo-500 animate-pulse" />
+                <p className="font-extrabold text-sm text-slate-800 dark:text-white">AI Learning Companion Mascot</p>
+              </div>
+
+              {/* Mascot picker selection list */}
+              <div className="space-y-2.5">
+                {MASCOTS.map((mas) => {
+                  const isSelected = activeMascot === mas.id;
+                  return (
+                    <div
+                      key={mas.id}
+                      onClick={() => saveMascot(mas.id)}
+                      className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                        isSelected 
+                          ? 'bg-gradient-to-br from-indigo-500/10 to-indigo-600/5 dark:from-indigo-500/10 dark:to-slate-900/10 border-indigo-200 dark:border-indigo-900/40 font-bold scale-[1.01] shadow-sm' 
+                          : 'bg-white dark:bg-slate-850 border-slate-150 dark:border-slate-800/80 text-slate-600 dark:text-slate-300 hover:border-indigo-200 hover:scale-[1.01]'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <div className={`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 flex items-center justify-center ${isSelected ? 'bg-indigo-500 ring-4 ring-indigo-500/25' : 'bg-slate-300'}`} />
+                        <div className="min-w-0">
+                          <p className={`font-black text-xs ${isSelected ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-800 dark:text-slate-200'}`}>{mas.name}</p>
+                          <p className="text-[9px] text-slate-400 font-bold uppercase mt-0.5">{mas.desc}</p>
+                          {isSelected && (
+                            <p className="text-[10px] text-slate-500 dark:text-slate-300 font-medium mt-1.5 leading-relaxed bg-white/60 dark:bg-slate-900/50 p-2 rounded-lg border border-slate-100 dark:border-slate-800">{mas.role}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Style selector custom cards */}
+              <div className="pt-4 border-t border-slate-200/40 dark:border-slate-800/60 space-y-3">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cognitive & Voice Style</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="p-3 rounded-xl bg-white dark:bg-slate-850 border border-slate-150 dark:border-slate-800">
+                    <span className="text-[9px] uppercase font-bold text-slate-400">Cognitive Profile</span>
+                    <select 
+                      value={cognitiveStyle} 
+                      onChange={(e) => saveCognitiveStyle(e.target.value)}
+                      className="w-full mt-1 bg-transparent text-[10px] font-black text-slate-850 dark:text-slate-200 focus:outline-none cursor-pointer"
+                    >
+                      <option value="Visual & Active Spaced Recall">Visual Spaced Recall</option>
+                      <option value="Kinesthetic Practice & Coding Labs">Kinesthetic Lab Code</option>
+                      <option value="Verbal / Socratic Discussion">Socratic Discussion</option>
+                    </select>
+                  </div>
+                  <div className="p-3 rounded-xl bg-white dark:bg-slate-850 border border-slate-150 dark:border-slate-800">
+                    <span className="text-[9px] uppercase font-bold text-slate-400">AI Voice Assistant</span>
+                    <select 
+                      value={learningVoice} 
+                      onChange={(e) => saveLearningVoice(e.target.value)}
+                      className="w-full mt-1 bg-transparent text-[10px] font-black text-slate-850 dark:text-slate-200 focus:outline-none cursor-pointer"
+                    >
+                      <option value="Calm Academic Tutor voice">Calm Academic</option>
+                      <option value="Exciting & High-Energy Coach">High-Energy Coach</option>
+                      <option value="Gentle Slow Paced Listener">Slow Listener</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* TAB 2: ACCOUNT PREFERENCES */
+          <div className="space-y-6 pt-6">
+            <div>
+              <h4 className="font-extrabold text-sm text-slate-800 dark:text-white flex items-center gap-2">
+                <Clock className="w-5 h-5 text-indigo-500" />
+                <span>Secure Session Auto-Logout Config</span>
+              </h4>
+              <p className="text-xs text-slate-400 font-semibold mt-1">Protect your academic workspace security by ending your inactive browser sessions automatically.</p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {[
+                { label: "Short Test (30s)", value: 30, desc: "Warns at 15s. Ideal for testing session expiry quickly." },
+                { label: "Standard (60s)", value: 60, desc: "Warns at 30s. Balance between protection and utility." },
+                { label: "Relaxed (5m / 300s)", value: 300, desc: "Warns at 150s. Suitable for continuous study." }
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => handleTimeoutChange(option.value)}
+                  className={`p-5 rounded-2xl border text-left cursor-pointer transition-all flex flex-col justify-between focus:outline-none hover:scale-[1.02] ${
+                    sessionTimeout === option.value
+                      ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-lg shadow-indigo-600/10'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800/80 text-slate-700 dark:text-slate-200 hover:border-indigo-300 dark:hover:border-indigo-800'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <p className={`font-black text-[10px] uppercase tracking-wide ${sessionTimeout === option.value ? 'text-indigo-200' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                      {option.label}
+                    </p>
+                    <p className="font-extrabold text-xs tracking-tight leading-tight mt-1">{option.value} Seconds Inactivity</p>
+                  </div>
+                  <p className={`text-[10px] mt-4 leading-relaxed ${sessionTimeout === option.value ? 'text-indigo-100 opacity-90' : 'text-slate-400'}`}>
+                    {option.desc}
+                  </p>
+                </button>
+              ))}
+            </div>
+
+            {/* Timing Parameters Details Card */}
+            <div className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 space-y-4">
+              <div className="flex items-center gap-2">
+                <Settings className="w-5 h-5 text-indigo-500" />
+                <p className="font-bold text-sm text-slate-800 dark:text-white">Active Security Timing Metrics</p>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-semibold">
+                <div className="p-3.5 bg-white dark:bg-slate-900 rounded-xl border">
+                  <span className="text-[10px] uppercase font-bold text-slate-400">Total session length</span>
+                  <p className="text-sm font-black text-slate-850 dark:text-white mt-0.5">{sessionTimeout} seconds</p>
+                  <p className="text-[10px] text-slate-400 font-medium mt-1">Syllabus workspace logs out automatically after inactivity.</p>
+                </div>
+                <div className="p-3.5 bg-white dark:bg-slate-900 rounded-xl border">
+                  <span className="text-[10px] uppercase font-bold text-slate-400">Pre-Logout warning trigger</span>
+                  <p className="text-sm font-black text-amber-500 dark:text-amber-400 mt-0.5">{Math.round(sessionTimeout / 2)} seconds</p>
+                  <p className="text-[10px] text-slate-400 font-medium mt-1">Modal prompts active student action to extend session length.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Real-time Theme Synchronization Section */}
+            <div className="space-y-4 pt-6 border-t border-slate-200/60 dark:border-slate-800">
+              <div>
+                <h4 className="font-extrabold text-sm text-slate-800 dark:text-white flex items-center gap-2">
+                  <Monitor className="w-5 h-5 text-indigo-500" />
+                  <span>Real-time Theme Customization</span>
+                </h4>
+                <p className="text-xs text-slate-400 font-semibold mt-1">
+                  Synchronize your active background interfaces cleanly with operating system dark mode thresholds.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {[
+                  { 
+                    id: "system", 
+                    label: "System Sync", 
+                    desc: "Follows system theme in real-time.", 
+                    icon: Monitor, 
+                    color: "text-indigo-500",
+                    bg: "bg-indigo-500/10 dark:bg-indigo-500/20"
+                  },
+                  { 
+                    id: "light", 
+                    label: "Light Override", 
+                    desc: "Always use standard light layout.", 
+                    icon: Sun, 
+                    color: "text-amber-500",
+                    bg: "bg-amber-500/10 dark:bg-amber-500/20"
+                  },
+                  { 
+                    id: "dark", 
+                    label: "Dark Override", 
+                    desc: "Always use high-contrast dark layout.", 
+                    icon: Moon, 
+                    color: "text-indigo-400",
+                    bg: "bg-indigo-500/10 dark:bg-indigo-500/20"
+                  }
+                ].map((option) => {
+                  const IconComponent = option.icon;
+                  const isSelected = themeMode === option.id;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => handleThemeChange(option.id as any)}
+                      className={`p-5 rounded-2xl border text-left cursor-pointer transition-all flex flex-col justify-between focus:outline-none min-h-[140px] hover:scale-[1.02] ${
+                        isSelected
+                          ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-lg shadow-indigo-600/10'
+                          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:border-indigo-300 dark:hover:border-indigo-800'
+                      }`}
+                    >
+                      <div className="w-full flex items-start justify-between">
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${isSelected ? 'bg-white/20 text-white' : `${option.bg} ${option.color}`}`}>
+                          <IconComponent className="w-4.5 h-4.5" />
+                        </div>
+                        {isSelected && (
+                          <span className="text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-white/25 text-white animate-pulse">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      
+                      <div className="mt-4">
+                        <p className="font-extrabold text-xs">
+                          {option.label}
+                        </p>
+                        <p className={`text-[10px] mt-1 font-semibold leading-relaxed ${isSelected ? 'text-indigo-100 opacity-90' : 'text-slate-400'}`}>
+                          {option.desc}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* DANGER ZONE - HIGH-VISIBILITY DELETE ACCOUNT SECTION */}
+      <div className="bg-rose-500/[0.02] dark:bg-rose-950/[0.05] border border-rose-200/60 dark:border-rose-900/40 rounded-[28px] p-6 sm:p-8 space-y-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
+          <div className="space-y-1.5 max-w-lg">
+            <h4 className="font-extrabold text-sm text-rose-600 dark:text-rose-400 flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-rose-500 shrink-0" />
+              <span>Danger Zone</span>
+            </h4>
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
+              Permanently delete your StudyWeb scholar account and wipe all study progress, custom flashcards, uploaded notes, and history logs. This action is irreversible.
+            </p>
+          </div>
+          <button
+            onClick={() => setShowDeleteConfirmStep1(true)}
+            className="px-5 py-3 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-xl text-xs font-black shadow-md shadow-rose-600/10 hover:shadow-rose-600/20 active:scale-95 transition-all inline-flex items-center gap-2 shrink-0 cursor-pointer"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Delete Account</span>
+          </button>
+        </div>
+      </div>
+
+      {/* STEP 1: DELETE CONFIRMATION MODAL */}
+      <AnimatePresence>
+        {showDeleteConfirmStep1 && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowDeleteConfirmStep1(false)}
+              className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            
+            {/* Modal Body */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+              className="relative w-full max-w-md overflow-hidden rounded-[28px] border border-rose-100 dark:border-rose-950 bg-white dark:bg-slate-900 p-6 sm:p-8 shadow-2xl text-center z-10"
+            >
+              {/* Decorative Red Alert Icon Container */}
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-600 border border-rose-100 dark:border-rose-900/50">
+                <AlertCircle className="h-7 w-7 animate-pulse" />
+              </div>
+
+              <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+                Delete Account Confirmation (Step 1 of 2)
+              </h3>
+              
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold leading-relaxed mt-3 px-2">
+                Are you absolutely sure you want to delete your StudyWeb account? This action is <span className="text-rose-600 dark:text-rose-400 font-extrabold">completely irreversible</span>. You will permanently lose access to:
+              </p>
+
+              {/* Bulleted list of items to lose */}
+              <div className="bg-rose-500/[0.015] dark:bg-rose-950/[0.03] border border-slate-100 dark:border-slate-850 rounded-2xl p-4 my-4 text-left space-y-2 text-[11px] font-bold text-slate-600 dark:text-slate-350">
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                  <span>All your custom workspace documents and notes</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                  <span>All active spaced repetition flashcard decks</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                  <span>Academic planner tasks and goal track records</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                  <span>Custom AI learning companion and style preferences</span>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirmStep1(false)}
+                  className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer border border-transparent dark:border-slate-800"
+                >
+                  Cancel, Keep My Data
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDeleteConfirmStep1(false);
+                    setShowDeleteConfirmStep2(true);
+                  }}
+                  className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md shadow-rose-600/10"
+                >
+                  Continue to Next Step
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* STEP 2: FINAL CONFIRMATION MODAL */}
+      <AnimatePresence>
+        {showDeleteConfirmStep2 && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                if (!isDeleting) {
+                  setShowDeleteConfirmStep2(false);
+                  setDeleteInputText('');
+                }
+              }}
+              className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            />
+            
+            {/* Modal Body */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+              className="relative w-full max-w-md overflow-hidden rounded-[28px] border border-rose-200 dark:border-rose-900 bg-white dark:bg-slate-900 p-6 sm:p-8 shadow-2xl text-center z-10"
+            >
+              {isDeleting ? (
+                <div className="py-8 space-y-4">
+                  <div className="w-12 h-12 border-4 border-rose-500 border-t-transparent rounded-full animate-spin mx-auto" />
+                  <p className="font-extrabold text-sm text-slate-800 dark:text-white">Permanently deleting account...</p>
+                  <p className="text-xs text-slate-400 font-semibold">Wiping your StudyWeb local workspace and cloud synchronization caches.</p>
+                </div>
+              ) : (
+                <>
+                  {/* Decorative Red Alert Icon Container */}
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-600 border border-rose-100 dark:border-rose-900/50">
+                    <Trash2 className="h-7 w-7 animate-bounce" />
+                  </div>
+
+                  <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+                    Final Double Confirmation (Step 2 of 2)
+                  </h3>
+                  
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold leading-relaxed mt-3">
+                    To prevent accidental data loss, please type the confirmation phrase exactly as shown below:
+                  </p>
+
+                  {/* Confirmation text to type */}
+                  <div className="my-4 p-3.5 bg-rose-500/5 dark:bg-rose-500/10 border border-rose-500/15 rounded-xl">
+                    <span className="font-mono text-xs font-black select-all text-rose-600 dark:text-rose-400 tracking-wider">
+                      DELETE MY ACCOUNT
+                    </span>
+                  </div>
+
+                  {/* Input field */}
+                  <div className="mb-6">
+                    <input
+                      type="text"
+                      value={deleteInputText}
+                      onChange={(e) => setDeleteInputText(e.target.value)}
+                      placeholder="Type the confirmation phrase here"
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-center text-xs font-bold text-slate-800 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all"
+                    />
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex flex-col sm:flex-row gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDeleteConfirmStep2(false);
+                        setDeleteInputText('');
+                      }}
+                      className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer border border-transparent dark:border-slate-800"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={deleteInputText !== 'DELETE MY ACCOUNT'}
+                      onClick={handleDeleteAccount}
+                      className="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:hover:bg-rose-600 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-md shadow-rose-600/10"
+                    >
+                      Permanently Delete
+                    </button>
+                  </div>
+                </>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1156,9 +2943,9 @@ export function ParentDashboardView() {
 
         <button
           onClick={() => {
-            alert('📥 Generating StudyWeb monthly scholar report PDF...');
+            (window as any).showToast?.('📥 Generating StudyWeb monthly scholar report PDF...', 'info');
             setTimeout(() => {
-              alert('✅ PDF Study Report generated! Saved to local downloads.');
+              (window as any).showToast?.('✅ PDF Study Report generated! Saved to local downloads.', 'success');
             }, 1000);
           }}
           className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors shadow"
@@ -1201,3 +2988,1012 @@ export function ParentDashboardView() {
     </div>
   );
 }
+
+// ==========================================
+// INTERACTIVE ACADEMIC INFOGRAPHICS VIEW
+// ==========================================
+
+interface ElementItem {
+  symbol: string;
+  name: string;
+  atomicNum: number;
+  electronegativity: number; // 0 to 4
+  radius: number; // pm (e.g., 30 to 160)
+  ionization: number; // kJ/mol (e.g., 500 to 2400)
+  group: number;
+  period: number;
+}
+
+export function InfographicsView() {
+  const [activeTab, setActiveTab] = useState<'biology' | 'chemistry' | 'physics' | 'cs'>('biology');
+  
+  // Share modal states
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareStatus, setShareStatus] = useState<'idle' | 'generating' | 'success' | 'error'>('idle');
+  const [shareMessage, setShareMessage] = useState('');
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedImage, setCopiedImage] = useState(false);
+
+  // Initialize state from URL query parameters if present
+  React.useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get('infographicTab') || params.get('tab');
+      if (tab === 'biology' || tab === 'chemistry' || tab === 'physics' || tab === 'cs') {
+        setActiveTab(tab as any);
+      }
+      
+      if (tab === 'chemistry') {
+        const trend = params.get('trend');
+        if (trend === 'electronegativity' || trend === 'radius' || trend === 'ionization') {
+          setSelectedTrend(trend as any);
+        }
+      } else if (tab === 'biology') {
+        const stage = params.get('stage');
+        if (stage === 'light' || stage === 'calvin') {
+          setSelectedBioStage(stage as any);
+        }
+      } else if (tab === 'physics') {
+        const wave = params.get('wave');
+        if (wave) {
+          const val = parseInt(wave, 10);
+          if (!isNaN(val) && val >= -12 && val <= 2) {
+            setWavelengthPower(val);
+          }
+        }
+      } else if (tab === 'cs') {
+        const n = params.get('n');
+        if (n) {
+          const val = parseInt(n, 10);
+          if (!isNaN(val) && val >= 5 && val <= 100) {
+            setInputSizeN(val);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to read url search params", e);
+    }
+  }, []);
+
+  const handleCopyLink = () => {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('infographicTab');
+      url.searchParams.set('tab', activeTab);
+      if (activeTab === 'chemistry') {
+        url.searchParams.set('trend', selectedTrend);
+      } else if (activeTab === 'biology') {
+        url.searchParams.set('stage', selectedBioStage);
+      } else if (activeTab === 'physics') {
+        url.searchParams.set('wave', wavelengthPower.toString());
+      } else if (activeTab === 'cs') {
+        url.searchParams.set('n', inputSizeN.toString());
+      }
+      navigator.clipboard.writeText(url.toString());
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCopyImageSnapshot = async () => {
+    const node = document.getElementById('infographic-display-canvas');
+    if (!node) {
+      setShareStatus('error');
+      setShareMessage('Could not find infographic canvas element.');
+      return;
+    }
+
+    setShareStatus('generating');
+    setShareMessage('Generating high-resolution snapshot...');
+
+    try {
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const isDark = document.documentElement.classList.contains('dark');
+      const blob = await toBlob(node, {
+        cacheBust: true,
+        backgroundColor: isDark ? '#0f172a' : '#ffffff',
+        style: {
+          borderRadius: '16px',
+        }
+      });
+
+      if (!blob) throw new Error('Blob generation failed');
+
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          [blob.type]: blob
+        })
+      ]);
+
+      setShareStatus('success');
+      setCopiedImage(true);
+      setTimeout(() => setCopiedImage(false), 3000);
+    } catch (err: any) {
+      console.error('Error copying image:', err);
+      setShareStatus('error');
+      setShareMessage(err?.message || 'Clipboard permissions or format not supported in this browser. Try downloading the PNG instead!');
+    }
+  };
+
+  const handleDownloadImageSnapshot = async () => {
+    const node = document.getElementById('infographic-display-canvas');
+    if (!node) {
+      setShareStatus('error');
+      setShareMessage('Could not find infographic canvas element.');
+      return;
+    }
+
+    setShareStatus('generating');
+    setShareMessage('Rendering PNG diagram...');
+
+    try {
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const isDark = document.documentElement.classList.contains('dark');
+      const dataUrl = await toPng(node, {
+        cacheBust: true,
+        backgroundColor: isDark ? '#0f172a' : '#ffffff',
+        style: {
+          borderRadius: '16px',
+        }
+      });
+
+      const link = document.createElement('a');
+      link.download = `studyweb_infographic_${activeTab}.png`;
+      link.href = dataUrl;
+      link.click();
+
+      setShareStatus('success');
+    } catch (err: any) {
+      console.error('Error downloading image:', err);
+      setShareStatus('error');
+      setShareMessage('Failed to download image. Please try again.');
+    }
+  };
+  
+  // Chemistry state
+  const [selectedTrend, setSelectedTrend] = useState<'electronegativity' | 'radius' | 'ionization'>('electronegativity');
+  const [hoveredElement, setHoveredElement] = useState<ElementItem | null>(null);
+
+  // Biology state
+  const [selectedBioStage, setSelectedBioStage] = useState<'light' | 'calvin'>('light');
+
+  // Physics state
+  const [wavelengthPower, setWavelengthPower] = useState<number>(-6); // exponent of 10
+
+  // Computer science state
+  const [inputSizeN, setInputSizeN] = useState<number>(20);
+
+  // Periodic table elements database (18 primary elements for group trends)
+  const chemistryElements: ElementItem[] = [
+    { symbol: 'H', name: 'Hydrogen', atomicNum: 1, electronegativity: 2.20, radius: 37, ionization: 1312, group: 1, period: 1 },
+    { symbol: 'He', name: 'Helium', atomicNum: 2, electronegativity: 0.00, radius: 31, ionization: 2372, group: 8, period: 1 },
+    { symbol: 'Li', name: 'Lithium', atomicNum: 3, electronegativity: 0.98, radius: 152, ionization: 520, group: 1, period: 2 },
+    { symbol: 'Be', name: 'Beryllium', atomicNum: 4, electronegativity: 1.57, radius: 112, ionization: 900, group: 2, period: 2 },
+    { symbol: 'B', name: 'Boron', atomicNum: 5, electronegativity: 2.04, radius: 88, ionization: 801, group: 3, period: 2 },
+    { symbol: 'C', name: 'Carbon', atomicNum: 6, electronegativity: 2.55, radius: 77, ionization: 1086, group: 4, period: 2 },
+    { symbol: 'N', name: 'Nitrogen', atomicNum: 7, electronegativity: 3.04, radius: 70, ionization: 1402, group: 5, period: 2 },
+    { symbol: 'O', name: 'Oxygen', atomicNum: 8, electronegativity: 3.44, radius: 66, ionization: 1314, group: 6, period: 2 },
+    { symbol: 'F', name: 'Fluorine', atomicNum: 9, electronegativity: 3.98, radius: 64, ionization: 1681, group: 7, period: 2 },
+    { symbol: 'Ne', name: 'Neon', atomicNum: 10, electronegativity: 0.00, radius: 38, ionization: 2081, group: 8, period: 2 },
+    { symbol: 'Na', name: 'Sodium', atomicNum: 11, electronegativity: 0.93, radius: 186, ionization: 496, group: 1, period: 3 },
+    { symbol: 'Mg', name: 'Magnesium', atomicNum: 12, electronegativity: 1.31, radius: 160, ionization: 738, group: 2, period: 3 },
+    { symbol: 'Al', name: 'Aluminium', atomicNum: 13, electronegativity: 1.61, radius: 143, ionization: 578, group: 3, period: 3 },
+    { symbol: 'Si', name: 'Silicon', atomicNum: 14, electronegativity: 1.90, radius: 118, ionization: 787, group: 4, period: 3 },
+    { symbol: 'P', name: 'Phosphorus', atomicNum: 15, electronegativity: 2.19, radius: 110, ionization: 1012, group: 5, period: 3 },
+    { symbol: 'S', name: 'Sulfur', atomicNum: 16, electronegativity: 2.58, radius: 104, ionization: 1000, group: 6, period: 3 },
+    { symbol: 'Cl', name: 'Chlorine', atomicNum: 17, electronegativity: 3.16, radius: 99, ionization: 1251, group: 7, period: 3 },
+    { symbol: 'Ar', name: 'Argon', atomicNum: 18, electronegativity: 0.00, radius: 71, ionization: 1521, group: 8, period: 3 }
+  ];
+
+  // Electromagnetic spectrum bands
+  const getPhysicsBand = (exp: number) => {
+    if (exp <= -11) return { name: 'Gamma Rays', color: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-500/10', sizeDesc: 'Atomic Nuclei (< 10 pm)', useCase: 'Cancer radiotherapy, astronomical phenomena', wavelength: '10⁻¹² m' };
+    if (exp <= -9) return { name: 'X-Rays', color: 'text-fuchsia-600 dark:text-fuchsia-400', bg: 'bg-fuchsia-500/10', sizeDesc: 'Atoms (100 pm)', useCase: 'Medical diagnostic imaging, security scanners', wavelength: '10⁻¹⁰ m' };
+    if (exp <= -8) return { name: 'Ultraviolet', color: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-500/10', sizeDesc: 'Viruses (10 - 100 nm)', useCase: 'Water sterilization, tanning, forensics', wavelength: '10⁻⁸ m' };
+    if (exp <= -6) return { name: 'Visible Light', color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10', sizeDesc: 'Unicellular Organisms (0.5 µm)', useCase: 'Human vision, microscopic study, photography', wavelength: '0.5 × 10⁻⁶ m' };
+    if (exp <= -4) return { name: 'Infrared', color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/10', sizeDesc: 'Needle Point / Pinhead (10 µm)', useCase: 'Thermal imaging, TV remotes, heat tracking', wavelength: '10⁻⁵ m' };
+    if (exp <= -1) return { name: 'Microwaves', color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-500/10', sizeDesc: 'Insects / Butterflies (1 cm)', useCase: 'Cooking, Wi-Fi networks, radar tracking', wavelength: '10⁻² m' };
+    return { name: 'Radio Waves', color: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-500/10', sizeDesc: 'Buildings & Humans (10 - 100 m)', useCase: 'FM/AM broadcasting, mobile cellular networks', wavelength: '10² m' };
+  };
+
+  const physicsBand = getPhysicsBand(wavelengthPower);
+
+  // Big-O calculations based on input size N
+  const bigOCalculations = (n: number) => {
+    return [
+      { name: 'O(1)', desc: 'Constant Time', value: 1, colorClass: 'text-emerald-500 bg-emerald-500/10', borderClass: 'border-emerald-500/25', level: 'Excellent' },
+      { name: 'O(log N)', desc: 'Logarithmic Time', value: Math.round(Math.log2(n) * 10) / 10, colorClass: 'text-teal-500 bg-teal-500/10', borderClass: 'border-teal-500/25', level: 'Good' },
+      { name: 'O(N)', desc: 'Linear Time', value: n, colorClass: 'text-sky-500 bg-sky-500/10', borderClass: 'border-sky-500/25', level: 'Fair' },
+      { name: 'O(N log N)', desc: 'Linearithmic Time', value: Math.round(n * Math.log2(n)), colorClass: 'text-amber-500 bg-amber-500/10', borderClass: 'border-amber-500/25', level: 'Bad' },
+      { name: 'O(N²)', desc: 'Quadratic Time', value: n * n, colorClass: 'text-rose-500 bg-rose-500/10', borderClass: 'border-rose-500/25', level: 'Horrible' }
+    ];
+  };
+
+  const calcResults = bigOCalculations(inputSizeN);
+
+  return (
+    <div className="space-y-6 text-left">
+      {/* HEADER SECTION */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h3 className="font-extrabold text-lg text-slate-900 dark:text-white flex items-center gap-2">
+            <Image className="w-5.5 h-5.5 text-indigo-500" />
+            <span>Interactive Scholar Infographics</span>
+          </h3>
+          <p className="text-xs text-slate-400 font-semibold mt-0.5">
+            Visual study aids, systems modeling, and schematic loops to accelerate cognitive recall.
+          </p>
+        </div>
+
+        {/* SUBJECT SWITCHER TABS & SHARE BUTTON */}
+        <div className="flex flex-wrap items-center gap-3 self-start md:self-center">
+          <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 p-1 rounded-xl border border-slate-150 dark:border-slate-850">
+            <button
+              onClick={() => setActiveTab('biology')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'biology'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm border border-slate-100 dark:border-slate-800'
+                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
+              }`}
+            >
+              Biology
+            </button>
+            <button
+              onClick={() => setActiveTab('chemistry')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'chemistry'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm border border-slate-100 dark:border-slate-800'
+                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
+              }`}
+            >
+              Chemistry
+            </button>
+            <button
+              onClick={() => setActiveTab('physics')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'physics'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm border border-slate-100 dark:border-slate-800'
+                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
+              }`}
+            >
+              Physics
+            </button>
+            <button
+              onClick={() => setActiveTab('cs')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'cs'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm border border-slate-100 dark:border-slate-800'
+                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
+              }`}
+            >
+              CompSci
+            </button>
+          </div>
+
+          <button
+            onClick={() => {
+              setShowShareModal(true);
+              setShareStatus('idle');
+              setShareMessage('');
+            }}
+            className="px-4 py-2 rounded-xl text-xs font-extrabold bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-750 text-white flex items-center gap-2 transition-all cursor-pointer shadow-md hover:scale-[1.02] active:scale-95"
+            title="Share Infographic or Copy Image Snapshot"
+          >
+            <Share2 className="w-4 h-4 animate-pulse" />
+            <span>Share Infographic & Snapshot</span>
+          </button>
+        </div>
+      </div>
+
+      {/* CORE DISPLAY CANVAS */}
+      <div id="infographic-display-canvas" className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-3xl p-5 md:p-6 shadow-sm overflow-hidden">
+        
+        {/* TAB 1: BIOLOGY - CELLULAR PHOTOSYNTHESIS */}
+        {activeTab === 'biology' && (
+          <div className="space-y-6">
+            <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <span className="text-[10px] uppercase font-black text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded">Bioenergetics Loop</span>
+                <h4 className="font-extrabold text-base text-slate-900 dark:text-white mt-1.5">Cellular Photosynthesis & Calvin Cycle</h4>
+                <p className="text-xs text-slate-400 mt-0.5">Explore the conversion of solar radiation into glucose within the chloroplast membrane</p>
+              </div>
+
+              {/* Sub-toggle of process */}
+              <div className="flex gap-2 shrink-0">
+                <button
+                  onClick={() => setSelectedBioStage('light')}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                    selectedBioStage === 'light'
+                      ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-slate-50 dark:bg-slate-950 border-slate-200/50 dark:border-slate-850 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  1. Light-Dependent Reactions
+                </button>
+                <button
+                  onClick={() => setSelectedBioStage('calvin')}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                    selectedBioStage === 'calvin'
+                      ? 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
+                      : 'bg-slate-50 dark:bg-slate-950 border-slate-200/50 dark:border-slate-850 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  2. Light-Independent Calvin Cycle
+                </button>
+              </div>
+            </div>
+
+            {/* Interactive chloroplast visual diagram */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+              
+              {/* Dynamic SVG graphic */}
+              <div className="md:col-span-7 bg-slate-50 dark:bg-slate-950/40 border border-slate-150/40 dark:border-slate-850 rounded-2xl p-6 flex items-center justify-center min-h-[280px] relative">
+                
+                {/* Chloroplast background shape */}
+                <div className="absolute inset-4 rounded-full bg-emerald-500/[0.03] border-2 border-dashed border-emerald-500/10 flex items-center justify-center">
+                  <div className="w-[85%] h-[85%] rounded-full bg-emerald-500/[0.02] border border-emerald-500/5" />
+                </div>
+
+                {/* Simulated dynamic loop flows */}
+                <svg className="w-full max-w-[340px] h-48 z-10 overflow-visible" viewBox="0 0 340 200">
+                  {/* Outer / Inner Membranes */}
+                  <ellipse cx="170" cy="100" rx="160" ry="90" fill="none" stroke="#10B981" strokeWidth="2" strokeOpacity="0.2" />
+                  <ellipse cx="170" cy="100" rx="150" ry="80" fill="none" stroke="#10B981" strokeWidth="1" strokeOpacity="0.1" />
+
+                  {/* Left Side: Thylakoid Stacks */}
+                  <g className="transition-opacity duration-300" opacity={selectedBioStage === 'light' ? 1 : 0.4}>
+                    {/* Water Input Arrow */}
+                    <path d="M 10 50 Q 50 50 70 80" fill="none" stroke="#3B82F6" strokeWidth="2" strokeDasharray="3,3" />
+                    <text x="12" y="42" fill="#3B82F6" className="text-[10px] font-black font-mono">H₂O Input</text>
+                    
+                    {/* Thylakoid Stack */}
+                    <rect x="60" y="80" width="30" height="8" rx="2" fill="#059669" />
+                    <rect x="58" y="89" width="34" height="8" rx="2" fill="#059669" />
+                    <rect x="60" y="98" width="30" height="8" rx="2" fill="#059669" />
+                    <text x="50" y="122" fill="#10B981" className="text-[9px] font-black">Thylakoid</text>
+
+                    {/* Solar Ray */}
+                    <path d="M 20 10 L 65 70" fill="none" stroke="#F59E0B" strokeWidth="3" />
+                    <circle cx="20" cy="10" r="3" fill="#F59E0B" />
+                    <text x="26" y="22" fill="#F59E0B" className="text-[10px] font-extrabold">Sunlight</text>
+
+                    {/* Oxygen output */}
+                    <path d="M 85 106 Q 110 130 110 170" fill="none" stroke="#10B981" strokeWidth="2" />
+                    <text x="105" y="184" fill="#10B981" className="text-[10px] font-black font-mono">O₂ (Released)</text>
+                  </g>
+
+                  {/* Center linking arrows: ATP / NADPH vs ADP / NADP+ */}
+                  <g className="transition-all duration-300">
+                    {/* Top Loop: ATP & NADPH going left to right */}
+                    <path d="M 92 80 Q 170 40 248 80" fill="none" stroke="#F59E0B" strokeWidth="2.5" className={selectedBioStage === 'light' ? 'animate-pulse' : ''} />
+                    <polygon points="248,80 240,75 244,82" fill="#F59E0B" />
+                    <text x="135" y="52" fill="#F59E0B" className="text-[9px] font-mono font-black tracking-wide">ATP + NADPH</text>
+
+                    {/* Bottom Loop: ADP & NADP+ returning right to left */}
+                    <path d="M 248 120 Q 170 160 92 120" fill="none" stroke="#94A3B8" strokeWidth="2" />
+                    <polygon points="92,120 100,125 96,118" fill="#94A3B8" />
+                    <text x="135" y="152" fill="#94A3B8" className="text-[9px] font-mono font-black tracking-wide">ADP + NADP⁺</text>
+                  </g>
+
+                  {/* Right Side: Calvin Cycle */}
+                  <g className="transition-opacity duration-300" opacity={selectedBioStage === 'calvin' ? 1 : 0.4}>
+                    {/* Carbon Dioxide input */}
+                    <path d="M 330 50 Q 290 50 270 80" fill="none" stroke="#A78BFA" strokeWidth="2" strokeDasharray="3,3" />
+                    <text x="280" y="42" fill="#A78BFA" className="text-[10px] font-black font-mono">CO₂ Input</text>
+
+                    {/* Stroma Cycle Circle */}
+                    <circle cx="270" cy="100" r="22" fill="none" stroke="#D97706" strokeWidth="2.5" strokeDasharray="4,2" />
+                    <text x="254" y="103" fill="#D97706" className="text-[9px] font-black uppercase">Stroma</text>
+
+                    {/* Sugar Output */}
+                    <path d="M 270 122 Q 270 150 295 170" fill="none" stroke="#10B981" strokeWidth="2" />
+                    <text x="272" y="184" fill="#059669" className="text-[10px] font-black font-mono">C₆H₁₂O₆ (Glucose)</text>
+                  </g>
+                </svg>
+              </div>
+
+              {/* Descriptions & key insights */}
+              <div className="md:col-span-5 space-y-4">
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-150/40 dark:border-slate-850 space-y-2.5 text-left">
+                  <h5 className="font-extrabold text-xs text-slate-800 dark:text-white flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full ${selectedBioStage === 'light' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                    <span>{selectedBioStage === 'light' ? 'Light-Dependent Phases' : 'Light-Independent Calvin Cycle'}</span>
+                  </h5>
+                  
+                  {selectedBioStage === 'light' ? (
+                    <div className="space-y-2 text-xs text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
+                      <p>
+                        Occurs within the <strong className="text-emerald-600 dark:text-emerald-400">thylakoid membrane</strong> layers where light-absorbing chlorophyll pigments capture solar photons.
+                      </p>
+                      <p>
+                        Photolysis splits water molecules (<strong className="text-slate-700 dark:text-slate-300 font-mono">H₂O</strong>), releasing <strong className="text-slate-700 dark:text-slate-300 font-mono">O₂</strong> gas as a byproduct.
+                      </p>
+                      <p>
+                        The generated electron transport gradient triggers ATP-synthase, manufacturing energy-carrying vectors <strong className="text-slate-700 dark:text-slate-300 font-mono">ATP</strong> and <strong className="text-slate-700 dark:text-slate-300 font-mono">NADPH</strong>.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 text-xs text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
+                      <p>
+                        Occurs in the <strong className="text-amber-600 dark:text-amber-400">stroma fluid matrix</strong>. Light is not directly required, but it consumes chemical fuel produced in step 1.
+                      </p>
+                      <p>
+                        Carbon dioxide (<strong className="text-slate-700 dark:text-slate-300 font-mono">CO₂</strong>) from the atmosphere is captured by the enzyme <strong className="text-indigo-600 dark:text-indigo-400 font-bold">RuBisCO</strong>.
+                      </p>
+                      <p>
+                        Uses ATP and NADPH to reduce carbon molecules, forming the stable 3-carbon sugar G3P, which eventually synthesizes into <strong className="text-emerald-600 dark:text-emerald-400 font-mono font-black">Glucose (C₆H₁₂O₆)</strong>.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-450 dark:text-slate-500 leading-relaxed">
+                  💡 <strong>Study Tip:</strong> Remember, while the Calvin cycle doesn't directly need light, it cannot operate in prolonged darkness because it relies on Thylakoid-manufactured ATP/NADPH which deplete rapidly.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: CHEMISTRY - PERIODIC TRENDS */}
+        {activeTab === 'chemistry' && (
+          <div className="space-y-6">
+            <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <span className="text-[10px] uppercase font-black text-teal-500 bg-teal-500/10 px-2 py-0.5 rounded">Elemental Properties</span>
+                <h4 className="font-extrabold text-base text-slate-900 dark:text-white mt-1.5">Interactive Periodicity Grid</h4>
+                <p className="text-xs text-slate-400 mt-0.5">Understand group and periodic trends of main-group elements by hovering over elements</p>
+              </div>
+
+              {/* Trend select buttons */}
+              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 p-1 rounded-xl border border-slate-150 dark:border-slate-850">
+                <button
+                  onClick={() => setSelectedTrend('electronegativity')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    selectedTrend === 'electronegativity'
+                      ? 'bg-white dark:bg-slate-900 text-teal-600 dark:text-teal-400 shadow-sm border border-slate-100 dark:border-slate-800'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
+                  }`}
+                >
+                  Electronegativity
+                </button>
+                <button
+                  onClick={() => setSelectedTrend('radius')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    selectedTrend === 'radius'
+                      ? 'bg-white dark:bg-slate-900 text-teal-600 dark:text-teal-400 shadow-sm border border-slate-100 dark:border-slate-800'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
+                  }`}
+                >
+                  Atomic Radius
+                </button>
+                <button
+                  onClick={() => setSelectedTrend('ionization')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    selectedTrend === 'ionization'
+                      ? 'bg-white dark:bg-slate-900 text-teal-600 dark:text-teal-400 shadow-sm border border-slate-100 dark:border-slate-800'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
+                  }`}
+                >
+                  Ionization Energy
+                </button>
+              </div>
+            </div>
+
+            {/* Periodic grid and element info panel */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+              
+              {/* Table rendering (First 3 periods) */}
+              <div className="md:col-span-8 space-y-4">
+                <div className="grid grid-cols-8 gap-2">
+                  {/* Column Group Labels */}
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <div key={i} className="text-center font-mono text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                      G{i === 0 ? 'IA' : i === 1 ? 'IIA' : i === 2 ? 'IIIA' : i === 3 ? 'IVA' : i === 4 ? 'VA' : i === 5 ? 'VIA' : i === 6 ? 'VIIA' : 'VIII'}
+                    </div>
+                  ))}
+
+                  {/* Periodic Elements Block mapping */}
+                  {chemistryElements.map((el) => {
+                    // Calculate intensity background based on chosen property
+                    let intensity = 0; // 0 to 1
+                    if (selectedTrend === 'electronegativity') {
+                      intensity = el.electronegativity / 4.0;
+                    } else if (selectedTrend === 'radius') {
+                      intensity = el.radius / 186.0;
+                    } else {
+                      intensity = el.ionization / 2372.0;
+                    }
+
+                    // Base color mapping
+                    const bgStyle = selectedTrend === 'electronegativity'
+                      ? `rgba(20, 184, 166, ${Math.max(0.05, intensity)})` // Teal
+                      : selectedTrend === 'radius'
+                        ? `rgba(99, 102, 241, ${Math.max(0.05, intensity)})` // Indigo
+                        : `rgba(244, 63, 94, ${Math.max(0.05, intensity)})`; // Rose
+
+                    const borderStyle = selectedTrend === 'electronegativity'
+                      ? `rgba(20, 184, 166, ${intensity})`
+                      : selectedTrend === 'radius'
+                        ? `rgba(99, 102, 241, ${intensity})`
+                        : `rgba(244, 63, 94, ${intensity})`;
+
+                    // If He/Ne/Ar, and trend is Electronegativity, set strictly zero
+                    const isNobleGasWithZeroEN = el.electronegativity === 0 && selectedTrend === 'electronegativity';
+
+                    return (
+                      <div
+                        key={el.symbol}
+                        onMouseEnter={() => setHoveredElement(el)}
+                        onMouseLeave={() => setHoveredElement(null)}
+                        style={{
+                          backgroundColor: isNobleGasWithZeroEN ? undefined : bgStyle,
+                          borderColor: isNobleGasWithZeroEN ? undefined : borderStyle
+                        }}
+                        className={`aspect-square rounded-xl border flex flex-col justify-between p-2 select-none transition-all cursor-pointer scale-100 hover:scale-105 hover:shadow-md ${
+                          isNobleGasWithZeroEN
+                            ? 'bg-slate-50 dark:bg-slate-950 border-slate-100 dark:border-slate-850 opacity-40'
+                            : 'bg-white dark:bg-slate-900 border-slate-200'
+                        }`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <span className="text-[8px] font-mono font-bold text-slate-400">{el.atomicNum}</span>
+                          <span className="text-[7px] font-mono text-slate-400 font-bold">P{el.period}</span>
+                        </div>
+                        <span className="text-sm font-black tracking-tight text-slate-900 dark:text-white block text-center">
+                          {el.symbol}
+                        </span>
+                        <span className="text-[8px] font-mono font-semibold text-slate-500 block text-center truncate">
+                          {selectedTrend === 'electronegativity' 
+                            ? (el.electronegativity === 0 ? 'N/A' : el.electronegativity) 
+                            : selectedTrend === 'radius' 
+                              ? `${el.radius}pm` 
+                              : el.ionization}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Legend bar */}
+                <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-100 dark:border-slate-850 text-[10px] font-extrabold text-slate-500 dark:text-slate-400">
+                  <span className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-300" />
+                    <span>Lower Values</span>
+                  </span>
+                  
+                  {/* Dynamic Gradient slider indicator */}
+                  <div className={`h-2 flex-1 mx-4 rounded-full ${
+                    selectedTrend === 'electronegativity'
+                      ? 'bg-gradient-to-r from-teal-500/5 to-teal-500'
+                      : selectedTrend === 'radius'
+                        ? 'bg-gradient-to-r from-indigo-500/5 to-indigo-500'
+                        : 'bg-gradient-to-r from-rose-500/5 to-rose-500'
+                  }`} />
+
+                  <span className="flex items-center gap-1">
+                    <span className={`w-2.5 h-2.5 rounded-full ${
+                      selectedTrend === 'electronegativity'
+                        ? 'bg-teal-500'
+                        : selectedTrend === 'radius'
+                          ? 'bg-indigo-500'
+                          : 'bg-rose-500'
+                    }`} />
+                    <span>Higher Values</span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Hover / Element Info Display panel */}
+              <div className="md:col-span-4 space-y-4">
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-150/40 dark:border-slate-850 text-left space-y-3.5 min-h-[190px] flex flex-col justify-center">
+                  {hoveredElement ? (
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-mono font-black uppercase text-indigo-500">Atomic Number {hoveredElement.atomicNum}</span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-500">Period {hoveredElement.period} • Group {hoveredElement.group}</span>
+                      </div>
+
+                      <h5 className="font-extrabold text-base text-slate-900 dark:text-white mt-1.5 flex items-baseline gap-1.5">
+                        <span className="text-2xl font-black">{hoveredElement.symbol}</span>
+                        <span className="text-xs text-slate-500 font-bold">{hoveredElement.name}</span>
+                      </h5>
+
+                      <div className="grid grid-cols-2 gap-2 mt-3.5 pt-3.5 border-t border-slate-200/40 dark:border-slate-800">
+                        <div>
+                          <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider">Electronegativity</span>
+                          <span className="font-mono text-xs text-slate-800 dark:text-white font-black">
+                            {hoveredElement.electronegativity === 0 ? 'N/A' : `${hoveredElement.electronegativity} Pauling`}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider">Atomic Radius</span>
+                          <span className="font-mono text-xs text-slate-800 dark:text-white font-black">{hoveredElement.radius} pm</span>
+                        </div>
+                        <div className="col-span-2 mt-1">
+                          <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider">First Ionization Energy</span>
+                          <span className="font-mono text-xs text-slate-800 dark:text-white font-black">{hoveredElement.ionization} kJ / mol</span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-4 space-y-2">
+                      <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-900 text-slate-400 dark:text-slate-500 flex items-center justify-center mx-auto">
+                        <Activity className="w-5 h-5 animate-pulse" />
+                      </div>
+                      <p className="text-xs font-bold text-slate-500 dark:text-slate-400 leading-normal">
+                        Hover over any chemical element in the periodic grid to visualize trend metrics.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Trend Explanation Text block */}
+                <div className="p-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-450 space-y-2">
+                  <h6 className="font-extrabold text-slate-800 dark:text-slate-300 text-xs flex items-center gap-1.5">
+                    <Zap className="w-4 h-4 text-amber-500" />
+                    <span>How trends behave across groups</span>
+                  </h6>
+                  
+                  {selectedTrend === 'electronegativity' && (
+                    <p className="leading-relaxed font-semibold">
+                      <strong>Electronegativity</strong> increases moving <strong className="text-teal-600 dark:text-teal-400">Left to Right</strong> across a period and decreases moving <strong className="text-teal-600 dark:text-teal-400">Top to Bottom</strong> down a group. Fluorine is the highest.
+                    </p>
+                  )}
+                  {selectedTrend === 'radius' && (
+                    <p className="leading-relaxed font-semibold">
+                      <strong>Atomic Radius</strong> decreases moving <strong className="text-indigo-600 dark:text-indigo-400">Left to Right</strong> because of increasing nuclear charge, but increases moving <strong className="text-indigo-600 dark:text-indigo-400">Top to Bottom</strong> due to added shells.
+                    </p>
+                  )}
+                  {selectedTrend === 'ionization' && (
+                    <p className="leading-relaxed font-semibold">
+                      <strong>Ionization Energy</strong> increases moving <strong className="text-rose-600 dark:text-rose-400">Left to Right</strong> because electrons are tightly bound, but decreases moving <strong className="text-rose-600 dark:text-rose-400">Top to Bottom</strong> as shells expand.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: PHYSICS - EM SPECTRUM */}
+        {activeTab === 'physics' && (
+          <div className="space-y-6">
+            <div className="pb-4 border-b border-slate-100 dark:border-slate-800">
+              <span className="text-[10px] uppercase font-black text-violet-500 bg-violet-500/10 px-2 py-0.5 rounded">Wave Dynamics</span>
+              <h4 className="font-extrabold text-base text-slate-900 dark:text-white mt-1.5">Interactive Electromagnetic Spectrum</h4>
+              <p className="text-xs text-slate-400 mt-0.5">Slide across the wavelength index to evaluate frequencies, size benchmarks, and real-world utility</p>
+            </div>
+
+            {/* Slider interface */}
+            <div className="space-y-6">
+              
+              {/* Sliding Bar Container */}
+              <div className="bg-slate-50 dark:bg-slate-950/40 p-6 rounded-2xl border border-slate-150/40 dark:border-slate-850 space-y-5">
+                <div className="flex justify-between items-baseline font-mono text-[10px] text-slate-400 font-black tracking-wider uppercase">
+                  <span>10⁻¹² m (Short Waves)</span>
+                  <span className="text-indigo-500">Active Node Point</span>
+                  <span>10² m (Long Waves)</span>
+                </div>
+
+                {/* Input Slider */}
+                <div className="relative pt-1.5">
+                  <input
+                    type="range"
+                    min="-12"
+                    max="2"
+                    step="1"
+                    value={wavelengthPower}
+                    onChange={(e) => setWavelengthPower(Number(e.target.value))}
+                    className="w-full h-2.5 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-600 focus:outline-none"
+                  />
+                  
+                  {/* Sliding spectrum color indicator */}
+                  <div className="flex h-1.5 rounded-full overflow-hidden mt-3 bg-gradient-to-r from-violet-600 via-fuchsia-600 via-indigo-600 via-emerald-600 via-amber-600 via-orange-600 to-rose-600 opacity-60" />
+                </div>
+              </div>
+
+              {/* Dynamic Wave Visualization */}
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+                
+                {/* Visualizer card */}
+                <div className="md:col-span-6 p-5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-150/40 dark:border-slate-850 min-h-[220px] flex flex-col justify-between">
+                  <div className="space-y-1.5 text-left">
+                    <span className={`inline-block text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded ${physicsBand.bg} ${physicsBand.color}`}>
+                      Wavelength 10^{wavelengthPower} m
+                    </span>
+                    <h5 className="font-extrabold text-lg text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <span>{physicsBand.name}</span>
+                    </h5>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
+                      Typically oscillates at a representative wavelength benchmark around <strong className="text-slate-800 dark:text-white font-mono">{physicsBand.wavelength}</strong>.
+                    </p>
+                  </div>
+
+                  {/* Representative simulated sine wave animation using raw SVG path */}
+                  <div className="h-16 border-t border-b border-dashed border-slate-200/60 dark:border-slate-800 flex items-center justify-center overflow-hidden">
+                    <svg className="w-full h-10" viewBox="0 0 300 40">
+                      <path
+                        d={`M 0 20 Q 15 ${20 - 15 * (wavelengthPower < -8 ? 1 : 0.8)} 30 20 T 60 20 T 90 20 T 120 20 T 150 20 T 180 20 T 210 20 T 240 20 T 270 20 T 300 20`}
+                        fill="none"
+                        stroke={wavelengthPower <= -9 ? '#8B5CF6' : wavelengthPower <= -6 ? '#6366F1' : wavelengthPower <= -3 ? '#10B981' : '#EF4444'}
+                        strokeWidth="2.5"
+                        className="animate-pulse"
+                        style={{
+                          animationDuration: `${Math.max(0.15, (wavelengthPower + 13) * 0.15)}s`
+                        }}
+                      />
+                    </svg>
+                  </div>
+                </div>
+
+                {/* Physics details and benchmarks */}
+                <div className="md:col-span-6 space-y-4">
+                  <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 text-left space-y-3.5">
+                    <div>
+                      <span className="text-[9px] font-bold text-slate-450 uppercase tracking-widest block">Approximate Size Scale</span>
+                      <p className="font-extrabold text-sm text-slate-800 dark:text-white mt-0.5 flex items-center gap-2">
+                        <span className="text-lg">🔬</span>
+                        <span>{physicsBand.sizeDesc}</span>
+                      </p>
+                    </div>
+
+                    <div>
+                      <span className="text-[9px] font-bold text-slate-450 uppercase tracking-widest block">Primary Applications / Uses</span>
+                      <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                        {physicsBand.useCase}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-indigo-50/5 dark:bg-indigo-950/10 border border-dashed border-indigo-100/20 rounded-xl text-[11px] text-slate-450 dark:text-slate-500 font-bold leading-normal">
+                    💡 <strong>Cognitive Recall:</strong> Shorter wavelengths correspond directly to higher frequencies and more energetic photons. Ionizing radiation starts at the UV band, posing high molecular risks.
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: COMPUTER SCIENCE - BIG-O COMPLEXITY */}
+        {activeTab === 'cs' && (
+          <div className="space-y-6">
+            <div className="pb-4 border-b border-slate-100 dark:border-slate-800">
+              <span className="text-[10px] uppercase font-black text-sky-500 bg-sky-500/10 px-2 py-0.5 rounded">Algorithmics</span>
+              <h4 className="font-extrabold text-base text-slate-900 dark:text-white mt-1.5">Big-O Time Complexity Visualizer</h4>
+              <p className="text-xs text-slate-400 mt-0.5">Interact with the input size N slider to witness logarithmic, linear, and quadratic growth differences</p>
+            </div>
+
+            <div className="space-y-6">
+              
+              {/* Slider panel for Input Size N */}
+              <div className="bg-slate-50 dark:bg-slate-950/40 p-5 rounded-2xl border border-slate-150/40 dark:border-slate-850 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                <div className="text-left space-y-0.5">
+                  <span className="text-[10px] uppercase font-black text-indigo-500">Input Data Elements</span>
+                  <h5 className="font-extrabold text-lg text-slate-900 dark:text-white">N = {inputSizeN} items</h5>
+                </div>
+
+                {/* Slider bar */}
+                <div className="flex-1 max-w-sm">
+                  <input
+                    type="range"
+                    min="5"
+                    max="100"
+                    value={inputSizeN}
+                    onChange={(e) => setInputSizeN(Number(e.target.value))}
+                    className="w-full h-2 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500 focus:outline-none"
+                  />
+                  <div className="flex justify-between text-[9px] font-mono text-slate-450 font-bold mt-1 uppercase">
+                    <span>5 elements</span>
+                    <span>100 elements</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Big-O Bar scale results */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+                
+                {/* Left: Dynamic bars comparison */}
+                <div className="lg:col-span-7 bg-slate-50 dark:bg-slate-950/20 rounded-2xl border border-slate-150/40 dark:border-slate-850 p-5 space-y-4">
+                  <h6 className="font-bold text-xs text-slate-800 dark:text-white text-left uppercase tracking-wider">Growth of Operations:</h6>
+                  
+                  <div className="space-y-3.5">
+                    {calcResults.map((curve) => {
+                      // Max comparison size is N^2 = 10000. Normalize scale nicely.
+                      const maxOps = 10000;
+                      const percentage = Math.max(0.2, (curve.value / maxOps) * 100);
+
+                      return (
+                        <div key={curve.name} className="space-y-1.5 text-left">
+                          <div className="flex justify-between items-baseline text-xs font-bold">
+                            <span className="flex items-center gap-1.5">
+                              <span className="font-mono font-black text-slate-900 dark:text-white">{curve.name}</span>
+                              <span className="text-[10px] text-slate-400 font-semibold truncate">({curve.desc})</span>
+                            </span>
+                            <span className="font-mono text-xs font-black text-slate-700 dark:text-slate-300">
+                              {curve.value.toLocaleString()} ops
+                            </span>
+                          </div>
+
+                          {/* Horizontal Bar progress */}
+                          <div className="h-3.5 w-full bg-slate-100 dark:bg-slate-900/60 rounded-lg overflow-hidden border border-slate-200/20">
+                            <div
+                              style={{ width: `${percentage}%` }}
+                              className={`h-full rounded-lg transition-all duration-300 ${
+                                curve.name === 'O(N²)' 
+                                  ? 'bg-rose-500' 
+                                  : curve.name === 'O(N log N)' 
+                                    ? 'bg-amber-500' 
+                                    : curve.name === 'O(N)' 
+                                      ? 'bg-sky-500' 
+                                      : curve.name === 'O(log N)' 
+                                        ? 'bg-teal-500' 
+                                        : 'bg-emerald-500'
+                              }`}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Right: Big-O Efficiency Matrix */}
+                <div className="lg:col-span-5 flex flex-col justify-between p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 text-left space-y-4">
+                  <div className="space-y-3">
+                    <span className="text-[9px] font-mono font-black uppercase text-indigo-500">Efficiency Evaluation</span>
+                    <h5 className="font-extrabold text-sm text-slate-900 dark:text-white">Asymptotic Scaling Behavior</h5>
+                    
+                    <div className="space-y-2 text-xs text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
+                      <p>
+                        As the input data scales from 20 to 100, notice how <strong className="text-rose-500 font-mono">O(N²)</strong> expands instantly from 400 to <strong className="text-rose-600 dark:text-rose-400 font-mono font-black">10,000 operations</strong>.
+                      </p>
+                      <p>
+                        Contrast this with logarithmic <strong className="text-teal-500 font-mono">O(log N)</strong>, which completes in less than <strong className="text-teal-600 dark:text-teal-400 font-mono">7 operations</strong> even for massive element scales.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-sky-500/[0.03] dark:bg-sky-500/[0.05] border border-dashed border-sky-500/10 rounded-xl text-[11px] text-slate-450 dark:text-slate-500 font-semibold leading-normal">
+                    📌 <strong>AP CompSci Axiom:</strong> Optimizing nested loops into linearithmic merges ($O(N \log N)$) makes the difference between software that crashes on large indexes and code that scales cleanly.
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+          </div>
+        )}
+
+      </div>
+
+      {/* SHARE INFOGRAPHIC DIALOG MODAL */}
+      <AnimatePresence>
+        {showShareModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowShareModal(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+
+            {/* Modal Body */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl max-w-md w-full relative z-10 text-left space-y-5 overflow-hidden"
+            >
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <span className="text-[9px] font-black uppercase text-indigo-500 tracking-wider">Scholar Tool</span>
+                  <h4 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
+                    <Share2 className="w-4 h-4 text-indigo-500" />
+                    <span>Share This Infographic</span>
+                  </h4>
+                </div>
+                <button
+                  onClick={() => setShowShareModal(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <span className="text-lg font-black leading-none block px-1">×</span>
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-semibold font-sans">
+                Generate a custom interactive URL to share this exact configuration, or copy/download a high-resolution snapshot of the diagram.
+              </p>
+
+              {/* ACTIVE OPTION SCHEMATIC DISPLAY */}
+              <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-2xl border border-slate-150 dark:border-slate-850 space-y-1">
+                <div className="text-[10px] font-mono font-black uppercase text-slate-400">Current Configuration:</div>
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <span className="capitalize">{activeTab}</span>
+                  <span className="text-slate-300 dark:text-slate-700">•</span>
+                  <span className="text-indigo-500 font-mono text-[11px]">
+                    {activeTab === 'biology' && `Stage: ${selectedBioStage}`}
+                    {activeTab === 'chemistry' && `Trend: ${selectedTrend}`}
+                    {activeTab === 'physics' && `Wavelength: 10^${wavelengthPower}m`}
+                    {activeTab === 'cs' && `N = ${inputSizeN}`}
+                  </span>
+                </div>
+              </div>
+
+              {/* ACTION MENU */}
+              <div className="space-y-2.5">
+                {/* 1. Shareable Link */}
+                <button
+                  onClick={handleCopyLink}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-900 text-xs font-bold text-slate-750 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-950 flex items-center justify-between transition-all cursor-pointer"
+                >
+                  <span className="flex items-center gap-2">
+                    <Copy className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Copy Interactive Link</span>
+                  </span>
+                  {copiedLink ? (
+                    <span className="text-[10px] font-black text-emerald-500 uppercase">Copied!</span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400 font-semibold">URL</span>
+                  )}
+                </button>
+
+                {/* 2. Copy Image Snapshot */}
+                <button
+                  disabled={shareStatus === 'generating'}
+                  onClick={handleCopyImageSnapshot}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-900 text-xs font-bold text-slate-750 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-950 flex items-center justify-between transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <span className="flex items-center gap-2">
+                    <Image className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Copy Image to Clipboard</span>
+                  </span>
+                  {copiedImage ? (
+                    <span className="text-[10px] font-black text-emerald-500 uppercase">Copied Image!</span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400 font-semibold">PNG</span>
+                  )}
+                </button>
+
+                {/* 3. Download Diagram */}
+                <button
+                  disabled={shareStatus === 'generating'}
+                  onClick={handleDownloadImageSnapshot}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-900 text-xs font-bold text-slate-750 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-950 flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <Download className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Download Diagram Image (.png)</span>
+                </button>
+              </div>
+
+              {/* PROCESS STATUS BANNER */}
+              {shareStatus !== 'idle' && (
+                <div className={`p-3 rounded-xl text-xs font-semibold ${
+                  shareStatus === 'generating' 
+                    ? 'bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 border border-indigo-100/10' 
+                    : shareStatus === 'success'
+                      ? 'bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 border border-emerald-100/10'
+                      : 'bg-rose-50/50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 border border-rose-100/10'
+                }`}>
+                  <p className="flex items-center gap-1.5">
+                    {shareStatus === 'generating' && <span className="w-2 h-2 rounded-full bg-indigo-500 animate-ping shrink-0" />}
+                    {shareStatus === 'success' && <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />}
+                    {shareStatus === 'error' && <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />}
+                    <span>{shareStatus === 'generating' ? shareMessage : shareStatus === 'success' ? 'Operation completed successfully!' : shareMessage}</span>
+                  </p>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
