@@ -64,8 +64,7 @@ import {
   AchievementsView,
   LeaderboardView,
   ProfileView,
-  ParentDashboardView,
-  InfographicsView
+  ParentDashboardView
 } from './components/Dashboard/AuxiliaryViews';
 
 export default function App() {
@@ -476,8 +475,6 @@ export default function App() {
         return <ProfileView sessionTimeout={sessionTimeout} setSessionTimeout={setSessionTimeout} />;
       case 'parent-dashboard':
         return <ParentDashboardView />;
-      case 'infographics':
-        return <InfographicsView />;
       case 'pdf-chat':
         return (
           <PDFWorkspaceView 

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   FileText, 
-  Sparkles, 
+  
   Plus, 
   Save, 
   Trash2, 
@@ -14,7 +14,7 @@ import {
   Eye,
   Settings,
   ChevronRight,
-  RefreshCw,
+  
   Bold,
   Italic,
   List,
@@ -23,7 +23,7 @@ import {
   Code,
   Check,
   X as CloseIcon,
-  PenTool,
+  
   Search,
   FileDown
 } from 'lucide-react';
@@ -52,12 +52,8 @@ export default function WorkspaceNotebook({ workspace, onAddNote, onRemoveNote }
   });
   
   // AI assistant status
-  const [isCopilotActive, setIsCopilotActive] = useState(false);
-  const [copilotStatus, setCopilotStatus] = useState('');
   
   // Drawing board overlay
-  const [showDrawBoard, setShowDrawBoard] = useState(false);
-  const [hasDrawings, setHasDrawings] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
 
   const handleSelectNote = (note: WorkspaceNote) => {
@@ -309,29 +305,6 @@ export default function WorkspaceNotebook({ workspace, onAddNote, onRemoveNote }
     setActiveNote(updated);
   };
 
-  const triggerAICopilot = (mode: 'complete' | 'format' | 'link') => {
-    if (isCopilotActive) return;
-    setIsCopilotActive(true);
-
-    const states = {
-      complete: 'AI is formulating sentences to complete notes based on document chapters...',
-      format: 'AI is structure-beautifying headings, lists, and highlighting formulas...',
-      link: 'AI is scanning definitions to generate associative conceptual links...'
-    };
-
-    setCopilotStatus(states[mode]);
-
-    setTimeout(() => {
-      setIsCopilotActive(false);
-      if (mode === 'complete') {
-        setNoteContent((prev) => prev + '\n\n**AI Continuous Insights:** Mendelian inheritance rules rely directly on chromosomal separations. The locus position controls crossing-over probabilities, representing physical maps.');
-      } else if (mode === 'format') {
-        setNoteContent((prev) => `# ${noteTitle}\n\n${prev.replace(/#/g, '')}`);
-      } else if (mode === 'link') {
-        setNoteContent((prev) => prev + '\n\n*Linked Topics: [[Mendelian Genetics]], [[AP Biology Genetics]]*');
-      }
-    }, 1500);
-  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 text-left relative">
@@ -417,7 +390,7 @@ export default function WorkspaceNotebook({ workspace, onAddNote, onRemoveNote }
       </div>
 
       {/* CENTER: Editor area (6 Cols) */}
-      <div className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-5 rounded-[24px] flex flex-col min-h-[500px]">
+      <div className="lg:col-span-9 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-5 rounded-[24px] flex flex-col min-h-[500px]">
         {activeNote ? (
           <div className="flex-1 flex flex-col space-y-4">
             {/* Title */}
@@ -440,16 +413,6 @@ export default function WorkspaceNotebook({ workspace, onAddNote, onRemoveNote }
               
               <div className="w-[1px] h-4 bg-slate-200 dark:bg-slate-800 mx-1" />
 
-              {/* Drawings attachment shortcut */}
-              <button 
-                onClick={() => setShowDrawBoard(true)}
-                className={`p-1.5 hover:bg-white dark:hover:bg-slate-800 rounded text-xs cursor-pointer flex items-center gap-1 ${hasDrawings ? 'text-indigo-600 dark:text-indigo-400 font-bold' : ''}`}
-              >
-                <PenTool className="w-3.5 h-3.5" />
-                <span className="text-[10px]">{hasDrawings ? 'Attached Sketch' : 'Handwrite'}</span>
-              </button>
-
-              <div className="w-[1px] h-4 bg-slate-200 dark:bg-slate-800 mx-1" />
 
               <div className="relative">
                 <button
@@ -514,143 +477,7 @@ export default function WorkspaceNotebook({ workspace, onAddNote, onRemoveNote }
         )}
       </div>
 
-      {/* RIGHT: AI assistant co-editor widget (3 Cols) */}
-      <div className="lg:col-span-3 bg-gradient-to-b from-indigo-500/5 to-white dark:from-indigo-950/10 dark:to-slate-900 border border-slate-150 dark:border-slate-850 p-5 rounded-[24px] space-y-4">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-indigo-500 animate-pulse" />
-          <h4 className="font-extrabold text-sm text-slate-850 dark:text-slate-100">AI Note Assistant</h4>
-        </div>
 
-        <p className="text-[11px] text-slate-400 leading-relaxed font-semibold">
-          AI editor assists your summarization and formats code and formulas based on the workspace knowledge base.
-        </p>
-
-        <div className="space-y-2">
-          <button 
-            disabled={!activeNote || isCopilotActive}
-            onClick={() => triggerAICopilot('complete')}
-            className="w-full text-left p-3 rounded-xl bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-900 border border-slate-150 dark:border-slate-800 font-semibold text-xs flex items-center justify-between cursor-pointer disabled:opacity-50"
-          >
-            <span>Continuous Note Autocomplete</span>
-            <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-          </button>
-
-          <button 
-            disabled={!activeNote || isCopilotActive}
-            onClick={() => triggerAICopilot('format')}
-            className="w-full text-left p-3 rounded-xl bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-900 border border-slate-150 dark:border-slate-800 font-semibold text-xs flex items-center justify-between cursor-pointer disabled:opacity-50"
-          >
-            <span>Auto-Format Headings & Math</span>
-            <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-          </button>
-
-          <button 
-            disabled={!activeNote || isCopilotActive}
-            onClick={() => triggerAICopilot('link')}
-            className="w-full text-left p-3 rounded-xl bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-900 border border-slate-150 dark:border-slate-800 font-semibold text-xs flex items-center justify-between cursor-pointer disabled:opacity-50"
-          >
-            <span>Discover Semantic Links</span>
-            <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-          </button>
-        </div>
-
-        {/* Status */}
-        <AnimatePresence>
-          {isCopilotActive && (
-            <motion.div
-              initial={{ opacity: 0, y: 5 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 5 }}
-              className="bg-indigo-500/10 border border-indigo-500/20 p-3 rounded-xl text-[10px] text-slate-500 dark:text-indigo-300 italic flex items-center gap-1.5"
-            >
-              <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0 text-indigo-500" />
-              <span>{copilotStatus}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* HANDWRITTEN CANVAS DRAWING OVERLAY */}
-      <AnimatePresence>
-        {showDrawBoard && (
-          <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 max-w-xl w-full relative space-y-4"
-            >
-              <button 
-                onClick={() => setShowDrawBoard(false)}
-                className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
-              >
-                <CloseIcon className="w-5 h-5" />
-              </button>
-
-              <h3 className="font-extrabold text-base text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                <PenTool className="w-5 h-5 text-indigo-500" />
-                <span>Handwrite Drawing Attachment</span>
-              </h3>
-
-              <p className="text-[11px] text-slate-400">
-                Practice diagram drawings and math equations. Attached sketches will save alongside note contents.
-              </p>
-
-              {/* Simulated drawboard frame */}
-              <div className="h-64 border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 rounded-2xl relative flex items-center justify-center overflow-hidden">
-                <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808005_1px,transparent_1px),linear-gradient(to_bottom,#80808005_1px,transparent_1px)] bg-[size:10px_10px]" />
-
-                {/* Hand sketches representation */}
-                {hasDrawings ? (
-                  <svg className="absolute inset-0 w-full h-full stroke-indigo-500" strokeWidth="2.5" fill="none">
-                    {/* Simulated hand-drawn DNA helix */}
-                    <path d="M 50,100 C 150,150 150,50 250,100 C 350,150 350,50 450,100" />
-                    <path d="M 50,100 C 150,50 150,150 250,100 C 350,50 350,150 450,100" strokeDasharray="4" />
-                    <line x1="100" y1="90" x2="100" y2="110" />
-                    <line x1="150" y1="80" x2="150" y2="120" />
-                    <line x1="200" y1="90" x2="200" y2="110" />
-                    <line x1="300" y1="90" x2="300" y2="110" />
-                    <line x1="350" y1="80" x2="350" y2="120" />
-                    <line x1="400" y1="90" x2="400" y2="110" />
-                  </svg>
-                ) : (
-                  <button 
-                    type="button" 
-                    onClick={() => setHasDrawings(true)}
-                    className="px-4 py-2 bg-indigo-500/10 text-indigo-500 border border-indigo-500/10 text-xs font-bold rounded-xl hover:bg-indigo-500/15 cursor-pointer"
-                  >
-                    Sketch DNA Helix
-                  </button>
-                )}
-              </div>
-
-              <div className="flex justify-between items-center pt-2">
-                <button 
-                  onClick={() => setHasDrawings(false)}
-                  className="text-slate-400 hover:text-slate-600 dark:hover:text-white font-bold text-xs cursor-pointer"
-                >
-                  Clear Sketch
-                </button>
-
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setShowDrawBoard(false)}
-                    className="px-4 py-1.5 border border-slate-200 dark:border-slate-800 font-bold text-slate-500 rounded-xl cursor-pointer"
-                  >
-                    Close
-                  </button>
-                  <button
-                    onClick={() => setShowDrawBoard(false)}
-                    className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg cursor-pointer"
-                  >
-                    Attach Sketch
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

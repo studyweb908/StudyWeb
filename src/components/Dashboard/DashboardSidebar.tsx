@@ -23,7 +23,7 @@ import {
   Plus,
   Folder,
   ChevronRight,
-  Image
+  Image,
 } from 'lucide-react';
 import { Workspace } from './WorkspaceTypes';
 
@@ -63,7 +63,6 @@ export default function DashboardSidebar({
     { id: 'notes', label: 'Notes', icon: <FileText className="w-4 h-4" />, colorClass: 'text-violet-600 dark:text-violet-400', bgClass: 'bg-violet-50 dark:bg-violet-950' },
     { id: 'flashcards', label: 'Flashcards', icon: <Layers className="w-4 h-4" />, colorClass: 'text-emerald-600 dark:text-emerald-400', bgClass: 'bg-emerald-50 dark:bg-emerald-950' },
     { id: 'quiz-center', label: 'Quiz Center', icon: <Award className="w-4 h-4" />, colorClass: 'text-yellow-600 dark:text-yellow-400', bgClass: 'bg-yellow-50 dark:bg-yellow-950' },
-    { id: 'infographics', label: 'Infographics', icon: <Image className="w-4 h-4" />, colorClass: 'text-teal-600 dark:text-teal-400', bgClass: 'bg-teal-50 dark:bg-teal-950' },
     { id: 'resources', label: 'Resources', icon: <Library className="w-4 h-4" />, colorClass: 'text-pink-600 dark:text-pink-400', bgClass: 'bg-pink-50 dark:bg-pink-950', comingSoon: true },
     { id: 'analytics', label: 'Analytics', icon: <BarChart2 className="w-4 h-4" />, colorClass: 'text-purple-600 dark:text-purple-400', bgClass: 'bg-purple-50 dark:bg-purple-950', comingSoon: true },
     { id: 'achievements', label: 'Achievements', icon: <Trophy className="w-4 h-4" />, colorClass: 'text-orange-600 dark:text-orange-400', bgClass: 'bg-orange-50 dark:bg-orange-950', comingSoon: true },

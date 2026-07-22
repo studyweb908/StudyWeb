@@ -694,8 +694,13 @@ export default function StudySessionView() {
                     isMuted ? (
                       <span className="text-rose-500">🔊 Active but muted</span>
                     ) : (
-                      <span className="text-emerald-500 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+                      <span className="text-emerald-500 flex items-center gap-1.5">
+                        <div className="flex items-end gap-[1px] h-2.5">
+                          <span className="w-0.5 bg-emerald-500 animate-[pulse_0.8s_infinite]" style={{ height: '60%' }}></span>
+                          <span className="w-0.5 bg-emerald-500 animate-[pulse_1.2s_infinite_0.2s]" style={{ height: '100%' }}></span>
+                          <span className="w-0.5 bg-emerald-500 animate-[pulse_1s_infinite_0.4s]" style={{ height: '40%' }}></span>
+                          <span className="w-0.5 bg-emerald-500 animate-[pulse_0.9s_infinite_0.1s]" style={{ height: '80%' }}></span>
+                        </div>
                         Synthesizing frequency...
                       </span>
                     )
