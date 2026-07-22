@@ -29,6 +29,7 @@ import QuizCenterView from './components/Dashboard/QuizCenterView';
 import FlashcardsView from './components/Dashboard/FlashcardsView';
 import QuickActions from './components/Dashboard/QuickActions';
 import QuickNoteModal from './components/Dashboard/QuickNoteModal';
+import OnboardingModal from './components/OnboardingModal';
 import OfflineNotice from './components/OfflineNotice';
 import { useThemeMode } from './hooks/useThemeMode';
 import { 
@@ -77,6 +78,7 @@ export default function App() {
 
   // Authentication State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [activeTab, setActiveTab] = useState(() => {
     return sessionStorage.getItem('studyweb_active_tab') || 'dashboard';
   });
@@ -195,6 +197,9 @@ export default function App() {
     
     if (savedLogin === 'true') {
       setIsLoggedIn(true);
+      if (onboardingComplete !== 'true') {
+        setShowOnboarding(true);
+      }
     }
 
     const handleLoginSuccess = () => {
@@ -207,9 +212,8 @@ export default function App() {
     const handleSignupSuccess = () => {
       setIsLoggedIn(true);
       localStorage.setItem('studyweb_is_logged_in', 'true');
-      localStorage.setItem('studyweb_onboarding_complete', 'true');
       setActiveTab('dashboard');
-      setShowLoginToast(true);
+      setShowOnboarding(true);
     };
 
     window.addEventListener('studyweb-login-success', handleLoginSuccess);
@@ -1018,6 +1022,14 @@ export default function App() {
           onNavigateToNotes={() => setActiveTab('notes')} 
         />
         
+        <OnboardingModal
+          isOpen={showOnboarding}
+          onComplete={() => {
+            localStorage.setItem('studyweb_onboarding_complete', 'true');
+            setShowOnboarding(false);
+            setShowLoginToast(true);
+          }}
+        />
 
         <OfflineNotice />
         <ToastContainer />
