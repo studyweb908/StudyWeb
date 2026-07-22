@@ -1986,6 +1986,17 @@ export function ProfileView({ sessionTimeout, setSessionTimeout }: ProfileViewPr
   const [avatarUrl, setAvatarUrl] = useState(() => {
     return localStorage.getItem('studyweb_profile_avatar') || PRESET_AVATARS[0].url;
   });
+  
+  const [onboardingData, setOnboardingData] = useState(() => {
+    const saved = localStorage.getItem('studyweb_onboarding_data');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (err) {}
+    }
+    return null;
+  });
+  
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   
   const [activeMascot, setActiveMascot] = useState(() => {
@@ -2324,6 +2335,69 @@ export function ProfileView({ sessionTimeout, setSessionTimeout }: ProfileViewPr
                   </div>
                 </div>
               </div>
+
+              {/* Extended Onboarding Profile */}
+              {onboardingData && (
+                <div className="pt-4 border-t border-slate-200/40 dark:border-slate-800/60 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="w-4.5 h-4.5 text-indigo-500" />
+                    <p className="font-extrabold text-xs text-slate-800 dark:text-white">Learning Profile</p>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3 text-xs font-semibold">
+                    {onboardingData.age && (
+                      <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Age Group</span>
+                        <p className="font-bold text-slate-700 dark:text-slate-200">{onboardingData.age}</p>
+                      </div>
+                    )}
+                    {onboardingData.status && (
+                      <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Current Status</span>
+                        <p className="font-bold text-slate-700 dark:text-slate-200">{onboardingData.status}</p>
+                      </div>
+                    )}
+                    {onboardingData.goal && (
+                      <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850 col-span-2">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Primary Goal</span>
+                        <p className="font-bold text-slate-700 dark:text-slate-200">{onboardingData.goal}</p>
+                      </div>
+                    )}
+                    {onboardingData.sources?.length > 0 && (
+                      <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850 col-span-2">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Learning Sources</span>
+                        <p className="font-bold text-slate-700 dark:text-slate-200">{onboardingData.sources.join(', ')}</p>
+                      </div>
+                    )}
+                    {onboardingData.device && (
+                      <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Primary Device</span>
+                        <p className="font-bold text-slate-700 dark:text-slate-200">{onboardingData.device}</p>
+                      </div>
+                    )}
+                    {onboardingData.usesAi && (
+                      <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Uses AI</span>
+                        <p className="font-bold text-slate-700 dark:text-slate-200">
+                          {onboardingData.usesAi} {onboardingData.aiTools?.length > 0 ? `(${onboardingData.aiTools.join(', ')})` : ''}
+                        </p>
+                      </div>
+                    )}
+                    {onboardingData.challenge && (
+                      <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850 col-span-2">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Biggest Challenge</span>
+                        <p className="font-bold text-slate-700 dark:text-slate-200">{onboardingData.challenge}</p>
+                      </div>
+                    )}
+                    {onboardingData.finalProblem && (
+                      <div className="p-3 bg-indigo-50 dark:bg-indigo-500/10 rounded-xl border border-indigo-100 dark:border-indigo-500/20 col-span-2">
+                        <span className="text-[10px] uppercase font-bold text-indigo-500 block mb-0.5">Desired Solution</span>
+                        <p className="font-bold text-indigo-900 dark:text-indigo-200">{onboardingData.finalProblem}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Right overview module: Mascot & Learning preferences */}

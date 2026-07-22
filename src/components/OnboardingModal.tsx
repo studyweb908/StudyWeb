@@ -92,18 +92,25 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
     if (step > 0) setStep(step - 1);
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
-      <div className="absolute inset-0 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm" />
-      
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 20 }}
-        className="relative w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl overflow-hidden border border-slate-100 dark:border-slate-800 flex flex-col max-h-[90vh]"
-      >
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="absolute inset-0 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm" 
+          />
+          
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95, y: 30 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            className="relative w-full max-w-xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl overflow-hidden border border-slate-100 dark:border-slate-800 flex flex-col max-h-[90vh]"
+          >
         {/* Header / Progress */}
         {step > 0 && step < 12 && (
           <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
@@ -449,6 +456,21 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                   </div>
                   <button
                     onClick={() => {
+                      // Save specific fields for standard profile
+                      if (formData.school) localStorage.setItem('studyweb_profile_school', formData.school);
+                      if (formData.study) localStorage.setItem('studyweb_profile_class_board', formData.study);
+                      
+                      let dailyMins = 60;
+                      if (formData.time.includes('Less than 1')) dailyMins = 30;
+                      if (formData.time.includes('1–2')) dailyMins = 90;
+                      if (formData.time.includes('2–4')) dailyMins = 180;
+                      if (formData.time.includes('4–6')) dailyMins = 300;
+                      if (formData.time.includes('More than 6')) dailyMins = 420;
+                      localStorage.setItem('studyweb_profile_daily_goal', dailyMins.toString());
+                      
+                      // Save complete onboarding payload
+                      localStorage.setItem('studyweb_onboarding_data', JSON.stringify(formData));
+                      
                       localStorage.removeItem('studyweb_onboarding_draft');
                       onComplete();
                     }}
@@ -479,5 +501,7 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
         )}
       </motion.div>
     </div>
+      )}
+    </AnimatePresence>
   );
 }
