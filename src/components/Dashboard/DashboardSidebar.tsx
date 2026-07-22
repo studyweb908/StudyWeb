@@ -78,7 +78,7 @@ export default function DashboardSidebar({
         <div className={`flex items-center ${isCollapsedState ? 'justify-center py-5 px-0' : 'justify-between px-6 py-5'} border-b border-slate-200 dark:border-slate-800/60`}>
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden shrink-0">
-              <img src="/logo.png" alt="StudyWeb Logo" className="w-full h-full object-contain" />
+              <img src="/logo.jpg" alt="StudyWeb Logo" className="w-full h-full object-contain" />
             </div>
             <div className={`${isCollapsedState ? 'hidden' : 'block'}`}>
               <span className="font-extrabold text-lg tracking-tight bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-300 bg-clip-text text-transparent truncate block">StudyWeb</span>

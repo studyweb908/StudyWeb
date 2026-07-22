@@ -226,7 +226,7 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
             ) : (
               <div className="flex items-center gap-1.5 min-w-0">
                 <div className="w-6 h-6 rounded-md flex items-center justify-center overflow-hidden shrink-0">
-                  <img src="/logo.png" alt="StudyWeb Logo" className="w-full h-full object-contain" />
+                  <img src="/logo.jpg" alt="StudyWeb Logo" className="w-full h-full object-contain" />
                 </div>
                 <span className="font-extrabold text-sm tracking-tight text-slate-900 dark:text-white truncate">
                   StudyWeb
