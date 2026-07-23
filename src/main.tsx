@@ -3,6 +3,23 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
+// Asset diagnostics
+const checkAssets = async () => {
+  const assetsToCheck = ['/logo.png', '/favicon.png'];
+  
+  for (const asset of assetsToCheck) {
+    try {
+      const response = await fetch(asset, { method: 'HEAD' });
+      if (!response.ok) {
+        console.warn(`[Diagnostic Warning] Asset not found at ${asset}. Status: ${response.status}`);
+      }
+    } catch (error) {
+      console.warn(`[Diagnostic Warning] Failed to fetch asset at ${asset}:`, error);
+    }
+  }
+};
+checkAssets();
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
