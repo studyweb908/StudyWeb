@@ -1,4 +1,5 @@
 import { BookOpen, Twitter, Facebook, Instagram, Linkedin, Youtube } from 'lucide-react';
+import logoUrl from '@/src/assets/logo.png';
 
 export default function Footer() {
   return (
@@ -8,7 +9,7 @@ export default function Footer() {
           
           <div className="col-span-2 lg:col-span-2">
             <div className="flex items-center gap-4 mb-6">
-              <img src="/logo.png" alt="Study Web Logo" className="w-12 h-14 object-contain invert mix-blend-screen" />
+              <img src={logoUrl} alt="Study Web Logo" className="w-12 h-14 object-contain invert mix-blend-screen" />
               <div className="flex flex-col justify-center mt-1 text-white">
                 <span className="font-serif font-semibold text-2xl tracking-[0.15em] leading-none mb-1">
                   STUDY WEB
