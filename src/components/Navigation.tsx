@@ -266,7 +266,7 @@ export default function Navigation() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <a href="#" className="flex items-center gap-2">
-                <img src="/logo.jpg" alt="Study Web Logo" className="h-16 w-auto object-contain dark:invert transition-all" />
+                <img src="/logo.png" alt="Study Web Logo" className="h-16 w-auto object-contain dark:invert transition-all" />
               </a>
             </div>
 
@@ -445,7 +445,7 @@ export default function Navigation() {
 
               {/* Header */}
               <div className="text-center space-y-2 mb-6">
-                <img src="/logo.jpg" alt="StudyWeb Logo" className="h-12 mx-auto dark:invert mb-1" />
+                <img src="/logo.png" alt="StudyWeb Logo" className="h-12 mx-auto dark:invert mb-1" />
                 <h3 className="text-2xl font-extrabold font-display text-brand-text">
                   {authMode === 'login' ? 'Welcome Back!' : 'Create Your Account'}
                 </h3>

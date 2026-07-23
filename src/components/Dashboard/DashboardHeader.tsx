@@ -206,34 +206,14 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
         </div>
       )}
       <div className="flex items-center justify-between gap-4">
-        {/* Mobile Hamburger & Logo */}
-        <div className="flex items-center gap-3 md:hidden max-w-[60%]">
+        {/* Hamburger & Logo */}
+        <div className="flex items-center gap-2 sm:gap-3 md:pr-4">
           <button 
             onClick={onMenuToggle}
-            className={`p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0 ${isFocusMode ? 'hidden' : ''}`}
+            className={`md:hidden p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0 ${isFocusMode ? 'hidden' : ''}`}
           >
             <Menu className="w-6 h-6" />
           </button>
-          
-          <div className="flex items-center gap-1.5 min-w-0">
-            {activeWorkspace ? (
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-base shrink-0 select-none">{activeWorkspace.emoji || '🧬'}</span>
-                <span className="font-extrabold text-sm tracking-tight text-slate-900 dark:text-white truncate">
-                  {activeWorkspace.name}
-                </span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 min-w-0">
-                <div className="w-6 h-6 rounded-md flex items-center justify-center overflow-hidden shrink-0">
-                  <img src="/logo.jpg" alt="StudyWeb Logo" className="w-full h-full object-contain" />
-                </div>
-                <span className="font-extrabold text-sm tracking-tight text-slate-900 dark:text-white truncate">
-                  StudyWeb
-                </span>
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Breadcrumb Navigation Trail - Desktop Only */}
