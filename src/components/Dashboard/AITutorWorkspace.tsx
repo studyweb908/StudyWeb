@@ -29,6 +29,7 @@ import {
   FileText,
   X
 } from 'lucide-react';
+import { useMicrophoneWaveform } from '../../hooks/useMicrophoneWaveform';
 
 interface Message {
   id: string;
@@ -306,6 +307,7 @@ Let me know if you would like me to clarify any specific point or provide an int
   const imgInputRef = useRef<HTMLInputElement>(null);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const waveformLevels = useMicrophoneWaveform(isListening);
   const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
@@ -429,7 +431,8 @@ Let me know if you would like me to clarify any specific point or provide an int
     };
 
     recognition.onerror = (err: any) => {
-      console.error("Speech recognition error:", err);
+      console.error("Speech recognition error:", err.error || err);
+      (window as any).showToast?.(`Microphone error: ${err.error || "Unknown error"}. Make sure microphone permissions are granted.`, "error");
       setIsListening(false);
     };
 
@@ -810,14 +813,35 @@ Let me know if you would like me to clarify any specific point or provide an int
             </button>
 
             {/* Core Input Field */}
-            <input
-              type="text"
-              required={attachedFiles.length === 0}
-              placeholder={isDragging ? "Drop your files here!" : "Ask AI study partner (e.g. explain Cellular Respiration, solve math problem...)"}
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              className="flex-1 px-3 py-2 bg-transparent text-sm text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none"
-            />
+            <div className="flex-1 relative flex items-center">
+              <input
+                type="text"
+                required={attachedFiles.length === 0}
+                placeholder={isDragging ? "Drop your files here!" : "Ask AI study partner (e.g. explain Cellular Respiration, solve math problem...)"}
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                className="w-full px-3 py-2 bg-transparent text-sm text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none pr-12"
+              />
+              <AnimatePresence>
+                {isListening && (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    className="absolute right-3 flex items-center gap-1 h-4"
+                  >
+                    {[0, 1, 2, 3].map((i) => (
+                      <motion.div
+                        key={i}
+                        className="w-1 bg-red-500 rounded-full origin-bottom"
+                        animate={{ height: `${waveformLevels[i]}px` }}
+                        transition={{ type: "tween", duration: 0.1 }}
+                      />
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
 
             {/* Mic */}
             <button

@@ -316,31 +316,31 @@ export default function WorkspaceContainer({ workspace, onBack, onUpdateWorkspac
 
       {/* RENDER ACTIVE TAB COMPONENT CONTAINER */}
       <div className="transition-all bg-white dark:bg-white rounded-[24px]">
-        {activeTab === 'overview' && (
+        <div className={activeTab === 'overview' ? 'block' : 'hidden'}>
           <WorkspaceOverview 
             workspace={workspace} 
             setActiveWorkspaceTab={setActiveTab}
             onRemoveFile={handleRemoveFile}
           />
-        )}
+        </div>
 
-        {activeTab === 'library' && (
+        <div className={activeTab === 'library' ? 'block' : 'hidden'}>
           <WorkspaceLibrary 
             workspace={workspace} 
             onAddFile={handleAddFile}
             onRemoveFile={handleRemoveFile}
             onClearAllFiles={handleClearAllFiles}
           />
-        )}
+        </div>
 
-        {activeTab === 'chat' && (
+        <div className={activeTab === 'chat' ? 'block' : 'hidden'}>
           <WorkspaceChat 
             workspace={workspace} 
             onUpdateWorkspace={onUpdateWorkspace}
           />
-        )}
+        </div>
 
-        {activeTab === 'flashcards' && (
+        <div className={activeTab === 'flashcards' ? 'block' : 'hidden'}>
           <WorkspaceFlashcards 
             workspace={workspace} 
             onAddFlashcard={handleAddFlashcard}
@@ -348,22 +348,22 @@ export default function WorkspaceContainer({ workspace, onBack, onUpdateWorkspac
             onBoxChange={handleBoxChange}
             onUpdateWorkspace={updateWorkspaceState}
           />
-        )}
+        </div>
 
-        {activeTab === 'quiz' && (
+        <div className={activeTab === 'quiz' ? 'block' : 'hidden'}>
           <WorkspaceQuiz 
             workspace={workspace} 
             onUpdateWorkspace={onUpdateWorkspace}
           />
-        )}
+        </div>
 
-        {activeTab === 'notes' && (
+        <div className={activeTab === 'notes' ? 'block' : 'hidden'}>
           <WorkspaceNotebook 
             workspace={workspace} 
             onAddNote={handleAddNote}
             onRemoveNote={handleRemoveNote}
           />
-        )}
+        </div>
       </div>
 
       {/* Cover Modal removed to prevent cover customizations */}

@@ -2,6 +2,7 @@ import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import { TaskProvider } from './context/TaskContext.tsx';
 
 // Asset diagnostics
 const checkAssets = async () => {
@@ -22,7 +23,9 @@ checkAssets();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <TaskProvider>
+      <App />
+    </TaskProvider>
   </StrictMode>,
 );
 

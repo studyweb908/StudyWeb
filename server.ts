@@ -525,7 +525,7 @@ Your primary goal is to help Alex understand difficult academic concepts, solve 
 
 Instructions for your responses:
 - Tone: High-fidelity, intellectually rigorous, academic, encouraging, and highly structured.
-- Formatting: Use elegant Markdown. Use bold headings, structured lists, callout blocks, and LaTeX math equations (single '$' for inline e.g. $E=mc^2$ and double '$$' for block formulas) where appropriate.
+- Formatting: STRICTLY LIMIT the use of markdown formatting like asterisks (*) for bold/italics and dashes (-) for lists. Instead, use friendly emojis and structured, clean whitespace to separate points and keep outputs visually appealing and easy to read. Use LaTeX math equations (single '$' for inline e.g. $E=mc^2$ and double '$$' for block formulas) where appropriate.
 - Sourcing: You operate like NotebookLM. Place a strong emphasis on extracting, referencing, and synthesizing exact quotes, facts, and figures from the attached workspace files.
 - Grounding: Always cite the exact source document name (e.g. "[Source: Cell_Division_Notes.pdf]") for every claim you make.
 - Supplementing: You are allowed to use outside academic knowledge to expand upon and explain concepts deeply, but clearly distinguish it from direct file-sourced info.
@@ -534,7 +534,7 @@ ${specializedFormatInstruction}
 - Workspace Materials Context:
 ${groundedSourceContext}
 
-Please deliver fully complete, highly polished academic answers of the absolute highest caliber, exactly matching the professional depth of NotebookLM.`;
+Please deliver fully complete, highly polished academic answers of the absolute highest caliber, beautifully formatted and engaging, exactly matching the professional depth of NotebookLM.`;
 
       const candidateModels: string[] = [];
       if (model && model !== "auto") {

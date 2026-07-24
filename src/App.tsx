@@ -5,6 +5,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion, useScroll, useSpring, AnimatePresence } from 'motion/react';
+import { useTaskContext } from './context/TaskContext';
 import Navigation from './components/Navigation';
 import Hero from './components/Hero';
 import SocialProof from './components/SocialProof';
@@ -79,9 +80,15 @@ export default function App() {
   // Authentication State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [activeTab, setActiveTab] = useState(() => {
-    return sessionStorage.getItem('studyweb_active_tab') || 'dashboard';
-  });
+
+  const {
+    activeWorkspace,
+    setActiveWorkspace,
+    activeTask: activeTab,
+    setActiveTask: setActiveTab,
+    intendedTask: intendedTab,
+    requireWorkspaceForTask
+  } = useTaskContext();
 
   // Workspaces State
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => {
@@ -93,33 +100,7 @@ export default function App() {
     }
     return INITIAL_WORKSPACES;
   });
-  const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(() => {
-    const savedId = sessionStorage.getItem('studyweb_active_workspace_id');
-    if (savedId) {
-      const local = localStorage.getItem('studyweb_workspaces_v2');
-      if (local) {
-        try {
-          const parsed = JSON.parse(local) as Workspace[];
-          return parsed.find(w => w.id === savedId) || null;
-        } catch (err) {}
-      }
-    }
-    return null;
-  });
-
-  // Persist session activeTab and activeWorkspace
-  useEffect(() => {
-    sessionStorage.setItem('studyweb_active_tab', activeTab);
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (activeWorkspace) {
-      sessionStorage.setItem('studyweb_active_workspace_id', activeWorkspace.id);
-    } else {
-      sessionStorage.removeItem('studyweb_active_workspace_id');
-    }
-  }, [activeWorkspace]);
-
+  // Workspace context handles persistance, but we still need to manage workspaces array locally.
   const handleUpdateWorkspace = (updated: Workspace) => {
     const next = workspaces.map(w => w.id === updated.id ? updated : w);
     setWorkspaces(next);
@@ -127,6 +108,10 @@ export default function App() {
     if (activeWorkspace && activeWorkspace.id === updated.id) {
       setActiveWorkspace(updated);
     }
+  };
+
+  const handleSelectWorkspace = (ws: Workspace) => {
+    setActiveWorkspace(ws);
   };
 
   const handleCreateWorkspace = (ws: Workspace) => {
@@ -231,7 +216,7 @@ export default function App() {
     localStorage.removeItem('studyweb_is_logged_in');
     setActiveTab('dashboard');
     setActiveWorkspace(null);
-    sessionStorage.removeItem('studyweb_active_tab');
+    sessionStorage.removeItem('studyweb_active_task');
     sessionStorage.removeItem('studyweb_active_workspace_id');
     setShowLogoutConfirm(false);
     setShowSessionWarning(false);
@@ -308,7 +293,7 @@ export default function App() {
             localStorage.removeItem('studyweb_is_logged_in');
             setActiveTab('dashboard');
             setActiveWorkspace(null);
-            sessionStorage.removeItem('studyweb_active_tab');
+            sessionStorage.removeItem('studyweb_active_task');
             sessionStorage.removeItem('studyweb_active_workspace_id');
             setShowLogoutConfirm(false);
             setShowSessionWarning(false);
@@ -366,7 +351,9 @@ export default function App() {
         </div>
 
         <button
-          onClick={() => setActiveTab('dashboard')}
+          onClick={() => {
+            requireWorkspaceForTask(activeTab);
+          }}
           className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-lg cursor-pointer transition-transform hover:-translate-y-0.5"
         >
           Select or Create a Workspace
@@ -374,136 +361,86 @@ export default function App() {
       </div>
     );
 
-    switch (activeTab) {
-      case 'dashboard':
-        if (activeWorkspace) {
-          return (
+    const isWorkspaceTab = ['dashboard', 'ai-tutor', 'notes', 'flashcards', 'quiz-center'].includes(activeTab);
+
+    return (
+      <div className="w-full h-full relative">
+        {/* Workspace Views */}
+        <div className={isWorkspaceTab ? 'block' : 'hidden'}>
+          {activeWorkspace ? (
             <WorkspaceContainer 
               workspace={activeWorkspace} 
               onBack={() => setActiveWorkspace(null)} 
               onUpdateWorkspace={handleUpdateWorkspace}
-              initialTab="overview"
+              initialTab={
+                activeTab === 'dashboard' ? 'overview' : 
+                activeTab === 'ai-tutor' ? 'chat' : 
+                activeTab === 'notes' ? 'notes' : 
+                activeTab === 'flashcards' ? 'flashcards' : 
+                activeTab === 'quiz-center' ? 'quiz' : 'overview'
+              }
             />
-          );
-        }
-        return (
-          <WorkspaceSelector 
-            workspaces={workspaces} 
-            onSelectWorkspace={setActiveWorkspace} 
-            onCreateWorkspace={handleCreateWorkspace}
-            onTogglePin={handleTogglePin}
-            onToggleFavorite={handleToggleFavorite}
-            onDeleteWorkspace={handleDeleteWorkspace}
-            onReorderWorkspaces={handleReorderWorkspaces}
-          />
-        );
-      case 'ai-tutor':
-        if (activeWorkspace) {
-          return (
-            <WorkspaceContainer 
-              workspace={activeWorkspace} 
-              onBack={() => setActiveWorkspace(null)} 
-              onUpdateWorkspace={handleUpdateWorkspace}
-              initialTab="chat"
-            />
-          );
-        }
-        return renderFallback(
-          "Select a Workspace",
-          "Your AI Tutor can answer questions using outside knowledge while strictly staying on topic, as well as use your active documents. Please select or create a study workspace to begin chatting."
-        );
-      case 'notes':
-        if (activeWorkspace) {
-          return (
-            <WorkspaceContainer 
-              workspace={activeWorkspace} 
-              onBack={() => setActiveWorkspace(null)} 
-              onUpdateWorkspace={handleUpdateWorkspace}
-              initialTab="notes"
-            />
-          );
-        }
-        return renderFallback(
-          "Notebook is Workspace-Grounded",
-          "Write rich-text notes with real-time AI autocompletes linked directly to your materials. Select a study workspace first."
-        );
-      case 'flashcards':
-        if (activeWorkspace) {
-          return (
-            <WorkspaceContainer 
-              workspace={activeWorkspace} 
-              onBack={() => setActiveWorkspace(null)} 
-              onUpdateWorkspace={handleUpdateWorkspace}
-              initialTab="flashcards"
-            />
-          );
-        }
-        return renderFallback(
-          "Spaced Repetition is Workspace-Grounded",
-          "Automate card generators from active chapters. Select a study workspace first to study and track Leitner boxes."
-        );
-      case 'quiz-center':
-        if (activeWorkspace) {
-          return (
-            <WorkspaceContainer 
-              workspace={activeWorkspace} 
-              onBack={() => setActiveWorkspace(null)} 
-              onUpdateWorkspace={handleUpdateWorkspace}
-              initialTab="quiz"
-            />
-          );
-        }
-        return renderFallback(
-          "Exam Practice is Workspace-Grounded",
-          "Simulate practice tests with negative markings that identify your core weak sections. Create or select a workspace first."
-        );
-      case 'study-session':
-        return <StudySessionView />;
-      case 'study-planner':
-        return <StudyPlannerView />;
-      case 'subjects':
-        return <SubjectsView />;
-      case 'resources':
-        return <ResourcesView />;
-      case 'analytics':
-        return <AnalyticsView />;
-      case 'achievements':
-        return <AchievementsView />;
-      case 'leaderboard':
-        return <LeaderboardView />;
-      case 'profile':
-        return <ProfileView sessionTimeout={sessionTimeout} setSessionTimeout={setSessionTimeout} />;
-      case 'parent-dashboard':
-        return <ParentDashboardView />;
-      case 'pdf-chat':
-        return (
+          ) : (
+            <div className="w-full">
+              {activeTab === 'dashboard' || !activeTab ? (
+                <WorkspaceSelector 
+                  workspaces={workspaces} 
+                  onSelectWorkspace={handleSelectWorkspace} 
+                  onCreateWorkspace={handleCreateWorkspace}
+                  onTogglePin={handleTogglePin}
+                  onToggleFavorite={handleToggleFavorite}
+                  onDeleteWorkspace={handleDeleteWorkspace}
+                  onReorderWorkspaces={handleReorderWorkspaces}
+                />
+              ) : activeTab === 'ai-tutor' ? (
+                renderFallback("Select a Workspace", "Your AI Tutor can answer questions using outside knowledge while strictly staying on topic, as well as use your active documents. Please select or create a study workspace to begin chatting.")
+              ) : activeTab === 'notes' ? (
+                renderFallback("Notebook is Workspace-Grounded", "Write rich-text notes with real-time AI autocompletes linked directly to your materials. Select a study workspace first.")
+              ) : activeTab === 'flashcards' ? (
+                renderFallback("Spaced Repetition is Workspace-Grounded", "Automate card generators from active chapters. Select a study workspace first to study and track Leitner boxes.")
+              ) : activeTab === 'quiz-center' ? (
+                renderFallback("Exam Practice is Workspace-Grounded", "Simulate practice tests with negative markings that identify your core weak sections. Create or select a workspace first.")
+              ) : null}
+            </div>
+          )}
+        </div>
+
+        {/* Other Views */}
+        <div className={activeTab === 'study-session' ? 'block' : 'hidden'}>
+          <StudySessionView />
+        </div>
+        <div className={activeTab === 'study-planner' ? 'block' : 'hidden'}>
+          <StudyPlannerView />
+        </div>
+        <div className={activeTab === 'subjects' ? 'block' : 'hidden'}>
+          <SubjectsView />
+        </div>
+        <div className={activeTab === 'resources' ? 'block' : 'hidden'}>
+          <ResourcesView />
+        </div>
+        <div className={activeTab === 'analytics' ? 'block' : 'hidden'}>
+          <AnalyticsView />
+        </div>
+        <div className={activeTab === 'achievements' ? 'block' : 'hidden'}>
+          <AchievementsView />
+        </div>
+        <div className={activeTab === 'leaderboard' ? 'block' : 'hidden'}>
+          <LeaderboardView />
+        </div>
+        <div className={activeTab === 'profile' ? 'block' : 'hidden'}>
+          <ProfileView sessionTimeout={sessionTimeout} setSessionTimeout={setSessionTimeout} />
+        </div>
+        <div className={activeTab === 'parent-dashboard' ? 'block' : 'hidden'}>
+          <ParentDashboardView />
+        </div>
+        <div className={activeTab === 'pdf-chat' ? 'block' : 'hidden'}>
           <PDFWorkspaceView 
             workspace={activeWorkspace || undefined}
             onUpdateWorkspace={handleUpdateWorkspace}
           />
-        );
-      default:
-        if (activeWorkspace) {
-          return (
-            <WorkspaceContainer 
-              workspace={activeWorkspace} 
-              onBack={() => setActiveWorkspace(null)} 
-              onUpdateWorkspace={handleUpdateWorkspace}
-            />
-          );
-        }
-        return (
-          <WorkspaceSelector 
-            workspaces={workspaces} 
-            onSelectWorkspace={setActiveWorkspace} 
-            onCreateWorkspace={handleCreateWorkspace}
-            onTogglePin={handleTogglePin}
-            onToggleFavorite={handleToggleFavorite}
-            onDeleteWorkspace={handleDeleteWorkspace}
-            onReorderWorkspaces={handleReorderWorkspaces}
-          />
-        );
-    }
+        </div>
+      </div>
+    );
   };
 
   // 1. RENDERING AUTHENTICATED WORKSPACE
@@ -521,7 +458,7 @@ export default function App() {
           isFocusMode={isFocusMode}
           workspaces={workspaces}
           activeWorkspace={activeWorkspace}
-          setActiveWorkspace={setActiveWorkspace}
+          setActiveWorkspace={handleSelectWorkspace}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
         />
@@ -544,7 +481,7 @@ export default function App() {
           <main id="workspace-main-content" className={`flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 md:p-8 pb-24 md:pb-8 ${isFocusMode ? 'max-w-none w-full' : 'max-w-7xl mx-auto w-full'} transition-all duration-300`}>
             <AnimatePresence mode="wait">
               <motion.div
-                key={activeTab}
+                key="workspace-main"
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}

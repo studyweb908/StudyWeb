@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sparkles, 
-  Send, 
+  Send,
+  Mic, 
   Search, 
   X, 
   BookOpen, 
@@ -19,6 +20,7 @@ import {
   Share2
 } from 'lucide-react';
 import { Workspace } from './WorkspaceTypes';
+import { useMicrophoneWaveform } from '../../hooks/useMicrophoneWaveform';
 
 interface WorkspaceChatProps {
   workspace: Workspace;
@@ -46,6 +48,52 @@ export default function WorkspaceChat({ workspace, onUpdateWorkspace }: Workspac
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isThinking, setIsThinking] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const waveformLevels = useMicrophoneWaveform(isListening);
+
+  const startSpeechRecognition = () => {
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+      return;
+    }
+
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      (window as any).showToast?.("Speech recognition is not supported in this browser.", "warning");
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onresult = (event: any) => {
+      const speechToText = event.results[0][0].transcript;
+      setInputValue(prev => prev + (prev ? ' ' : '') + speechToText);
+    };
+
+    recognition.onerror = (err: any) => {
+      console.error("Speech recognition error:", err.error || err);
+      (window as any).showToast?.(`Microphone error: ${err.error || "Unknown error"}. Make sure microphone permissions are granted.`, "error");
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognition.start();
+  };
   const [activeCitation, setActiveCitation] = useState<{
     sourceName: string;
     page?: number;
@@ -62,6 +110,26 @@ export default function WorkspaceChat({ workspace, onUpdateWorkspace }: Workspac
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [sharedMsgId, setSharedMsgId] = useState<string | null>(null);
   const [addedNoteMsgId, setAddedNoteMsgId] = useState<string | null>(null);
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
+
+  const handleSpeakMessage = (id: string, text: string) => {
+    if (speakingMsgId === id) {
+      window.speechSynthesis.cancel();
+      setSpeakingMsgId(null);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    // Strip markdown before speaking
+    const cleanText = text.replace(/[*_#`~]/g, '');
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.onend = () => setSpeakingMsgId(null);
+    utterance.onerror = () => setSpeakingMsgId(null);
+    
+    setSpeakingMsgId(id);
+    window.speechSynthesis.speak(utterance);
+  };
 
   const handleCopyMessage = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
@@ -120,6 +188,12 @@ export default function WorkspaceChat({ workspace, onUpdateWorkspace }: Workspac
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isThinking]);
+
+  useEffect(() => {
+    return () => {
+      window.speechSynthesis.cancel();
+    };
+  }, []);
 
   const handleSend = async (textToSend: string) => {
     if (!textToSend.trim() || isThinking) return;
@@ -435,6 +509,24 @@ export default function WorkspaceChat({ workspace, onUpdateWorkspace }: Workspac
                 {msg.sender === 'ai' && (
                   <div className="flex flex-wrap items-center gap-1.5 pt-2.5 border-t border-slate-100 dark:border-slate-800/60 text-[10px] text-slate-400">
                     <button
+                      onClick={() => handleSpeakMessage(msg.id, msg.text)}
+                      className="inline-flex items-center gap-1 hover:text-indigo-600 dark:hover:text-indigo-400 font-bold transition-all px-2.5 py-1 rounded bg-slate-50 dark:bg-slate-800/40 border border-slate-150 dark:border-slate-700/40 cursor-pointer active:scale-95"
+                      title={speakingMsgId === msg.id ? "Stop reading" : "Read aloud"}
+                    >
+                      {speakingMsgId === msg.id ? (
+                        <>
+                          <VolumeX className="w-3 h-3 text-indigo-500" />
+                          <span className="text-indigo-500">Stop</span>
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="w-3 h-3 text-slate-400 hover:text-slate-600" />
+                          <span>Listen</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
                       onClick={() => handleCopyMessage(msg.id, msg.text)}
                       className="inline-flex items-center gap-1 hover:text-indigo-600 dark:hover:text-indigo-400 font-bold transition-all px-2.5 py-1 rounded bg-slate-50 dark:bg-slate-800/40 border border-slate-150 dark:border-slate-700/40 cursor-pointer active:scale-95"
                       title="Copy content to clipboard"
@@ -530,19 +622,52 @@ export default function WorkspaceChat({ workspace, onUpdateWorkspace }: Workspac
 
         {/* INPUT FORM CONTAINER */}
         <div className="p-4 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-950/20 flex gap-2">
-          <input 
-            type="text" 
-            placeholder={`Query files inside ${workspace.name}...`}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyPress}
-            disabled={isThinking}
-            className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs sm:text-sm font-semibold text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
-          />
+          <div className="flex-1 relative flex items-center">
+            <input 
+              type="text" 
+              placeholder={`Query files inside ${workspace.name}...`}
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={handleKeyPress}
+              disabled={isThinking}
+              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs sm:text-sm font-semibold text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500 disabled:opacity-50 pr-12"
+            />
+            <AnimatePresence>
+              {isListening && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  className="absolute right-3 flex items-center gap-1 h-4"
+                >
+                  {[0, 1, 2, 3].map((i) => (
+                    <motion.div
+                      key={i}
+                      className="w-1 bg-red-500 rounded-full origin-bottom"
+                      animate={{ height: `${waveformLevels[i]}px` }}
+                      transition={{ type: "tween", duration: 0.1 }}
+                    />
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+          <button
+            type="button"
+            onClick={startSpeechRecognition}
+            className={`w-10 h-10 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 ${
+              isListening 
+                ? 'text-red-500 bg-red-500/10 animate-pulse' 
+                : 'text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-800'
+            }`}
+            title={isListening ? "Listening... Click to stop" : "Dictate your question"}
+          >
+            <Mic className="w-4.5 h-4.5" />
+          </button>
           <button
             onClick={() => handleSend(inputValue)}
             disabled={!inputValue.trim() || isThinking}
-            className="w-10 h-10 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 flex items-center justify-center text-white dark:text-slate-900 transition-colors disabled:opacity-50 cursor-pointer"
+            className="w-10 h-10 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 flex items-center justify-center text-white dark:text-slate-900 transition-colors disabled:opacity-50 cursor-pointer shrink-0"
           >
             <Send className="w-4 h-4" />
           </button>

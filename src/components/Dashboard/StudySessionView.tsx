@@ -20,6 +20,8 @@ import {
   Sliders
 } from 'lucide-react';
 
+import confetti from 'canvas-confetti';
+
 export default function StudySessionView() {
   const [secondsLeft, setSecondsLeft] = useState(25 * 60);
   const [isActive, setIsActive] = useState(false);
@@ -451,6 +453,11 @@ export default function StudySessionView() {
       setIsActive(false);
       // Play bell or toggle session
       if (sessionType === 'focus') {
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 }
+        });
         (window as any).showToast?.('🎉 Focus Session Complete! Time for a short break.', 'success');
         setSessionType('break');
         setSecondsLeft(5 * 60);

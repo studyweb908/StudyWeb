@@ -13,6 +13,7 @@ import {
   Trophy,
   Star
 } from 'lucide-react';
+import confetti from 'canvas-confetti';
 import { QuizQuestion } from './types';
 
 export default function QuizCenterView() {
@@ -48,12 +49,17 @@ export default function QuizCenterView() {
   };
 
   const handleNextQuestion = () => {
-    const activeQuestions = quizBank[activeSubject || 'Biology'];
+    const activeQuestions = quizBank[activeSubject || 'Biology'] || [];
     if (currentQuestionIndex < activeQuestions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
       setSelectedAnswerIndex(null);
       setIsAnswered(false);
     } else {
+      confetti({
+        particleCount: 150,
+        spread: 80,
+        origin: { y: 0.6 }
+      });
       setQuizFinished(true);
     }
   };

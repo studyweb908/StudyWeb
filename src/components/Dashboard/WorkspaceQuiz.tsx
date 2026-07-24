@@ -31,6 +31,7 @@ import {
   XCircle,
   Trophy
 } from 'lucide-react';
+import confetti from 'canvas-confetti';
 import { Workspace, QuizQuestionItem } from './WorkspaceTypes';
 
 interface WorkspaceQuizProps {
@@ -379,12 +380,22 @@ export default function WorkspaceQuiz({ workspace, onQuizSubmitScore, onUpdateWo
       // Finished
       if (timerRef.current) clearInterval(timerRef.current);
       if (onQuizSubmitScore) onQuizSubmitScore(score);
+      confetti({
+        particleCount: 150,
+        spread: 80,
+        origin: { y: 0.6 }
+      });
       setView('results');
     }
   };
 
   const handleSubmitQuizEarly = () => {
     if (timerRef.current) clearInterval(timerRef.current);
+    confetti({
+      particleCount: 150,
+      spread: 80,
+      origin: { y: 0.6 }
+    });
     setView('results');
   };
 
