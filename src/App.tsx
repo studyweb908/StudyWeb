@@ -361,7 +361,7 @@ export default function App() {
       </div>
     );
 
-    const isWorkspaceTab = ['dashboard', 'ai-tutor', 'notes', 'flashcards', 'quiz-center'].includes(activeTab);
+    const isWorkspaceTab = ['workspaces', 'ai-tutor', 'notes', 'flashcards', 'quiz-center'].includes(activeTab);
 
     return (
       <div className="w-full h-full relative">
@@ -370,10 +370,13 @@ export default function App() {
           {activeWorkspace ? (
             <WorkspaceContainer 
               workspace={activeWorkspace} 
+              workspaces={workspaces}
+              onSwitchWorkspace={setActiveWorkspace}
+              onDeleteWorkspace={handleDeleteWorkspace}
               onBack={() => setActiveWorkspace(null)} 
               onUpdateWorkspace={handleUpdateWorkspace}
               initialTab={
-                activeTab === 'dashboard' ? 'overview' : 
+                activeTab === 'workspaces' ? 'overview' : 
                 activeTab === 'ai-tutor' ? 'chat' : 
                 activeTab === 'notes' ? 'notes' : 
                 activeTab === 'flashcards' ? 'flashcards' : 
@@ -382,7 +385,7 @@ export default function App() {
             />
           ) : (
             <div className="w-full">
-              {activeTab === 'dashboard' || !activeTab ? (
+              {activeTab === 'workspaces' ? (
                 <WorkspaceSelector 
                   workspaces={workspaces} 
                   onSelectWorkspace={handleSelectWorkspace} 
@@ -406,6 +409,9 @@ export default function App() {
         </div>
 
         {/* Other Views */}
+        <div className={activeTab === 'dashboard' || !activeTab ? 'block' : 'hidden'}>
+          <DashboardHome setActiveTab={setActiveTab} />
+        </div>
         <div className={activeTab === 'study-session' ? 'block' : 'hidden'}>
           <StudySessionView />
         </div>
@@ -481,11 +487,11 @@ export default function App() {
           <main id="workspace-main-content" className={`flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 md:p-8 pb-24 md:pb-8 ${isFocusMode ? 'max-w-none w-full' : 'max-w-7xl mx-auto w-full'} transition-all duration-300`}>
             <AnimatePresence mode="wait">
               <motion.div
-                key="workspace-main"
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                transition={{ duration: 0.25 }}
+                key={`workspace-main-${activeTab}-${activeWorkspace?.id || 'none'}`}
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
               >
                 {renderDashboardContent()}
               </motion.div>
@@ -514,10 +520,10 @@ export default function App() {
             <button
               onClick={() => {
                 setActiveWorkspace(null);
-                setActiveTab('dashboard');
+                setActiveTab('workspaces');
               }}
               className={`w-full h-full flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors ${
-                activeTab === 'dashboard' && activeWorkspace === null
+                activeTab === 'workspaces' && activeWorkspace === null
                   ? 'text-indigo-600 dark:text-indigo-400'
                   : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
               }`}

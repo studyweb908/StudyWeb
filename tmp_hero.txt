@@ -1,0 +1,77 @@
+      {/* ================= HERO CARD ================= */}
+      <div className="relative rounded-[28px] overflow-hidden bg-gradient-to-br from-brand-primary via-indigo-600 to-brand-secondary p-[1px] shadow-xl">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-brand-primary/20 via-transparent to-transparent pointer-events-none" />
+        
+        <div className="relative bg-white dark:bg-slate-900/95 backdrop-blur-3xl px-6 py-8 md:p-10 rounded-[27px] flex flex-col md:flex-row items-center justify-between gap-8">
+          <div className="space-y-5 max-w-xl text-left">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-primary/10 text-brand-primary dark:bg-indigo-500/10 dark:text-indigo-400 text-xs font-bold border border-brand-primary/20">
+              <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+              <span>Smart Study Space Active</span>
+            </div>
+            
+            <div className="space-y-2">
+              <h1 className="text-3xl md:text-4xl font-extrabold text-brand-text dark:text-white tracking-tight font-display leading-tight">
+                Good Morning 👋 <br />
+                Welcome back!
+              </h1>
+              <p className="text-sm md:text-base text-brand-text-light dark:text-slate-300 leading-relaxed font-medium">
+                "Small daily improvements over time lead to stunning academic results." Your AI Tutor analyzed your math homework. Ready to crush your AP targets?
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-4 pt-1">
+              <button
+                onClick={() => setActiveTab('ai-tutor')}
+                className="px-5 py-3 rounded-xl bg-brand-primary hover:bg-brand-secondary text-white text-xs sm:text-sm font-bold transition-all shadow-xl shadow-brand-primary/30 hover:shadow-brand-secondary/40 hover:-translate-y-0.5 flex items-center gap-2 group cursor-pointer"
+              >
+                <span>Ask AI Tutor Anything</span>
+                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              </button>
+
+              <button
+                onClick={() => setActiveTab('study-session')}
+                className="px-5 py-3 rounded-xl bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-brand-text dark:text-slate-200 text-xs sm:text-sm font-bold transition-all border border-slate-200 dark:border-slate-700/60 hover:-translate-y-0.5 flex items-center gap-2 cursor-pointer"
+              >
+                <Clock className="w-4 h-4 text-brand-primary dark:text-slate-400 animate-spin-slow" />
+                <span>Start Focus Pomodoro</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Graphical Representation Card */}
+          <div className="relative w-full max-w-[280px] md:max-w-xs flex-shrink-0">
+            <div className="relative rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/60 dark:border-slate-800 p-5 space-y-4 shadow-md">
+              <div className="flex justify-between items-center">
+                <span className="text-brand-text-light dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider">Today's Target</span>
+                <span className="text-slate-500 dark:text-slate-400 text-[10px] font-bold bg-slate-200/50 dark:bg-slate-800 px-2 py-0.5 rounded">0% Complete</span>
+              </div>
+              
+              {/* Target rings list */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-brand-text dark:text-white">Daily Focus Goal</span>
+                  <span className="text-xs text-slate-500 font-bold">0 / 60 mins</span>
+                </div>
+                <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-slate-400 dark:bg-slate-600 rounded-full" style={{ width: '0%' }} />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-brand-text dark:text-white">Quizzes Cleared</span>
+                  <span className="text-xs text-slate-500 font-bold">0 tasks</span>
+                </div>
+                <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-slate-400 dark:bg-slate-600 rounded-full" style={{ width: '0%' }} />
+                </div>
+              </div>
+
+              {/* Achievements Highlight */}
+              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-center">
+                <p className="text-[10px] text-brand-text-light dark:text-slate-400">Start studying to unlock achievements!</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ================= DUAL GRID ================= */}

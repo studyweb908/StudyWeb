@@ -71,7 +71,6 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
 
   // File Picker Refs
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const [pickerAccept, setPickerAccept] = useState('application/pdf');
 
   // Advanced Web Search & Copy Paste Drive sources
   const [webSearchQuery, setWebSearchQuery] = useState('');
@@ -189,9 +188,11 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
     setUploadType('doc');
     const steps = [
       'Reading pasted document content...',
-      'Generating AI outline summary...',
-      'Extracting quotes and academic tags...',
-      'Mapping nodes to study workspace knowledge graph...'
+      'Carefully analyzing textual semantics and core themes...',
+      'Generating rigorous academic outline summary...',
+      'Extracting quotes, facts, and critical terminology...',
+      'Mapping extracted concepts to workspace knowledge graph...',
+      'Text carefully analyzed and indexed successfully!'
     ];
     setCurrentSteps(steps);
     setCurrentStepIdx(0);
@@ -276,21 +277,10 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
   };
 
   const triggerUploadInput = (type: 'pdf' | 'doc' | 'ppt' | 'excel' | 'image' | 'audio' | 'video' | 'url') => {
-    if (type === 'pdf') {
-      setPickerAccept('application/pdf');
-      fileInputRef.current?.click();
-    } else if (type === 'audio') {
-      setPickerAccept('audio/*');
-      fileInputRef.current?.click();
-    } else if (type === 'video') {
-      setPickerAccept('video/*');
-      fileInputRef.current?.click();
-    } else if (type === 'url') {
+    if (type === 'url') {
       setUrlInputType('url');
       setShowUrlInput(true);
-    } else if (type === 'ppt' || type === 'excel' || type === 'image') {
-      if (type === 'image') setPickerAccept('image/*');
-      else setPickerAccept('*/*');
+    } else {
       fileInputRef.current?.click();
     }
   };
@@ -376,9 +366,10 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
         'Connecting to web domain...',
         'Scraping page and stripping non-article elements...',
         'Parsing text content, title, and description...',
+        'Carefully analyzing textual content and semantic context...',
         'Extracting quotes, facts, and scientific terminology...',
         'Mapping web content into StudyWeb Knowledge Graph...',
-        'Web page indexed successfully!'
+        'Web page carefully analyzed and indexed successfully!'
       ];
     } else if (type === 'audio') {
       steps = [
@@ -509,7 +500,6 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
             <input 
               type="file" 
               ref={fileInputRef} 
-              accept={pickerAccept} 
               onChange={handleFileChange} 
               className="hidden" 
             />

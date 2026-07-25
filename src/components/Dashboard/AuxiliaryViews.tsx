@@ -47,7 +47,14 @@ import {
   Image,
   Activity,
   Zap,
-  Gauge
+  Gauge,
+  FileCode,
+  FileArchive,
+  FileVideo,
+  FileAudio,
+  FileImage,
+  File,
+  X
 } from 'lucide-react';
 import { NoteItem, SubjectMetric } from './types';
 import { useThemeMode } from '../../hooks/useThemeMode';
@@ -1649,15 +1656,24 @@ export function NotesView() {
 // 5. RESOURCES LIBRARY VIEW
 // ==========================================
 export function ResourcesView() {
+  const [previewMaterial, setPreviewMaterial] = useState<{ title: string; type: string } | null>(null);
+
   const materials = [
-    { title: 'AP Chemistry formula quicksheet', type: 'PDF Document', size: '2.1 MB' },
-    { title: 'Biology Chapter 4 Study guide', type: 'EPUB Ebook', size: '4.8 MB' },
-    { title: 'Calculus previous year solved exams', type: 'PDF Document', size: '8.4 MB' },
-    { title: 'Physics rotational kinematics cheat sheet', type: 'Markdown Text', size: '45 KB' },
+    { title: 'AP Chemistry formula quicksheet', type: 'PDF Document', size: '2.1 MB', uploadDate: 'Oct 12, 2023' },
+    { title: 'Biology Chapter 4 Study guide', type: 'EPUB Ebook', size: '4.8 MB', uploadDate: 'Oct 15, 2023' },
+    { title: 'Calculus previous year solved exams', type: 'PDF Document', size: '8.4 MB', uploadDate: 'Oct 20, 2023' },
+    { title: 'Physics rotational kinematics cheat sheet', type: 'Markdown Text', size: '45 KB', uploadDate: 'Oct 22, 2023' },
   ];
 
+  const getFileIcon = (type: string) => {
+    if (type.includes('PDF')) return { icon: <FileText className="w-5 h-5" />, color: 'bg-rose-500/10 text-rose-600 dark:text-rose-500' };
+    if (type.includes('EPUB')) return { icon: <BookOpen className="w-5 h-5" />, color: 'bg-amber-500/10 text-amber-600 dark:text-amber-500' };
+    if (type.includes('Markdown')) return { icon: <FileCode className="w-5 h-5" />, color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500' };
+    return { icon: <File className="w-5 h-5" />, color: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-500' };
+  };
+
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-[24px] border border-slate-100 dark:border-slate-800/80 p-6 shadow-sm text-left text-xs sm:text-sm space-y-6">
+    <div className="bg-white dark:bg-slate-900 rounded-[24px] border border-slate-100 dark:border-slate-800/80 p-6 shadow-sm text-left text-xs sm:text-sm space-y-6 relative">
       <div>
         <h3 className="font-extrabold text-lg text-slate-900 dark:text-white flex items-center gap-2">
           <Library className="w-5.5 h-5.5 text-indigo-500" />
@@ -1667,27 +1683,90 @@ export function ResourcesView() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {materials.map((mat, idx) => (
-          <div key={idx} className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 hover:border-indigo-200 transition-all bg-slate-50/50 dark:bg-slate-800/20 flex items-center justify-between">
-            <div className="flex items-center gap-3 min-w-0">
-              <span className="p-2 bg-indigo-500/10 text-indigo-500 rounded-lg flex-shrink-0">
-                <FileSpreadsheet className="w-5 h-5" />
-              </span>
-              <div className="min-w-0">
-                <p className="font-bold text-slate-800 dark:text-white truncate">{mat.title}</p>
-                <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">{mat.type} • {mat.size}</p>
-              </div>
-            </div>
-
-            <button 
-              onClick={() => (window as any).showToast?.('📥 Material download started successfully.', 'success')}
-              className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+        {materials.map((mat, idx) => {
+          const { icon, color } = getFileIcon(mat.type);
+          return (
+            <div 
+              key={idx} 
+              onClick={() => setPreviewMaterial(mat)}
+              className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 hover:border-indigo-200 transition-all bg-slate-50/50 dark:bg-slate-800/20 flex items-center justify-between cursor-pointer group"
             >
-              <Download className="w-4.5 h-4.5" />
-            </button>
-          </div>
-        ))}
+              <div className="flex items-center gap-3 min-w-0">
+                <span className={`p-2 rounded-lg flex-shrink-0 ${color}`}>
+                  {icon}
+                </span>
+                <div className="min-w-0">
+                  <p className="font-bold text-slate-800 dark:text-white truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{mat.title}</p>
+                  <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">{mat.type} • {mat.size} • {mat.uploadDate}</p>
+                </div>
+              </div>
+
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  (window as any).showToast?.('📥 Material download started successfully.', 'success')
+                }}
+                className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition-colors"
+              >
+                <Download className="w-4.5 h-4.5" />
+              </button>
+            </div>
+          );
+        })}
       </div>
+
+      <AnimatePresence>
+        {previewMaterial && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setPreviewMaterial(null)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-3xl bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col h-[80vh]"
+            >
+              <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-500 rounded-lg">
+                    {getFileIcon(previewMaterial.type).icon}
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-slate-900 dark:text-white text-sm">{previewMaterial.title}</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">{previewMaterial.type} Viewer Preview</p>
+                  </div>
+                </div>
+                
+                <button 
+                  onClick={() => setPreviewMaterial(null)}
+                  className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-xl text-slate-400 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="flex-1 bg-slate-100 dark:bg-slate-950 flex flex-col items-center justify-center p-8 text-center relative overflow-hidden">
+                <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
+                <div className="relative z-10 max-w-sm space-y-4">
+                  <div className="w-20 h-20 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 mx-auto flex items-center justify-center text-slate-300 dark:text-slate-600">
+                     {getFileIcon(previewMaterial.type).icon}
+                  </div>
+                  <h4 className="text-base font-bold text-slate-700 dark:text-slate-300">File Preview Not Available</h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-500 leading-relaxed">
+                    This is a mock viewer for <span className="font-bold text-slate-700 dark:text-slate-400">{previewMaterial.title}</span>. In a fully implemented application, the actual {previewMaterial.type} contents would render here.
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

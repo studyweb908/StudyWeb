@@ -8,13 +8,13 @@ import {
   Layers, 
   Award, 
   Network, 
-  ArrowRight, 
   BookOpen, 
   TrendingUp, 
   ChevronRight, 
+  ChevronDown,
   AlertCircle,
   ThumbsUp,
-  Brain,
+
   Zap,
   Calendar,
   Video,
@@ -25,27 +25,29 @@ import {
   Terminal,
   RefreshCw,
   X,
-  Trash2
+  Trash2,
+  Check
 } from 'lucide-react';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import QuickPreviewModal from './QuickPreviewModal';
 
 interface WorkspaceOverviewProps {
   workspace: Workspace;
+  workspaces?: Workspace[];
+  onSwitchWorkspace?: (workspace: Workspace) => void;
+  onDeleteWorkspace?: (id: string) => void;
   setActiveWorkspaceTab: (tab: string) => void;
   onStartStudySession?: () => void;
   onRemoveFile?: (fileId: string) => void;
 }
 
-export default function WorkspaceOverview({ workspace, setActiveWorkspaceTab, onStartStudySession, onRemoveFile }: WorkspaceOverviewProps) {
+export default function WorkspaceOverview({ workspace, workspaces = [], onSwitchWorkspace, onDeleteWorkspace, setActiveWorkspaceTab, onStartStudySession, onRemoveFile }: WorkspaceOverviewProps) {
   // Compute numbers
   const fileCount = workspace.files.length;
   const cardCount = workspace.flashcards.length;
   const quizCount = workspace.quizzes.length;
   const noteCount = workspace.notes.length;
   
-  // Calculate conceptual coverage
-  const conceptCount = workspace.nodes.filter(n => n.type === 'concept' || n.type === 'formula').length;
 
   // Active Insights states
   const [previewFile, setPreviewFile] = useState<WorkspaceFile | null>(null);
@@ -115,8 +117,8 @@ export default function WorkspaceOverview({ workspace, setActiveWorkspaceTab, on
           {workspace.emoji}
         </div>
 
-        <div className="relative z-10 flex flex-col justify-between h-full gap-5">
-          <div className="space-y-3 max-w-2xl">
+        <div className="relative z-20 flex flex-col justify-between h-full gap-5">
+          <div className="space-y-3 max-w-2xl relative">
             <h1 className="text-3xl md:text-4xl font-extrabold text-slate-800 dark:text-white tracking-tight leading-tight flex items-center gap-3">
               <span>{workspace.emoji}</span>
               <span>{workspace.name}</span>
@@ -125,36 +127,31 @@ export default function WorkspaceOverview({ workspace, setActiveWorkspaceTab, on
 
           <div className="flex flex-wrap items-center gap-3 pt-2">
             <button
-              onClick={() => setActiveWorkspaceTab('chat')}
-              className="px-4 py-2.5 rounded-xl text-white text-xs font-bold transition-all flex items-center gap-2 shadow-sm hover:shadow-md group cursor-pointer"
-              style={{
-                backgroundColor: workspace.colorTheme === 'emerald' ? '#10B981' :
-                                workspace.colorTheme === 'indigo' ? '#4F46E5' :
-                                workspace.colorTheme === 'rose' ? '#F43F5E' :
-                                workspace.colorTheme === 'amber' ? '#D97706' :
-                                workspace.colorTheme === 'violet' ? '#7C3AED' :
-                                '#0891B2'
-              }}
-            >
-              <span>Ask Active AI Tutor</span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-            </button>
-
-            <button
               onClick={() => setActiveWorkspaceTab('library')}
               className="px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100/80 dark:bg-slate-800/60 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-750 text-slate-700 dark:text-slate-200 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer"
             >
               <FileText className="w-4 h-4" />
               <span>Upload Material</span>
             </button>
+            <button
+              onClick={() => {
+                if (window.confirm('Are you sure you want to delete this workspace? This action cannot be undone.')) {
+                  onDeleteWorkspace?.(workspace.id);
+                }
+              }}
+              className="px-4 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-950/60 border border-red-200/80 dark:border-red-900/50 text-red-600 dark:text-red-400 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ml-auto sm:ml-0"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Delete Workspace</span>
+            </button>
           </div>
         </div>
       </div>
 
       {/* ================= STATS GRID ================= */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         {/* Stat 1 */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-4 rounded-2xl flex items-center gap-3">
+        <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-6 rounded-2xl flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
             <FileText className="w-5 h-5" />
           </div>
@@ -165,7 +162,7 @@ export default function WorkspaceOverview({ workspace, setActiveWorkspaceTab, on
         </div>
 
         {/* Stat 2 */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-4 rounded-2xl flex items-center gap-3">
+        <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-6 rounded-2xl flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
             <Layers className="w-5 h-5" />
           </div>
@@ -174,31 +171,78 @@ export default function WorkspaceOverview({ workspace, setActiveWorkspaceTab, on
             <p className="text-lg font-black text-slate-800 dark:text-slate-100">{cardCount}</p>
           </div>
         </div>
-
-        {/* Stat 3 */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-4 rounded-2xl flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-violet-50 dark:bg-violet-950/40 border border-violet-100 dark:border-violet-900/30 flex items-center justify-center text-violet-600 dark:text-violet-400 shrink-0">
-            <Brain className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Concepts Map</p>
-            <p className="text-lg font-black text-slate-800 dark:text-slate-100">{conceptCount}</p>
-          </div>
-        </div>
-
-        {/* Stat 5 */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-4 rounded-2xl flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
-            <Clock className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Study Time</p>
-            <p className="text-lg font-black text-slate-800 dark:text-slate-100">{workspace.studyHours}h</p>
-          </div>
-        </div>
       </div>
 
 
+
+      {/* ================= RECENT RESOURCES ================= */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-6 rounded-[24px]">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-black text-slate-850 dark:text-slate-100 tracking-tight text-lg">Recent Study Materials</h3>
+          <button 
+            onClick={() => setActiveWorkspaceTab('library')}
+            className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-1 cursor-pointer transition-colors"
+          >
+            <span>View All</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        
+        {workspace.files.length === 0 ? (
+          <div className="py-8 text-center border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl bg-slate-50/50 dark:bg-slate-900/50">
+            <FileText className="w-6 h-6 text-slate-400 dark:text-slate-500 mx-auto mb-2" />
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">No materials uploaded yet.</p>
+            <button 
+              onClick={() => setActiveWorkspaceTab('library')}
+              className="mt-3 px-4 py-2 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 text-[11px] font-bold rounded-lg cursor-pointer transition-colors"
+            >
+              Upload Material
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {workspace.files.slice(0, 3).map((file, idx) => (
+              <div key={file.id || idx} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border border-transparent hover:border-slate-100 dark:hover:border-slate-700/50 group cursor-pointer" onClick={() => setPreviewFile(file)}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                    file.type === 'pdf' ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-500' :
+                    file.type === 'video' ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-500' :
+                    file.type === 'audio' ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-500' :
+                    file.type === 'url' ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-500' :
+                    'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                  }`}>
+                    {file.type === 'pdf' ? <FileText className="w-4 h-4" /> :
+                     file.type === 'video' ? <Video className="w-4 h-4" /> :
+                     file.type === 'audio' ? <Music className="w-4 h-4" /> :
+                     file.type === 'url' ? <Globe className="w-4 h-4" /> :
+                     <FileText className="w-4 h-4" />}
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 line-clamp-1">{file.name}</h4>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{file.type}</span>
+                      <span className="w-1 h-1 rounded-full bg-slate-200 dark:bg-slate-700" />
+                      <span className="text-[10px] text-slate-400">{file.uploadDate}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {onRemoveFile && (
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setFileToRemove(file); }}
+                      className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg cursor-pointer transition-colors"
+                      title="Remove file"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <ChevronRight className="w-4 h-4 text-slate-300 dark:text-slate-600" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <AnimatePresence>
         {previewFile && (

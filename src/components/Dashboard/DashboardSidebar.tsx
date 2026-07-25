@@ -57,6 +57,7 @@ export default function DashboardSidebar({
 }: SidebarProps) {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" />, colorClass: 'text-blue-600 dark:text-blue-400', bgClass: 'bg-blue-50 dark:bg-blue-950' },
+    { id: 'workspaces', label: 'Workspaces', icon: <Folder className="w-4 h-4" />, colorClass: 'text-orange-600 dark:text-orange-400', bgClass: 'bg-orange-50 dark:bg-orange-950' },
     { id: 'ai-tutor', label: 'AI Tutor', icon: <Sparkles className="w-4 h-4" />, highlight: true, colorClass: 'text-indigo-600 dark:text-indigo-400', bgClass: 'bg-indigo-50 dark:bg-indigo-950' },
     { id: 'study-session', label: 'Study Session', icon: <Clock className="w-4 h-4" />, colorClass: 'text-amber-600 dark:text-amber-400', bgClass: 'bg-amber-50 dark:bg-amber-950' },
     { id: 'study-planner', label: 'Study Planner', icon: <Calendar className="w-4 h-4" />, colorClass: 'text-sky-600 dark:text-sky-400', bgClass: 'bg-sky-50 dark:bg-sky-950' },
@@ -132,7 +133,7 @@ export default function DashboardSidebar({
                   />
                 )}
                 
-                <div className="flex items-center gap-3 relative z-10 min-w-0">
+                <div className="flex items-center gap-3 relative z-10 min-w-0 flex-1">
                   <span className={`flex items-center justify-center w-8 h-8 rounded-lg shrink-0 ${item.bgClass} ${item.colorClass}`}>
                     {item.icon}
                   </span>
@@ -145,98 +146,6 @@ export default function DashboardSidebar({
               </button>
             );
           })}
-
-          {/* Study Workspaces Navigation Section */}
-          <div className="pt-4 pb-2 border-t border-slate-100 dark:border-slate-800/60 mt-4">
-            <div className={`px-3 mb-2.5 flex items-center ${isCollapsedState ? 'justify-center' : 'justify-between'}`}>
-              <span className={`text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center gap-1.5 ${isCollapsedState ? 'hidden' : ''}`}>
-                <Folder className="w-3.5 h-3.5" />
-                <span>Study Workspaces</span>
-              </span>
-              {isCollapsedState && <Folder className="w-4.5 h-4.5 text-slate-400 dark:text-slate-500" title="Study Workspaces" />}
-              <button
-                onClick={() => {
-                  setActiveWorkspace?.(null);
-                  setActiveTab('dashboard');
-                  onClose();
-                }}
-                className={`text-[10px] font-black text-indigo-600 dark:text-indigo-400 cursor-pointer flex items-center gap-0.5 ${isCollapsedState ? 'hidden' : ''}`}
-                title="Show workspace selector"
-              >
-                <span>Manage</span>
-              </button>
-            </div>
-
-            <div className="space-y-1.5">
-              {/* Option to view all / clear active workspace */}
-              <button
-                onClick={() => {
-                  setActiveWorkspace?.(null);
-                  setActiveTab('dashboard');
-                  onClose();
-                }}
-                className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3'} py-2.5 rounded-xl text-sm font-semibold relative isolate group cursor-pointer ${
-                  activeWorkspace === null && activeTab === 'dashboard'
-                    ? 'text-slate-900 dark:text-white'
-                    : 'text-slate-600 dark:text-slate-300'
-                }`}
-                title="All Workspaces"
-              >
-                {activeWorkspace === null && activeTab === 'dashboard' && (
-                  <motion.div
-                    layoutId={`activeSidebarTab-${layoutIdPrefix}`}
-                    className="absolute inset-0 bg-slate-100 dark:bg-slate-800/60 rounded-xl -z-10 border border-slate-200/40 dark:border-slate-700/30"
-                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                  />
-                )}
-                <div className="flex items-center gap-3 relative z-10 min-w-0">
-                  <span className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                    <span className="text-sm select-none">🗂️</span>
-                  </span>
-                  <span className={`tracking-tight text-[13px] truncate ${isCollapsedState ? 'hidden' : 'block'} ${activeWorkspace === null && activeTab === 'dashboard' ? 'font-extrabold' : ''}`}>All Workspaces</span>
-                </div>
-              </button>
-
-              {/* List existing workspaces */}
-              {workspaces.map((ws) => {
-                const isSelected = activeWorkspace?.id === ws.id;
-                return (
-                  <button
-                    key={ws.id}
-                    onClick={() => {
-                      setActiveWorkspace?.(ws);
-                      setActiveTab('dashboard');
-                      onClose();
-                    }}
-                    className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3'} py-2.5 rounded-xl text-sm font-semibold relative isolate group cursor-pointer ${
-                      isSelected
-                        ? 'text-slate-900 dark:text-white'
-                        : 'text-slate-600 dark:text-slate-300'
-                    }`}
-                    title={ws.name}
-                  >
-                    {isSelected && (
-                      <motion.div
-                        layoutId={`activeSidebarTab-${layoutIdPrefix}`}
-                        className="absolute inset-0 bg-slate-100 dark:bg-slate-800/60 rounded-xl -z-10 border border-slate-200/40 dark:border-slate-700/30"
-                        transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                      />
-                    )}
-                    <div className="flex items-center gap-3 relative z-10 min-w-0">
-                      <span className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                        <span className="text-sm select-none">{ws.emoji || '🧬'}</span>
-                      </span>
-                      <span className={`tracking-tight text-[13px] truncate ${isCollapsedState ? 'hidden' : 'block'} ${isSelected ? 'font-extrabold' : ''}`}>{ws.name}</span>
-                    </div>
-                    
-                    {isSelected && !isCollapsedState && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 dark:bg-indigo-400 shrink-0 ml-1 relative z-10" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
 
           {menuItems.some(i => i.comingSoon) && !isCollapsedState && (
             <div className="pt-4 pb-1">

@@ -23,7 +23,9 @@ import {
   Trash2,
   FolderPlus,
   Coins,
-  GripVertical
+  GripVertical,
+  Video,
+  Music
 } from 'lucide-react';
 import { 
   DndContext, 
@@ -139,7 +141,7 @@ function SortableWorkspaceCard({
             </div>
           </div>
 
-          <div className="p-5 space-y-3.5 text-left flex-1 flex flex-col justify-between">
+          <div className="p-6 space-y-3.5 text-left flex-1 flex flex-col justify-between">
             <div className="space-y-3.5">
               <div className="flex items-center gap-2">
                 {/* Subject Section - MAX VISIBILITY */}
@@ -263,6 +265,12 @@ export default function WorkspaceSelector({
   const [sortBy, setSortBy] = useState<'manual' | 'lastOpened' | 'name' | 'files'>('manual');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    const handleOpenModal = () => setShowCreateModal(true);
+    window.addEventListener('open_create_workspace_modal', handleOpenModal);
+    return () => window.removeEventListener('open_create_workspace_modal', handleOpenModal);
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -415,29 +423,59 @@ export default function WorkspaceSelector({
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto px-4 md:px-6 text-left">
-      {/* LANDING STATS BANNER */}
-      <div className="relative rounded-[24px] overflow-hidden bg-slate-900 border border-slate-800 text-white p-6 sm:p-8">
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#8080800a_1px,transparent_1px),linear-gradient(to_bottom,#8080800a_1px,transparent_1px)] bg-[size:14px_24px] pointer-events-none" />
-        <div className="absolute -top-12 -right-12 w-44 h-44 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+      {/* Recent Resources Section */}
+      {(() => {
+        // Gather all resources across all workspaces
+        const allResources = workspaces.flatMap(ws => 
+          ws.files.map(file => ({ ...file, workspaceName: ws.name, workspaceId: ws.id }))
+        ).sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime());
 
-        <div className="relative z-10 max-w-2xl space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 px-2.5 py-1 rounded-full font-black uppercase tracking-wider">
-              AI Workspace Hub
-            </span>
-            <span className="text-xs text-slate-400 font-semibold">• From Confusion To Clarity</span>
+        if (allResources.length === 0) return null;
+
+        return (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-3xl shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
+                  <FileText className="w-4 h-4" />
+                </div>
+                <h3 className="font-black text-slate-800 dark:text-slate-100 tracking-tight text-lg">Recent Study Materials</h3>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {allResources.slice(0, 3).map((file, idx) => (
+                <div key={file.id || idx} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors cursor-pointer group" onClick={() => onSelectWorkspace(workspaces.find(w => w.id === file.workspaceId)!)}>
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                    file.type === 'pdf' ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400' :
+                    file.type === 'video' ? 'bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400' :
+                    file.type === 'audio' ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400' :
+                    file.type === 'url' ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400' :
+                    'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                  }`}>
+                    {file.type === 'pdf' ? <FileText className="w-5 h-5" /> :
+                     file.type === 'video' ? <Video className="w-5 h-5" /> :
+                     file.type === 'audio' ? <Music className="w-5 h-5" /> :
+                     file.type === 'url' ? <Globe className="w-5 h-5" /> :
+                     <FileText className="w-5 h-5" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{file.name}</h4>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{file.type}</span>
+                      <span className="w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-700" />
+                      <span className="text-[10px] text-slate-400 truncate">{file.workspaceName}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-          <h2 className="text-xl sm:text-2xl font-black tracking-tight leading-tight">
-            Your Premium Personal Knowledge Engine
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-400 leading-relaxed font-semibold">
-            Create structured study workspaces. Upload PDF slide decks, web URLs, transcripts, or notes. StudyWeb index processes formulas and crafts Spaced Repetition Flashcards instantly.
-          </p>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* FILTER RAILS & SEARCH CONTROL PANEL */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 p-4 rounded-[20px] flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 p-6 rounded-[20px] flex flex-col md:flex-row md:items-center justify-between gap-4">
         {/* Subject scrollable badges */}
         <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1">
           {subjects.map((sub) => (

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  ArrowLeft, 
-  Settings, 
+  ArrowLeft,
+  Settings,
+  ChevronDown,
   Pin, 
   Share2, 
   Star, 
@@ -38,6 +39,9 @@ import WorkspaceNavbar from './WorkspaceNavbar';
 
 interface WorkspaceContainerProps {
   workspace: Workspace;
+  workspaces?: Workspace[];
+  onSwitchWorkspace?: (workspace: Workspace) => void;
+  onDeleteWorkspace?: (id: string) => void;
   onBack: () => void;
   onUpdateWorkspace: (updated: Workspace) => void;
   initialTab?: 'overview' | 'library' | 'chat' | 'flashcards' | 'quiz' | 'notes';
@@ -45,7 +49,7 @@ interface WorkspaceContainerProps {
 
 type TabType = 'overview' | 'library' | 'chat' | 'flashcards' | 'quiz' | 'notes';
 
-export default function WorkspaceContainer({ workspace, onBack, onUpdateWorkspace, initialTab }: WorkspaceContainerProps) {
+export default function WorkspaceContainer({ workspace, workspaces = [], onSwitchWorkspace, onDeleteWorkspace, onBack, onUpdateWorkspace, initialTab }: WorkspaceContainerProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [isChangingCover, setIsChangingCover] = useState(false);
   const [coverUrlInput, setCoverUrlInput] = useState('');
@@ -236,9 +240,27 @@ export default function WorkspaceContainer({ workspace, onBack, onUpdateWorkspac
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto px-4 md:px-6 animate-fade-in">
+      {/* WORKSPACE SWITCHER TABS */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 hide-scrollbar">
+        {workspaces.map(ws => (
+          <button
+            key={ws.id}
+            onClick={() => onSwitchWorkspace?.(ws)}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all cursor-pointer ${
+              ws.id === workspace.id
+                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-md'
+                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
+            }`}
+          >
+            <span className="text-base">{ws.emoji}</span>
+            <span>{ws.name}</span>
+          </button>
+        ))}
+      </div>
+
       {activeTab !== 'overview' && (
         /* COMPACT CLINICAL UPPER HEADER FOR SPECIALIZED TOOLS */
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-white border border-slate-150 rounded-[20px] p-4 shadow-sm backdrop-blur-md">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-white border border-slate-150 rounded-[20px] p-6 shadow-sm backdrop-blur-md">
           <div className="flex items-center gap-3 text-left">
             <button
               onClick={() => setActiveTab('overview')}
@@ -248,7 +270,7 @@ export default function WorkspaceContainer({ workspace, onBack, onUpdateWorkspac
               <ArrowLeft className="w-4 h-4" />
             </button>
             
-            <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0 relative">
               <div className="w-10 h-10 bg-slate-50 rounded-xl border border-slate-150 flex items-center justify-center text-xl shadow-inner shrink-0">
                 {workspace.emoji || '🧬'}
               </div>
@@ -319,6 +341,9 @@ export default function WorkspaceContainer({ workspace, onBack, onUpdateWorkspac
         <div className={activeTab === 'overview' ? 'block' : 'hidden'}>
           <WorkspaceOverview 
             workspace={workspace} 
+            workspaces={workspaces}
+            onSwitchWorkspace={onSwitchWorkspace}
+            onDeleteWorkspace={onDeleteWorkspace}
             setActiveWorkspaceTab={setActiveTab}
             onRemoveFile={handleRemoveFile}
           />
