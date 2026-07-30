@@ -59,7 +59,7 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const requireWorkspaceForTask = (task: string) => {
     // Called when the user clicks "Select or Create a Workspace" from a fallback page
     setIntendedTask(task);
-    setActiveTask('dashboard');
+    setActiveTask('workspaces');
   };
 
   return (

@@ -4,16 +4,23 @@ import { createServer as createViteServer } from "vite";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
+import { knowledgeRouter } from "./src/knowledge-engine/api.js";
 
 // Load environment variables
 dotenv.config();
+
+// Initialize the Knowledge Engine database
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   // JSON Body Parser for API Requests
-  app.use(express.json());
+  app.use(express.json({ limit: "200mb" }));
+  app.use(express.urlencoded({ limit: "200mb", extended: true }));
+
+  // Mount Knowledge Engine Module
+  app.use("/api/knowledge", knowledgeRouter);
 
   // API Route: Send Contact Form Submission via Email
   app.post("/api/contact", async (req, res) => {
@@ -323,10 +330,25 @@ ${message}
     return intersection / union;
   }
 
+  /**
+   * Advanced RAG Knowledge Engine Retrieval
+   * Reusable central engine for extracting semantically relevant chunks across all workspace features.
+   */
+  async function performAdvancedRAG(ai: any, query: string, files: any[], notes: any[], topK: number = 8, overrideWorkspaceId?: string): Promise<string> {
+    const { retrieveKnowledge } = await import('./src/knowledge-engine/retrieval/rag.js');
+    let workspaceId = overrideWorkspaceId || '';
+    if (!workspaceId) {
+      if (files && files.length > 0 && files[0].workspaceId) workspaceId = files[0].workspaceId;
+      else if (notes && notes.length > 0 && notes[0].workspaceId) workspaceId = notes[0].workspaceId;
+    }
+    
+    return await retrieveKnowledge(workspaceId, 'local-user', query, topK, ai, files, notes);
+  }
+
   // API Route: AI Tutor Query via Nvidia API (Llama models) or Gemini API
   app.post("/api/ai-tutor", async (req, res) => {
     try {
-      const { prompt, deepResearch, citationMode, attachedFiles, model } = req.body;
+      const { prompt, deepResearch, citationMode, attachedFiles, model, workspaceId } = req.body;
 
       if (!prompt) {
         res.status(400).json({ error: "Prompt is required." });
@@ -359,116 +381,8 @@ ${message}
           });
         }
 
-        const queryLower = prompt.toLowerCase();
-        const stopWords = new Set(["the", "a", "an", "and", "or", "but", "is", "are", "was", "were", "to", "of", "in", "for", "on", "with", "at", "by", "from", "up", "about", "into", "over", "after"]);
-        const queryWords = queryLower
-          .replace(/[^\w\s]/g, "")
-          .split(/\s+/)
-          .filter((w: string) => w.length > 2 && !stopWords.has(w));
-
-        // Group 1: General document list sorted by simple keyword overlap
-        const sortedFiles = attachedFiles.map((file: any) => {
-          let score = 0;
-          const fileNameLower = file.name.toLowerCase();
-          
-          if (queryLower.includes(fileNameLower)) {
-            score += 200;
-          } else {
-            const fileKeywords = fileNameLower.split(/[._\s-]/);
-            fileKeywords.forEach((kw: string) => {
-              if (kw.length > 3 && queryLower.includes(kw)) score += 50;
-            });
-          }
-
-          const summaryText = (file.summary || "").toLowerCase();
-          const highlightsText = (file.highlights || []).join(" ").toLowerCase();
-          const transcriptionText = (file.transcription || "").toLowerCase();
-          const formulasText = (file.formulas || []).join(" ").toLowerCase();
-
-          queryWords.forEach((word: string) => {
-            if (summaryText.includes(word)) score += 20;
-            if (highlightsText.includes(word)) score += 25;
-            if (transcriptionText.includes(word)) score += 30;
-            if (formulasText.includes(word)) score += 35;
-          });
-
-          return { file, score };
-        }).sort((a: any, b: any) => b.score - a.score);
-
-        // Group 2: Advanced Chunk-level semantic search
-        const allChunks: Array<{ text: string; embedding?: number[] | null; sourceName: string }> = [];
-        
-        for (const file of attachedFiles) {
-          let fileChunks = file.chunks || [];
-          if (fileChunks.length === 0) {
-            // Generate chunks on-the-fly if not already pre-computed
-            const chunkTexts = chunkFileContent(file);
-            if (ai) {
-              const embedPromises = chunkTexts.map(async (text) => {
-                const emb = await getEmbedding(ai, text);
-                return { text, embedding: emb };
-              });
-              fileChunks = await Promise.all(embedPromises);
-            } else {
-              fileChunks = chunkTexts.map(text => ({ text, embedding: null }));
-            }
-          }
-          
-          fileChunks.forEach((c: any) => {
-            allChunks.push({
-              text: c.text,
-              embedding: c.embedding,
-              sourceName: file.name || "Document"
-            });
-          });
-        }
-
-        // Rank chunks by similarity
-        let rankedChunks: Array<{ text: string; sourceName: string; score: number }> = [];
-        if (allChunks.length > 0) {
-          let queryEmbedding: number[] | null = null;
-          if (ai) {
-            queryEmbedding = await getEmbedding(ai, prompt);
-          }
-
-          rankedChunks = allChunks.map(chunk => {
-            let score = 0;
-            if (queryEmbedding && chunk.embedding) {
-              score = cosineSimilarity(queryEmbedding, chunk.embedding);
-            } else {
-              score = JaccardWordSimilarity(prompt, chunk.text);
-            }
-            return {
-              text: chunk.text,
-              sourceName: chunk.sourceName,
-              score
-            };
-          }).sort((a, b) => b.score - a.score);
-        }
-
-        const topChunks = rankedChunks.slice(0, 6);
-
-        // Build extremely comprehensive grounding text like NotebookLM
-        groundedSourceContext = "=== NOTEBOOKLM CORE RESOURCE INDEX ===\n";
-        groundedSourceContext += `Total active workspace materials: ${attachedFiles.length} files.\n\n`;
-        
-        sortedFiles.forEach(({ file, score }: any, idx: number) => {
-          groundedSourceContext += `- SOURCE [${idx + 1}]: "${file.name}" (Type: ${file.type ? file.type.toUpperCase() : 'DOCUMENT'}) | General Relevance Score: ${score}\n`;
-          if (file.summary) {
-            groundedSourceContext += `  Summary: ${file.summary.substring(0, 150)}...\n`;
-          }
-        });
-        groundedSourceContext += "\n";
-
-        if (topChunks.length > 0) {
-          groundedSourceContext += "=== HIGH-PRECISION RETRIEVAL-AUGMENTED PASSAGES (RAG RETRIEVED) ===\n";
-          groundedSourceContext += "These specific passages were dynamically chunked, embedded, and retrieved from the documents as the most semantically relevant to the user's question:\n\n";
-          
-          topChunks.forEach((chunk, index) => {
-            groundedSourceContext += `PASSAGE [${index + 1}] (From: "${chunk.sourceName}" | Semantic Confidence: ${(chunk.score * 100).toFixed(1)}%):\n`;
-            groundedSourceContext += `"${chunk.text}"\n\n`;
-          });
-        }
+        const notesContext = []; // Notes can be retrieved from body if we add it in frontend, but AI Tutor currently doesn't pass 'notes' from frontend.
+        groundedSourceContext = await performAdvancedRAG(ai, prompt, attachedFiles, notesContext, 8, workspaceId);
         
         groundedSourceContext += "=========================================\n\n";
         
@@ -706,10 +620,10 @@ Please deliver fully complete, highly polished academic answers of the absolute 
   // API Route: Analyze and index uploaded resources (PDF, Audio, Video, URL, YouTube) using Gemini
   app.post("/api/analyze-resource", async (req, res) => {
     try {
-      const { name, type, size, url, description } = req.body;
+      const { name, type, size, url, description, fileBase64, fileMimeType } = req.body;
 
-      if (!name && !url) {
-        res.status(400).json({ error: "Resource name or URL is required." });
+      if (!name && !url && !fileBase64) {
+        res.status(400).json({ error: "Resource name, URL, or file content is required." });
         return;
       }
 
@@ -761,14 +675,15 @@ ${urlExtractedDescription ? `Web Page Meta Description: ${urlExtractedDescriptio
 ${urlExtractedText ? `Scraped Content Text:\n${urlExtractedText}\n` : ""}
 
 CRITICAL INTEGRITY INSTRUCTIONS:
-Your goal is to generate extremely high-fidelity, perfect, and real-time facts/summaries about this specific resource.
+Your goal is to generate extremely high-fidelity, perfect, and real-time facts/summaries about this specific resource. 
+You must analyze the provided file content very, very carefully. Know exactly what the user has uploaded, what is inside it (e.g. if there is a PDF, image, video, etc.), and what are the things that should be done with it. 
 If the resource is a YouTube video, you MUST use the googleSearch grounding tool to search for the video title ("${targetName}") or URL ("${url || ''}") to fetch its real topics, structure, formulas, and true transcripts. Avoid generating placeholder, generic, or dummy summaries.
 Your generated data must contain:
-1. A rich, professional, and comprehensive 3-4 sentence academic summary of what this resource covers. Base this on the title, description, scraped text, and search results. Do not use generic filler text or placeholders.
+1. A rich, professional, and comprehensive academic summary of what this resource covers (including details on what the user uploaded, its exact contents, and what should be done with it). Do not use generic filler text or placeholders.
 2. 3-4 high-quality specific tags (e.g. ['Photosynthesis', 'AP Bio', 'Plant Biology']).
 3. 3-4 high-quality highlights, key quotes, or core conceptual statements representing key facts from this resource.
-4. If type is 'audio', 'video' or 'url' (especially YouTube), generate a highly realistic and factually accurate 3-4 paragraph voice transcription segment representing the lecture audio or narration context of the video.
-5. If type is 'pdf', 'video', 'url' or others containing science, math, physics, or chemistry, generate 2-3 key mathematical formulas, stoichiometry, or equations in LaTeX format, otherwise leave this empty.
+4. A highly realistic and factually accurate voice transcription segment or detailed visual description representing the contents of the file.
+5. If it contains science, math, physics, or chemistry, generate 2-3 key mathematical formulas, stoichiometry, or equations in LaTeX format, otherwise leave this empty.
 
 You must return a JSON object with the following schema:
 {
@@ -799,9 +714,25 @@ You must return a JSON object with the following schema:
       const promptContent = `Perform a high-fidelity academic indexing, formula extraction, highlights identification, and transcription for study resource "${targetName}" of type "${type}" located at URL "${url || 'N/A'}". 
 If this is a YouTube video or specific web page, search Google for "${targetName}" or the URL to get the exact real content, key topics, chapter notes, transcription text, and math formulas. Ensure the returned JSON is 100% correct, highly specific, and has zero placeholders.`;
 
+      let contents: any = promptContent;
+      let targetModel = "gemini-3.5-flash";
+
+      if (fileBase64 && fileMimeType) {
+        contents = [
+          promptContent,
+          {
+            inlineData: {
+              data: fileBase64,
+              mimeType: fileMimeType
+            }
+          }
+        ];
+        targetModel = "gemini-3.1-pro-preview"; // Best for complex files, videos, images
+      }
+
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: promptContent,
+        model: targetModel,
+        contents: contents,
         config: {
           systemInstruction,
           temperature: 0.3,
@@ -985,7 +916,7 @@ If this is a YouTube video or specific web page, search Google for "${targetName
   // API Route: Generate Quiz from Notes & Resources using Gemini with structured JSON output schema
   app.post("/api/generate-quiz", async (req, res) => {
     try {
-      const { notes, files, count, difficulty, questionType } = req.body;
+      const { notes, files, count, difficulty, questionType, workspaceId } = req.body;
 
       const hasNotes = notes && notes.length > 0;
       const hasFiles = files && files.length > 0;
@@ -993,34 +924,6 @@ If this is a YouTube video or specific web page, search Google for "${targetName
       if (!hasNotes && !hasFiles) {
         res.status(400).json({ error: "No study notes or resource files were found in the active workspace. Please add notes or resources first." });
         return;
-      }
-
-      let contextText = "";
-
-      if (hasNotes) {
-        contextText += "=== STUDY NOTES ===\n";
-        contextText += notes.map((n: any) => `Title: ${n.title}\nContent:\n${n.content}`).join("\n\n---\n\n");
-        contextText += "\n\n";
-      }
-
-      if (hasFiles) {
-        contextText += "=== INDEXED STUDY RESOURCES ===\n";
-        files.forEach((file: any, idx: number) => {
-          contextText += `Resource #${idx + 1}: "${file.name}" (Type: ${file.type})\n`;
-          if (file.summary) {
-            contextText += `Summary of Resource: ${file.summary}\n`;
-          }
-          if (file.highlights && file.highlights.length > 0) {
-            contextText += `Key Highlights:\n` + file.highlights.map((h: string) => `- ${h}`).join("\n") + "\n";
-          }
-          if (file.formulas && file.formulas.length > 0) {
-            contextText += `Equations & Formulas:\n` + file.formulas.join(", ") + "\n";
-          }
-          if (file.transcription) {
-            contextText += `Lecture Audio/Video Transcription segment:\n${file.transcription.substring(0, 4500)}\n`;
-          }
-          contextText += "\n---\n\n";
-        });
       }
 
       const questionCount = count || 5;
@@ -1031,7 +934,7 @@ If this is a YouTube video or specific web page, search Google for "${targetName
       if (qType === "TF") {
         typeInstruction = "The quiz MUST consist ONLY of True/False questions (2 options: 'True' or 'False'). correctIndex must be 0 for True or 1 for False.";
       } else if (qType === "FillBlank") {
-        typeInstruction = "The quiz MUST consist ONLY of Fill in the Blank questions, where the question has a blank space like '_______', and 4 plausible options to fill the blank are provided (one of which is correct).";
+        typeInstruction = "The quiz MUST consist ONLY of Fill in the Blank questions, where the question has a blank space like '_______'. The options array MUST contain exactly 1 element which is the exact correct string answer, and correctIndex MUST be 0.";
       } else {
         typeInstruction = "The quiz MUST consist of standard multiple-choice questions (MCQ) with exactly 4 distinct options.";
       }
@@ -1044,8 +947,8 @@ ${typeInstruction}
 
 Each question MUST:
 1. Be challenging and directly test understanding of the material in the provided context (notes and/or resources).
-2. Have options set to an array of choices (exactly 4 options for MCQ/FillBlank, exactly 2 options ['True', 'False'] for TF).
-3. Have a correctIndex pointing to the correct option in the options array (0 to 3, or 0 to 1 for True/False).
+2. Have options set to an array of choices (exactly 4 options for MCQ, exactly 2 options ['True', 'False'] for TF, exactly 1 correct text option for FillBlank).
+3. Have a correctIndex pointing to the correct option in the options array.
 4. Provide a detailed, encouraging, and highly educational explanation for why the correct answer is right and why other options are incorrect.
 5. Have difficulty set to "${diffLevel}".
 6. Have type set to "${qType}".
@@ -1055,7 +958,7 @@ Strictly return a JSON object containing a "questions" array matching the reques
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
         console.warn("GEMINI_API_KEY not configured. Using high-quality local generation fallback.");
-        const fallbackQuiz = generateFallbackQuiz(notes || [], files || [], questionCount, diffLevel);
+        const fallbackQuiz = generateFallbackQuiz(notes || [], files || [], questionCount, diffLevel, qType);
         res.json({ questions: fallbackQuiz });
         return;
       }
@@ -1068,6 +971,9 @@ Strictly return a JSON object containing a "questions" array matching the reques
           }
         }
       });
+
+      const ragQuery = `Generate a ${diffLevel} difficulty ${qType} quiz containing ${questionCount} questions about the core concepts, topics, formulas, and definitions.`;
+      const contextText = await performAdvancedRAG(ai, ragQuery, files, notes, 15, workspaceId);
 
       const prompt = `Generate a practice quiz with ${questionCount} questions of difficulty "${diffLevel}" and type "${qType}" from the following study materials and contextual references:\n\n${contextText}`;
 
@@ -1250,12 +1156,7 @@ Strictly return a JSON object containing a "questions" array matching the reques
          finalOptions = ['True', 'False'];
          finalCorrectIndex = Math.random() > 0.5 ? 0 : 1;
       } else if (qType === 'FillBlank') {
-         finalOptions = [
-            baseQ.options[baseQ.correctIndex],
-            'Alternative Concept 1',
-            'Alternative Concept 2',
-            'Alternative Concept 3'
-         ];
+         finalOptions = [baseQ.options[baseQ.correctIndex]];
          finalCorrectIndex = 0;
       }
       
@@ -1678,7 +1579,7 @@ Each object in the array MUST match this TypeScript schema:
   // API Route: Generate Mindmap from Notes & Resources like NotebookLM
   app.post("/api/generate-mindmap", async (req, res) => {
     try {
-      const { notes, files, subject } = req.body;
+      const { notes, files, subject, workspaceId } = req.body;
 
       const hasNotes = notes && notes.length > 0;
       const hasFiles = files && files.length > 0;
@@ -1688,35 +1589,27 @@ Each object in the array MUST match this TypeScript schema:
         return;
       }
 
-      let contextText = "";
-
-      if (hasNotes) {
-        contextText += "=== STUDY NOTES ===\n";
-        contextText += notes.map((n: any) => `Title: ${n.title}\nContent:\n${n.content}`).join("\n\n---\n\n");
-        contextText += "\n\n";
-      }
-
-      if (hasFiles) {
-        contextText += "=== INDEXED STUDY RESOURCES ===\n";
-        files.forEach((file: any, idx: number) => {
-          contextText += `Resource #${idx + 1}: "${file.name}" (Type: ${file.type})\n`;
-          if (file.summary) {
-            contextText += `Summary of Resource: ${file.summary}\n`;
-          }
-          if (file.highlights && file.highlights.length > 0) {
-            contextText += `Key Highlights:\n` + file.highlights.map((h: string) => `- ${h}`).join("\n") + "\n";
-          }
-          if (file.formulas && file.formulas.length > 0) {
-            contextText += `Equations & Formulas:\n` + file.formulas.join(", ") + "\n";
-          }
-          if (file.transcription) {
-            contextText += `Lecture Audio/Video Transcription segment:\n${file.transcription.substring(0, 3000)}\n`;
-          }
-          contextText += "\n---\n\n";
-        });
-      }
-
       const workspaceSubject = subject || "Study Workspace";
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
+        console.warn("GEMINI_API_KEY not configured. Falling back to local mind map generator.");
+        const fallbackNodes = generateFallbackMindmap(notes || [], files || [], workspaceSubject);
+        res.json(fallbackNodes);
+        return;
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          }
+        }
+      });
+
+      const ragQuery = `Generate a comprehensive hierarchical knowledge graph and semantic mind map covering the core concepts, topics, definitions, and themes. Connect topics logically.`;
+      const contextText = await performAdvancedRAG(ai, ragQuery, files, notes, 15, workspaceId);
 
       const systemInstruction = `You are an elite academic mapping engine modeled on NotebookLM.
 Your task is to generate an exceptionally structured, highly integrated conceptual Mind Map (semantic network) in JSON format based on the user's study notes and indexed resources.
@@ -1754,22 +1647,6 @@ Your output MUST be a JSON object matching the following TypeScript schema:
   }>;
 }`;
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
-        console.warn("GEMINI_API_KEY not configured. Falling back to local mindmap generator.");
-        const fallbackGraph = generateFallbackMindmap(notes || [], files || [], workspaceSubject);
-        res.json(fallbackGraph);
-        return;
-      }
-
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build",
-          }
-        }
-      });
 
       const promptText = `Analyze our entire workspace resources and construct an integrated NotebookLM concept map (mind map) with central root "${workspaceSubject}":\n\n${contextText}`;
 
@@ -1941,7 +1818,7 @@ Your output MUST be a JSON object matching the following TypeScript schema:
   // API Route: Generate Flashcards from Notes & Resources like NotebookLM
   app.post("/api/generate-flashcards", async (req, res) => {
     try {
-      const { notes, files, count, difficulty } = req.body;
+      const { notes, files, count, difficulty, workspaceId } = req.body;
 
       const hasNotes = notes && notes.length > 0;
       const hasFiles = files && files.length > 0;
@@ -1951,48 +1828,8 @@ Your output MUST be a JSON object matching the following TypeScript schema:
         return;
       }
 
-      let contextText = "";
-
-      if (hasNotes) {
-        contextText += "=== STUDY NOTES ===\n";
-        contextText += notes.map((n: any) => `Title: ${n.title}\nContent:\n${n.content}`).join("\n\n---\n\n");
-        contextText += "\n\n";
-      }
-
-      if (hasFiles) {
-        contextText += "=== INDEXED STUDY RESOURCES ===\n";
-        files.forEach((file: any, idx: number) => {
-          contextText += `Resource #${idx + 1}: "${file.name}" (Type: ${file.type})\n`;
-          if (file.summary) {
-            contextText += `Summary of Resource: ${file.summary}\n`;
-          }
-          if (file.highlights && file.highlights.length > 0) {
-            contextText += `Key Highlights:\n` + file.highlights.map((h: string) => `- ${h}`).join("\n") + "\n";
-          }
-          if (file.formulas && file.formulas.length > 0) {
-            contextText += `Equations & Formulas:\n` + file.formulas.join(", ") + "\n";
-          }
-          if (file.transcription) {
-            contextText += `Lecture Audio/Video Transcription segment:\n${file.transcription.substring(0, 4500)}\n`;
-          }
-          contextText += "\n---\n\n";
-        });
-      }
-
       const cardCount = count || 5;
       const diffLevel = difficulty || "Medium";
-
-      const systemInstruction = `You are a high-performance academic tutor and Study Assistant modeled on NotebookLM.
-Your task is to generate high-quality, concept-based active recall flashcards from the provided study notes and/or indexed resources.
-Generate exactly ${cardCount} flashcards at the specified difficulty level: "${diffLevel}".
-
-Each flashcard MUST satisfy:
-1. "front": A clear, thought-provoking question, key term, or conceptual prompt. Keep it highly focused.
-2. "back": A clear, concise, and factually accurate explanation, definition, or answer. Keep it directly relevant and easy to understand during active rehearsal.
-3. "topic": A very short categorizing label representing the specific subtopic/theme (e.g. "Photosynthesis", "Stoichiometry", "Feynman Method").
-4. "difficulty": Strictly set to "${diffLevel}".
-
-You MUST return a JSON object with a "flashcards" array containing your generated flashcard items matching the requested schema.`;
 
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
@@ -2010,6 +1847,22 @@ You MUST return a JSON object with a "flashcards" array containing your generate
           }
         }
       });
+
+      const ragQuery = `Generate ${cardCount} ${diffLevel} difficulty active recall flashcards covering the most critical definitions, formulas, concepts, and facts.`;
+      const contextText = await performAdvancedRAG(ai, ragQuery, files, notes, 15, workspaceId);
+
+      const systemInstruction = `You are a high-performance academic tutor and Study Assistant modeled on NotebookLM.
+Your task is to generate high-quality, concept-based active recall flashcards from the provided study notes and/or indexed resources.
+Generate exactly ${cardCount} flashcards at the specified difficulty level: "${diffLevel}".
+
+Each flashcard MUST satisfy:
+1. "front": A clear, thought-provoking question, key term, or conceptual prompt. Keep it highly focused.
+2. "back": A clear, concise, and factually accurate explanation, definition, or answer. Keep it directly relevant and easy to understand during active rehearsal.
+3. "topic": A very short categorizing label representing the specific subtopic/theme (e.g. "Photosynthesis", "Stoichiometry", "Feynman Method").
+4. "difficulty": Strictly set to "${diffLevel}".
+
+You MUST return a JSON object with a "flashcards" array containing your generated flashcard items matching the requested schema.`;
+
 
       const prompt = `Generate ${cardCount} high-quality flashcards of difficulty "${diffLevel}" based on the following materials:\n\n${contextText}`;
 

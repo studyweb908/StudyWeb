@@ -100,6 +100,7 @@ export default function WorkspaceFlashcards({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          workspaceId: workspace.id,
           notes: workspace.notes,
           files: workspace.files,
           count: numCards,

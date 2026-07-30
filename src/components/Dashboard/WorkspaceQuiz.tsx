@@ -71,6 +71,7 @@ export default function WorkspaceQuiz({ workspace, onQuizSubmitScore, onUpdateWo
   const [activeQuestions, setActiveQuestions] = useState<QuizQuestionItem[]>([]);
   const [activeIdx, setActiveIdx] = useState(0);
   const [selectedAnsIdx, setSelectedAnsIdx] = useState<number | null>(null);
+  const [textAnswer, setTextAnswer] = useState<string>('');
   const [hasSubmittedAns, setHasSubmittedAns] = useState(false);
   const [score, setScore] = useState(0);
   
@@ -265,6 +266,7 @@ export default function WorkspaceQuiz({ workspace, onQuizSubmitScore, onUpdateWo
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
+          workspaceId: workspace.id,
           notes: quizSource !== 'resources' ? workspace.notes : [],
           files: quizSource !== 'notes' ? workspace.files : [],
           count: questionCount,
@@ -293,6 +295,7 @@ export default function WorkspaceQuiz({ workspace, onQuizSubmitScore, onUpdateWo
         setActiveQuestions(data.questions);
         setActiveIdx(0);
         setSelectedAnsIdx(null);
+        setTextAnswer('');
         setHasSubmittedAns(false);
         setScore(0);
         setWrongAnswersList([]);
@@ -326,6 +329,7 @@ export default function WorkspaceQuiz({ workspace, onQuizSubmitScore, onUpdateWo
   const handleRetakeQuiz = () => {
     setActiveIdx(0);
     setSelectedAnsIdx(null);
+    setTextAnswer('');
     setHasSubmittedAns(false);
     setScore(0);
     setWrongAnswersList([]);
@@ -353,21 +357,41 @@ export default function WorkspaceQuiz({ workspace, onQuizSubmitScore, onUpdateWo
   };
 
   const handleSubmitAnswer = () => {
-    if (selectedAnsIdx === null || hasSubmittedAns) return;
-    setHasSubmittedAns(true);
+    if (hasSubmittedAns) return;
 
     const question = activeQuestions[activeIdx];
-    const isCorrect = selectedAnsIdx === question.correctIndex;
-
-    if (isCorrect) {
-      setScore((prev) => prev + 1);
+    
+    if (question.type === 'FillBlank') {
+      if (!textAnswer.trim()) return;
+      setHasSubmittedAns(true);
+      
+      const isCorrect = textAnswer.trim().toLowerCase() === question.options[question.correctIndex || 0].toLowerCase();
+      if (isCorrect) {
+        setScore((prev) => prev + 1);
+      } else {
+        setWrongAnswersList((prev) => [...prev, {
+          question: question.question,
+          userAns: textAnswer,
+          correctAns: question.options[question.correctIndex || 0],
+          explanation: question.explanation
+        }]);
+      }
     } else {
-      setWrongAnswersList((prev) => [...prev, {
-        question: question.question,
-        userAns: question.options[selectedAnsIdx],
-        correctAns: question.options[question.correctIndex],
-        explanation: question.explanation
-      }]);
+      if (selectedAnsIdx === null) return;
+      setHasSubmittedAns(true);
+
+      const isCorrect = selectedAnsIdx === question.correctIndex;
+
+      if (isCorrect) {
+        setScore((prev) => prev + 1);
+      } else {
+        setWrongAnswersList((prev) => [...prev, {
+          question: question.question,
+          userAns: question.options[selectedAnsIdx],
+          correctAns: question.options[question.correctIndex],
+          explanation: question.explanation
+        }]);
+      }
     }
   };
 
@@ -375,6 +399,7 @@ export default function WorkspaceQuiz({ workspace, onQuizSubmitScore, onUpdateWo
     if (activeIdx + 1 < activeQuestions.length) {
       setActiveIdx((prev) => prev + 1);
       setSelectedAnsIdx(null);
+      setTextAnswer('');
       setHasSubmittedAns(false);
     } else {
       // Finished
@@ -637,35 +662,64 @@ export default function WorkspaceQuiz({ workspace, onQuizSubmitScore, onUpdateWo
             </h3>
 
             <div className="space-y-2.5">
-              {currentQ.options.map((opt, idx) => {
-                const isSelected = selectedAnsIdx === idx;
-                const isCorrectAns = idx === currentQ.correctIndex;
-                
-                let optionStyle = 'border-slate-150 dark:border-slate-800/80 bg-white dark:bg-slate-900 hover:bg-slate-50 hover:border-slate-200';
-                if (isSelected) {
-                  optionStyle = 'border-indigo-500 bg-indigo-500/5 dark:bg-indigo-950/20';
-                }
-                if (hasSubmittedAns) {
-                  if (isCorrectAns) {
-                    optionStyle = 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400';
-                  } else if (isSelected) {
-                    optionStyle = 'border-rose-500 bg-rose-500/10 text-rose-700 dark:text-rose-400';
-                  }
-                }
-
-                return (
-                  <button
-                    key={idx}
+              {currentQ.type === 'FillBlank' ? (
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    value={textAnswer}
+                    onChange={(e) => setTextAnswer(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && textAnswer.trim() && !hasSubmittedAns) {
+                        handleSubmitAnswer();
+                      }
+                    }}
                     disabled={hasSubmittedAns}
-                    onClick={() => handleSelectOption(idx)}
-                    className={`w-full p-4 border rounded-2xl text-xs sm:text-sm font-semibold transition-all flex items-center justify-between cursor-pointer ${optionStyle}`}
-                  >
-                    <span className="pr-3">{opt}</span>
-                    {hasSubmittedAns && isCorrectAns && <Check className="w-4 h-4 text-emerald-500 shrink-0" />}
-                    {hasSubmittedAns && isSelected && !isCorrectAns && <CloseIcon className="w-4 h-4 text-rose-500 shrink-0" />}
-                  </button>
-                );
-              })}
+                    placeholder="Type your answer here..."
+                    className={`w-full p-4 border rounded-2xl text-xs sm:text-sm font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500/50 ${
+                      hasSubmittedAns 
+                        ? textAnswer.trim().toLowerCase() === currentQ.options[currentQ.correctIndex || 0].toLowerCase()
+                          ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                          : 'border-rose-500 bg-rose-500/10 text-rose-700 dark:text-rose-400'
+                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100'
+                    }`}
+                  />
+                  {hasSubmittedAns && textAnswer.trim().toLowerCase() !== currentQ.options[currentQ.correctIndex || 0].toLowerCase() && (
+                    <div className="text-emerald-600 dark:text-emerald-400 font-bold text-xs p-2 bg-emerald-50 dark:bg-emerald-950/20 rounded-xl">
+                      Correct Answer: {currentQ.options[currentQ.correctIndex || 0]}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                currentQ.options.map((opt, idx) => {
+                  const isSelected = selectedAnsIdx === idx;
+                  const isCorrectAns = idx === currentQ.correctIndex;
+                  
+                  let optionStyle = 'border-slate-150 dark:border-slate-800/80 bg-white dark:bg-slate-900 hover:bg-slate-50 hover:border-slate-200';
+                  if (isSelected) {
+                    optionStyle = 'border-indigo-500 bg-indigo-500/5 dark:bg-indigo-950/20';
+                  }
+                  if (hasSubmittedAns) {
+                    if (isCorrectAns) {
+                      optionStyle = 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400';
+                    } else if (isSelected) {
+                      optionStyle = 'border-rose-500 bg-rose-500/10 text-rose-700 dark:text-rose-400';
+                    }
+                  }
+
+                  return (
+                    <button
+                      key={idx}
+                      disabled={hasSubmittedAns}
+                      onClick={() => handleSelectOption(idx)}
+                      className={`w-full p-4 border rounded-2xl text-xs sm:text-sm font-semibold transition-all flex items-center justify-between cursor-pointer ${optionStyle}`}
+                    >
+                      <span className="pr-3">{opt}</span>
+                      {hasSubmittedAns && isCorrectAns && <Check className="w-4 h-4 text-emerald-500 shrink-0" />}
+                      {hasSubmittedAns && isSelected && !isCorrectAns && <CloseIcon className="w-4 h-4 text-rose-500 shrink-0" />}
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
 
@@ -692,7 +746,7 @@ export default function WorkspaceQuiz({ workspace, onQuizSubmitScore, onUpdateWo
             {!hasSubmittedAns ? (
               <button
                 onClick={handleSubmitAnswer}
-                disabled={selectedAnsIdx === null}
+                disabled={currentQ.type === 'FillBlank' ? !textAnswer.trim() : selectedAnsIdx === null}
                 className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md disabled:opacity-50 cursor-pointer"
               >
                 Check Answer

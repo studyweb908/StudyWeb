@@ -226,6 +226,7 @@ export default function AITutorWorkspace() {
           prompt: textToSend || `Please analyze my attached documents: ${attachedFiles.map(f => f.name).join(', ')}`,
           deepResearch,
           citationMode,
+          workspaceId: workspace.id,
           attachedFiles,
           model: selectedModel
         })
@@ -600,40 +601,41 @@ Let me know if you would like me to clarify any specific point or provide an int
               className={`flex gap-4 max-w-3xl ${msg.sender === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}
             >
               {/* Avatar */}
-              <div className={`w-8.5 h-8.5 rounded-xl flex items-center justify-center flex-shrink-0 font-bold text-xs ${
+              <div className={`w-8.5 h-8.5 rounded-[10px] flex items-center justify-center flex-shrink-0 font-bold text-xs ${
                 msg.sender === 'user' 
-                  ? 'bg-slate-200 text-slate-700' 
-                  : 'bg-indigo-660 bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
+                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300' 
+                  : 'bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900 shadow-md shadow-slate-900/5'
               }`}>
                 {msg.sender === 'user' ? 'ME' : 'AI'}
               </div>
 
               {/* Chat bubble body */}
               <div className={`space-y-1 ${msg.sender === 'user' ? 'text-right' : 'text-left'}`}>
-                <div className={`px-5 py-3.5 rounded-2xl text-sm leading-relaxed ${
+                <div className={`px-6 py-5 rounded-[20px] text-[15px] leading-[1.65] ${
                   msg.sender === 'user'
-                    ? 'bg-indigo-600 text-white rounded-tr-none'
-                    : 'bg-white dark:bg-slate-800/80 text-slate-800 dark:text-slate-100 border border-slate-100 dark:border-slate-850 rounded-tl-none shadow-sm'
+                    ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 rounded-tr-none shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)]'
+                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-800/60 rounded-tl-none shadow-[0_2px_8px_-2px_rgba(0,0,0,0.04)]'
                 }`}>
                   {/* Simulated Markdown renderer */}
-                  <div className="space-y-3 whitespace-pre-wrap">
+                  <div className="space-y-4 whitespace-pre-wrap">
                     {msg.text.split('\n\n').map((paragraph, idx) => {
                       if (paragraph.startsWith('###')) {
-                        return <h4 key={idx} className="font-extrabold text-base text-indigo-600 dark:text-indigo-400 pt-1">{paragraph.replace('###', '')}</h4>;
+                        return <h4 key={idx} className="font-bold text-slate-900 dark:text-white pt-2">{paragraph.replace('###', '').trim()}</h4>;
                       }
                       if (paragraph.startsWith('-')) {
                         return (
-                          <ul key={idx} className="list-disc pl-5 space-y-1.5">
-                            {paragraph.split('\n').map((li, liIdx) => (
-                              <li key={liIdx}>{li.replace('-', '').trim()}</li>
-                            ))}
+                          <ul key={idx} className="list-disc pl-5 space-y-2 marker:text-slate-400">
+                            {paragraph.split('\n').map((li, liIdx) => {
+                              const cleanedLi = li.replace('-', '').trim();
+                              return <li key={liIdx} dangerouslySetInnerHTML={{ __html: cleanedLi.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>') }} />;
+                            })}
                           </ul>
                         );
                       }
                       if (paragraph.startsWith('$$')) {
-                        return <div key={idx} className="bg-slate-50 dark:bg-slate-900 p-2.5 rounded-lg font-mono text-xs overflow-x-auto text-indigo-500 border border-slate-200/50 dark:border-slate-800">{paragraph.replace(/\$\$/g, '')}</div>;
+                        return <div key={idx} className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl font-mono text-[13px] overflow-x-auto text-slate-600 dark:text-slate-400 border border-slate-200/50 dark:border-slate-800/50">{paragraph.replace(/\$\$/g, '')}</div>;
                       }
-                      return <p key={idx} dangerouslySetInnerHTML={{ __html: paragraph.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />;
+                      return <p key={idx} dangerouslySetInnerHTML={{ __html: paragraph.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>') }} />;
                     })}
                   </div>
 
@@ -715,17 +717,17 @@ Let me know if you would like me to clarify any specific point or provide an int
                 exit={{ opacity: 0, y: -10 }}
                 className="flex gap-4 max-w-xl mr-auto"
               >
-                <div className="w-8.5 h-8.5 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xs font-bold">
+                <div className="w-8.5 h-8.5 rounded-[10px] bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900 shadow-md shadow-slate-900/5 flex items-center justify-center text-xs font-bold">
                   AI
                 </div>
-                <div className="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-850 px-5 py-3.5 rounded-2xl rounded-tl-none shadow-sm text-sm">
+                <div className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-800/60 px-6 py-5 rounded-[20px] rounded-tl-none shadow-[0_2px_8px_-2px_rgba(0,0,0,0.04)] text-[15px]">
                   <div className="flex items-center gap-3">
-                    <div className="flex gap-1">
-                      <span className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
-                      <span className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
-                      <span className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
+                    <div className="flex gap-1.5">
+                      <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
+                      <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
+                      <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
                     </div>
-                    <span className="text-xs text-slate-400 font-bold">StudyWeb AI is thinking...</span>
+                    <span className="text-[13px] text-slate-500 dark:text-slate-400 font-medium">StudyWeb AI is thinking...</span>
                   </div>
                 </div>
               </motion.div>

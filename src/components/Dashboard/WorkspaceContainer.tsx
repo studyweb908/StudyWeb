@@ -240,24 +240,6 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto px-4 md:px-6 animate-fade-in">
-      {/* WORKSPACE SWITCHER TABS */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 md:mx-0 md:px-0 hide-scrollbar">
-        {workspaces.map(ws => (
-          <button
-            key={ws.id}
-            onClick={() => onSwitchWorkspace?.(ws)}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all cursor-pointer ${
-              ws.id === workspace.id
-                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-md'
-                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
-            }`}
-          >
-            <span className="text-base">{ws.emoji}</span>
-            <span>{ws.name}</span>
-          </button>
-        ))}
-      </div>
-
       {activeTab !== 'overview' && (
         /* COMPACT CLINICAL UPPER HEADER FOR SPECIALIZED TOOLS */
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-white border border-slate-150 rounded-[20px] p-6 shadow-sm backdrop-blur-md">
@@ -346,6 +328,7 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
             onDeleteWorkspace={onDeleteWorkspace}
             setActiveWorkspaceTab={setActiveTab}
             onRemoveFile={handleRemoveFile}
+            onBack={onBack}
           />
         </div>
 
@@ -355,6 +338,7 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
             onAddFile={handleAddFile}
             onRemoveFile={handleRemoveFile}
             onClearAllFiles={handleClearAllFiles}
+            onUpdateWorkspace={onUpdateWorkspace}
           />
         </div>
 

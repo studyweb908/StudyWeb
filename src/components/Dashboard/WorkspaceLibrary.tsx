@@ -32,9 +32,10 @@ interface WorkspaceLibraryProps {
   onAddFile: (file: WorkspaceFile) => void;
   onRemoveFile: (fileId: string) => void;
   onClearAllFiles?: () => void;
+  onUpdateWorkspace?: (ws: Workspace) => void;
 }
 
-export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, onClearAllFiles }: WorkspaceLibraryProps) {
+export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, onClearAllFiles, onUpdateWorkspace }: WorkspaceLibraryProps) {
   // Real uploading states
   const [isUploading, setIsUploading] = useState(false);
   const [previewFile, setPreviewFile] = useState<WorkspaceFile | null>(null);
@@ -210,25 +211,73 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
     libraryProgressRef.current = progress;
 
     try {
-      const response = await fetch('/api/analyze-resource', {
+      const response = await fetch('/api/knowledge/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          workspaceId: workspace.id,
+          userId: 'local-user',
           name: title,
           type: 'doc',
           size: 'Pasted Document',
-          description: driveCopyText
+          content: driveCopyText
         })
       });
 
+      if (!response.ok) throw new Error("Document analysis failed");
+      const { jobId, documentId } = await response.json();
+
+      let isCompleted = false;
+      let finalFileData = null;
+      let finalNotes: any[] = [];
+      while (!isCompleted) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        const statusRes = await fetch(`/api/knowledge/status/${documentId}`);
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          if (statusData.status === 'completed') {
+            isCompleted = true;
+            finalFileData = statusData.document;
+            finalNotes = statusData.notes || [];
+          } else if (statusData.status === 'failed') {
+            throw new Error(statusData.message || 'Job failed');
+          }
+        }
+      }
+
+      const fileData = finalFileData || {
+        id: documentId,
+        name: title,
+        type: 'doc',
+        size: 'Pasted Document',
+        uploadDate: new Date().toISOString().split('T')[0],
+        status: 'indexed',
+        tags: ['Indexed'],
+        summary: 'Indexed by Knowledge Engine'
+      };
+
       clearInterval(progress);
       libraryProgressRef.current = null;
-      if (!response.ok) throw new Error("Document analysis failed");
-      const fileData = await response.json();
       
       setUploadPercent(100);
       setTimeout(() => {
         onAddFile(fileData);
+        if (finalNotes.length > 0 && onUpdateWorkspace) {
+          const updatedNotes = [
+            ...finalNotes.map(n => ({
+              id: n.id,
+              title: n.title,
+              content: n.content,
+              updatedAt: new Date().toISOString(),
+              tags: ['Generated Summary']
+            })),
+            ...(workspace.notes || []).filter(existing => !finalNotes.some(f => f.id === existing.id))
+          ];
+          onUpdateWorkspace({
+            ...workspace,
+            notes: updatedNotes
+          });
+        }
         setIsUploading(false);
         setDriveCopyText('');
         setDriveCopyTitle('');
@@ -273,7 +322,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
     }
 
     const formattedSize = formatFileSize(file.size);
-    analyzeAndAddResource(file.name, type, formattedSize);
+    analyzeAndAddResource(file.name, type, formattedSize, undefined, file);
   };
 
   const triggerUploadInput = (type: 'pdf' | 'doc' | 'ppt' | 'excel' | 'image' | 'audio' | 'video' | 'url') => {
@@ -305,7 +354,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
     }
 
     const formattedSize = formatFileSize(file.size);
-    analyzeAndAddResource(file.name, type, formattedSize);
+    analyzeAndAddResource(file.name, type, formattedSize, undefined, file);
     e.target.value = '';
   };
 
@@ -336,7 +385,8 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
     name: string, 
     type: 'pdf' | 'doc' | 'ppt' | 'excel' | 'image' | 'audio' | 'video' | 'url', 
     size: string, 
-    url?: string
+    url?: string,
+    file?: File
   ) => {
     if (isUploading) return;
 
@@ -429,16 +479,35 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
     progressIntervalRef.current = progressInterval;
 
     try {
-      const response = await fetch('/api/analyze-resource', {
+      let fileBase64 = "";
+      let fileMimeType = "";
+      if (file) {
+        fileMimeType = file.type;
+        const reader = new FileReader();
+        const promise = new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = error => reject(error);
+        });
+        reader.readAsDataURL(file);
+        const dataUrl = await promise;
+        fileBase64 = dataUrl.split(',')[1];
+      }
+
+      // New Knowledge Engine Backend
+      const response = await fetch('/api/knowledge/upload', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
+          workspaceId: workspace.id,
+          userId: 'local-user',
           name,
           type,
           size,
-          url
+          url,
+          fileBase64,
+          fileMimeType
         })
       });
 
@@ -446,8 +515,38 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
         throw new Error('Analysis failed');
       }
 
-      const fileData = await response.json();
-      
+      const { jobId, documentId } = await response.json();
+
+      // Poll for status
+      let isCompleted = false;
+      let finalFileData = null;
+      let finalNotes: any[] = [];
+      while (!isCompleted) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        const statusRes = await fetch(`/api/knowledge/status/${documentId}`);
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          if (statusData.status === 'completed') {
+            isCompleted = true;
+            finalFileData = statusData.document;
+            finalNotes = statusData.notes || [];
+          } else if (statusData.status === 'failed') {
+            throw new Error(statusData.message || 'Job failed');
+          }
+        }
+      }
+
+      const fileData = finalFileData || {
+        id: documentId,
+        name: name || url,
+        type,
+        size,
+        uploadDate: new Date().toISOString().split('T')[0],
+        status: 'indexed',
+        tags: ['Indexed'],
+        summary: 'Indexed by Knowledge Engine'
+      };
+
       clearInterval(progressInterval);
       clearInterval(timerInterval);
       progressIntervalRef.current = null;
@@ -458,6 +557,22 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
       
       setTimeout(() => {
         onAddFile(fileData);
+        if (finalNotes.length > 0 && onUpdateWorkspace) {
+          const updatedNotes = [
+            ...finalNotes.map(n => ({
+              id: n.id,
+              title: n.title,
+              content: n.content,
+              updatedAt: new Date().toISOString(),
+              tags: ['Generated Summary']
+            })),
+            ...(workspace.notes || []).filter(existing => !finalNotes.some(f => f.id === existing.id))
+          ];
+          onUpdateWorkspace({
+            ...workspace,
+            notes: updatedNotes
+          });
+        }
         setIsUploading(false);
       }, 800);
 

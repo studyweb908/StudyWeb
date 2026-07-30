@@ -42,7 +42,8 @@ export default function WorkspaceNotebook({ workspace, onAddNote, onRemoveNote }
   const [noteContent, setNoteContent] = useState(workspace.notes[0]?.content || '');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const filteredNotes = workspace.notes.filter((note) => {
+  const uniqueNotes = Array.from(new Map((workspace.notes || []).map(n => [n.id, n])).values());
+  const filteredNotes = uniqueNotes.filter((note) => {
     const q = searchQuery.toLowerCase().trim();
     if (!q) return true;
     return (

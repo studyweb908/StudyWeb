@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import QuickPreviewModal from './QuickPreviewModal';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area, Cell } from 'recharts';
 
 interface WorkspaceOverviewProps {
   workspace: Workspace;
@@ -39,14 +40,23 @@ interface WorkspaceOverviewProps {
   setActiveWorkspaceTab: (tab: string) => void;
   onStartStudySession?: () => void;
   onRemoveFile?: (fileId: string) => void;
+  onBack: () => void;
 }
 
-export default function WorkspaceOverview({ workspace, workspaces = [], onSwitchWorkspace, onDeleteWorkspace, setActiveWorkspaceTab, onStartStudySession, onRemoveFile }: WorkspaceOverviewProps) {
+export default function WorkspaceOverview({ workspace, workspaces = [], onSwitchWorkspace, onDeleteWorkspace, setActiveWorkspaceTab, onStartStudySession, onRemoveFile, onBack }: WorkspaceOverviewProps) {
   // Compute numbers
   const fileCount = workspace.files.length;
   const cardCount = workspace.flashcards.length;
   const quizCount = workspace.quizzes.length;
   const noteCount = workspace.notes.length;
+
+  const readingProgressData = React.useMemo(() => {
+    return workspace.files.slice(0, 5).map(file => ({
+      name: file.name.length > 15 ? file.name.substring(0, 15) + '...' : file.name,
+      progress: Math.floor(Math.random() * 40) + 60, // Mock 60-100% progress
+      coverage: Math.floor(Math.random() * 20) + 80 // Mock 80-100% analysis coverage
+    }));
+  }, [workspace.files]);
   
 
   // Active Insights states
@@ -127,6 +137,13 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
 
           <div className="flex flex-wrap items-center gap-3 pt-2">
             <button
+              onClick={onBack}
+              className="px-4 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 border border-indigo-200/80 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer"
+            >
+              <Layers className="w-4 h-4" />
+              <span>Switch Workspace</span>
+            </button>
+            <button
               onClick={() => setActiveWorkspaceTab('library')}
               className="px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100/80 dark:bg-slate-800/60 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-750 text-slate-700 dark:text-slate-200 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer"
             >
@@ -173,7 +190,41 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
         </div>
       </div>
 
-
+      {/* ================= READING PROGRESS WIDGET ================= */}
+      {workspace.files.length > 0 && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-6 rounded-[24px]">
+          <h3 className="font-black text-slate-850 dark:text-slate-100 tracking-tight text-lg mb-4 flex items-center gap-2">
+            <TrendingUp className="w-5 h-5 text-indigo-500" />
+            Reading Progress & Analysis Coverage
+          </h3>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={readingProgressData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorProgress" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="colorCoverage" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-slate-200, #e2e8f0)" />
+                <XAxis dataKey="name" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} unit="%" />
+                <RechartsTooltip 
+                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }}
+                  itemStyle={{ fontSize: '12px', fontWeight: 'bold' }}
+                  labelStyle={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}
+                />
+                <Area type="monotone" dataKey="progress" name="Reading Progress" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorProgress)" />
+                <Area type="monotone" dataKey="coverage" name="Analysis Coverage" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorCoverage)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       {/* ================= RECENT RESOURCES ================= */}
       <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-6 rounded-[24px]">

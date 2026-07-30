@@ -484,6 +484,7 @@ ${selectedHighlights}`;
           prompt: actionPrompt,
           deepResearch: true,
           citationMode: true,
+          workspaceId: workspace?.id,
           attachedFiles: selectedDocs.map(d => ({ name: d.name, type: "PDF Document" })),
           model: "auto"
         })
@@ -542,6 +543,7 @@ Student Question:
           prompt: fullPrompt,
           deepResearch: true,
           citationMode: true,
+          workspaceId: workspace?.id,
           attachedFiles: activeDocs.map(d => ({ name: d.name, type: "PDF Document" })),
           model: "auto"
         })

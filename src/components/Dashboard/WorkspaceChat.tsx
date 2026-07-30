@@ -222,6 +222,7 @@ export default function WorkspaceChat({ workspace, onUpdateWorkspace }: Workspac
         },
         body: JSON.stringify({
           prompt: textToSend,
+          workspaceId: workspace.id,
           attachedFiles: workspace.files,
           citationMode: true,
           deepResearch: isComplexQuery,
