@@ -410,7 +410,7 @@ export default function App() {
 
         {/* Other Views */}
         <div className={activeTab === 'dashboard' || !activeTab ? 'block' : 'hidden'}>
-          <DashboardHome setActiveTab={setActiveTab} />
+          <DashboardHome setActiveTab={setActiveTab} setActiveWorkspace={setActiveWorkspace} workspaces={workspaces} />
         </div>
         <div className={activeTab === 'study-session' ? 'block' : 'hidden'}>
           <StudySessionView />

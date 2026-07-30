@@ -118,7 +118,7 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
 
   // State handlers to bubble up modifications
   const handleAddFile = (newFile: WorkspaceFile) => {
-    const updatedFiles = [newFile, ...workspace.files];
+    const updatedFiles = [newFile, ...(workspace.files || [])];
     
     // Also create a concept node for the newly uploaded file!
     const newFileNode = {
@@ -144,7 +144,7 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
   };
 
   const handleRemoveFile = (fileId: string) => {
-    const updatedFiles = workspace.files.filter(f => f.id !== fileId);
+    const updatedFiles = (workspace.files || []).filter(f => f.id !== fileId);
     const updatedNodes = workspace.nodes.filter(n => n.id !== `n-${fileId}`);
     const updatedLinks = workspace.links.filter(l => l.target !== `n-${fileId}`);
     updateWorkspaceState({
@@ -155,7 +155,7 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
   };
 
   const handleClearAllFiles = () => {
-    const fileNodeIds = new Set(workspace.files.map(f => `n-${f.id}`));
+    const fileNodeIds = new Set((workspace.files || []).map(f => `n-${f.id}`));
     const updatedNodes = workspace.nodes.filter(n => !fileNodeIds.has(n.id));
     const updatedLinks = workspace.links.filter(l => !fileNodeIds.has(l.target));
     updateWorkspaceState({

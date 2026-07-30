@@ -45,18 +45,23 @@ interface WorkspaceOverviewProps {
 
 export default function WorkspaceOverview({ workspace, workspaces = [], onSwitchWorkspace, onDeleteWorkspace, setActiveWorkspaceTab, onStartStudySession, onRemoveFile, onBack }: WorkspaceOverviewProps) {
   // Compute numbers
-  const fileCount = workspace.files.length;
-  const cardCount = workspace.flashcards.length;
-  const quizCount = workspace.quizzes.length;
-  const noteCount = workspace.notes.length;
+  const files = workspace.files || [];
+  const flashcards = workspace.flashcards || [];
+  const quizzes = workspace.quizzes || [];
+  const notes = workspace.notes || [];
+
+  const fileCount = files.length;
+  const cardCount = flashcards.length;
+  const quizCount = quizzes.length;
+  const noteCount = notes.length;
 
   const readingProgressData = React.useMemo(() => {
-    return workspace.files.slice(0, 5).map(file => ({
+    return files.slice(0, 5).map(file => ({
       name: file.name.length > 15 ? file.name.substring(0, 15) + '...' : file.name,
       progress: Math.floor(Math.random() * 40) + 60, // Mock 60-100% progress
       coverage: Math.floor(Math.random() * 20) + 80 // Mock 80-100% analysis coverage
     }));
-  }, [workspace.files]);
+  }, [files]);
   
 
   // Active Insights states
@@ -191,7 +196,7 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
       </div>
 
       {/* ================= READING PROGRESS WIDGET ================= */}
-      {workspace.files.length > 0 && (
+      {files.length > 0 && (
         <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-6 rounded-[24px]">
           <h3 className="font-black text-slate-850 dark:text-slate-100 tracking-tight text-lg mb-4 flex items-center gap-2">
             <TrendingUp className="w-5 h-5 text-indigo-500" />
@@ -239,7 +244,7 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
           </button>
         </div>
         
-        {workspace.files.length === 0 ? (
+        {files.length === 0 ? (
           <div className="py-8 text-center border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl bg-slate-50/50 dark:bg-slate-900/50">
             <FileText className="w-6 h-6 text-slate-400 dark:text-slate-500 mx-auto mb-2" />
             <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">No materials uploaded yet.</p>
@@ -252,7 +257,7 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
           </div>
         ) : (
           <div className="space-y-2">
-            {workspace.files.slice(0, 3).map((file, idx) => (
+            {[...files].sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime()).slice(0, 3).map((file, idx) => (
               <div key={file.id || idx} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border border-transparent hover:border-slate-100 dark:hover:border-slate-700/50 group cursor-pointer" onClick={() => setPreviewFile(file)}>
                 <div className="flex items-center gap-3">
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${

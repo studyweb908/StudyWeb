@@ -261,6 +261,16 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
       
       setUploadPercent(100);
       setTimeout(() => {
+        // 🔥 Dopamine hit: Dispatch a powerful success toast event!
+        window.dispatchEvent(
+          new CustomEvent('studyweb-toast', {
+            detail: {
+              message: `🎉 Boom! "${title}" was parsed, analyzed, and synthesized into your workspace! 🧠🔥`,
+              type: 'success'
+            }
+          })
+        );
+
         onAddFile(fileData);
         if (finalNotes.length > 0 && onUpdateWorkspace) {
           const updatedNotes = [
@@ -556,6 +566,16 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
       setUploadStep(steps[steps.length - 1]);
       
       setTimeout(() => {
+        // 🔥 Dopamine hit: Dispatch a powerful success toast event!
+        window.dispatchEvent(
+          new CustomEvent('studyweb-toast', {
+            detail: {
+              message: `🎉 Incredible! "${name || url}" was analyzed at lightning speed and indexed into your brain! 🧠⚡`,
+              type: 'success'
+            }
+          })
+        );
+
         onAddFile(fileData);
         if (finalNotes.length > 0 && onUpdateWorkspace) {
           const updatedNotes = [

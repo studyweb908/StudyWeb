@@ -226,7 +226,7 @@ export default function AITutorWorkspace() {
           prompt: textToSend || `Please analyze my attached documents: ${attachedFiles.map(f => f.name).join(', ')}`,
           deepResearch,
           citationMode,
-          workspaceId: workspace.id,
+          workspaceId: "local-workspace",
           attachedFiles,
           model: selectedModel
         })

@@ -247,6 +247,37 @@ export default function PDFWorkspaceView({ workspace, onUpdateWorkspace }: PDFWo
     }
   ]);
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>(['ap-bio-genetics', 'ap-chem-thermo']);
+
+  React.useEffect(() => {
+    if (workspace && workspace.files) {
+      setDocuments(prev => {
+        const newDocs = [...prev];
+        let hasNew = false;
+        workspace.files.forEach(f => {
+          if (!newDocs.find(d => d.id === f.id)) {
+            hasNew = true;
+            newDocs.unshift({
+              id: f.id,
+              name: f.name,
+              size: f.size || 'Unknown Size',
+              pages: Math.floor(Math.random() * 20) + 1,
+              highlights: [],
+              highlightColors: {}
+            });
+          }
+        });
+        
+        // If we found new documents, auto-select the latest one
+        if (hasNew && workspace.files.length > 0) {
+          const latestId = workspace.files[workspace.files.length - 1].id;
+          setViewingDocId(latestId);
+          setSelectedDocIds(prevIds => prevIds.includes(latestId) ? prevIds : [...prevIds, latestId]);
+        }
+        
+        return hasNew ? newDocs : prev;
+      });
+    }
+  }, [workspace]);
   const [aiChatLogs, setAiChatLogs] = useState<Array<{ sender: 'user' | 'ai'; text: string }>>([
     { 
       sender: 'ai', 

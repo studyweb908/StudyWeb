@@ -6,9 +6,12 @@ import {
   Clock
 } from 'lucide-react';
 import { CalendarWidget, TodayTasksCard, AIInsightsCard, RecentStudyMaterials } from './DashboardWidgets';
+import { Workspace } from './WorkspaceTypes';
 
 interface DashboardHomeProps {
   setActiveTab: (tab: string) => void;
+  setActiveWorkspace?: (workspace: Workspace | null) => void;
+  workspaces?: Workspace[];
 }
 
 const containerVariants = {
@@ -37,7 +40,7 @@ const SkeletonCard = ({ className = '' }: { className?: string }) => (
   </div>
 );
 
-export default function DashboardHome({ setActiveTab }: DashboardHomeProps) {
+export default function DashboardHome({ setActiveTab, setActiveWorkspace, workspaces = [] }: DashboardHomeProps) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -188,7 +191,7 @@ export default function DashboardHome({ setActiveTab }: DashboardHomeProps) {
 
         {/* Recent Study Materials (4 cols) */}
         <motion.div variants={itemVariants} className="col-span-1 md:col-span-6 lg:col-span-4 h-full">
-          <RecentStudyMaterials />
+          <RecentStudyMaterials workspaces={workspaces} setActiveWorkspace={setActiveWorkspace} setActiveTab={setActiveTab} />
         </motion.div>
 
         {/* Mini Calendar (4 cols) */}

@@ -427,7 +427,7 @@ export default function WorkspaceSelector({
       {(() => {
         // Gather all resources across all workspaces
         const allResources = workspaces.flatMap(ws => 
-          ws.files.map(file => ({ ...file, workspaceName: ws.name, workspaceId: ws.id }))
+          ws.files ? ws.files.map(file => ({ ...file, workspaceName: ws.name, workspaceId: ws.id })) : []
         ).sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime());
 
         if (allResources.length === 0) return null;

@@ -85,16 +85,16 @@ async function processDocument(docId: string, workspaceId: string, userId: strin
     const apiKey = process.env.GEMINI_API_KEY;
     const ai = apiKey && apiKey !== "MY_GEMINI_API_KEY" ? new GoogleGenAI({ apiKey, httpOptions: { headers: { "User-Agent": "aistudio-build" } } }) : null;
 
-    let chunkIdx = 0;
-    for (const chunkText of chunks) {
-      chunkIdx++;
-      
+    // Parallel processing for blazing fast analysis
+    await Promise.all(chunks.map(async (chunkText, index) => {
+      const chunkIdx = index + 1;
       let aiMetadata: any = { topic: 'Extracted Topic', subtopic: 'Subtopic' };
+      
       if (ai) {
         try {
           const response = await ai.models.generateContent({
             model: "gemini-3.5-flash",
-            contents: `Analyze this text chunk and provide metadata: "${chunkText}"\nProvide JSON with keys: topic, subtopic, definitions, concepts, keywords, examples, formulae, people, dates, events, difficulty, learningObjectives, prerequisites, relatedConcepts, examImportance.`,
+            contents: `Analyze this text chunk and provide metadata: "${chunkText.substring(0, 1000)}"\nProvide JSON with keys: topic, subtopic, definitions, concepts, keywords, examples, formulae, people, dates, events, difficulty, learningObjectives, prerequisites, relatedConcepts, examImportance.`,
             config: { responseMimeType: "application/json" }
           }) as any;
           if (response && response.text) {
@@ -123,7 +123,7 @@ async function processDocument(docId: string, workspaceId: string, userId: strin
         
       if (chunkError || !chunkData) {
          console.error('Failed to create chunk:', chunkError);
-         continue;
+         return;
       }
       
       const chunkId = chunkData.id;
@@ -150,7 +150,7 @@ async function processDocument(docId: string, workspaceId: string, userId: strin
           });
         }
       }
-    }
+    }));
 
     await updateJob('processing', 90, 'Generating summaries');
 
@@ -300,7 +300,7 @@ knowledgeRouter.post('/search', async (req, res) => {
       const scored = (data || []).map((row: any) => {
         const setA = new Set(query.toLowerCase().split(' '));
         const setB = new Set((row.text as string || "").toLowerCase().split(' '));
-        const intersection = new Set([...setA].filter(x => setB.has(x)));
+        const intersection = new Set([...setA].filter((x: string) => setB.has(x)));
         const score = intersection.size / (setA.size + setB.size - intersection.size);
         return { ...row, score };
       });

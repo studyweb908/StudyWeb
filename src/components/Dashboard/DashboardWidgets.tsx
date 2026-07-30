@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronLeft, ChevronRight, Sparkles, Brain, Bot, CheckSquare, Check, Circle, BookOpen, FileText, Image as ImageIcon, ArrowRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Sparkles, Brain, Bot, CheckSquare, Check, Circle, BookOpen, FileText, Image as ImageIcon, ArrowRight, Video, Music, Globe } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // -----------------------------------------
@@ -245,15 +245,53 @@ export function AIInsightsCard() {
 // -----------------------------------------
 // 4. Recent Study Materials
 // -----------------------------------------
-export function RecentStudyMaterials() {
-  const materials = [
-    { id: '1', name: 'Biology Notes.pdf', type: 'pdf', icon: FileText, color: 'text-slate-700 dark:text-slate-300', bg: 'bg-slate-100 dark:bg-slate-800' },
-    { id: '2', name: 'child.jpg', type: 'image', icon: ImageIcon, color: 'text-slate-700 dark:text-slate-300', bg: 'bg-slate-100 dark:bg-slate-800' },
-    { id: '3', name: 'Cell Structure.pdf', type: 'pdf', icon: FileText, color: 'text-slate-700 dark:text-slate-300', bg: 'bg-slate-100 dark:bg-slate-800' },
-  ];
+import { Workspace } from './WorkspaceTypes';
 
-  const handleGenerateQuiz = (fileName: string) => {
-    console.log("Generate quiz:", fileName);
+export function RecentStudyMaterials({ 
+  workspaces = [],
+  setActiveWorkspace,
+  setActiveTab
+}: { 
+  workspaces?: Workspace[],
+  setActiveWorkspace?: (workspace: Workspace | null) => void,
+  setActiveTab?: (tab: string) => void
+}) {
+  // Aggregate all files from all workspaces
+  const allFiles = workspaces.flatMap(w => w.files ? w.files.map(f => ({ ...f, workspaceId: w.id })) : []);
+  // Sort files by upload date descending
+  allFiles.sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime());
+  // Take top 3 recent files
+  const recentFiles = allFiles.slice(0, 3);
+
+  const getFileStyle = (type: string) => {
+    switch (type) {
+      case 'pdf': return { icon: FileText, color: 'text-rose-500', bg: 'bg-rose-50 dark:bg-rose-950/40' };
+      case 'video': return { icon: Video, color: 'text-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/40' };
+      case 'audio': return { icon: Music, color: 'text-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/40' };
+      case 'url': return { icon: Globe, color: 'text-blue-500', bg: 'bg-blue-50 dark:bg-blue-950/40' };
+      case 'image': return { icon: ImageIcon, color: 'text-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/40' };
+      default: return { icon: FileText, color: 'text-slate-500', bg: 'bg-slate-100 dark:bg-slate-800' };
+    }
+  };
+
+  const handleGenerateQuiz = (workspaceId: string) => {
+    if (setActiveWorkspace && setActiveTab) {
+      const workspace = workspaces.find(w => w.id === workspaceId);
+      if (workspace) {
+        setActiveWorkspace(workspace);
+        setActiveTab('quiz-center');
+      }
+    }
+  };
+
+  const handleOpenFile = (workspaceId: string) => {
+    if (setActiveWorkspace && setActiveTab) {
+      const workspace = workspaces.find(w => w.id === workspaceId);
+      if (workspace) {
+        setActiveWorkspace(workspace);
+        setActiveTab('pdf-chat');
+      }
+    }
   };
 
   return (
@@ -262,19 +300,26 @@ export function RecentStudyMaterials() {
 
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-extrabold text-base text-slate-900 dark:text-white">Recent Study Materials</h3>
-        <button className="text-xs text-slate-600 dark:text-slate-400 font-bold hover:underline cursor-pointer">
+        <button 
+          onClick={() => setActiveTab && setActiveTab('workspaces')}
+          className="text-xs text-slate-600 dark:text-slate-400 font-bold hover:underline cursor-pointer"
+        >
           View All
         </button>
       </div>
       
-      {materials.length > 0 ? (
+      {recentFiles.length > 0 ? (
         <div className="space-y-3 flex-1">
-          {materials.map((file) => {
-            const Icon = file.icon;
+          {recentFiles.map((file) => {
+            const { icon: Icon, color, bg } = getFileStyle(file.type);
             return (
-              <div key={file.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-[16px] hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border border-transparent hover:border-slate-100 dark:hover:border-slate-700/50 group/item gap-3 sm:gap-2 cursor-pointer min-w-0">
+              <div 
+                key={file.id} 
+                onClick={() => handleOpenFile(file.workspaceId)}
+                className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-[16px] hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border border-transparent hover:border-slate-100 dark:hover:border-slate-700/50 group/item gap-3 sm:gap-2 cursor-pointer min-w-0"
+              >
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${file.bg} ${file.color}`}>
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${bg} ${color}`}>
                     <Icon className="w-5 h-5 group-hover/item:scale-110 transition-transform duration-300" />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -288,7 +333,7 @@ export function RecentStudyMaterials() {
                   whileTap={{ scale: 0.95 }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleGenerateQuiz(file.name);
+                    handleGenerateQuiz(file.workspaceId);
                   }}
                   className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 hover:shadow-sm text-xs font-bold transition-all cursor-pointer self-start sm:self-auto"
                 >
