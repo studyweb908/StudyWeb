@@ -268,9 +268,9 @@ export default function WorkspaceFlashcards({
             <BrainCircuit className="w-6 h-6 animate-pulse" />
           </div>
           <div className="space-y-1.5">
-            <h4 className="font-extrabold text-slate-800 dark:text-slate-200 text-sm">No flashcards in this workspace yet</h4>
-            <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
-              Unlock active recall with NotebookLM! Let the AI parse your workspace notes and documents to build cards automatically.
+            <h4 className="font-bold text-slate-800 dark:text-slate-200 text-sm">You haven't created any flashcards yet.</h4>
+            <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
+              Let AI analyze your study materials and generate practice flashcards in seconds.
             </p>
           </div>
           <button
@@ -448,8 +448,8 @@ export default function WorkspaceFlashcards({
                   </div>
 
                   {totalMaterials === 0 && (
-                    <div className="p-3 bg-amber-500/5 border border-amber-500/10 rounded-2xl text-amber-600 dark:text-amber-400 text-[10px] font-bold leading-normal">
-                      Note: You don't have any study documents or notes uploaded yet. The AI will generate high-quality general-purpose recall study flashcards.
+                    <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-700 dark:text-amber-400 text-xs font-medium leading-relaxed">
+                      You haven't uploaded any study materials yet. The AI will generate general knowledge flashcards instead.
                     </div>
                   )}
 

@@ -247,7 +247,9 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
         {files.length === 0 ? (
           <div className="py-8 text-center border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl bg-slate-50/50 dark:bg-slate-900/50">
             <FileText className="w-6 h-6 text-slate-400 dark:text-slate-500 mx-auto mb-2" />
-            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">No materials uploaded yet.</p>
+            <p className="text-[13px] font-medium text-slate-500 dark:text-slate-400">
+              Nothing here yet. Start by uploading your first study material.
+            </p>
             <button 
               onClick={() => setActiveWorkspaceTab('library')}
               className="mt-3 px-4 py-2 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 text-[11px] font-bold rounded-lg cursor-pointer transition-colors"

@@ -379,10 +379,10 @@ export default function WorkspaceNotebook({ workspace, onAddNote, onRemoveNote }
           ) : (
             <div className="text-center py-8 text-slate-400 dark:text-slate-500">
               <FileText className="w-8 h-8 mx-auto mb-2 text-slate-300 dark:text-slate-700 opacity-60" />
-              <p className="text-xs font-semibold">No notes found</p>
+              <p className="text-[13px] font-medium text-slate-500 dark:text-slate-400">Nothing here yet.</p>
               {searchQuery && (
-                <p className="text-[10px] mt-1 text-slate-400 max-w-[140px] mx-auto">
-                  No matching titles or content keywords.
+                <p className="text-[11px] mt-1 text-slate-400 max-w-[140px] mx-auto">
+                  We couldn't find any notes matching your search.
                 </p>
               )}
             </div>
@@ -473,7 +473,7 @@ export default function WorkspaceNotebook({ workspace, onAddNote, onRemoveNote }
           </div>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center">
-            <p className="text-slate-400 font-semibold">Select a study note from sidebar or create a new one.</p>
+            <p className="text-[13px] text-slate-500 dark:text-slate-400 font-medium">Select a note to view or create a new one to get started.</p>
           </div>
         )}
       </div>

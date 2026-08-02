@@ -20,15 +20,15 @@ import {
 import { useThemeMode } from '../../hooks/useThemeMode';
 
 const tabLabels: Record<string, string> = {
-  'dashboard': 'Overview',
-  'ai-tutor': 'AI Tutor',
+  'dashboard': 'Home',
+  'ai-tutor': 'Your AI Tutor',
   'pdf-chat': 'PDF Chat',
   'study-session': 'Study Session',
   'study-planner': 'Study Planner',
   'subjects': 'Subjects',
-  'notes': 'Notes',
+  'notes': 'Your AI Study Notes',
   'flashcards': 'Flashcards',
-  'quiz-center': 'Quiz Center',
+  'quiz-center': 'Create Practice Quizzes in Seconds',
   'resources': 'Resources',
   'analytics': 'Analytics',
   'achievements': 'Achievements',

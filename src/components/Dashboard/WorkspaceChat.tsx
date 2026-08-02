@@ -38,6 +38,27 @@ interface Message {
   }>;
 }
 
+const CopySnippetButton = ({ text }: { text: string }) => {
+  const [copied, setCopied] = useState(false);
+  
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button 
+      onClick={handleCopy}
+      className="p-1 hover:bg-slate-700/50 rounded transition-colors text-slate-400 hover:text-slate-200 ml-auto shrink-0 cursor-pointer"
+      title="Copy snippet"
+    >
+      {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+    </button>
+  );
+};
+
 export default function WorkspaceChat({ workspace, onUpdateWorkspace }: WorkspaceChatProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -475,24 +496,29 @@ export default function WorkspaceChat({ workspace, onUpdateWorkspace }: Workspac
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, y: 6, scale: 0.95 }}
                                 transition={{ duration: 0.15, ease: 'easeOut' }}
-                                className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-3 bg-slate-900/95 dark:bg-slate-950/95 text-white rounded-xl shadow-xl border border-slate-850 dark:border-slate-800 backdrop-blur-md pointer-events-none z-[100] text-[11px] text-left leading-relaxed flex flex-col gap-1.5"
+                                className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-3 bg-slate-900/95 dark:bg-slate-950/95 text-white rounded-xl shadow-xl border border-slate-850 dark:border-slate-800 backdrop-blur-md z-[100] text-[11px] text-left leading-relaxed flex flex-col gap-1.5 cursor-default"
                               >
                                 <div className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-1.5 mb-1 shrink-0">
                                   <div className="flex items-center gap-1.5 min-w-0">
                                     <FileText className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                                     <span className="font-extrabold text-[10px] text-slate-200 truncate">{cite.sourceName}</span>
                                   </div>
-                                  {cite.page !== undefined && (
-                                    <span className="font-bold text-[8px] text-amber-400 font-mono bg-amber-500/10 px-1 py-0.5 rounded uppercase tracking-wider">
-                                      Page {cite.page}
-                                    </span>
-                                  )}
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    {cite.page !== undefined && (
+                                      <span className="font-bold text-[8px] text-amber-400 font-mono bg-amber-500/10 px-1 py-0.5 rounded uppercase tracking-wider">
+                                        Page {cite.page}
+                                      </span>
+                                    )}
+                                    <CopySnippetButton text={cite.quote} />
+                                  </div>
                                 </div>
                                 <p className="italic font-medium text-slate-300 leading-normal line-clamp-3 relative pl-2 border-l-2 border-indigo-500">
                                   "{cite.quote}"
                                 </p>
-                                <div className="text-[9px] text-slate-500 mt-0.5 font-bold flex items-center gap-1">
-                                  <span>Click to inspect full citation</span>
+                                <div 
+                                  className="text-[10px] text-indigo-400 mt-1 font-bold flex items-center gap-1 cursor-pointer hover:text-indigo-300 transition-colors w-fit"
+                                >
+                                  <span>View Source</span>
                                   <span>&rarr;</span>
                                 </div>
                                 {/* Triangle arrow */}

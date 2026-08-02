@@ -27,7 +27,8 @@ import {
   Plus,
   Trash2,
   FileText,
-  X
+  X,
+  Copy
 } from 'lucide-react';
 import { useMicrophoneWaveform } from '../../hooks/useMicrophoneWaveform';
 
@@ -44,6 +45,158 @@ interface Message {
   source?: string;
 }
 
+const CopySnippetButton = ({ text }: { text: string }) => {
+  const [copied, setCopied] = useState(false);
+  
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button 
+      onClick={handleCopy}
+      className="p-1 hover:bg-slate-700/50 rounded transition-colors text-slate-400 hover:text-slate-200 ml-auto shrink-0"
+      title="Copy snippet"
+    >
+      {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+    </button>
+  );
+};
+
+function parseTextWithHighlights(
+  text: string,
+  msgId: string,
+  citations: Message['citations'] | undefined,
+  hoveredCitation: any,
+  setHoveredCitation: (cite: any) => void,
+  setActiveCitation: (cite: any) => void
+) {
+  if (!citations || citations.length === 0) {
+    return <span dangerouslySetInnerHTML={{ __html: text.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>') }} />;
+  }
+
+  const regex = /<cite id="(\d+)">([\s\S]*?)<\/cite>|\[(\d+)\]/g;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match;
+
+  const renderTooltip = (citeId: string, cite: any) => (
+    <AnimatePresence>
+      {hoveredCitation?.id === citeId && (
+        <motion.div
+          initial={{ opacity: 0, y: 10, scale: 0.95 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 6, scale: 0.95 }}
+          transition={{ duration: 0.15, ease: 'easeOut' }}
+          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-3 bg-slate-900/95 dark:bg-slate-950/95 text-white rounded-xl shadow-xl border border-slate-850 dark:border-slate-800 backdrop-blur-md z-[100] text-[11px] text-left leading-relaxed flex flex-col gap-1.5 cursor-default"
+        >
+          <div className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-1.5 mb-1 shrink-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <FileText className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+              <span className="font-extrabold text-[10px] text-slate-200 truncate">{cite.sourceName}</span>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              {cite.page !== undefined && (
+                <span className="font-bold text-[8px] text-amber-400 font-mono bg-amber-500/10 px-1 py-0.5 rounded uppercase tracking-wider">
+                  Page {cite.page}
+                </span>
+              )}
+              <CopySnippetButton text={cite.quote} />
+            </div>
+          </div>
+          <p className="italic font-medium text-slate-300 leading-normal line-clamp-3 relative pl-2 border-l-2 border-indigo-500">
+            "{cite.quote}"
+          </p>
+          <div 
+            className="text-[10px] text-indigo-400 mt-1 font-bold flex items-center gap-1 cursor-pointer hover:text-indigo-300 transition-colors w-fit"
+            onClick={(e) => { e.stopPropagation(); setActiveCitation(cite); }}
+          >
+            <span>View Source</span>
+            <span>&rarr;</span>
+          </div>
+          <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-slate-900/95 dark:border-t-slate-950/95" />
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
+  while ((match = regex.exec(text)) !== null) {
+    const preText = text.substring(lastIndex, match.index);
+    if (preText) {
+      parts.push(<span key={`pre-${match.index}`} dangerouslySetInnerHTML={{ __html: preText.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>') }} />);
+    }
+
+    if (match[1]) {
+      // <cite id="...">
+      const citeIdx = parseInt(match[1], 10);
+      const citeContent = match[2];
+      const citeData = citations[citeIdx];
+      const citeId = `${msgId}-inline-${citeIdx}-${match.index}`;
+
+      if (citeData) {
+        parts.push(
+          <span 
+            key={`cite-${match.index}`}
+            className="bg-amber-500/20 text-amber-900 dark:text-amber-200 px-1 rounded cursor-pointer transition-colors hover:bg-amber-500/30 border-b border-amber-500/30 inline-block my-0.5 relative z-10"
+            onMouseEnter={() => setHoveredCitation({
+              id: citeId,
+              sourceName: citeData.sourceName,
+              page: citeData.page,
+              quote: citeData.quote
+            })}
+            onMouseLeave={() => setHoveredCitation(null)}
+            onClick={() => setActiveCitation(citeData)}
+          >
+            <span dangerouslySetInnerHTML={{ __html: citeContent.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>') }} />
+            {renderTooltip(citeId, citeData)}
+          </span>
+        );
+      } else {
+        parts.push(<span key={`cite-${match.index}`}>{citeContent}</span>);
+      }
+    } else if (match[3]) {
+      // [1] format
+      const citeIdx = parseInt(match[3], 10) - 1;
+      const citeData = citations[citeIdx];
+      const citeId = `${msgId}-inline-${citeIdx}-${match.index}`;
+
+      if (citeData) {
+        parts.push(
+          <span 
+            key={`bracket-${match.index}`}
+            className="inline-flex items-center justify-center bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-bold text-[10px] rounded px-1.5 mx-0.5 cursor-pointer transition-colors relative z-10"
+            onMouseEnter={() => setHoveredCitation({
+              id: citeId,
+              sourceName: citeData.sourceName,
+              page: citeData.page,
+              quote: citeData.quote
+            })}
+            onMouseLeave={() => setHoveredCitation(null)}
+            onClick={() => setActiveCitation(citeData)}
+          >
+            [{match[3]}]
+            {renderTooltip(citeId, citeData)}
+          </span>
+        );
+      } else {
+        parts.push(<span key={`bracket-${match.index}`}>[{match[3]}]</span>);
+      }
+    }
+
+    lastIndex = regex.lastIndex;
+  }
+
+  const postText = text.substring(lastIndex);
+  if (postText) {
+    parts.push(<span key={`post-${lastIndex}`} dangerouslySetInnerHTML={{ __html: postText.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>') }} />);
+  }
+
+  return <>{parts}</>;
+}
+
 export default function AITutorWorkspace() {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -55,6 +208,9 @@ export default function AITutorWorkspace() {
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isThinking, setIsThinking] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSemanticSearch, setShowSemanticSearch] = useState(false);
   const [deepResearch, setDeepResearch] = useState(false);
   const [citationMode, setCitationMode] = useState(true);
   const [attachedFiles, setAttachedFiles] = useState<{ name: string; type: string; size?: string }[]>([]);
@@ -202,6 +358,74 @@ export default function AITutorWorkspace() {
     { title: "Generate Quiz", desc: "Create a 3-question test on the French Revolution.", text: "Generate a custom 3-question multiple-choice quiz on the main causes of the French Revolution. Include answers and clear explanations." }
   ];
 
+  const handleSemanticSearch = async (queryToSearch: string) => {
+    if (!queryToSearch.trim()) return;
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      sender: 'user',
+      text: `Search documents for: "${queryToSearch}"`,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    setMessages(prev => [...prev, userMsg]);
+    setSearchQuery('');
+    setIsSearching(true);
+    setShowSemanticSearch(false);
+
+    try {
+      const response = await fetch("/api/knowledge/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: queryToSearch,
+          workspaceId: "local-workspace"
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Search request failed");
+      }
+      
+      const data = await response.json();
+      
+      const formattedResults = data.results?.map((res: any, idx: number) => {
+        return `<cite id="${idx}">Excerpt from ${res.source_type || 'Document'}: ${res.text || res.content}</cite>`;
+      }).join('\n\n') || 'No excerpts found.';
+
+      const aiMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        sender: 'ai',
+        text: `Here are the semantic search results for "${queryToSearch}":\n\n${formattedResults}`,
+        citations: data.results?.map((res: any) => ({
+          sourceName: res.source_type || 'Workspace Document',
+          quote: res.text || res.content || 'No content preview available'
+        })) || [],
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      
+      setMessages(prev => [...prev, aiMsg]);
+    } catch (err: any) {
+      console.warn("Semantic search failed:", err);
+      // Local simulation fallback
+      const mockMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        sender: 'ai',
+        text: `Here are the semantic search results for "${queryToSearch}":\n\n(Simulated fallback due to database connection issue)\n\n<cite id="0">Gregor Mendel's law of segregation states that the two alleles for each gene separate during gamete formation.</cite>`,
+        citations: [
+          {
+            sourceName: "AP Biology - Genetics.pdf",
+            quote: `Extracted chunk matching "${queryToSearch}": Gregor Mendel's law of segregation states that the two alleles for each gene separate during gamete formation.`
+          }
+        ],
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setMessages(prev => [...prev, mockMsg]);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
   const handleSend = async (textToSend: string) => {
     if (!textToSend.trim() && attachedFiles.length === 0) return;
 
@@ -256,22 +480,22 @@ export default function AITutorWorkspace() {
       let mockCitations: Array<{ sourceName: string; page?: number; quote: string }> = [];
       
       if (textToSend.toLowerCase().includes('quantum')) {
-        aiResponseText = "### Quantum Physics Made Simple 🌌\n\nImagine the universe is made of tiny, microscopic Lego blocks. In our normal world, a Lego brick is either red or blue. But in the quantum world, **Lego blocks can be both red and blue at the absolute same time** until you look at them! This is called **Superposition**.\n\nHere are the 3 big rules of the quantum playground:\n1. **Superposition**: Things can exist in multiple states or places simultaneously.\n2. **Quantum Entanglement**: Two tiny blocks can become 'best friends' and mirror each other instantly, even if they are on opposite sides of the universe!\n3. **The Observer Effect**: Simply looking at or measuring a quantum block changes its behavior completely.\n\n*Source citation: StudyWeb Physics Library Vol 2, Page 45*";
+        aiResponseText = "### Quantum Physics Made Simple 🌌\n\nImagine the universe is made of tiny, microscopic Lego blocks. In our normal world, a Lego brick is either red or blue. But in the quantum world, **Lego blocks can be both red and blue at the absolute same time** until you look at them! This is called **Superposition** [1].\n\nHere are the 3 big rules of the quantum playground:\n1. **Superposition**: Things can exist in multiple states or places simultaneously.\n2. **Quantum Entanglement**: Two tiny blocks can become 'best friends' and mirror each other instantly, even if they are on opposite sides of the universe!\n3. **The Observer Effect**: Simply looking at or measuring a quantum block changes its behavior completely.";
         mockCitations = [
           { sourceName: "StudyWeb Physics Library Vol 2", page: 45, quote: "Things can exist in multiple states or places simultaneously until they are actively measured." }
         ];
       } else if (textToSend.toLowerCase().includes('limit')) {
-        aiResponseText = "### Step-by-Step Math Solution 📐\n\nWe need to find:\n$$\\lim_{x \\to 0} \\frac{\\sin(x)}{x}$$\n\n**Step 1: Direct Substitution**\nSubstitute $x = 0$ into the expression:\n$$\\frac{\\sin(0)}{0} = \\frac{0}{0}$$\nThis is an **indeterminate form** (0/0).\n\n**Step 2: Apply L'Hôpital's Rule**\nSince the limit results in $0/0$, we can take the derivative of the numerator and the denominator separately:\n- Derivative of $\\sin(x)$ is $\\cos(x)$\n- Derivative of $x$ is $1$\n\n**Step 3: Evaluate the New Limit**\n$$\\lim_{x \\to 0} \\frac{\\cos(x)}{1} = \\frac{\\cos(0)}{1} = \\frac{1}{1} = 1$$\n\nTherefore, the limit is **1**.";
+        aiResponseText = "### Step-by-Step Math Solution 📐\n\nWe need to find:\n$$\\lim_{x \\to 0} \\frac{\\sin(x)}{x}$$\n\n**Step 1: Direct Substitution**\nSubstitute $x = 0$ into the expression:\n$$\\frac{\\sin(0)}{0} = \\frac{0}{0}$$\nThis is an **indeterminate form** (0/0).\n\n**Step 2: Apply L'Hôpital's Rule**\nSince the limit results in $0/0$, we can take the derivative of the numerator and the denominator separately [1]:\n- Derivative of $\\sin(x)$ is $\\cos(x)$\n- Derivative of $x$ is $1$\n\n**Step 3: Evaluate the New Limit**\n$$\\lim_{x \\to 0} \\frac{\\cos(x)}{1} = \\frac{\\cos(0)}{1} = \\frac{1}{1} = 1$$\n\nTherefore, the limit is **1**.";
         mockCitations = [
           { sourceName: "Calculus Guide Book", page: 12, quote: "Since the limit results in 0/0, we apply L'Hopital's rule by evaluating derivative quotients." }
         ];
       } else if (textToSend.toLowerCase().includes('cellular') || textToSend.toLowerCase().includes('respiration')) {
-        aiResponseText = "### Cellular Respiration Breakdown 🔋\n\nCellular respiration is how cells turn glucose (sugar) into ATP (usable biological energy). Think of it like a power plant converting raw coal into electricity!\n\nHere are the 3 major stages:\n1. **Glycolysis** (takes place in cytoplasm): Breaks glucose into pyruvate, yielding **2 ATP**.\n2. **Krebs Cycle (Citric Acid Cycle)** (takes place in mitochondria matrix): Extracts electrons, yielding **2 ATP** and releasing CO2.\n3. **Electron Transport Chain (ETC)** (takes place in mitochondria inner membrane): Uses oxygen and high-energy electrons to generate a massive power surge of **28 to 32 ATP**.\n\n*Key takeaway:* Mitochondria is truly the powerhouse of the cell because that's where the ETC yields the most ATP!";
+        aiResponseText = "### Cellular Respiration Breakdown 🔋\n\nCellular respiration is how cells turn glucose (sugar) into ATP (usable biological energy). Think of it like a power plant converting raw coal into electricity!\n\nHere are the 3 major stages:\n1. **Glycolysis** (takes place in cytoplasm): Breaks glucose into pyruvate, yielding **2 ATP**.\n2. **Krebs Cycle (Citric Acid Cycle)** (takes place in mitochondria matrix): Extracts electrons, yielding **2 ATP** and releasing CO2.\n3. **Electron Transport Chain (ETC)** (takes place in mitochondria inner membrane): Uses oxygen and high-energy electrons to generate a massive power surge of **28 to 32 ATP** [1].\n\n*Key takeaway:* Mitochondria is truly the powerhouse of the cell because that's where the ETC yields the most ATP!";
         mockCitations = [
           { sourceName: "Biology Syllabus Summary", page: 8, quote: "Glycolysis yields 2 ATP in the cytoplasm, Krebs yields 2 ATP in the matrix, and Electron Transport Chain yields 28-32 ATP." }
         ];
       } else if (textToSend.toLowerCase().includes('quiz') || textToSend.toLowerCase().includes('revolution')) {
-        aiResponseText = "### French Revolution Mini-Quiz 🇫🇷\n\nHere are 3 custom practice questions to test your comprehension:\n\n**Question 1:** Which social class bore the greatest tax burden prior to the French Revolution?\n- A) The First Estate (Clergy)\n- B) The Second Estate (Nobility)\n- C) The Third Estate (Commoners)\n*Correct Answer: **C**. The Third Estate made up 98% of the population and paid virtually all taxes.*\n\n**Question 2:** What event on July 14, 1789, is celebrated as the start of the Revolution?\n- A) The Execution of Louis XVI\n- B) The Storming of the Bastille\n- C) The Tennis Court Oath\n*Correct Answer: **B**. This represented the collapse of royal tyranny.*\n\nWould you like me to add these questions to your official StudyWeb Quiz tracker?";
+        aiResponseText = "### French Revolution Mini-Quiz 🇫🇷\n\nHere are 3 custom practice questions to test your comprehension:\n\n**Question 1:** Which social class bore the greatest tax burden prior to the French Revolution?\n- A) The First Estate (Clergy)\n- B) The Second Estate (Nobility)\n- C) The Third Estate (Commoners)\n*Correct Answer: **C**. The Third Estate made up 98% of the population and paid virtually all taxes.*\n\n**Question 2:** What event on July 14, 1789, is celebrated as the start of the Revolution? [1]\n- A) The Execution of Louis XVI\n- B) The Storming of the Bastille\n- C) The Tennis Court Oath\n*Correct Answer: **B**. This represented the collapse of royal tyranny.*\n\nWould you like me to add these questions to your official StudyWeb Quiz tracker?";
         mockCitations = [
           { sourceName: "French History Compendium", page: 114, quote: "The storming of the Bastille on July 14, 1789 marked the collapse of absolute royal authority." }
         ];
@@ -577,6 +801,20 @@ Let me know if you would like me to clarify any specific point or provide an int
               <div className={`w-2 h-2 rounded-full ${deepResearch ? 'bg-indigo-600 animate-ping' : 'bg-slate-300'}`} />
               <span>Deep Research</span>
             </button>
+            
+            {/* Semantic Search Toggle */}
+            <button
+              onClick={() => setShowSemanticSearch(prev => !prev)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
+                showSemanticSearch
+                  ? 'bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 border-indigo-200' 
+                  : 'bg-white dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
+              }`}
+              title="Semantic Search through workspace documents"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span>Search Docs</span>
+            </button>
 
             {/* Citation Mode */}
             <button
@@ -627,7 +865,7 @@ Let me know if you would like me to clarify any specific point or provide an int
                           <ul key={idx} className="list-disc pl-5 space-y-2 marker:text-slate-400">
                             {paragraph.split('\n').map((li, liIdx) => {
                               const cleanedLi = li.replace('-', '').trim();
-                              return <li key={liIdx} dangerouslySetInnerHTML={{ __html: cleanedLi.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>') }} />;
+                              return <li key={liIdx}>{parseTextWithHighlights(cleanedLi, msg.id, msg.citations, hoveredCitation, setHoveredCitation, setActiveCitation)}</li>;
                             })}
                           </ul>
                         );
@@ -635,7 +873,7 @@ Let me know if you would like me to clarify any specific point or provide an int
                       if (paragraph.startsWith('$$')) {
                         return <div key={idx} className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl font-mono text-[13px] overflow-x-auto text-slate-600 dark:text-slate-400 border border-slate-200/50 dark:border-slate-800/50">{paragraph.replace(/\$\$/g, '')}</div>;
                       }
-                      return <p key={idx} dangerouslySetInnerHTML={{ __html: paragraph.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>') }} />;
+                      return <p key={idx}>{parseTextWithHighlights(paragraph, msg.id, msg.citations, hoveredCitation, setHoveredCitation, setActiveCitation)}</p>;
                     })}
                   </div>
 
@@ -672,24 +910,30 @@ Let me know if you would like me to clarify any specific point or provide an int
                                   animate={{ opacity: 1, y: 0, scale: 1 }}
                                   exit={{ opacity: 0, y: 6, scale: 0.95 }}
                                   transition={{ duration: 0.15, ease: 'easeOut' }}
-                                  className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-3 bg-slate-900/95 dark:bg-slate-950/95 text-white rounded-xl shadow-xl border border-slate-850 dark:border-slate-800 backdrop-blur-md pointer-events-none z-[100] text-[11px] text-left leading-relaxed flex flex-col gap-1.5"
+                                  className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-3 bg-slate-900/95 dark:bg-slate-950/95 text-white rounded-xl shadow-xl border border-slate-850 dark:border-slate-800 backdrop-blur-md z-[100] text-[11px] text-left leading-relaxed flex flex-col gap-1.5 cursor-default"
                                 >
                                   <div className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-1.5 mb-1 shrink-0">
                                     <div className="flex items-center gap-1.5 min-w-0">
                                       <FileText className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                                       <span className="font-extrabold text-[10px] text-slate-200 truncate">{cite.sourceName}</span>
                                     </div>
-                                    {cite.page !== undefined && (
-                                      <span className="font-bold text-[8px] text-amber-400 font-mono bg-amber-500/10 px-1 py-0.5 rounded uppercase tracking-wider">
-                                        Page {cite.page}
-                                      </span>
-                                    )}
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      {cite.page !== undefined && (
+                                        <span className="font-bold text-[8px] text-amber-400 font-mono bg-amber-500/10 px-1 py-0.5 rounded uppercase tracking-wider">
+                                          Page {cite.page}
+                                        </span>
+                                      )}
+                                      <CopySnippetButton text={cite.quote} />
+                                    </div>
                                   </div>
                                   <p className="italic font-medium text-slate-300 leading-normal line-clamp-3 relative pl-2 border-l-2 border-indigo-500">
                                     "{cite.quote}"
                                   </p>
-                                  <div className="text-[9px] text-slate-500 mt-0.5 font-bold flex items-center gap-1">
-                                    <span>Click to inspect full citation</span>
+                                  <div 
+                                    className="text-[10px] text-indigo-400 mt-1 font-bold flex items-center gap-1 cursor-pointer hover:text-indigo-300 transition-colors w-fit"
+                                    onClick={(e) => { e.stopPropagation(); setActiveCitation(cite); }}
+                                  >
+                                    <span>View Source</span>
                                     <span>&rarr;</span>
                                   </div>
                                   {/* Triangle arrow */}
@@ -760,7 +1004,7 @@ Let me know if you would like me to clarify any specific point or provide an int
         )}
 
         {/* Message Input & Attachment Dock */}
-        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900">
+        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 relative">
           {/* Render attached files summary inside input container */}
           <AnimatePresence>
             {attachedFiles.length > 0 && (
@@ -777,6 +1021,45 @@ Let me know if you would like me to clarify any specific point or provide an int
                     <button onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))} className="text-slate-400 hover:text-slate-600 dark:hover:text-white font-bold ml-1 text-[10px]">&times;</button>
                   </div>
                 ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Semantic Search UI Overlay */}
+          <AnimatePresence>
+            {showSemanticSearch && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                className="absolute bottom-full left-0 w-full mb-3 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-500/30 rounded-2xl p-3 shadow-lg flex items-center gap-3 z-10"
+              >
+                <div className="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-500/10 flex items-center justify-center shrink-0">
+                  <Search className="w-4 h-4 text-indigo-500" />
+                </div>
+                <form 
+                  onSubmit={(e) => {
+                     e.preventDefault();
+                     handleSemanticSearch(searchQuery);
+                  }}
+                  className="flex-1 flex items-center gap-2"
+                >
+                  <input 
+                    type="text"
+                    autoFocus
+                    placeholder="Semantic search through workspace notes & docs..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-transparent text-sm focus:outline-none text-slate-800 dark:text-white placeholder-slate-400"
+                  />
+                  <button type="submit" disabled={isSearching || !searchQuery.trim()} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-50 flex items-center gap-1 cursor-pointer">
+                    {isSearching ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                    <span>{isSearching ? 'Searching...' : 'Search'}</span>
+                  </button>
+                </form>
+                <button type="button" onClick={() => setShowSemanticSearch(false)} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl cursor-pointer transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
               </motion.div>
             )}
           </AnimatePresence>
@@ -1147,52 +1430,88 @@ Let me know if you would like me to clarify any specific point or provide an int
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 15 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 w-full max-w-lg rounded-2xl shadow-xl overflow-hidden"
+              className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 w-full max-w-4xl max-h-[85vh] rounded-2xl shadow-xl flex flex-col overflow-hidden"
             >
-              <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-950/20">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                    <FileText className="w-4 h-4" />
+              <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-950/20 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                    <BookOpen className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="font-extrabold text-xs text-slate-900 dark:text-white truncate max-w-[280px]">
+                    <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
                       {activeCitation.sourceName}
                     </h4>
                     {activeCitation.page !== undefined && (
-                      <p className="text-[10px] text-slate-400 font-bold">Page {activeCitation.page}</p>
+                      <p className="text-[11px] text-slate-500 font-bold mt-0.5">Page {activeCitation.page}</p>
                     )}
                   </div>
                 </div>
                 <button
                   onClick={() => setActiveCitation(null)}
-                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-lg transition-colors cursor-pointer"
+                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-lg transition-colors cursor-pointer"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <div className="p-5 space-y-4">
-                <div className="space-y-1.5">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Verbatim Reference Passage:</span>
-                  <div className="p-4 rounded-xl bg-amber-500/5 border border-amber-500/15 text-slate-700 dark:text-slate-300 text-sm leading-relaxed font-medium italic relative">
-                    <span className="absolute -top-2 left-2 text-2xl font-serif text-amber-300 select-none">“</span>
-                    <p className="relative z-10 pl-2">{activeCitation.quote}</p>
-                    <span className="absolute -bottom-6 right-2 text-2xl font-serif text-amber-300 select-none">”</span>
+              <div className="flex flex-col md:flex-row flex-1 min-h-0">
+                {/* Left side: Context details */}
+                <div className="w-full md:w-1/3 border-b md:border-b-0 md:border-r border-slate-100 dark:border-slate-800 p-6 bg-slate-50/30 dark:bg-slate-900/50 flex flex-col gap-6 overflow-y-auto">
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <FileText className="w-3 h-3" />
+                      Extracted Excerpt
+                    </span>
+                    <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-slate-800 dark:text-slate-200 text-sm leading-relaxed font-medium italic relative shadow-inner">
+                      <span className="absolute -top-2 left-2 text-3xl font-serif text-amber-500/30 select-none">"</span>
+                      <p className="relative z-10 pl-2">{activeCitation.quote}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="text-[11px] text-slate-500 font-medium leading-relaxed bg-slate-100 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700/50 mt-auto">
+                    <strong className="block text-slate-700 dark:text-slate-300 mb-1">Source Verification</strong>
+                    This snippet was dynamically extracted using semantically aligned embeddings. Review the original source document context to ensure full analytical accuracy.
                   </div>
                 </div>
 
-                <div className="text-[11px] text-slate-400 dark:text-slate-500 font-medium leading-relaxed">
-                  This segment was dynamically extracted using semantically aligned RAG (Retrieval-Augmented Generation) embeddings. Clicking citations keeps your analysis verifiable and transparent.
-                </div>
-              </div>
+                {/* Right side: PDF mock view */}
+                <div className="flex-1 bg-slate-100 dark:bg-slate-950 p-4 md:p-8 overflow-y-auto relative">
+                  <div className="max-w-2xl mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-md rounded flex flex-col min-h-full">
+                    <div className="h-10 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/50 flex items-center px-4 justify-between text-slate-400 shrink-0">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full bg-red-400/80" />
+                        <div className="w-2.5 h-2.5 rounded-full bg-amber-400/80" />
+                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-400/80" />
+                      </div>
+                      <span className="font-mono text-[10px]">{activeCitation.sourceName.split('/').pop() || 'document.pdf'}</span>
+                    </div>
+                    <div className="p-8 md:p-12 font-serif text-sm leading-loose text-slate-500 dark:text-slate-400 flex-1">
+                      <div className="space-y-4 blur-[2px] opacity-40 select-none">
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-3/4" />
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-full" />
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-5/6" />
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-full" />
+                      </div>
+                      
+                      <div className="my-8 space-y-4">
+                        <div className="text-xs font-sans text-amber-500 font-bold uppercase tracking-widest mb-2 flex items-center gap-2">
+                          <Target className="w-4 h-4" />
+                          Highlighted Match - Page {activeCitation.page || 1}
+                        </div>
+                        <div className="p-1 -mx-1 bg-amber-200/40 dark:bg-amber-500/20 text-slate-800 dark:text-slate-200 rounded">
+                          <p className="font-medium text-[15px]">{activeCitation.quote}</p>
+                        </div>
+                      </div>
 
-              <div className="px-5 py-3.5 bg-slate-50 dark:bg-slate-950/20 border-t border-slate-100 dark:border-slate-800 flex justify-end">
-                <button
-                  onClick={() => setActiveCitation(null)}
-                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm shadow-indigo-600/10 cursor-pointer"
-                >
-                  Close Reference
-                </button>
+                      <div className="space-y-4 blur-[2px] opacity-40 select-none">
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-full" />
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-4/5" />
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-full" />
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-2/3" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </motion.div>
           </motion.div>

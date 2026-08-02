@@ -614,7 +614,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
         
         {/* Dynamic Title */}
         <h3 className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight text-center mt-6 mb-5 select-none">
-          Upload Documents to <span className="bg-gradient-to-r from-teal-500 to-emerald-600 bg-clip-text text-transparent font-extrabold">Workspace</span>
+          Upload Study Material
         </h3>
 
         {/* File Picker drag & drop zone */}
@@ -626,8 +626,8 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
           <div className="flex flex-col items-center justify-center space-y-4">
             <div>
               <h4 className="font-extrabold text-sm sm:text-base text-slate-700">or drop your files</h4>
-              <p className="text-[11px] text-slate-400 font-semibold mt-1">
-                pdf, images, docs, audio, <span className="underline cursor-pointer hover:text-slate-600">and more</span>
+              <p className="text-[11px] text-slate-400 font-medium mt-2">
+                Upload your PDF, DOCX or PPT and we'll analyze it instantly.
               </p>
             </div>
 
@@ -644,10 +644,10 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
               {/* 1. Upload files button */}
               <button 
                 onClick={() => triggerUploadInput('pdf')}
-                className="px-4 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-full text-xs font-black text-slate-600 flex items-center gap-1.5 cursor-pointer shadow-sm transition-all hover:scale-[1.01] active:scale-95"
+                className="px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-[13px] font-semibold text-slate-700 flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
               >
                 <Upload className="w-4 h-4 text-slate-500" />
-                <span>Upload files</span>
+                <span>Upload Files</span>
               </button>
 
               {/* 2. Websites button */}
@@ -657,11 +657,10 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
                   setShowUrlInput(!showUrlInput);
                   setShowDriveCopyInput(false);
                 }} 
-                className={`px-4 py-2 hover:bg-slate-100 border rounded-full text-xs font-black flex items-center gap-2 cursor-pointer shadow-sm transition-all hover:scale-[1.01] active:scale-95 ${showUrlInput ? 'text-indigo-600 border-indigo-300 bg-indigo-50/40' : 'text-slate-600 border-slate-200 bg-slate-50'}`}
+                className={`px-4 py-2 hover:bg-slate-50 border rounded-lg text-[13px] font-semibold flex items-center gap-2 cursor-pointer shadow-sm transition-all ${showUrlInput ? 'text-indigo-600 border-indigo-200 bg-indigo-50/50' : 'text-slate-700 border-slate-200 bg-white'}`}
               >
                 <Link className="w-4 h-4 text-slate-500" />
-                {/* Custom Red YouTube Icon style */}
-                <span className="w-4.5 h-3 bg-red-600 rounded-[3px] flex items-center justify-center text-[6px] text-white shrink-0"><span className="scale-[0.5] ml-[0.5px]">▶</span></span>
+                <span className="w-4 h-3 bg-red-600 rounded-sm flex items-center justify-center text-[6px] text-white shrink-0">▶</span>
                 <span>Websites</span>
               </button>
 
@@ -673,10 +672,10 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
                   setShowDriveCopyInput(!showDriveCopyInput);
                   setShowUrlInput(false);
                 }} 
-                className="px-4 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-full text-xs font-black text-slate-600 flex items-center gap-1.5 cursor-pointer shadow-sm transition-all hover:scale-[1.01] active:scale-95"
+                className={`px-4 py-2 hover:bg-slate-50 border rounded-lg text-[13px] font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm transition-all ${showDriveCopyInput ? 'text-indigo-600 border-indigo-200 bg-indigo-50/50' : 'text-slate-700 border-slate-200 bg-white'}`}
               >
                 <Clipboard className="w-4 h-4 text-slate-500" />
-                <span>Copied text</span>
+                <span>Paste Text</span>
               </button>
 
             </div>
@@ -695,7 +694,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
           >
             <div className="flex items-center justify-between">
               <h4 className="font-extrabold text-xs text-slate-800">
-                {urlInputType === 'youtube' ? 'Index YouTube Video Lecture' : 'Index Web Article URL'}
+                {urlInputType === 'youtube' ? 'Add YouTube Video' : 'Add Web Article'}
               </h4>
               <button onClick={() => setShowUrlInput(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
                 <X className="w-4 h-4" />
@@ -714,7 +713,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
                 type="submit"
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer"
               >
-                Analyze Link
+                Save Link
               </button>
             </form>
             <p className="text-[10px] text-slate-400 leading-relaxed">
@@ -738,7 +737,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
             <div className="flex items-center justify-between">
               <h4 className="font-extrabold text-xs text-slate-800 flex items-center gap-1.5">
                 <Clipboard className="w-3.5 h-3.5 text-indigo-500" />
-                <span>Paste Document or Copied Workspace Text</span>
+                <span>Paste Text or Document Content</span>
               </h4>
               <button onClick={() => setShowDriveCopyInput(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
                 <X className="w-4 h-4" />
@@ -747,7 +746,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
             <form onSubmit={handleDriveCopySubmit} className="space-y-3">
               <input
                 type="text"
-                placeholder="Document Title (e.g. Biology Lecture Notes, Syllabus Outline)"
+                placeholder="Give your notes a memorable title"
                 value={driveCopyTitle}
                 onChange={(e) => setDriveCopyTitle(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-800 focus:outline-none focus:border-indigo-500"
@@ -755,7 +754,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
               <textarea
                 required
                 rows={4}
-                placeholder="Paste your study texts, PDF copies, or Google Drive documentation paragraphs here..."
+                placeholder="Paste your study texts or paragraphs here..."
                 value={driveCopyText}
                 onChange={(e) => setDriveCopyText(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-800 focus:outline-none focus:border-indigo-500 resize-none"
@@ -765,7 +764,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer w-full flex items-center justify-center gap-1.5"
               >
                 <Sparkles className="w-3.5 h-3.5 text-amber-200" />
-                <span>Index Pasted Workspace Document</span>
+                <span>Save Notes</span>
               </button>
             </form>
           </motion.div>

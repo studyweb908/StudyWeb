@@ -606,8 +606,8 @@ export default function WorkspaceQuiz({ workspace, onQuizSubmitScore, onUpdateWo
           )}
 
           {(!workspace.notes || workspace.notes.length === 0) && (!workspace.files || workspace.files.length === 0) && (
-            <p className="text-center text-[11px] text-slate-400 font-extrabold uppercase tracking-wider bg-slate-50 dark:bg-slate-950/20 border border-dashed border-slate-200 dark:border-slate-850 rounded-xl py-2 px-3">
-              📝 Tip: Add study notes or upload resources to unlock personalized AI quiz generation!
+            <p className="text-center text-[11px] text-slate-500 dark:text-slate-400 font-medium bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl py-3 px-4">
+              Upload a study file or create notes to generate your first AI practice quiz.
             </p>
           )}
 
