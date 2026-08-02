@@ -1077,7 +1077,7 @@ Student Question:
                                 <textarea
                                   value={newNoteText}
                                   onChange={(e) => setNewNoteText(e.target.value)}
-                                  placeholder="Type your summary point, study hint, or test question here..."
+                                  placeholder="Type your note here..."
                                   rows={2}
                                   className="w-full text-xs p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/25 placeholder-slate-400 text-slate-800 dark:text-white"
                                 />
@@ -1386,7 +1386,7 @@ Student Question:
             <input
               type="text"
               required
-              placeholder="Ask about formulas, inheritance or spontaneity..."
+              placeholder="Ask anything about this document..."
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               className="flex-1 px-3 py-2.5 bg-transparent text-xs sm:text-sm text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none"

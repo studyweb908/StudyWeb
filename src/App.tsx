@@ -285,22 +285,7 @@ export default function App() {
 
     if (isLoggedIn) {
       interval = setInterval(() => {
-        setInactivitySeconds(prev => {
-          const next = prev + 1;
-          if (next >= sessionTimeout) {
-            // Auto logout
-            setIsLoggedIn(false);
-            localStorage.removeItem('studyweb_is_logged_in');
-            setActiveTab('dashboard');
-            setActiveWorkspace(null);
-            sessionStorage.removeItem('studyweb_active_task');
-            sessionStorage.removeItem('studyweb_active_workspace_id');
-            setShowLogoutConfirm(false);
-            setShowSessionWarning(false);
-            return 0;
-          }
-          return next;
-        });
+        setInactivitySeconds(prev => prev + 1);
       }, 1000);
 
       window.addEventListener('mousemove', resetTimer);
@@ -323,7 +308,18 @@ export default function App() {
 
   // Separate effect to handle warning logic
   useEffect(() => {
-    if (isLoggedIn && inactivitySeconds === sessionTimeout - 15 && sessionTimeout > 15) {
+    if (isLoggedIn && inactivitySeconds >= sessionTimeout) {
+       // Auto logout
+       setIsLoggedIn(false);
+       localStorage.removeItem('studyweb_is_logged_in');
+       setActiveTab('dashboard');
+       setActiveWorkspace(null);
+       sessionStorage.removeItem('studyweb_active_task');
+       sessionStorage.removeItem('studyweb_active_workspace_id');
+       setShowLogoutConfirm(false);
+       setShowSessionWarning(false);
+       setInactivitySeconds(0);
+    } else if (isLoggedIn && inactivitySeconds === sessionTimeout - 15 && sessionTimeout > 15) {
        setShowSessionWarning(true);
        playWarningSound();
     } else if (isLoggedIn && inactivitySeconds < sessionTimeout - 15) {

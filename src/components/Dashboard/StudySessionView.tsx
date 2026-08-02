@@ -741,7 +741,7 @@ export default function StudySessionView() {
               <textarea
                 value={focusNotes}
                 onChange={(e) => setFocusNotes(e.target.value)}
-                placeholder="Jot down formulas, ideas, and lecture highlights during your Pomodoro sprint. Let the AI summarize them later."
+                placeholder="Type your study notes here..."
                 className="flex-1 w-full bg-slate-50/50 dark:bg-slate-950/20 p-4 rounded-xl border border-slate-100 dark:border-slate-800/80 text-xs sm:text-sm text-slate-800 dark:text-white placeholder-slate-400 leading-relaxed focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
             </div>

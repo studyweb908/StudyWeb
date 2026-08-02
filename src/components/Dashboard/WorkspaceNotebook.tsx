@@ -379,10 +379,15 @@ export default function WorkspaceNotebook({ workspace, onAddNote, onRemoveNote }
           ) : (
             <div className="text-center py-8 text-slate-400 dark:text-slate-500">
               <FileText className="w-8 h-8 mx-auto mb-2 text-slate-300 dark:text-slate-700 opacity-60" />
-              <p className="text-[13px] font-medium text-slate-500 dark:text-slate-400">Nothing here yet.</p>
+              <p className="text-[13px] font-medium text-slate-500 dark:text-slate-400">You haven't created any notes yet.</p>
               {searchQuery && (
                 <p className="text-[11px] mt-1 text-slate-400 max-w-[140px] mx-auto">
                   We couldn't find any notes matching your search.
+                </p>
+              )}
+              {!searchQuery && (
+                <p className="text-[11px] mt-1 text-slate-400 max-w-[140px] mx-auto">
+                  Start writing to capture your study material.
                 </p>
               )}
             </div>

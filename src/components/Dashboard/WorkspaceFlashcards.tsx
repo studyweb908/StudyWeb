@@ -270,7 +270,7 @@ export default function WorkspaceFlashcards({
           <div className="space-y-1.5">
             <h4 className="font-bold text-slate-800 dark:text-slate-200 text-sm">You haven't created any flashcards yet.</h4>
             <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
-              Let AI analyze your study materials and generate practice flashcards in seconds.
+              Upload your materials and let AI create a smart study deck for you in seconds.
             </p>
           </div>
           <button
@@ -278,7 +278,7 @@ export default function WorkspaceFlashcards({
             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow shadow-emerald-600/20 inline-flex items-center gap-1.5 cursor-pointer"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Generate with AI</span>
+            <span>Generate Flashcards</span>
           </button>
         </div>
       )}
@@ -309,8 +309,8 @@ export default function WorkspaceFlashcards({
                   <Sparkles className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">AI Flashcard Generator</h3>
-                  <p className="text-[11px] font-medium text-slate-400">Generate structured active recall study decks using AI</p>
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">Create AI Flashcards</h3>
+                  <p className="text-[11px] font-medium text-slate-400 mt-0.5">Turn your notes into interactive flashcards that make revision faster and easier.</p>
                 </div>
               </div>
 

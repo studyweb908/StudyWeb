@@ -252,9 +252,9 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
             </p>
             <button 
               onClick={() => setActiveWorkspaceTab('library')}
-              className="mt-3 px-4 py-2 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 text-[11px] font-bold rounded-lg cursor-pointer transition-colors"
+              className="mt-3 px-4 py-2 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 text-[12px] font-bold rounded-lg cursor-pointer transition-colors"
             >
-              Upload Material
+              Upload Study Material
             </button>
           </div>
         ) : (

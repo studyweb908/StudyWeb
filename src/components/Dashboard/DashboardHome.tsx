@@ -96,11 +96,11 @@ export default function DashboardHome({ setActiveTab, setActiveWorkspace, worksp
                         
                 <div className="space-y-3">
                   <h1 className="text-4xl md:text-5xl font-serif text-slate-900 dark:text-white tracking-tight leading-[1.1]">
-                    Good Morning <br />
-                    <span className="text-slate-500 dark:text-slate-400 font-sans font-medium text-2xl md:text-3xl tracking-normal mt-2 block">Welcome back.</span>
+                    Welcome Back<br />
+                    <span className="text-slate-500 dark:text-slate-400 font-sans font-medium text-2xl md:text-3xl tracking-normal mt-2 block">— Let's Make Today Productive</span>
                   </h1>
                   <p className="text-sm md:text-base text-slate-600 dark:text-slate-400 leading-relaxed max-w-md pt-2">
-                    Your AI Tutor analyzed your recent coursework. You have pending reviews for Biology. Ready to begin your session?
+                    Review your recent coursework, generate practice tests, and master concepts faster with your personal AI study assistant.
                   </p>
                 </div>
               </div>
@@ -112,7 +112,7 @@ export default function DashboardHome({ setActiveTab, setActiveWorkspace, worksp
                   onClick={() => setActiveTab('ai-tutor')}
                   className="px-6 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold transition-all shadow-sm flex items-center justify-center gap-2 group cursor-pointer w-full sm:w-auto shrink-0"
                 >
-                  <span>Ask AI Tutor</span>
+                  <span>Start Studying Smarter Today</span>
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                 </motion.button>
 
@@ -123,7 +123,7 @@ export default function DashboardHome({ setActiveTab, setActiveWorkspace, worksp
                   className="px-6 py-3.5 rounded-2xl bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-sm font-bold transition-all border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-2 cursor-pointer shadow-sm w-full sm:w-auto shrink-0"
                 >
                   <Clock className="w-4 h-4 text-slate-400" />
-                  <span>Focus Timer</span>
+                  <span>Start Focus Session</span>
                 </motion.button>
               </div>
             </div>

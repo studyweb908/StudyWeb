@@ -277,7 +277,7 @@ export default function QuickNoteModal({ isOpen, onClose, onNavigateToNotes }: Q
                     <input
                       ref={titleRef}
                       type="text"
-                      placeholder="e.g. Krebs Cycle phase 2, Math formula review..."
+                      placeholder="Title (e.g., Biology Chapter 4)"
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
                       className="w-full bg-slate-50 dark:bg-slate-950/40 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm text-slate-800 dark:text-white placeholder-slate-400 border border-slate-200/60 dark:border-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600/20 focus:border-indigo-600 dark:focus:border-indigo-500 transition-all font-semibold"
@@ -341,7 +341,7 @@ export default function QuickNoteModal({ isOpen, onClose, onNavigateToNotes }: Q
                     </div>
                     <textarea
                       rows={5}
-                      placeholder="Draft your key thought, concept highlight, or study revision details..."
+                      placeholder="Write your study notes here..."
                       value={content}
                       onChange={(e) => setContent(e.target.value)}
                       className="w-full bg-slate-50 dark:bg-slate-950/40 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm text-slate-800 dark:text-white placeholder-slate-400 border border-slate-200/60 dark:border-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600/20 focus:border-indigo-600 dark:focus:border-indigo-500 transition-all leading-relaxed"

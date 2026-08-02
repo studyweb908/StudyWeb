@@ -227,7 +227,7 @@ export function AIInsightsCard() {
           whileTap={{ scale: 0.98 }}
           className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold shadow-sm transition-all duration-300 cursor-pointer group/btn"
         >
-          <span>Start Practice Quiz</span>
+          <span>Start Refresher Quiz</span>
           <ArrowRight className="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform" />
         </motion.button>
       </div>
@@ -400,7 +400,7 @@ export function RecentStudyMaterials({
                   className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 hover:shadow-sm text-xs font-bold transition-all cursor-pointer self-start sm:self-auto"
                 >
                   <Sparkles className="w-3 h-3" />
-                  <span>Generate Quiz</span>
+                  <span>Create Practice Quiz</span>
                 </motion.button>
               </div>
             );
@@ -411,7 +411,7 @@ export function RecentStudyMaterials({
           <div className="w-12 h-12 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mb-3">
              <FileText className="w-5 h-5 text-slate-400" />
           </div>
-          <p className="text-sm font-medium text-slate-500">Nothing here yet.</p>
+          <p className="text-sm font-medium text-slate-500">You haven't uploaded any study materials yet.</p>
         </div>
       )}
     </div>

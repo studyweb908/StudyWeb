@@ -202,7 +202,7 @@ export default function AITutorWorkspace() {
     {
       id: '1',
       sender: 'ai',
-      text: "Hello Alex! I am your StudyWeb AI Tutor. I can help explain difficult equations, synthesize complex notes, summarize PDFs, or generate tailored practice questions. What would you like to explore today?",
+      text: "Hi! I'm your AI Study Assistant. Ask me anything about your uploaded materials, and I'll explain concepts, create summaries, or test your knowledge.",
       time: 'Just now'
     }
   ]);
@@ -1102,7 +1102,7 @@ Let me know if you would like me to clarify any specific point or provide an int
               <input
                 type="text"
                 required={attachedFiles.length === 0}
-                placeholder={isDragging ? "Drop your files here!" : "Ask AI study partner (e.g. explain Cellular Respiration, solve math problem...)"}
+                placeholder={isDragging ? "Drop your files here!" : "Ask anything about your notes, flashcards, or topics..."}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 className="w-full px-3 py-2 bg-transparent text-sm text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none pr-12"

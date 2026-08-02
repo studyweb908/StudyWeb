@@ -64,7 +64,7 @@ export default function WorkspaceChat({ workspace, onUpdateWorkspace }: Workspac
     {
       id: '1',
       sender: 'ai',
-      text: `Hello! I am your AI Knowledge Assistant, connected directly to your **${workspace.name}** workspace knowledge base.\n\nAll my responses are generated strictly using your **${workspace.files.length} active documents**. I will automatically cite files, page numbers, and transcript sections. What would you like me to analyze for you?`,
+      text: `Hi! I'm your AI Study Assistant for **${workspace.name}**.\n\nI use your **${workspace.files.length} uploaded study materials** to answer questions, explain concepts, and provide exact citations. What would you like to learn today?`,
     }
   ]);
   const [inputValue, setInputValue] = useState('');
@@ -652,7 +652,7 @@ export default function WorkspaceChat({ workspace, onUpdateWorkspace }: Workspac
           <div className="flex-1 relative flex items-center">
             <input 
               type="text" 
-              placeholder={`Query files inside ${workspace.name}...`}
+              placeholder="Ask anything about your notes, flashcards, or topics..."
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyPress}

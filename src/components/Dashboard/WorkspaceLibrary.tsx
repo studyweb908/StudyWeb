@@ -625,9 +625,9 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
         >
           <div className="flex flex-col items-center justify-center space-y-4">
             <div>
-              <h4 className="font-extrabold text-sm sm:text-base text-slate-700">or drop your files</h4>
-              <p className="text-[11px] text-slate-400 font-medium mt-2">
-                Upload your PDF, DOCX or PPT and we'll analyze it instantly.
+              <h4 className="font-extrabold text-sm sm:text-base text-slate-700">or drag and drop your files here</h4>
+              <p className="text-[11px] text-slate-400 font-medium mt-2 max-w-xs mx-auto leading-relaxed">
+                Upload your PDF, PPT, DOCX, or notes to generate quizzes, summaries, and flashcards instantly.
               </p>
             </div>
 

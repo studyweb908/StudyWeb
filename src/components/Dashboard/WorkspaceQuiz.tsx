@@ -437,8 +437,8 @@ export default function WorkspaceQuiz({ workspace, onQuizSubmitScore, onUpdateWo
       {view === 'setup' && (
         <div className="space-y-6">
           <div>
-            <h3 className="font-extrabold text-lg text-slate-900 dark:text-white">AI Quiz & Exam Center</h3>
-            <p className="text-xs text-slate-400 font-medium">Generate customized adaptive practice quizzes or timed tests from active knowledge bases.</p>
+            <h3 className="font-extrabold text-lg text-slate-900 dark:text-white">Create AI-Powered Practice Quizzes</h3>
+            <p className="text-xs text-slate-400 font-medium">Generate customized practice tests from your uploaded study materials to master any topic faster.</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -607,7 +607,7 @@ export default function WorkspaceQuiz({ workspace, onQuizSubmitScore, onUpdateWo
 
           {(!workspace.notes || workspace.notes.length === 0) && (!workspace.files || workspace.files.length === 0) && (
             <p className="text-center text-[11px] text-slate-500 dark:text-slate-400 font-medium bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl py-3 px-4">
-              Upload a study file or create notes to generate your first AI practice quiz.
+              You haven't uploaded any study materials yet. Add files or notes to start generating your practice quizzes.
             </p>
           )}
 
@@ -625,12 +625,12 @@ export default function WorkspaceQuiz({ workspace, onQuizSubmitScore, onUpdateWo
               {isGenerating ? (
                 <>
                   <Loader2 className="w-4.5 h-4.5 animate-spin" />
-                  <span>AI parsing study materials ({questionCount} Qs)...</span>
+                  <span>Creating your quiz ({questionCount} Qs)...</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-4.5 h-4.5 fill-current animate-pulse text-yellow-300" />
-                  <span>Generate Quiz</span>
+                  <span>Create My Quiz</span>
                 </>
               )}
             </button>

@@ -499,7 +499,7 @@ export default function WorkspaceSelector({
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
             <input 
               type="text" 
-              placeholder="Search workspaces..."
+              placeholder="Search your workspaces..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9.5 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 text-xs font-semibold focus:outline-none focus:border-indigo-500 text-slate-850 dark:text-white"

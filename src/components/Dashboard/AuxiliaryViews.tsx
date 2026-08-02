@@ -556,8 +556,8 @@ export function SubjectsView() {
       {subjects.length === 0 ? (
         <div className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl bg-slate-50/50 dark:bg-slate-900/50">
           <BookOpen className="w-12 h-12 text-slate-300 dark:text-slate-700 mb-4" />
-          <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">No Subject Analytics Yet</h3>
-          <p className="text-sm text-slate-500 text-center max-w-sm">Complete quizzes, review flashcards, and use the study planner to populate your mastery profiles.</p>
+          <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">You haven't generated any analytics yet.</h3>
+          <p className="text-sm text-slate-500 text-center max-w-sm">Complete quizzes and review flashcards to see your progress here.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1319,8 +1319,8 @@ export function NotesView() {
             ) : (
               <div className="text-center py-16 text-slate-400">
                 <FileText className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-700 mb-2" />
-                <p className="text-xs font-semibold">No study notes found.</p>
-                <p className="text-[10px] text-slate-400 mt-1">Try modifying your filter or create a new entry.</p>
+                <p className="text-sm font-medium text-slate-500">You haven't created any notes yet.</p>
+                <p className="text-[11px] text-slate-400 mt-1">Let's write something new to get started.</p>
               </div>
             )}
           </div>
