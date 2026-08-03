@@ -59,6 +59,7 @@ import {
 import { NoteItem, SubjectMetric } from './types';
 import { useThemeMode } from '../../hooks/useThemeMode';
 import AutoSavingToast from '../AutoSavingToast';
+import { ProfileForm } from './ProfileForm';
 
 // ==========================================
 // 1. STUDY PLANNER VIEW
@@ -2539,6 +2540,8 @@ export function ProfileView({ sessionTimeout, setSessionTimeout }: ProfileViewPr
         ) : (
           /* TAB 2: ACCOUNT PREFERENCES */
           <div className="space-y-6 pt-6">
+            <ProfileForm />
+
             <div>
               <h4 className="font-extrabold text-sm text-slate-800 dark:text-white flex items-center gap-2">
                 <Clock className="w-5 h-5 text-indigo-500" />

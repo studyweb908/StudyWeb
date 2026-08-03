@@ -18,6 +18,7 @@ import {
   ImagePlus
 } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
+import { supabase } from '../lib/supabase';
 
 export default function Navigation() {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -26,6 +27,11 @@ export default function Navigation() {
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [showPassword, setShowPassword] = useState(false);
   const [profilePic, setProfilePic] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
 
   const isProgrammaticScrollRef = useRef(false);
   const scrollTimeoutRef = useRef<any>(null);
@@ -483,25 +489,56 @@ export default function Navigation() {
 
               {/* Form (Simulated submission) */}
               <form 
-                onSubmit={(e) => {
+                onSubmit={async (e) => {
                   e.preventDefault();
-                  (window as any).showToast?.(
-                    authMode === 'login' 
-                      ? 'Successfully logged in to StudyWeb!' 
-                      : 'Welcome! Your StudyWeb account has been created.', 
-                    'success'
-                  );
-                  
-                  if (authMode === 'signup') {
-                    window.dispatchEvent(new CustomEvent('studyweb-signup-success'));
-                  } else {
-                    localStorage.setItem('studyweb_is_logged_in', 'true');
-                    window.dispatchEvent(new CustomEvent('studyweb-login-success'));
+                  setAuthError('');
+                  setAuthLoading(true);
+                  try {
+                    if (authMode === 'signup') {
+                      const { data, error } = await supabase.auth.signUp({
+                        email,
+                        password,
+                        options: {
+                          data: {
+                            full_name: fullName,
+                            avatar_url: profilePic || ''
+                          }
+                        }
+                      });
+                      if (error) throw error;
+                      
+                      if (data.user) {
+                        await supabase.from('profiles').upsert({
+                          id: data.user.id,
+                          full_name: fullName,
+                          avatar_url: profilePic || ''
+                        });
+                      }
+                      
+                      (window as any).showToast?.('Welcome! Your StudyWeb account has been created.', 'success');
+                      window.dispatchEvent(new CustomEvent('studyweb-signup-success'));
+                    } else {
+                      const { data, error } = await supabase.auth.signInWithPassword({
+                        email,
+                        password,
+                      });
+                      if (error) throw error;
+                      
+                      (window as any).showToast?.('Successfully logged in to StudyWeb!', 'success');
+                      localStorage.setItem('studyweb_is_logged_in', 'true');
+                      window.dispatchEvent(new CustomEvent('studyweb-login-success'));
+                    }
+                    setIsAuthModalOpen(false);
+                  } catch (err: any) {
+                    console.error('Auth error:', err);
+                    setAuthError(err.message || 'Authentication failed');
+                  } finally {
+                    setAuthLoading(false);
                   }
-                  setIsAuthModalOpen(false);
                 }} 
                 className="space-y-4"
               >
+                {authError && <div className="text-red-500 text-xs font-bold bg-red-500/10 p-2 rounded-lg">{authError}</div>}
                 {authMode === 'signup' && (
                   <>
                     <div className="space-y-1.5 flex flex-col items-center pb-2">
@@ -536,6 +573,8 @@ export default function Navigation() {
                         <input
                           type="text"
                           required
+                          value={fullName}
+                          onChange={(e) => setFullName(e.target.value)}
                           placeholder="John Doe"
                           className="w-full pl-10 pr-4 py-3 rounded-xl border border-card-border bg-card-bg/50 dark:bg-brand-bg-dark/50 backdrop-blur-sm text-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
                         />
@@ -554,6 +593,8 @@ export default function Navigation() {
                     <input
                       type="email"
                       required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
                       placeholder="you@example.com"
                       className="w-full pl-10 pr-4 py-3 rounded-xl border border-card-border bg-card-bg/50 dark:bg-brand-bg-dark/50 backdrop-blur-sm text-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
                     />
@@ -577,6 +618,8 @@ export default function Navigation() {
                     <input
                       type={showPassword ? 'text' : 'password'}
                       required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••"
                       className="w-full pl-10 pr-10 py-3 rounded-xl border border-card-border bg-card-bg/50 dark:bg-brand-bg-dark/50 backdrop-blur-sm text-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
                     />
@@ -601,9 +644,10 @@ export default function Navigation() {
 
                 <button
                   type="submit"
-                  className="w-full bg-brand-primary hover:bg-brand-secondary text-white py-3.5 rounded-xl font-bold text-xs sm:text-sm transition-all shadow-lg shadow-brand-primary/10 hover:shadow-xl hover:shadow-brand-secondary/25 flex items-center justify-center gap-2 group cursor-pointer mt-2"
+                  disabled={authLoading}
+                  className="w-full bg-brand-primary hover:bg-brand-secondary text-white py-3.5 rounded-xl font-bold text-xs sm:text-sm transition-all shadow-lg shadow-brand-primary/10 hover:shadow-xl hover:shadow-brand-secondary/25 flex items-center justify-center gap-2 group cursor-pointer mt-2 disabled:opacity-70"
                 >
-                  {authMode === 'login' ? 'Log In' : 'Create Free Account'}
+                  {authLoading ? 'Please wait...' : (authMode === 'login' ? 'Log In' : 'Create Free Account')}
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                 </button>
               </form>

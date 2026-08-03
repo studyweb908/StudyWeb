@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Sparkles
 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface OnboardingModalProps {
   isOpen: boolean;
@@ -455,7 +456,7 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                     </p>
                   </div>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       // Save specific fields for standard profile
                       if (formData.school) localStorage.setItem('studyweb_profile_school', formData.school);
                       if (formData.study) localStorage.setItem('studyweb_profile_class_board', formData.study);
@@ -468,8 +469,22 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                       if (formData.time.includes('More than 6')) dailyMins = 420;
                       localStorage.setItem('studyweb_profile_daily_goal', dailyMins.toString());
                       
-                      // Save complete onboarding payload
+                      // Save complete onboarding payload locally
                       localStorage.setItem('studyweb_onboarding_data', JSON.stringify(formData));
+                      
+                      // Save to Supabase if authenticated
+                      if (supabase) {
+                        try {
+                          const { data: { session } } = await supabase.auth.getSession();
+                          if (session?.user) {
+                            await supabase.from('profiles').update({
+                              onboarding_data: formData
+                            }).eq('id', session.user.id);
+                          }
+                        } catch (err) {
+                          console.error('Failed to save onboarding data to Supabase:', err);
+                        }
+                      }
                       
                       localStorage.removeItem('studyweb_onboarding_draft');
                       onComplete();
