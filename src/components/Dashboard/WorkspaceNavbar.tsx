@@ -97,10 +97,10 @@ export default function WorkspaceNavbar({
   const subFeatures = [
     { id: 'overview' as const, label: 'Overview', icon: Layout, desc: 'Progress & Stats' },
     { id: 'library' as const, label: 'Upload Material', icon: Files, desc: 'Add files & links', badge: fileCount },
-    { id: 'notes' as const, label: 'Notes', icon: Edit3, desc: 'Notebook draft', badge: noteCount },
-    { id: 'flashcards' as const, label: 'Flashcards', icon: BrainCircuit, desc: 'Leitner system', badge: flashcardCount },
     { id: 'chat' as const, label: 'AI Tutor', icon: MessageSquare, desc: 'Interactive help' },
-    { id: 'quiz' as const, label: 'Quizzes', icon: Award, desc: 'Practice exam', badge: quizCount },
+    { id: 'notes' as const, label: 'Notes', icon: Edit3, desc: 'Notebook draft', badge: noteCount, comingSoon: true },
+    { id: 'flashcards' as const, label: 'Flashcards', icon: BrainCircuit, desc: 'Leitner system', badge: flashcardCount, comingSoon: true },
+    { id: 'quiz' as const, label: 'Quizzes', icon: Award, desc: 'Practice exam', badge: quizCount, comingSoon: true },
   ];
 
   return (
@@ -187,14 +187,21 @@ export default function WorkspaceNavbar({
             const Icon = feat.icon;
             const isSelected = activeTab === feat.id;
 
+            const isComingSoon = (feat as any).comingSoon;
             return (
               <button
                 key={feat.id}
-                onClick={() => onTabChange(feat.id)}
-                className={`relative flex flex-col items-start p-4 rounded-2xl transition-all duration-300 border cursor-pointer text-left w-full h-full active:scale-97 select-none ${
+                
+                onClick={() => {
+                  
+                  onTabChange(feat.id);
+                }}
+                className={`relative flex flex-col items-start p-4 rounded-2xl transition-all duration-300 border text-left w-full h-full select-none ${
+                  'cursor-pointer active:scale-97'
+                } ${
                   isSelected
                     ? `${theme.activeBg}`
-                    : `bg-slate-50/50 dark:bg-slate-900/40 border-slate-100/80 dark:border-slate-800/60 text-slate-650 dark:text-slate-400 ${theme.hoverBg}`
+                    : `bg-slate-50/50 dark:bg-slate-900/40 border-slate-100/80 dark:border-slate-800/60 text-slate-650 dark:text-slate-400 ${isComingSoon ? '' : theme.hoverBg}`
                 }`}
               >
                 <div className="flex items-center gap-2 w-full justify-between">

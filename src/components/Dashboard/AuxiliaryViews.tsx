@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import ComingSoon from './ComingSoon';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../../lib/supabase';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import { toPng, toBlob } from 'html-to-image';
@@ -65,476 +67,11 @@ import { ProfileForm } from './ProfileForm';
 // 1. STUDY PLANNER VIEW
 // ==========================================
 export function StudyPlannerView() {
-  const [plannerTasks, setPlannerTasks] = useState(() => {
-    const saved = localStorage.getItem('studyweb_planner_tasks');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return [];
-  });
-
-  const [showAddPlan, setShowAddPlan] = useState(false);
-  const [newAction, setNewAction] = useState('');
-  const [newDay, setNewDay] = useState('Monday');
-  const [newHours, setNewHours] = useState('1h');
-  const [newPriority, setNewPriority] = useState('Medium');
-  const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
-
-
-  // Sync tasks
-  React.useEffect(() => {
-    localStorage.setItem('studyweb_planner_tasks', JSON.stringify(plannerTasks));
-  }, [plannerTasks]);
-
-
-  // Listen for Quick Action trigger
-  React.useEffect(() => {
-    const handleTriggerAddPlan = () => {
-      setShowAddPlan(true);
-    };
-    window.addEventListener('studyweb_trigger_add_plan', handleTriggerAddPlan);
-    return () => window.removeEventListener('studyweb_trigger_add_plan', handleTriggerAddPlan);
-  }, []);
-
-
-  const [taskToDelete, setTaskToDelete] = useState<any | null>(null);
-
-  const toggleTask = (id: string) => {
-    setPlannerTasks(plannerTasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
-  };
-
-  const initiateDelete = (e: React.MouseEvent, task: any) => {
-    e.stopPropagation();
-    setTaskToDelete(task);
-  };
-
-  const confirmDelete = () => {
-    if (!taskToDelete) return;
-    setPlannerTasks(plannerTasks.filter(t => t.id !== taskToDelete.id));
-    setSelectedTasks(selectedTasks.filter(tId => tId !== taskToDelete.id));
-    setTaskToDelete(null);
-  };
-
-  const handleAddTask = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newAction.trim()) return;
-
-    const newTask = {
-      id: Date.now().toString(),
-      day: newDay,
-      action: newAction,
-      hours: newHours,
-      priority: newPriority,
-      completed: false
-    };
-
-    setPlannerTasks([...plannerTasks, newTask]);
-    setNewAction('');
-    setShowAddPlan(false);
-  };
-
-  const allTaskIds = plannerTasks.map(t => t.id);
-  const isAllSelected = plannerTasks.length > 0 && selectedTasks.length === plannerTasks.length;
-
-  const handleSelectAll = () => {
-    if (isAllSelected) {
-      setSelectedTasks([]);
-    } else {
-      setSelectedTasks(allTaskIds);
-    }
-  };
-
-  const handleBulkDelete = () => {
-    if (selectedTasks.length === 0) return;
-    setPlannerTasks(plannerTasks.filter(t => !selectedTasks.includes(t.id)));
-    setSelectedTasks([]);
-  };
-
-  const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-  const uniqueDaysInTasks = Array.from(new Set(plannerTasks.map((t: any) => t.day))) as string[];
-  const activeDays = dayOrder.filter(day => uniqueDaysInTasks.includes(day));
-  uniqueDaysInTasks.forEach(day => {
-    if (!activeDays.includes(day)) {
-      activeDays.push(day);
-    }
-  });
-
-  const parseHours = (hStr: string): number => {
-    if (!hStr) return 0;
-    const matchH = hStr.match(/(\d+(\.\d+)?)\s*h/i);
-    const matchM = hStr.match(/(\d+)\s*m/i);
-    if (matchH) return parseFloat(matchH[1]);
-    if (matchM) return parseInt(matchM[1]) / 60;
-    const parsed = parseFloat(hStr);
-    return isNaN(parsed) ? 0 : parsed;
-  };
-
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-[24px] border border-slate-100 dark:border-slate-800/80 p-6 shadow-sm text-left text-xs sm:text-sm space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h3 className="font-extrabold text-lg text-slate-900 dark:text-white flex items-center gap-2">
-            <Calendar className="w-5.5 h-5.5 text-indigo-500 animate-pulse" />
-            <span>Intelligent Study Planner</span>
-          </h3>
-          <p className="text-xs text-slate-400 dark:text-slate-500 font-semibold mt-0.5">Your study timeline customized by AI for optimal spaced repetition</p>
-        </div>
-        
-        <div className="flex items-center gap-2">
-
-          <button
-            onClick={() => {
-              setShowAddPlan(!showAddPlan);
-            }}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-xs font-bold transition-all cursor-pointer shadow-sm hover:scale-[1.02]"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Task</span>
-          </button>
-        </div>
-      </div>
-
-      <AnimatePresence>
-        {showAddPlan && (
-          <motion.form
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            onSubmit={handleAddTask}
-            className="p-5 rounded-[20px] border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 space-y-4 overflow-hidden text-xs"
-          >
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Study Action Item</label>
-              <input
-                type="text"
-                required
-                placeholder="e.g. Solve AP Calculus derivatives worksheet"
-                value={newAction}
-                onChange={(e) => setNewAction(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none font-medium"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-              {/* Day Selector Tabs */}
-              <div className="md:col-span-5">
-                <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Select Day</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {dayOrder.map(day => (
-                    <button
-                      key={day}
-                      type="button"
-                      onClick={() => setNewDay(day)}
-                      className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold transition-all cursor-pointer border ${
-                        newDay === day
-                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                          : 'bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-850 hover:bg-slate-100 dark:hover:bg-slate-900'
-                      }`}
-                    >
-                      {day.substring(0, 3)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Priority Radio Buttons */}
-              <div className="md:col-span-4">
-                <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Priority Level</label>
-                <div className="flex gap-1.5">
-                  {[
-                    { value: 'High', label: 'High', activeClass: 'bg-rose-500 text-white border-rose-500 ring-rose-500/20', inactiveClass: 'text-rose-600 dark:text-rose-400 bg-rose-50/50 dark:bg-rose-950/20 border-rose-200/40 dark:border-rose-950/40 hover:bg-rose-50' },
-                    { value: 'Medium', label: 'Medium', activeClass: 'bg-amber-500 text-white border-amber-500 ring-amber-500/20', inactiveClass: 'text-amber-600 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-950/20 border-amber-200/40 dark:border-amber-950/40 hover:bg-amber-50' },
-                    { value: 'Low', label: 'Low', activeClass: 'bg-emerald-500 text-white border-emerald-500 ring-emerald-500/20', inactiveClass: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/40 dark:border-emerald-950/40 hover:bg-emerald-50' }
-                  ].map(p => (
-                    <button
-                      key={p.value}
-                      type="button"
-                      onClick={() => setNewPriority(p.value)}
-                      className={`flex-1 py-1.5 rounded-lg text-[11px] font-extrabold transition-all border cursor-pointer text-center ${
-                        newPriority === p.value ? p.activeClass + ' shadow-sm ring-2' : p.inactiveClass
-                      }`}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Hours Presets */}
-              <div className="md:col-span-3">
-                <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">Study Duration</label>
-                <div className="flex gap-1.5">
-                  <input
-                    type="text"
-                    required
-                    value={newHours}
-                    onChange={(e) => setNewHours(e.target.value)}
-                    className="w-20 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-white focus:outline-none font-bold"
-                    placeholder="1h"
-                  />
-                  <div className="flex flex-1 gap-1">
-                    {['30m', '1h', '2h', '3h'].map(preset => (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => setNewHours(preset)}
-                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
-                          newHours === preset
-                            ? 'bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 border-indigo-200'
-                            : 'bg-white dark:bg-slate-950 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-850 hover:bg-slate-100 dark:hover:bg-slate-900'
-                        }`}
-                      >
-                        {preset}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/60">
-              <button
-                type="button"
-                onClick={() => setShowAddPlan(false)}
-                className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900 font-semibold cursor-pointer transition-all"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold cursor-pointer transition-all shadow-md shadow-indigo-600/10"
-              >
-                Create Task
-              </button>
-            </div>
-          </motion.form>
-        )}
-      </AnimatePresence>
-
-
-      {activeDays.length === 0 ? (
-        <div className="text-center py-16 border border-dashed border-slate-200 dark:border-slate-800 rounded-[24px] flex flex-col items-center justify-center p-8 bg-slate-50/20 dark:bg-slate-900/5">
-          <div className="p-4 rounded-full bg-indigo-50 dark:bg-indigo-950/40 mb-4 animate-bounce">
-            <CalendarDays className="w-8 h-8 text-indigo-500" />
-          </div>
-          <h4 className="font-extrabold text-slate-800 dark:text-slate-200 text-base">Your Study Planner is Empty</h4>
-          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5 max-w-sm text-center font-semibold leading-relaxed">
-            Plan your custom timetable! Add specific study tasks and specify which day they belong to, and they will dynamically appear in a beautiful weekly overview.
-          </p>
-        </div>
-      ) : (
-        <div className={`grid grid-cols-1 ${
-          activeDays.length === 1 ? 'md:grid-cols-1 max-w-lg mx-auto' :
-          activeDays.length === 2 ? 'md:grid-cols-2' :
-          activeDays.length === 3 ? 'md:grid-cols-3' :
-          'md:grid-cols-4 lg:grid-cols-5'
-        } gap-6 items-start`}>
-          {activeDays.map((day) => {
-            const tasksForDay = plannerTasks.filter((t: any) => t.day === day);
-            const totalHoursForDay = tasksForDay.reduce((acc: number, t: any) => acc + parseHours(t.hours), 0);
-            const completedCount = tasksForDay.filter((t: any) => t.completed).length;
-            const progressPct = tasksForDay.length > 0 ? (completedCount / tasksForDay.length) * 100 : 0;
-            
-            return (
-              <div 
-                key={day} 
-                className="rounded-[22px] border border-slate-200/60 dark:border-slate-800/80 bg-slate-50/40 dark:bg-slate-900/20 p-5.5 space-y-5 hover:border-slate-300 dark:hover:border-slate-700 transition-all duration-300 shadow-sm flex flex-col hover:shadow-md"
-              >
-                {/* Column Header */}
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="font-black text-sm text-slate-900 dark:text-slate-100 tracking-wider uppercase flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-                      {day}
-                    </span>
-                    <span className="text-xs font-black px-2.5 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400">
-                      {totalHoursForDay > 0 ? `${Number(totalHoursForDay.toFixed(1))}h` : '0h'}
-                    </span>
-                  </div>
-                  
-                  {/* Progress Indicator */}
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-450 font-bold">
-                      <span>{completedCount}/{tasksForDay.length} Completed</span>
-                      <span>{Math.round(progressPct)}%</span>
-                    </div>
-                    <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                      <motion.div 
-                        initial={{ width: 0 }}
-                        animate={{ width: `${progressPct}%` }}
-                        transition={{ duration: 0.4, ease: "easeOut" }}
-                        className="h-full bg-indigo-500 rounded-full"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Tasks List */}
-                <div className="space-y-3 min-h-[40px]">
-                  <AnimatePresence mode="popLayout">
-                    {tasksForDay.map((task: any) => {
-                      const isHigh = task.priority === 'High';
-                      const isMedium = task.priority === 'Medium';
-                      const borderLeftColor = isHigh 
-                        ? 'border-l-[4px] border-l-rose-500' 
-                        : isMedium 
-                          ? 'border-l-[4px] border-l-amber-500' 
-                          : 'border-l-[4px] border-l-emerald-400';
-
-                      return (
-                        <motion.div 
-                          key={task.id}
-                          layout
-                          initial={{ opacity: 0, scale: 0.9, y: 10 }}
-                          animate={{ opacity: 1, scale: 1, y: 0 }}
-                          exit={{ opacity: 0, scale: 0.8, y: -15, transition: { duration: 0.25, ease: "easeInOut" } }}
-                          onClick={() => toggleTask(task.id)}
-                          className={`group relative p-3.5 rounded-xl border text-xs cursor-pointer transition-all duration-300 ${borderLeftColor} ${
-                            task.completed 
-                              ? 'bg-slate-100/40 dark:bg-slate-950/20 border-slate-100 dark:border-slate-850 text-slate-400/80' 
-                              : 'bg-white dark:bg-slate-950 border-slate-200/50 dark:border-slate-850/60 hover:border-indigo-200 dark:hover:border-indigo-900/60 hover:-translate-y-0.5 shadow-sm hover:shadow'
-                          }`}
-                        >
-                          <div className="flex items-start gap-3">
-                            {/* Interactive Completion Ring */}
-                            <div className="mt-0.5 relative w-4.5 h-4.5 flex items-center justify-center shrink-0">
-                              <motion.div
-                                className="absolute inset-0 rounded-full border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900"
-                                animate={{
-                                  scale: task.completed ? [1, 1.2, 1] : 1,
-                                  borderColor: task.completed ? '#6366f1' : 'rgba(148, 163, 184, 0.4)',
-                                  backgroundColor: task.completed ? '#6366f1' : 'rgba(255, 255, 255, 0)',
-                                }}
-                                transition={{ duration: 0.2, ease: "easeOut" }}
-                              />
-                              <AnimatePresence>
-                                {task.completed && (
-                                  <motion.div
-                                    initial={{ scale: 0, opacity: 0 }}
-                                    animate={{ scale: 1, opacity: 1 }}
-                                    exit={{ scale: 0, opacity: 0 }}
-                                    className="absolute z-10 text-white flex items-center justify-center"
-                                  >
-                                    <Check className="w-3 h-3 stroke-[4]" />
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </div>
-
-                            <div className="flex-1 min-w-0 pr-4">
-                              <div className="relative inline-block max-w-full">
-                                <p className={`leading-snug text-[13px] transition-colors duration-300 break-words pr-2 ${
-                                  task.completed 
-                                    ? 'text-slate-400/70 dark:text-slate-500/80 font-medium' 
-                                    : 'text-slate-800 dark:text-slate-100 font-extrabold'
-                                }`}>
-                                  {task.action}
-                                </p>
-                                {/* Strike-Through motion line */}
-                                <motion.div
-                                  initial={false}
-                                  animate={{ scaleX: task.completed ? 1 : 0 }}
-                                  className="absolute left-0 top-[50%] h-[1.5px] bg-slate-300 dark:bg-slate-600 rounded"
-                                  style={{ 
-                                    originX: 0,
-                                    width: '100%'
-                                  }}
-                                  transition={{ duration: 0.25, ease: "easeInOut" }}
-                                />
-                              </div>
-
-                              <div className="flex justify-between items-center mt-3 pt-2.5 border-t border-slate-100/40 dark:border-slate-800/30 text-[10px] text-slate-450 dark:text-slate-500 font-bold">
-                                <span className="text-slate-500 dark:text-slate-400">
-                                  {task.hours}
-                                </span>
-                                <span className={`px-2 py-0.5 rounded text-[8.5px] font-black tracking-wider uppercase ${
-                                  isHigh 
-                                    ? 'bg-rose-50 dark:bg-rose-950/20 text-rose-500' 
-                                    : isMedium 
-                                      ? 'bg-amber-50 dark:bg-amber-950/20 text-amber-500' 
-                                      : 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-500'
-                                }`}>
-                                  {task.priority}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Inline Delete Button (shown on hover) */}
-                          <button
-                            onClick={(e) => initiateDelete(e, task)}
-                            className="absolute top-2 right-2 p-1 rounded-md text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                            title="Delete task"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </motion.div>
-                      );
-                    })}
-                  </AnimatePresence>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Delete Confirmation Modal */}
-      <AnimatePresence>
-        {taskToDelete && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setTaskToDelete(null)}
-              className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm"
-            />
-            
-            {/* Modal Body */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
-              className="relative w-full max-w-sm overflow-hidden rounded-[24px] border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-xl text-center"
-            >
-              {/* Decorative Warning Icon Container */}
-              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 dark:bg-rose-950/30 text-rose-500">
-                <Trash2 className="h-6 w-6 animate-pulse" />
-              </div>
-              
-              {/* Title & Description with beautiful typography */}
-              <h4 className="text-base font-black text-slate-900 dark:text-white leading-snug">
-                Delete Study Task?
-              </h4>
-              <p className="mt-2 text-xs font-semibold text-slate-500 dark:text-slate-400 leading-relaxed px-2">
-                Are you sure you want to remove <span className="text-indigo-500 font-extrabold">"{taskToDelete.action}"</span> from your planner? This action cannot be undone.
-              </p>
-              
-              {/* Buttons */}
-              <div className="mt-6 flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setTaskToDelete(null)}
-                  className="flex-1 rounded-xl border border-slate-200 dark:border-slate-800 py-2.5 text-xs font-extrabold text-slate-600 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer transition-all"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={confirmDelete}
-                  className="flex-1 rounded-xl bg-rose-600 hover:bg-rose-700 py-2.5 text-xs font-extrabold text-white cursor-pointer shadow-md shadow-rose-600/10 transition-all hover:scale-[1.02]"
-                >
-                  Delete Task
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-    </div>
+    <ComingSoon 
+      title="Study Planner" 
+      description="Schedule builder, task management, and exam date tracking are currently under construction." 
+    />
   );
 }
 
@@ -1658,13 +1195,63 @@ export function NotesView() {
 // ==========================================
 export function ResourcesView() {
   const [previewMaterial, setPreviewMaterial] = useState<{ title: string; type: string } | null>(null);
-
-  const materials = [
+  const [materials, setMaterials] = useState<{ title: string; type: string; size: string; uploadDate: string }[]>([
     { title: 'AP Chemistry formula quicksheet', type: 'PDF Document', size: '2.1 MB', uploadDate: 'Oct 12, 2023' },
     { title: 'Biology Chapter 4 Study guide', type: 'EPUB Ebook', size: '4.8 MB', uploadDate: 'Oct 15, 2023' },
     { title: 'Calculus previous year solved exams', type: 'PDF Document', size: '8.4 MB', uploadDate: 'Oct 20, 2023' },
     { title: 'Physics rotational kinematics cheat sheet', type: 'Markdown Text', size: '45 KB', uploadDate: 'Oct 22, 2023' },
-  ];
+  ]);
+
+  useEffect(() => {
+    async function fetchSupabaseFiles() {
+      if (!supabase) return;
+      try {
+        const { data, error } = await supabase
+          .from('workspace_files')
+          .select('*')
+          .order('created_at', { ascending: false });
+          
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          const supabaseMaterials = data.map(d => ({
+            title: d.name || 'Untitled',
+            type: (d.type || 'PDF Document').toUpperCase(),
+            size: d.size || 'Unknown Size',
+            uploadDate: new Date(d.created_at || Date.now()).toLocaleDateString()
+          }));
+          setMaterials(supabaseMaterials);
+        }
+      } catch (err) {
+        console.warn("Supabase fetch error for workspace_files (table may not exist):", err);
+      }
+    }
+    
+    fetchSupabaseFiles();
+    
+    // Subscribe to real-time inserts if Supabase is connected
+    if (supabase) {
+      const subscription = supabase
+        .channel('workspace_files_aux')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'workspace_files' }, (payload) => {
+          setMaterials(prev => {
+            const newDoc = payload.new;
+            const newMaterial = {
+              title: newDoc.name || 'Untitled',
+              type: (newDoc.type || 'PDF Document').toUpperCase(),
+              size: newDoc.size || 'Unknown Size',
+              uploadDate: new Date(newDoc.created_at || Date.now()).toLocaleDateString()
+            };
+            return [newMaterial, ...prev];
+          });
+        })
+        .subscribe();
+        
+      return () => {
+        supabase.removeChannel(subscription);
+      };
+    }
+  }, []);
 
   const getFileIcon = (type: string) => {
     if (type.includes('PDF')) return { icon: <FileText className="w-5 h-5" />, color: 'bg-rose-500/10 text-rose-600 dark:text-rose-500' };

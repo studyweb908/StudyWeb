@@ -1,33 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Sparkles, 
-  Flame, 
-  Clock, 
-  FileText, 
-  Layers, 
-  Award, 
-  Network, 
-  BookOpen, 
-  TrendingUp, 
-  ChevronRight, 
-  ChevronDown,
-  AlertCircle,
-  ThumbsUp,
-
-  Zap,
-  Calendar,
-  Video,
-  Music,
-  Globe,
-  Sigma,
-  Quote,
-  Terminal,
-  RefreshCw,
-  X,
-  Trash2,
-  Check
-} from 'lucide-react';
+import { Image as ImageIcon, Sparkles, Flame, Clock, FileText, Layers, Award, Network, BookOpen, TrendingUp, ChevronRight, ChevronDown, AlertCircle, ThumbsUp, Zap, Calendar, Video, Music, Globe, Sigma, Quote, Terminal, RefreshCw, X, Trash2, Check, ExternalLink } from 'lucide-react';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import QuickPreviewModal from './QuickPreviewModal';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area, Cell } from 'recharts';
@@ -66,6 +39,7 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
 
   // Active Insights states
   const [previewFile, setPreviewFile] = useState<WorkspaceFile | null>(null);
+  const [selectedMaterial, setSelectedMaterial] = useState<WorkspaceFile | null>(null);
   const [fileToRemove, setFileToRemove] = useState<WorkspaceFile | null>(null);
 
   const themeColors = {
@@ -260,19 +234,23 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
         ) : (
           <div className="space-y-2">
             {[...files].sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime()).slice(0, 3).map((file, idx) => (
-              <div key={file.id || idx} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border border-transparent hover:border-slate-100 dark:hover:border-slate-700/50 group cursor-pointer" onClick={() => setPreviewFile(file)}>
+              <div key={file.id || idx} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border border-transparent hover:border-slate-100 dark:hover:border-slate-700/50 group cursor-pointer" onClick={() => setSelectedMaterial(file)}>
                 <div className="flex items-center gap-3">
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                    file.type === 'pdf' ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-500' :
-                    file.type === 'video' ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-500' :
-                    file.type === 'audio' ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-500' :
-                    file.type === 'url' ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-500' :
+                    (file.type || '').toLowerCase().includes('pdf') ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-500' :
+                    ((file.type || '').toLowerCase().includes('video') || (file.type || '').toLowerCase().includes('mp4')) ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-500' :
+                    ((file.type || '').toLowerCase().includes('audio') || (file.type || '').toLowerCase().includes('mp3')) ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-500' :
+                    ((file.type || '').toLowerCase().includes('url') || (file.type || '').toLowerCase().includes('link')) ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-500' :
+                    ((file.type || '').toLowerCase().includes('image') || (file.type || '').toLowerCase().includes('png') || (file.type || '').toLowerCase().includes('jpg')) ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-500' :
+                    ((file.type || '').toLowerCase().includes('epub') || (file.type || '').toLowerCase().includes('book')) ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-500' :
                     'bg-slate-100 dark:bg-slate-800 text-slate-500'
                   }`}>
-                    {file.type === 'pdf' ? <FileText className="w-4 h-4" /> :
-                     file.type === 'video' ? <Video className="w-4 h-4" /> :
-                     file.type === 'audio' ? <Music className="w-4 h-4" /> :
-                     file.type === 'url' ? <Globe className="w-4 h-4" /> :
+                    {((file.type || '').toLowerCase().includes('pdf')) ? <FileText className="w-4 h-4" /> :
+                     ((file.type || '').toLowerCase().includes('video') || (file.type || '').toLowerCase().includes('mp4')) ? <Video className="w-4 h-4" /> :
+                     ((file.type || '').toLowerCase().includes('audio') || (file.type || '').toLowerCase().includes('mp3')) ? <Music className="w-4 h-4" /> :
+                     ((file.type || '').toLowerCase().includes('url') || (file.type || '').toLowerCase().includes('link')) ? <Globe className="w-4 h-4" /> :
+                     ((file.type || '').toLowerCase().includes('image') || (file.type || '').toLowerCase().includes('png') || (file.type || '').toLowerCase().includes('jpg')) ? <ImageIcon className="w-4 h-4" /> :
+                     ((file.type || '').toLowerCase().includes('epub') || (file.type || '').toLowerCase().includes('book')) ? <BookOpen className="w-4 h-4" /> :
                      <FileText className="w-4 h-4" />}
                   </div>
                   <div>

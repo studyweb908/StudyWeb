@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from '../../lib/supabase';
 import { 
   ArrowLeft,
   Settings,
@@ -51,6 +52,7 @@ type TabType = 'overview' | 'library' | 'chat' | 'flashcards' | 'quiz' | 'notes'
 
 export default function WorkspaceContainer({ workspace, workspaces = [], onSwitchWorkspace, onDeleteWorkspace, onBack, onUpdateWorkspace, initialTab }: WorkspaceContainerProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const [isGlobalDragging, setIsGlobalDragging] = useState(false);
   const [isChangingCover, setIsChangingCover] = useState(false);
   const [coverUrlInput, setCoverUrlInput] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -116,6 +118,68 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
     });
   };
 
+  useEffect(() => {
+    const handleDataUrlReady = (e: any) => {
+      const { id, url } = e.detail;
+      const updatedFiles = (workspace.files || []).map(f => f.id === id ? { ...f, url } : f);
+      updateWorkspaceState({ files: updatedFiles });
+    };
+    
+    window.addEventListener('studyweb-file-dataurl-ready', handleDataUrlReady);
+    return () => window.removeEventListener('studyweb-file-dataurl-ready', handleDataUrlReady);
+  }, [workspace, onUpdateWorkspace]);
+
+  useEffect(() => {
+    let dragCounter = 0;
+    const handleGlobalDragEnter = (e: DragEvent) => {
+      e.preventDefault();
+      if (e.dataTransfer?.types.includes('Files')) {
+        dragCounter++;
+        if (dragCounter === 1) {
+          setIsGlobalDragging(true);
+        }
+      }
+    };
+    const handleGlobalDragOver = (e: DragEvent) => {
+      e.preventDefault();
+    };
+    const handleGlobalDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      if (e.dataTransfer?.types.includes('Files')) {
+        dragCounter--;
+        if (dragCounter === 0) {
+          setIsGlobalDragging(false);
+        }
+      }
+    };
+    const handleGlobalDrop = (e: DragEvent) => {
+      e.preventDefault();
+      dragCounter = 0;
+      setIsGlobalDragging(false);
+      
+      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+        setActiveTab('library');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('studyweb-global-file-drop', {
+            detail: { files: e.dataTransfer?.files }
+          }));
+        }, 100);
+      }
+    };
+
+    window.addEventListener('dragenter', handleGlobalDragEnter);
+    window.addEventListener('dragover', handleGlobalDragOver);
+    window.addEventListener('dragleave', handleGlobalDragLeave);
+    window.addEventListener('drop', handleGlobalDrop);
+
+    return () => {
+      window.removeEventListener('dragenter', handleGlobalDragEnter);
+      window.removeEventListener('dragover', handleGlobalDragOver);
+      window.removeEventListener('dragleave', handleGlobalDragLeave);
+      window.removeEventListener('drop', handleGlobalDrop);
+    };
+  }, []);
+
   // State handlers to bubble up modifications
   const handleAddFile = (newFile: WorkspaceFile) => {
     const updatedFiles = [newFile, ...(workspace.files || [])];
@@ -143,7 +207,24 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
     });
   };
 
-  const handleRemoveFile = (fileId: string) => {
+  const handleRemoveFile = async (fileId: string) => {
+    // 1. Delete from Supabase Database
+    try {
+      if (supabase) {
+        await supabase.from('workspace_files').delete().eq('id', fileId);
+        
+        // Also try to delete from storage if there's a record (though currently simulated)
+        // const { data: fileData } = await supabase.from('workspace_files').select('url').eq('id', fileId).single();
+        // if (fileData?.url?.includes('supabase.co/storage')) {
+        //   const path = fileData.url.split('/').pop();
+        //   if (path) await supabase.storage.from('workspace_files').remove([path]);
+        // }
+      }
+    } catch (e) {
+      console.error("Failed to delete from Supabase:", e);
+    }
+    
+    // 2. Update local state
     const updatedFiles = (workspace.files || []).filter(f => f.id !== fileId);
     const updatedNodes = workspace.nodes.filter(n => n.id !== `n-${fileId}`);
     const updatedLinks = workspace.links.filter(l => l.target !== `n-${fileId}`);
@@ -152,6 +233,16 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
       nodes: updatedNodes,
       links: updatedLinks
     });
+    
+    // 3. Notify success
+    window.dispatchEvent(
+      new CustomEvent('studyweb-toast', {
+        detail: {
+          message: 'File was deleted successfully.',
+          type: 'success'
+        }
+      })
+    );
   };
 
   const handleClearAllFiles = () => {
@@ -239,7 +330,25 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
   const currentTheme = themeColors[workspace.colorTheme] || themeColors.indigo;
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 md:px-6 animate-fade-in">
+    <div className="space-y-6 max-w-7xl mx-auto px-4 md:px-6 animate-fade-in relative">
+      <AnimatePresence>
+        {isGlobalDragging && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-indigo-900/40 backdrop-blur-sm border-4 border-indigo-500 m-4 rounded-3xl"
+          >
+            <div className="bg-white dark:bg-slate-900 p-8 rounded-3xl shadow-2xl flex flex-col items-center max-w-sm text-center pointer-events-none">
+              <div className="w-20 h-20 bg-indigo-100 dark:bg-indigo-900/50 rounded-full flex items-center justify-center mb-6">
+                <Upload className="w-10 h-10 text-indigo-600 dark:text-indigo-400 animate-bounce" />
+              </div>
+              <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-2">Drop files here</h2>
+              <p className="text-slate-500 dark:text-slate-400">Release to upload your documents, images, or media to this workspace.</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {activeTab !== 'overview' && (
         /* COMPACT CLINICAL UPPER HEADER FOR SPECIALIZED TOOLS */
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-white border border-slate-150 rounded-[20px] p-6 shadow-sm backdrop-blur-md">

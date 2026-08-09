@@ -34,8 +34,13 @@ if (typeof window !== 'undefined' && window.localStorage && !(window as any).__s
   localStorage.setItem = function(key: string, value: string) {
     try {
       originalSetItem.apply(this, arguments as any);
-    } catch (e) {
-      console.error('Offline Sync originalSetItem error', e);
+    } catch (e: any) {
+      if (e.name === 'QuotaExceededError' || e.message.includes('quota')) {
+        console.warn('Local storage quota exceeded. Some offline features may be unavailable. Try clearing your browser cache if issues persist.');
+        (window as any).showToast?.('Storage limit reached. Clear some older files or cache.', 'error');
+      } else {
+        console.error('Offline Sync originalSetItem error', e);
+      }
     }
     
     // Only intercept studyweb_ keys, skip the queue key itself

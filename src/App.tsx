@@ -270,6 +270,26 @@ export default function App() {
     }
   };
 
+  // Handle file deletion from anywhere
+  useEffect(() => {
+    const handleFileDeleted = (e: any) => {
+      const { id, workspaceId } = e.detail;
+      setWorkspaces(prev => prev.map(ws => {
+        if (ws.id === workspaceId) {
+          return {
+            ...ws,
+            files: (ws.files || []).filter(f => f.id !== id),
+            nodes: ws.nodes.filter(n => n.id !== `n-${id}`),
+            links: ws.links.filter(l => l.target !== `n-${id}`)
+          };
+        }
+        return ws;
+      }));
+    };
+    window.addEventListener('studyweb-file-deleted', handleFileDeleted);
+    return () => window.removeEventListener('studyweb-file-deleted', handleFileDeleted);
+  }, []);
+
   // Sync sessionTimeout change to localStorage
   useEffect(() => {
     localStorage.setItem('studyweb_session_timeout', String(sessionTimeout));

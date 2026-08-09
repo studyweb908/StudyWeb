@@ -367,3 +367,53 @@ CREATE POLICY "Users can delete own workspaces"
   ON workspaces FOR DELETE
   USING ( auth.uid() = user_id );
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS onboarding_data JSONB;
+-- Enable RLS and create policies for all tables
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable all for authenticated users" ON documents FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Enable all for anon users" ON documents FOR ALL USING (auth.role() = 'anon') WITH CHECK (auth.role() = 'anon');
+
+ALTER TABLE processing_jobs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable all for authenticated users" ON processing_jobs FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Enable all for anon users" ON processing_jobs FOR ALL USING (auth.role() = 'anon') WITH CHECK (auth.role() = 'anon');
+
+ALTER TABLE document_chunks ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable all for authenticated users" ON document_chunks FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Enable all for anon users" ON document_chunks FOR ALL USING (auth.role() = 'anon') WITH CHECK (auth.role() = 'anon');
+
+ALTER TABLE embeddings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable all for authenticated users" ON embeddings FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Enable all for anon users" ON embeddings FOR ALL USING (auth.role() = 'anon') WITH CHECK (auth.role() = 'anon');
+
+ALTER TABLE generated_notes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable all for authenticated users" ON generated_notes FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Enable all for anon users" ON generated_notes FOR ALL USING (auth.role() = 'anon') WITH CHECK (auth.role() = 'anon');
+
+ALTER TABLE document_metadata ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable all for authenticated users" ON document_metadata FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Enable all for anon users" ON document_metadata FOR ALL USING (auth.role() = 'anon') WITH CHECK (auth.role() = 'anon');
+
+ALTER TABLE retrieval_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable all for authenticated users" ON retrieval_logs FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Enable all for anon users" ON retrieval_logs FOR ALL USING (auth.role() = 'anon') WITH CHECK (auth.role() = 'anon');
+
+-- Enable RLS for workspace_files
+ALTER TABLE workspace_files ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view own workspace files"
+  ON workspace_files FOR SELECT
+  USING (EXISTS (SELECT 1 FROM workspaces WHERE id = workspace_files.workspace_id AND user_id = auth.uid()));
+CREATE POLICY "Users can insert own workspace files"
+  ON workspace_files FOR INSERT
+  WITH CHECK (EXISTS (SELECT 1 FROM workspaces WHERE id = workspace_files.workspace_id AND user_id = auth.uid()));
+CREATE POLICY "Users can update own workspace files"
+  ON workspace_files FOR UPDATE
+  USING (EXISTS (SELECT 1 FROM workspaces WHERE id = workspace_files.workspace_id AND user_id = auth.uid()));
+CREATE POLICY "Users can delete own workspace files"
+  ON workspace_files FOR DELETE
+  USING (EXISTS (SELECT 1 FROM workspaces WHERE id = workspace_files.workspace_id AND user_id = auth.uid()));
+
+-- Enable realtime for workspace_files
+begin;
+  drop publication if exists supabase_realtime;
+  create publication supabase_realtime;
+commit;
+alter publication supabase_realtime add table workspace_files;

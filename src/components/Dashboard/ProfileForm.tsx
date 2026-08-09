@@ -83,7 +83,7 @@ export function ProfileForm() {
     const result = profileSchema.safeParse(formData);
     if (!result.success) {
       const formattedErrors: any = {};
-      result.error.errors.forEach(err => {
+      result.error.issues.forEach(err => {
         if (err.path[0]) formattedErrors[err.path[0]] = err.message;
       });
       setErrors(formattedErrors);

@@ -5,7 +5,7 @@ import {
   ArrowRight, 
   Clock
 } from 'lucide-react';
-import { CalendarWidget, TodayTasksCard, AIInsightsCard, RecentStudyMaterials } from './DashboardWidgets';
+import { CalendarWidget, TodayTasksCard, AIInsightsCard, RecentStudyMaterials, StorageQuotaWidget } from './DashboardWidgets';
 import { Workspace } from './WorkspaceTypes';
 
 interface DashboardHomeProps {
@@ -112,15 +112,15 @@ export default function DashboardHome({ setActiveTab, setActiveWorkspace, worksp
                   onClick={() => setActiveTab('ai-tutor')}
                   className="px-6 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold transition-all shadow-sm flex items-center justify-center gap-2 group cursor-pointer w-full sm:w-auto shrink-0"
                 >
-                  <span>Start Studying Smarter Today</span>
+                  <span>Ask AI Tutor</span>
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                 </motion.button>
 
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
-                  onClick={() => setActiveTab('study-session')}
-                  className="px-6 py-3.5 rounded-2xl bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-sm font-bold transition-all border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-2 cursor-pointer shadow-sm w-full sm:w-auto shrink-0"
+                  disabled
+                  className="px-6 py-3.5 rounded-2xl bg-white dark:bg-slate-900 text-slate-400 dark:text-slate-500 text-sm font-bold transition-all border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-2 cursor-not-allowed shadow-sm w-full sm:w-auto shrink-0 opacity-60"
                 >
                   <Clock className="w-4 h-4 text-slate-400" />
                   <span>Start Focus Session</span>
@@ -195,6 +195,13 @@ export default function DashboardHome({ setActiveTab, setActiveWorkspace, worksp
         {/* Mini Calendar (4 cols) */}
         <motion.div variants={itemVariants} className="col-span-1 md:col-span-12 lg:col-span-4 h-full min-w-0">
           <CalendarWidget />
+        </motion.div>
+        
+        {/* ROW 3 */}
+        
+        {/* Storage Quota (4 cols) */}
+        <motion.div variants={itemVariants} className="col-span-1 md:col-span-6 lg:col-span-4 h-full min-w-0">
+          <StorageQuotaWidget workspaces={workspaces} />
         </motion.div>
 
       </div>

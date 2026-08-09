@@ -243,6 +243,24 @@ export default function QuickPreviewModal({ file, onClose, onExplore }: QuickPre
             </div>
           )}
 
+          
+          {/* FILE PREVIEW (PDF / Image) */}
+          {file.url && (file.type === 'pdf' || file.type === 'image' || file.type === 'doc') && (
+            <div className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden mb-6 mt-4">
+              {file.type === 'image' ? (
+                <div className="flex items-center justify-center p-4 min-h-[300px]">
+                   <img src={file.url} alt={file.name} className="max-w-full max-h-[400px] object-contain rounded-lg shadow-sm" />
+                </div>
+              ) : (
+                <iframe 
+                  src={file.url} 
+                  className="w-full h-[400px]" 
+                  title={file.name}
+                />
+              )}
+            </div>
+          )}
+
           {/* AI-Generated Summary */}
           {file.summary && (
             <div className="space-y-2">

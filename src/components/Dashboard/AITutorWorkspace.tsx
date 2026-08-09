@@ -856,24 +856,58 @@ Let me know if you would like me to clarify any specific point or provide an int
                 }`}>
                   {/* Simulated Markdown renderer */}
                   <div className="space-y-4 whitespace-pre-wrap">
-                    {msg.text.split('\n\n').map((paragraph, idx) => {
-                      if (paragraph.startsWith('###')) {
-                        return <h4 key={idx} className="font-bold text-slate-900 dark:text-white pt-2">{paragraph.replace('###', '').trim()}</h4>;
+                    {msg.text.split(/(?=\n\n###|\n\n```|\n\n- )/g).map((block, idx) => {
+                      const paragraph = block.trim();
+                      if (!paragraph) return null;
+                      
+                      if (paragraph.startsWith('```')) {
+                        const lines = paragraph.split('\n');
+                        const lang = lines[0].replace('```', '').trim();
+                        const code = lines.slice(1, -1).join('\n') || lines.slice(1).join('\n').replace('```', '');
+                        return (
+                          <div key={idx} className="bg-slate-900 dark:bg-slate-950 rounded-xl overflow-hidden my-3 shadow-sm">
+                            {lang && (
+                              <div className="flex items-center justify-between px-4 py-2 bg-slate-800 dark:bg-slate-900 border-b border-slate-700 dark:border-slate-800 text-xs font-mono text-slate-400">
+                                <span>{lang}</span>
+                                <CopySnippetButton text={code} />
+                              </div>
+                            )}
+                            <div className="p-4 overflow-x-auto">
+                              <pre className="font-mono text-[13px] text-slate-300 leading-relaxed"><code dangerouslySetInnerHTML={{ __html: code }} /></pre>
+                            </div>
+                          </div>
+                        );
                       }
+                      
+                      if (paragraph.startsWith('###')) {
+                        return <h4 key={idx} className="font-bold text-slate-900 dark:text-white pt-2 text-lg tracking-tight">{paragraph.replace(/^###\s*/, '').trim()}</h4>;
+                      }
+                      
                       if (paragraph.startsWith('-')) {
                         return (
-                          <ul key={idx} className="list-disc pl-5 space-y-2 marker:text-slate-400">
+                          <ul key={idx} className="list-disc pl-5 space-y-2 marker:text-indigo-400">
                             {paragraph.split('\n').map((li, liIdx) => {
-                              const cleanedLi = li.replace('-', '').trim();
+                              const cleanedLi = li.replace(/^-\s*/, '').trim();
+                              if (!cleanedLi) return null;
                               return <li key={liIdx}>{parseTextWithHighlights(cleanedLi, msg.id, msg.citations, hoveredCitation, setHoveredCitation, setActiveCitation)}</li>;
                             })}
                           </ul>
                         );
                       }
-                      if (paragraph.startsWith('$$')) {
-                        return <div key={idx} className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl font-mono text-[13px] overflow-x-auto text-slate-600 dark:text-slate-400 border border-slate-200/50 dark:border-slate-800/50">{paragraph.replace(/\$\$/g, '')}</div>;
+                      
+                      if (paragraph.startsWith('$')) {
+                        return <div key={idx} className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl font-mono text-[13px] overflow-x-auto text-slate-600 dark:text-slate-400 border border-slate-200/50 dark:border-slate-800/50 my-2">{paragraph.replace(/\$\$/g, '')}</div>;
                       }
-                      return <p key={idx}>{parseTextWithHighlights(paragraph, msg.id, msg.citations, hoveredCitation, setHoveredCitation, setActiveCitation)}</p>;
+                      
+                      // Split by normal paragraphs
+                      return (
+                        <div key={idx} className="space-y-4">
+                          {paragraph.split('\n\n').map((p, pIdx) => {
+                             if (!p.trim()) return null;
+                             return <p key={pIdx}>{parseTextWithHighlights(p, msg.id, msg.citations, hoveredCitation, setHoveredCitation, setActiveCitation)}</p>;
+                          })}
+                        </div>
+                      );
                     })}
                   </div>
 
@@ -971,7 +1005,7 @@ Let me know if you would like me to clarify any specific point or provide an int
                       <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
                       <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
                     </div>
-                    <span className="text-[13px] text-slate-500 dark:text-slate-400 font-medium">StudyWeb AI is thinking...</span>
+                    <span className="text-[13px] text-slate-500 dark:text-slate-400 font-medium">Thinking...</span>
                   </div>
                 </div>
               </motion.div>
@@ -984,7 +1018,7 @@ Let me know if you would like me to clarify any specific point or provide an int
         {/* Suggested Quick Prompts Grid */}
         {messages.length === 1 && (
           <div className="p-6 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/20">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Try asking me about:</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Try asking your AI Tutor:</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
               {suggestedPrompts.map((p, idx) => (
                 <button

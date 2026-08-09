@@ -40,11 +40,45 @@ export default function Navigation() {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        setProfilePic(result);
-        localStorage.setItem('studyweb_profile_pic', result);
-        localStorage.setItem('studyweb_profile_avatar', result);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 256;
+          const MAX_HEIGHT = 256;
+          let width = img.width;
+          let height = img.height;
+          
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const resizedBase64 = canvas.toDataURL('image/jpeg', 0.8);
+            setProfilePic(resizedBase64);
+            try {
+              localStorage.setItem('studyweb_profile_pic', resizedBase64);
+              localStorage.setItem('studyweb_profile_avatar', resizedBase64);
+            } catch (err) {
+              console.warn('Storage quota exceeded, skipping local persistence');
+            }
+          }
+        };
+        if (event.target?.result) {
+          img.src = event.target.result as string;
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -494,6 +528,20 @@ export default function Navigation() {
                   setAuthError('');
                   setAuthLoading(true);
                   try {
+                    if (!supabase) {
+                      // Mock auth if no supabase configured
+                      if (authMode === 'signup') {
+                        (window as any).showToast?.('Welcome! Your StudyWeb account has been created.', 'success');
+                        window.dispatchEvent(new CustomEvent('studyweb-signup-success'));
+                      } else {
+                        (window as any).showToast?.('Successfully logged in to StudyWeb!', 'success');
+                        localStorage.setItem('studyweb_is_logged_in', 'true');
+                        window.dispatchEvent(new CustomEvent('studyweb-login-success'));
+                      }
+                      setIsAuthModalOpen(false);
+                      return;
+                    }
+
                     if (authMode === 'signup') {
                       const { data, error } = await supabase.auth.signUp({
                         email,
@@ -531,7 +579,11 @@ export default function Navigation() {
                     setIsAuthModalOpen(false);
                   } catch (err: any) {
                     console.error('Auth error:', err);
-                    setAuthError(err.message || 'Authentication failed');
+                    let errMsg = err.message || 'Authentication failed';
+                    if (errMsg === 'Failed to fetch') {
+                      errMsg = 'Network error or adblocker prevented connection to auth server. Please check your connection.';
+                    }
+                    setAuthError(errMsg);
                   } finally {
                     setAuthLoading(false);
                   }
