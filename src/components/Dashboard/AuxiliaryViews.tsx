@@ -1637,7 +1637,7 @@ export function ProfileView({ sessionTimeout, setSessionTimeout }: ProfileViewPr
   const [editClassBoard, setEditClassBoard] = useState(classBoard);
   const [editSchool, setEditSchool] = useState(schoolDivision);
 
-  const saveProfileDetails = () => {
+  const saveProfileDetails = async () => {
     if (!editName.trim()) return;
     setStudentName(editName);
     setClassBoard(editClassBoard);
@@ -1645,14 +1645,62 @@ export function ProfileView({ sessionTimeout, setSessionTimeout }: ProfileViewPr
     localStorage.setItem('studyweb_profile_name', editName);
     localStorage.setItem('studyweb_profile_class_board', editClassBoard);
     localStorage.setItem('studyweb_profile_school', editSchool);
+    
+    // Save to Supabase
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        await supabase.from('profiles').update({
+          full_name: editName,
+          current_study: editClassBoard,
+          school_name: editSchool,
+          updated_at: new Date()
+        }).eq('id', session.user.id);
+      }
+    } catch (err) {
+      console.error('Failed to save to Supabase:', err);
+    }
+    
     setIsEditingDetails(false);
     triggerToast('✨ Scholar profile details successfully updated!');
   };
 
-  // Real-time state synchronization using localStorage
+  // Real-time state synchronization using localStorage and Supabase
   const [avatarUrl, setAvatarUrl] = useState(() => {
     return localStorage.getItem('studyweb_profile_avatar') || PRESET_AVATARS[0].url;
   });
+  
+  const [userEmail, setUserEmail] = useState('Loading...');
+  const [userId, setUserId] = useState('');
+  
+  // Sync with Supabase on mount
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          setUserEmail(session.user.email || '');
+          setUserId(session.user.id);
+          
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+            
+          if (profile) {
+            if (profile.full_name) setStudentName(profile.full_name);
+            if (profile.avatar_url) setAvatarUrl(profile.avatar_url);
+            if (profile.current_study) setClassBoard(profile.current_study);
+            if (profile.school_name) setSchoolDivision(profile.school_name);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching profile data:', err);
+      }
+    };
+    fetchProfile();
+  }, []);
   
   const [onboardingData, setOnboardingData] = useState(() => {
     const saved = localStorage.getItem('studyweb_onboarding_data');
@@ -1697,11 +1745,18 @@ export function ProfileView({ sessionTimeout, setSessionTimeout }: ProfileViewPr
     }, 1500);
   };
 
-  const saveAvatar = (url: string) => {
+  const saveAvatar = async (url: string) => {
     setAvatarUrl(url);
     localStorage.setItem('studyweb_profile_avatar', url);
     setShowAvatarPicker(false);
     triggerToast('🖼️ Profile avatar successfully updated!');
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        await supabase.from('profiles').update({ avatar_url: url }).eq('id', session.user.id);
+      }
+    } catch (e) {}
   };
 
   const saveMascot = (id: string) => {
@@ -1887,7 +1942,7 @@ export function ProfileView({ sessionTimeout, setSessionTimeout }: ProfileViewPr
                 
                 <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold">{classBoard}</p>
                 <p className="text-[11px] text-slate-450 font-semibold">{schoolDivision}</p>
-                <p className="text-[11px] text-slate-400 font-medium">Account ID: <span className="font-mono text-slate-500 dark:text-slate-300">studyweb908@gmail.com</span></p>
+                <p className="text-[11px] text-slate-400 font-medium">Account ID: <span className="font-mono text-slate-500 dark:text-slate-300">{userEmail || 'Loading...'}</span></p>
               </div>
             )}
             

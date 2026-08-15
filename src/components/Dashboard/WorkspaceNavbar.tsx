@@ -191,13 +191,13 @@ export default function WorkspaceNavbar({
             return (
               <button
                 key={feat.id}
-                
+                disabled={isComingSoon}
                 onClick={() => {
-                  
+                  if (isComingSoon) return;
                   onTabChange(feat.id);
                 }}
                 className={`relative flex flex-col items-start p-4 rounded-2xl transition-all duration-300 border text-left w-full h-full select-none ${
-                  'cursor-pointer active:scale-97'
+                  isComingSoon ? 'opacity-50 grayscale cursor-not-allowed' : 'cursor-pointer active:scale-97'
                 } ${
                   isSelected
                     ? `${theme.activeBg}`

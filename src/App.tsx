@@ -557,15 +557,8 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => {
-                setActiveTab('study-planner');
-                setActiveWorkspace(null);
-              }}
-              className={`w-full h-full flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors ${
-                activeTab === 'study-planner'
-                  ? 'text-indigo-600 dark:text-indigo-400'
-                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
-              }`}
+              disabled
+              className="w-full h-full flex flex-col items-center justify-center gap-1 cursor-not-allowed opacity-50 grayscale text-slate-400"
             >
               <Calendar className="w-5 h-5" />
               <span className="text-[10px] font-extrabold">Planner</span>
@@ -669,11 +662,8 @@ export default function App() {
 
                     {/* Create Notes */}
                     <button
-                      onClick={() => {
-                        setIsBottomSheetOpen(false);
-                        setShowQuickNote(true);
-                      }}
-                      className="p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 hover:bg-violet-50/20 dark:hover:bg-violet-950/20 text-left cursor-pointer transition-all flex flex-col gap-2 group active:scale-95"
+                      disabled
+                      className="opacity-50 grayscale p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 text-left cursor-not-allowed transition-all flex flex-col gap-2 group"
                     >
                       <span className="w-9 h-9 rounded-xl bg-violet-500 text-white flex items-center justify-center shadow">
                         <FileText className="w-4.5 h-4.5" />
@@ -703,11 +693,8 @@ export default function App() {
 
                     {/* Quick Scan */}
                     <button
-                      onClick={() => {
-                        setIsBottomSheetOpen(false);
-                        setShowQuickScan(true);
-                      }}
-                      className="p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 hover:bg-pink-50/20 dark:hover:bg-pink-950/20 text-left cursor-pointer transition-all flex flex-col gap-2 group active:scale-95"
+                      disabled
+                      className="opacity-50 grayscale p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 text-left cursor-not-allowed transition-all flex flex-col gap-2 group"
                     >
                       <span className="w-9 h-9 rounded-xl bg-pink-500 text-white flex items-center justify-center shadow">
                         <Terminal className="w-4.5 h-4.5" />

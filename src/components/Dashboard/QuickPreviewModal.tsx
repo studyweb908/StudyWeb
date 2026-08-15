@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { motion } from 'motion/react';
 import { 
   X, 
@@ -8,13 +8,11 @@ import {
   FileText, 
   Quote, 
   Brain, 
-  Sigma, 
-  Terminal, 
-  RefreshCw, 
   ExternalLink,
-  BookOpen,
   Link,
-  Sparkles
+  Sparkles,
+  ShieldCheck,
+  Check
 } from 'lucide-react';
 import { WorkspaceFile } from './WorkspaceTypes';
 
@@ -114,25 +112,7 @@ interface QuickPreviewModalProps {
 }
 
 export default function QuickPreviewModal({ file, onClose, onExplore }: QuickPreviewModalProps) {
-  const [modalLogsCount, setModalLogsCount] = useState(0);
-  const [isModalStreaming, setIsModalStreaming] = useState(true);
   const fileLogs = getPipelineLogs(file);
-
-  useEffect(() => {
-    setModalLogsCount(0);
-    setIsModalStreaming(true);
-    let currentIdx = 0;
-    const interval = setInterval(() => {
-      currentIdx += 1;
-      setModalLogsCount(currentIdx);
-      if (currentIdx >= fileLogs.length) {
-        clearInterval(interval);
-        setIsModalStreaming(false);
-      }
-    }, Math.max(10, 800 / fileLogs.length)); // Safe streaming time
-
-    return () => clearInterval(interval);
-  }, [file.id, fileLogs.length]);
 
   const getFileIcon = () => {
     switch (file.type) {
@@ -199,9 +179,15 @@ export default function QuickPreviewModal({ file, onClose, onExplore }: QuickPre
               <span className="text-[10px] font-black uppercase tracking-wider text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-2.5 py-0.5 rounded-md">
                 {file.type}
               </span>
-              <h2 className="text-lg font-black text-slate-850 dark:text-slate-100 leading-snug break-words">
-                {file.name}
-              </h2>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg font-black text-slate-850 dark:text-slate-100 leading-snug break-words">
+                  {file.name}
+                </h2>
+                <div className="flex items-center gap-1 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-100 dark:border-emerald-800">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span className="text-[9px] font-bold uppercase tracking-wide">Indexed & Verified Source</span>
+                </div>
+              </div>
               <div className="flex items-center gap-2 text-xs text-slate-400 font-medium">
                 <span>{file.size}</span>
                 <span>•</span>
@@ -298,125 +284,6 @@ export default function QuickPreviewModal({ file, onClose, onExplore }: QuickPre
               </div>
             </div>
           )}
-
-          {/* RETRIEVED TEXT FORM / TRANSCRIPTION */}
-          {file.transcription && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                <BookOpen className="w-3.5 h-3.5 text-teal-500" />
-                <span>Retrieved Text Form of Research Data</span>
-              </div>
-              <div className="bg-slate-50 dark:bg-slate-950/40 border border-slate-150 dark:border-slate-800/60 rounded-2xl p-4 max-h-[250px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800">
-                <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap font-medium">
-                  {file.transcription}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Extracted Mathematical Formulas */}
-          {file.formulas && file.formulas.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                <Sigma className="w-3.5 h-3.5 text-indigo-500" />
-                <span>Extracted Formulas & Models</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {file.formulas.map((formula, idx) => (
-                  <div key={idx} className="p-3 bg-slate-50 dark:bg-slate-950/40 border border-slate-100 dark:border-slate-800 rounded-xl flex flex-col gap-1 text-left">
-                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Formula Node #{idx+1}</span>
-                    <code className="text-xs sm:text-sm font-mono text-indigo-600 dark:text-indigo-400 font-bold break-all">
-                      {formula}
-                    </code>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Categorization Tags */}
-          {file.tags && file.tags.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                Knowledge Graph Tags
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {file.tags.map((tag, idx) => (
-                  <span 
-                    key={idx} 
-                    className="text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 px-2.5 py-1 rounded-lg border border-indigo-100 dark:border-indigo-900/30"
-                  >
-                    #{tag}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Real-time Dynamic Diagnostic Logs */}
-          <div className="space-y-2 pt-3 border-t border-slate-100 dark:border-slate-800/80">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-indigo-500" />
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                  AI Pipeline Diagnostic Trace
-                </span>
-              </div>
-              
-              <button
-                onClick={() => {
-                  setModalLogsCount(0);
-                  setIsModalStreaming(true);
-                  let currentIdx = 0;
-                  const interval = setInterval(() => {
-                    currentIdx += 1;
-                    setModalLogsCount(currentIdx);
-                    if (currentIdx >= fileLogs.length) {
-                      clearInterval(interval);
-                      setIsModalStreaming(false);
-                    }
-                  }, 100);
-                }}
-                disabled={isModalStreaming}
-                className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline disabled:opacity-50 cursor-pointer"
-              >
-                <RefreshCw className={`w-3 h-3 ${isModalStreaming ? 'animate-spin' : ''}`} />
-                <span>Re-run Diagnostic</span>
-              </button>
-            </div>
-
-            <div className="bg-slate-950 dark:bg-black rounded-xl p-3 border border-slate-850 text-left font-mono text-[10px] leading-relaxed shadow-inner max-h-[140px] overflow-y-auto">
-              <div className="space-y-1.5">
-                {fileLogs.slice(0, modalLogsCount).map((log, idx) => {
-                  let badgeColor = 'text-indigo-400 bg-indigo-950/40 border border-indigo-900/40';
-                  if (log.type === 'success') badgeColor = 'text-emerald-400 bg-emerald-950/40 border border-emerald-900/40';
-                  if (log.type === 'warn') badgeColor = 'text-amber-400 bg-amber-950/40 border border-amber-900/40';
-                  if (log.type === 'debug') badgeColor = 'text-slate-400 bg-slate-900/60 border border-slate-800';
-
-                  return (
-                    <div key={idx} className="flex items-start gap-2 text-slate-300">
-                      <span className="text-slate-600 select-none">
-                        [{new Date(Date.now() - (15 - idx) * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}]
-                      </span>
-                      <span className={`px-1 rounded text-[8px] font-black uppercase tracking-wide shrink-0 ${badgeColor}`}>
-                        {log.type}
-                      </span>
-                      <span className="break-all font-medium text-slate-300 dark:text-slate-200">
-                        {log.message}
-                      </span>
-                    </div>
-                  );
-                })}
-                
-                {isModalStreaming && (
-                  <div className="flex items-center gap-1.5 text-slate-500 italic pl-1 text-[10px]">
-                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping shrink-0" />
-                    <span>Streaming trace entry {modalLogsCount + 1}/{fileLogs.length}...</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
 
         </div>
 

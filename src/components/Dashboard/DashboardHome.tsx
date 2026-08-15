@@ -6,6 +6,7 @@ import {
   Clock
 } from 'lucide-react';
 import { CalendarWidget, TodayTasksCard, AIInsightsCard, RecentStudyMaterials, StorageQuotaWidget } from './DashboardWidgets';
+import { HeroSkeleton, AIInsightsSkeleton, TasksSkeleton, RecentStudySkeleton, CalendarSkeleton, StorageQuotaSkeleton } from './DashboardSkeletons';
 import { Workspace } from './WorkspaceTypes';
 
 interface DashboardHomeProps {
@@ -30,17 +31,6 @@ const itemVariants = {
   show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
 };
 
-const SkeletonCard = ({ className = '' }: { className?: string }) => (
-  <div className={`bg-slate-50 dark:bg-slate-800/50 rounded-[24px] border border-slate-100 dark:border-slate-800/80 p-6 animate-pulse flex flex-col h-full ${className}`}>
-    <div className="w-1/3 h-5 bg-slate-200 dark:bg-slate-700 rounded-full mb-6"></div>
-    <div className="space-y-3 flex-1">
-      <div className="w-full h-12 bg-slate-200 dark:bg-slate-700 rounded-xl"></div>
-      <div className="w-full h-12 bg-slate-200 dark:bg-slate-700 rounded-xl"></div>
-      <div className="w-2/3 h-12 bg-slate-200 dark:bg-slate-700 rounded-xl"></div>
-    </div>
-  </div>
-);
-
 export default function DashboardHome({ setActiveTab, setActiveWorkspace, workspaces = [], activeWorkspace }: DashboardHomeProps) {
   const [isLoading, setIsLoading] = useState(true);
 
@@ -54,19 +44,22 @@ export default function DashboardHome({ setActiveTab, setActiveWorkspace, worksp
       <div className="pb-12 space-y-6 max-w-7xl mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6 text-left auto-rows-min">
           <div className="col-span-1 md:col-span-12 xl:col-span-8 h-full min-h-[320px]">
-            <SkeletonCard className="rounded-[32px]" />
+            <HeroSkeleton />
           </div>
           <div className="col-span-1 md:col-span-12 xl:col-span-4 h-full min-h-[320px]">
-            <SkeletonCard />
+            <AIInsightsSkeleton />
           </div>
           <div className="col-span-1 md:col-span-6 lg:col-span-4 h-full min-h-[320px]">
-            <SkeletonCard />
+            <TasksSkeleton />
           </div>
           <div className="col-span-1 md:col-span-6 lg:col-span-4 h-full min-h-[320px]">
-            <SkeletonCard />
+            <RecentStudySkeleton />
           </div>
           <div className="col-span-1 md:col-span-12 lg:col-span-4 h-full min-h-[320px]">
-            <SkeletonCard />
+            <CalendarSkeleton />
+          </div>
+          <div className="col-span-1 md:col-span-6 lg:col-span-4 h-full min-h-[320px]">
+            <StorageQuotaSkeleton />
           </div>
         </div>
       </div>
@@ -120,7 +113,7 @@ export default function DashboardHome({ setActiveTab, setActiveWorkspace, worksp
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   disabled
-                  className="px-6 py-3.5 rounded-2xl bg-white dark:bg-slate-900 text-slate-400 dark:text-slate-500 text-sm font-bold transition-all border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-2 cursor-not-allowed shadow-sm w-full sm:w-auto shrink-0 opacity-60"
+                  className="px-6 py-3.5 rounded-2xl bg-white dark:bg-slate-900 text-slate-400 dark:text-slate-500 text-sm font-bold transition-all border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-2 cursor-not-allowed shadow-sm w-full sm:w-auto shrink-0 opacity-60 grayscale"
                 >
                   <Clock className="w-4 h-4 text-slate-400" />
                   <span>Start Focus Session</span>

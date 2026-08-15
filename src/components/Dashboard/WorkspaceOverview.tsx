@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Image as ImageIcon, Sparkles, Flame, Clock, FileText, Layers, Award, Network, BookOpen, TrendingUp, ChevronRight, ChevronDown, AlertCircle, ThumbsUp, Zap, Calendar, Video, Music, Globe, Sigma, Quote, Terminal, RefreshCw, X, Trash2, Check, ExternalLink } from 'lucide-react';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import QuickPreviewModal from './QuickPreviewModal';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area, Cell } from 'recharts';
 
 interface WorkspaceOverviewProps {
   workspace: Workspace;
@@ -27,20 +26,12 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
   const cardCount = flashcards.length;
   const quizCount = quizzes.length;
   const noteCount = notes.length;
-
-  const readingProgressData = React.useMemo(() => {
-    return files.slice(0, 5).map(file => ({
-      name: file.name.length > 15 ? file.name.substring(0, 15) + '...' : file.name,
-      progress: Math.floor(Math.random() * 40) + 60, // Mock 60-100% progress
-      coverage: Math.floor(Math.random() * 20) + 80 // Mock 80-100% analysis coverage
-    }));
-  }, [files]);
   
 
   // Active Insights states
   const [previewFile, setPreviewFile] = useState<WorkspaceFile | null>(null);
-  const [selectedMaterial, setSelectedMaterial] = useState<WorkspaceFile | null>(null);
   const [fileToRemove, setFileToRemove] = useState<WorkspaceFile | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const themeColors = {
     emerald: {
@@ -130,11 +121,7 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
               <span>Upload Material</span>
             </button>
             <button
-              onClick={() => {
-                if (window.confirm('Are you sure you want to delete this workspace? This action cannot be undone.')) {
-                  onDeleteWorkspace?.(workspace.id);
-                }
-              }}
+              onClick={() => setShowDeleteConfirm(true)}
               className="px-4 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-950/60 border border-red-200/80 dark:border-red-900/50 text-red-600 dark:text-red-400 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ml-auto sm:ml-0"
             >
               <Trash2 className="w-4 h-4" />
@@ -169,41 +156,6 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
         </div>
       </div>
 
-      {/* ================= READING PROGRESS WIDGET ================= */}
-      {files.length > 0 && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-6 rounded-[24px]">
-          <h3 className="font-black text-slate-850 dark:text-slate-100 tracking-tight text-lg mb-4 flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-indigo-500" />
-            Reading Progress & Analysis Coverage
-          </h3>
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={readingProgressData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorProgress" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="colorCoverage" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-slate-200, #e2e8f0)" />
-                <XAxis dataKey="name" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-                <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} unit="%" />
-                <RechartsTooltip 
-                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }}
-                  itemStyle={{ fontSize: '12px', fontWeight: 'bold' }}
-                  labelStyle={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}
-                />
-                <Area type="monotone" dataKey="progress" name="Reading Progress" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorProgress)" />
-                <Area type="monotone" dataKey="coverage" name="Analysis Coverage" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorCoverage)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
 
       {/* ================= RECENT RESOURCES ================= */}
       <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-6 rounded-[24px]">
@@ -234,7 +186,7 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
         ) : (
           <div className="space-y-2">
             {[...files].sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime()).slice(0, 3).map((file, idx) => (
-              <div key={file.id || idx} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border border-transparent hover:border-slate-100 dark:hover:border-slate-700/50 group cursor-pointer" onClick={() => setSelectedMaterial(file)}>
+              <div key={file.id || idx} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border border-transparent hover:border-slate-100 dark:hover:border-slate-700/50 group cursor-pointer" onClick={() => setPreviewFile(file)}>
                 <div className="flex items-center gap-3">
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
                     (file.type || '').toLowerCase().includes('pdf') ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-500' :
@@ -342,6 +294,43 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>Remove Source</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white dark:bg-slate-900 rounded-[24px] p-6 max-w-sm w-full shadow-2xl border border-slate-100 dark:border-slate-800"
+            >
+              <div className="w-12 h-12 bg-red-50 dark:bg-red-500/10 rounded-2xl flex items-center justify-center text-red-500 mb-4 border border-red-100 dark:border-red-500/20">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">Delete Workspace?</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed mb-6">
+                Are you sure you want to delete this workspace? This will permanently remove all associated materials, notes, flashcards, and quizzes. This action cannot be undone.
+              </p>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="px-4 py-2 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-bold cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    onDeleteWorkspace?.(workspace.id);
+                    setShowDeleteConfirm(false);
+                  }}
+                  className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-xl text-xs font-bold cursor-pointer shadow-sm shadow-red-200 dark:shadow-none transition-all flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Permanently</span>
                 </button>
               </div>
             </motion.div>

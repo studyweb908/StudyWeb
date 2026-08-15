@@ -478,7 +478,13 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                           const { data: { session } } = await supabase.auth.getSession();
                           if (session?.user) {
                             await supabase.from('profiles').update({
-                              onboarding_data: formData
+                              onboarding_data: formData,
+                              age: formData.age,
+                              current_study: formData.study,
+                              school_name: formData.school,
+                              primary_goal: formData.goal,
+                              uses_ai: formData.usesAi === 'Yes' ? true : false,
+                              updated_at: new Date()
                             }).eq('id', session.user.id);
                           }
                         } catch (err) {
