@@ -18,6 +18,7 @@ import Contact from './components/Contact';
 import FAQ from './components/FAQ';
 import FinalCTA from './components/FinalCTA';
 import Footer from './components/Footer';
+import { supabase } from './lib/supabase';
 
 // Authenticated Dashboard Components
 import DashboardSidebar from './components/Dashboard/DashboardSidebar';
@@ -211,15 +212,29 @@ export default function App() {
 
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
-  const executeLogout = () => {
+  const executeLogout = async () => {
     setIsLoggedIn(false);
+    
+    // Clear Supabase Session
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {}
+
+    // Clear all local state to ensure no cross-user data leakage
     localStorage.removeItem('studyweb_is_logged_in');
+    localStorage.removeItem('studyweb_profile_name');
+    localStorage.removeItem('studyweb_profile_avatar');
+    localStorage.removeItem('studyweb_profile_class_board');
+    localStorage.removeItem('studyweb_profile_school');
+    localStorage.removeItem('studyweb_onboarding_draft');
+    localStorage.removeItem('studyweb_onboarding_data');
+    localStorage.removeItem('studyweb_onboarding_complete');
+
     setActiveTab('dashboard');
     setActiveWorkspace(null);
     sessionStorage.removeItem('studyweb_active_task');
     sessionStorage.removeItem('studyweb_active_workspace_id');
     setShowLogoutConfirm(false);
-    setShowSessionWarning(false);
   };
 
   const handleLogout = () => {
@@ -227,48 +242,7 @@ export default function App() {
   };
 
 
-  // Session Expiration / Inactivity System (60s total by default for ease of user testing, adjustable via account preferences)
-  const [sessionTimeout, setSessionTimeout] = useState(() => Number(localStorage.getItem('studyweb_session_timeout') || 60));
-  const [inactivitySeconds, setInactivitySeconds] = useState(0);
-  const [showSessionWarning, setShowSessionWarning] = useState(false);
 
-  const SESSION_TIMEOUT_LIMIT = sessionTimeout;
-  const SESSION_WARNING_THRESHOLD = Math.round(sessionTimeout / 2);
-
-  const playWarningSound = () => {
-    try {
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContextClass) return;
-      const ctx = new AudioContextClass();
-      
-      // Tone 1: E5 (659.25 Hz)
-      const osc1 = ctx.createOscillator();
-      const gain1 = ctx.createGain();
-      osc1.type = 'sine';
-      osc1.frequency.setValueAtTime(659.25, ctx.currentTime);
-      gain1.gain.setValueAtTime(0.12, ctx.currentTime);
-      gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-      osc1.connect(gain1);
-      gain1.connect(ctx.destination);
-      osc1.start();
-      osc1.stop(ctx.currentTime + 0.4);
-
-      // Tone 2: A5 (880.00 Hz) slightly offset
-      const osc2 = ctx.createOscillator();
-      const gain2 = ctx.createGain();
-      osc2.type = 'sine';
-      osc2.frequency.setValueAtTime(880.00, ctx.currentTime + 0.15);
-      gain2.gain.setValueAtTime(0.01, ctx.currentTime);
-      gain2.gain.setValueAtTime(0.12, ctx.currentTime + 0.15);
-      gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
-      osc2.connect(gain2);
-      gain2.connect(ctx.destination);
-      osc2.start();
-      osc2.stop(ctx.currentTime + 0.6);
-    } catch (err) {
-      console.warn('Web Audio API not supported or blocked by browser play policy:', err);
-    }
-  };
 
   // Handle file deletion from anywhere
   useEffect(() => {
@@ -290,62 +264,7 @@ export default function App() {
     return () => window.removeEventListener('studyweb-file-deleted', handleFileDeleted);
   }, []);
 
-  // Sync sessionTimeout change to localStorage
-  useEffect(() => {
-    localStorage.setItem('studyweb_session_timeout', String(sessionTimeout));
-    setInactivitySeconds(0);
-  }, [sessionTimeout]);
 
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-
-    const resetTimer = () => {
-      setInactivitySeconds(0);
-    };
-
-    if (isLoggedIn) {
-      interval = setInterval(() => {
-        setInactivitySeconds(prev => prev + 1);
-      }, 1000);
-
-      window.addEventListener('mousemove', resetTimer);
-      window.addEventListener('keydown', resetTimer);
-      window.addEventListener('click', resetTimer);
-      window.addEventListener('touchstart', resetTimer);
-
-      return () => {
-        clearInterval(interval);
-        window.removeEventListener('mousemove', resetTimer);
-        window.removeEventListener('keydown', resetTimer);
-        window.removeEventListener('click', resetTimer);
-        window.removeEventListener('touchstart', resetTimer);
-      };
-    } else {
-       setInactivitySeconds(0);
-       setShowSessionWarning(false);
-    }
-  }, [isLoggedIn, sessionTimeout]);
-
-  // Separate effect to handle warning logic
-  useEffect(() => {
-    if (isLoggedIn && inactivitySeconds >= sessionTimeout) {
-       // Auto logout
-       setIsLoggedIn(false);
-       localStorage.removeItem('studyweb_is_logged_in');
-       setActiveTab('dashboard');
-       setActiveWorkspace(null);
-       sessionStorage.removeItem('studyweb_active_task');
-       sessionStorage.removeItem('studyweb_active_workspace_id');
-       setShowLogoutConfirm(false);
-       setShowSessionWarning(false);
-       setInactivitySeconds(0);
-    } else if (isLoggedIn && inactivitySeconds === sessionTimeout - 15 && sessionTimeout > 15) {
-       setShowSessionWarning(true);
-       playWarningSound();
-    } else if (isLoggedIn && inactivitySeconds < sessionTimeout - 15) {
-       setShowSessionWarning(false);
-    }
-  }, [isLoggedIn, inactivitySeconds, sessionTimeout]);
 
   // Helper helper to render active workspace tabs
   const renderDashboardContent = () => {
@@ -450,7 +369,7 @@ export default function App() {
           <LeaderboardView />
         </div>
         <div className={activeTab === 'profile' ? 'block' : 'hidden'}>
-          <ProfileView sessionTimeout={sessionTimeout} setSessionTimeout={setSessionTimeout} />
+          <ProfileView />
         </div>
         <div className={activeTab === 'parent-dashboard' ? 'block' : 'hidden'}>
           <ParentDashboardView />
@@ -860,21 +779,16 @@ export default function App() {
 
         {/* Logout Confirmation Modal */}
         <AnimatePresence>
-          {(showLogoutConfirm || showSessionWarning) && (
+          {showLogoutConfirm && (
             <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
               {/* Backdrop */}
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                onClick={() => {
-                  setShowLogoutConfirm(false);
-                  setShowSessionWarning(false);
-                  setInactivitySeconds(0);
-                }}
+                onClick={() => setShowLogoutConfirm(false)}
                 className="absolute inset-0 bg-slate-950/60 backdrop-blur-md"
               />
-
               {/* Modal Card */}
               <motion.div
                 initial={{ scale: 0.95, opacity: 0, y: 20 }}
@@ -886,7 +800,6 @@ export default function App() {
               >
                 {/* Visual Top Highlight Accent */}
                 <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-red-500 via-rose-500 to-pink-500" />
-
                 <div className="flex flex-col items-center text-center">
                   {/* Warning Icon with pulsating ring */}
                   <div className="relative mb-5">
@@ -895,56 +808,24 @@ export default function App() {
                       <AlertTriangle className="w-8 h-8" />
                     </div>
                   </div>
-
                   <h3 className="text-xl md:text-2xl font-black text-slate-900 dark:text-slate-100 tracking-tight mb-2">
-                    {showSessionWarning && !showLogoutConfirm ? "Are you still there?" : "Confirm Logout"}
+                    Confirm Logout
                   </h3>
                   
                   <p className="text-sm text-slate-500 dark:text-slate-400 mb-6 max-w-sm leading-relaxed">
-                    {showSessionWarning && !showLogoutConfirm 
-                      ? "Your session is about to expire due to inactivity. Move your mouse or press a key to stay logged in." 
-                      : "Are you sure you want to log out of your session? You will need to sign back in to access your dashboard and active workspaces."}
+                    Are you sure you want to log out of your session? You will need to sign back in to access your dashboard and active workspaces.
                   </p>
-
-                  {/* Subtle Countdown Tracker */}
-                  <div className="w-full bg-slate-50 dark:bg-slate-950/80 rounded-2xl p-4 mb-6 border border-slate-150 dark:border-slate-800/80 relative overflow-hidden">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                        Auto-logout on idle
-                      </span>
-                      <span className="text-sm font-black font-mono text-rose-500 dark:text-rose-400 flex items-center gap-1.5">
-                        <Clock className="w-4 h-4 animate-spin text-rose-500" style={{ animationDuration: "3s" }} />
-                        {SESSION_TIMEOUT_LIMIT - inactivitySeconds}s
-                      </span>
-                    </div>
-                    {/* Visual Progress Bar */}
-                    <div className="h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full mt-3 overflow-hidden relative">
-                      <motion.div
-                        className="h-full bg-gradient-to-r from-rose-500 to-pink-500 rounded-full"
-                        initial={{ width: "100%" }}
-                        animate={{ 
-                          width: `${Math.max(0, ((SESSION_TIMEOUT_LIMIT - inactivitySeconds) / SESSION_TIMEOUT_LIMIT) * 100)}%` 
-                        }}
-                        transition={{ duration: 1, ease: "linear" }}
-                      />
-                    </div>
-                  </div>
 
                   {/* Action Buttons */}
                   <div className="flex flex-col sm:flex-row gap-3 w-full">
                     <motion.button
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
-                      onClick={() => {
-                        setShowLogoutConfirm(false);
-                        setShowSessionWarning(false);
-                        setInactivitySeconds(0);
-                      }}
+                      onClick={() => setShowLogoutConfirm(false)}
                       className="flex-1 px-5 py-3 rounded-2xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-100 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-800 transition-all cursor-pointer flex items-center justify-center gap-1.5 order-2 sm:order-1 focus:outline-none"
                     >
-                      {showSessionWarning && !showLogoutConfirm ? "I'm still here" : "Cancel"}
+                      Cancel
                     </motion.button>
-
                     <motion.button
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}

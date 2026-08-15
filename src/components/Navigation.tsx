@@ -562,6 +562,10 @@ export default function Navigation() {
                           avatar_url: profilePic || ''
                         });
                       }
+
+                      // Clear any stale local data
+                      ['studyweb_profile_name', 'studyweb_profile_avatar', 'studyweb_profile_class_board', 'studyweb_profile_school', 'studyweb_onboarding_draft', 'studyweb_onboarding_data'].forEach(k => localStorage.removeItem(k));
+                      localStorage.removeItem('studyweb_onboarding_complete');
                       
                       (window as any).showToast?.('Welcome! Your StudyWeb account has been created.', 'success');
                       window.dispatchEvent(new CustomEvent('studyweb-signup-success'));
@@ -571,6 +575,11 @@ export default function Navigation() {
                         password,
                       });
                       if (error) throw error;
+                      // Clear any stale local data
+                      ['studyweb_profile_name', 'studyweb_profile_avatar', 'studyweb_profile_class_board', 'studyweb_profile_school', 'studyweb_onboarding_draft', 'studyweb_onboarding_data'].forEach(k => localStorage.removeItem(k));
+                      
+                      // Explicitly set onboarding complete for existing users
+                      localStorage.setItem('studyweb_onboarding_complete', 'true');
                       
                       (window as any).showToast?.('Successfully logged in to StudyWeb!', 'success');
                       localStorage.setItem('studyweb_is_logged_in', 'true');

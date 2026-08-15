@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 const profileSchema = z.object({
   full_name: z.string().min(2, 'Full name must be at least 2 characters'),
   avatar_url: z.string().url('Must be a valid URL').or(z.literal('')),
-  academic_level: z.string().min(1, 'Academic level is required'),
+  current_study: z.string().min(1, 'Academic level is required'),
 });
 
 type ProfileFormData = z.infer<typeof profileSchema>;
@@ -16,7 +16,7 @@ export function ProfileForm() {
   const [formData, setFormData] = useState<ProfileFormData>({
     full_name: '',
     avatar_url: '',
-    academic_level: '',
+    current_study: '',
   });
   
   const [errors, setErrors] = useState<Partial<Record<keyof ProfileFormData, string>>>({});
@@ -39,7 +39,7 @@ export function ProfileForm() {
       if (session?.user) {
         const { data, error } = await supabase
           .from('profiles')
-          .select('full_name, avatar_url, academic_level')
+          .select('full_name, avatar_url, current_study')
           .eq('id', session.user.id)
           .single();
 
@@ -51,7 +51,7 @@ export function ProfileForm() {
           setFormData({
             full_name: data.full_name || '',
             avatar_url: data.avatar_url || '',
-            academic_level: data.academic_level || '',
+            current_study: data.current_study || '',
           });
         }
       } else {
@@ -109,7 +109,7 @@ export function ProfileForm() {
       const { error } = await supabase.from('profiles').upsert(updates);
       localStorage.setItem('studyweb_profile_name', formData.full_name);
       localStorage.setItem('studyweb_profile_avatar', formData.avatar_url);
-      localStorage.setItem('studyweb_profile_class_board', formData.academic_level);
+      localStorage.setItem('studyweb_profile_class_board', formData.current_study);
       if (error) throw error;
       
       setSuccess(true);
@@ -169,22 +169,22 @@ export function ProfileForm() {
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="academic_level" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
+          <label htmlFor="current_study" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
             Academic Level / Class Board
           </label>
           <input
-            id="academic_level"
-            name="academic_level"
+            id="current_study"
+            name="current_study"
             type="text"
-            value={formData.academic_level}
+            value={formData.current_study}
             onChange={handleChange}
             className={`w-full px-4 py-2.5 rounded-xl border bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-colors ${
-              errors.academic_level ? 'border-red-500 dark:border-red-500/50' : 'border-slate-200 dark:border-slate-800'
+              errors.current_study ? 'border-red-500 dark:border-red-500/50' : 'border-slate-200 dark:border-slate-800'
             }`}
             placeholder="e.g. Advanced Placement AP US Curriculum"
           />
-          {errors.academic_level && (
-            <p className="text-xs text-red-500">{errors.academic_level}</p>
+          {errors.current_study && (
+            <p className="text-xs text-red-500">{errors.current_study}</p>
           )}
         </div>
 

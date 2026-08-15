@@ -1589,10 +1589,6 @@ export function LeaderboardView() {
 // ==========================================
 // 9. PROFILE VIEW
 // ==========================================
-interface ProfileViewProps {
-  sessionTimeout: number;
-  setSessionTimeout: (timeout: number) => void;
-}
 
 const PRESET_AVATARS = [
   { id: '1', url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=120', name: 'Alex' },
@@ -1607,7 +1603,7 @@ const MASCOTS = [
   { id: 'sparky', name: 'Sparky the Mech', desc: 'Analytical Formula Guide', role: 'Structures mathematical axioms, chemistry structures, and study pathways.' }
 ];
 
-export function ProfileView({ sessionTimeout, setSessionTimeout }: ProfileViewProps) {
+export function ProfileView() {
   const { themeMode, setThemeMode } = useThemeMode();
   const [activeProfileTab, setActiveProfileTab] = useState<'overview' | 'preferences'>('overview');
   
@@ -1689,10 +1685,19 @@ export function ProfileView({ sessionTimeout, setSessionTimeout }: ProfileViewPr
             .single();
             
           if (profile) {
-            if (profile.full_name) setStudentName(profile.full_name);
+            if (profile.full_name) {
+              setStudentName(profile.full_name);
+              setEditName(profile.full_name);
+            }
             if (profile.avatar_url) setAvatarUrl(profile.avatar_url);
-            if (profile.current_study) setClassBoard(profile.current_study);
-            if (profile.school_name) setSchoolDivision(profile.school_name);
+            if (profile.current_study) {
+              setClassBoard(profile.current_study);
+              setEditClassBoard(profile.current_study);
+            }
+            if (profile.school_name) {
+              setSchoolDivision(profile.school_name);
+              setEditSchool(profile.school_name);
+            }
           }
         }
       } catch (err) {
@@ -1782,11 +1787,6 @@ export function ProfileView({ sessionTimeout, setSessionTimeout }: ProfileViewPr
     setLearningVoice(voice);
     localStorage.setItem('studyweb_profile_voice_style', voice);
     triggerToast('🎙️ AI Tutor vocal profile synthesized!');
-  };
-
-  const handleTimeoutChange = (val: number) => {
-    setSessionTimeout(val);
-    triggerToast(`⏱️ Auto-logout security interval updated to ${val}s!`);
   };
 
   const handleThemeChange = (mode: any) => {
@@ -1992,7 +1992,7 @@ export function ProfileView({ sessionTimeout, setSessionTimeout }: ProfileViewPr
 
         {/* TAB 1: OVERVIEW */}
         {activeProfileTab === 'overview' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6">
+          <div className="grid grid-cols-1 gap-6 pt-6 max-w-3xl">
             
             {/* Left overview module: Interactive targets */}
             <div className="space-y-5 bg-slate-50/50 dark:bg-slate-900/30 p-5 rounded-2xl border border-slate-100 dark:border-slate-800">
@@ -2110,213 +2110,11 @@ export function ProfileView({ sessionTimeout, setSessionTimeout }: ProfileViewPr
                 </div>
               </div>
             </div>
-
-            {/* Right overview module: Mascot & Learning preferences */}
-            <div className="space-y-5 bg-slate-50/50 dark:bg-slate-900/30 p-5 rounded-2xl border border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <Brain className="w-5 h-5 text-indigo-500 animate-pulse" />
-                <p className="font-extrabold text-sm text-slate-800 dark:text-white">AI Learning Companion Mascot</p>
-              </div>
-
-              {/* Mascot picker selection list */}
-              <div className="space-y-2.5">
-                {MASCOTS.map((mas) => {
-                  const isSelected = activeMascot === mas.id;
-                  return (
-                    <div
-                      key={mas.id}
-                      onClick={() => saveMascot(mas.id)}
-                      className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                        isSelected 
-                          ? 'bg-gradient-to-br from-indigo-500/10 to-indigo-600/5 dark:from-indigo-500/10 dark:to-slate-900/10 border-indigo-200 dark:border-indigo-900/40 font-bold scale-[1.01] shadow-sm' 
-                          : 'bg-white dark:bg-slate-850 border-slate-150 dark:border-slate-800/80 text-slate-600 dark:text-slate-300 hover:border-indigo-200 hover:scale-[1.01]'
-                      }`}
-                    >
-                      <div className="flex items-start gap-2.5">
-                        <div className={`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 flex items-center justify-center ${isSelected ? 'bg-indigo-500 ring-4 ring-indigo-500/25' : 'bg-slate-300'}`} />
-                        <div className="min-w-0">
-                          <p className={`font-black text-xs ${isSelected ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-800 dark:text-slate-200'}`}>{mas.name}</p>
-                          <p className="text-[9px] text-slate-400 font-bold uppercase mt-0.5">{mas.desc}</p>
-                          {isSelected && (
-                            <p className="text-[10px] text-slate-500 dark:text-slate-300 font-medium mt-1.5 leading-relaxed bg-white/60 dark:bg-slate-900/50 p-2 rounded-lg border border-slate-100 dark:border-slate-800">{mas.role}</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Style selector custom cards */}
-              <div className="pt-4 border-t border-slate-200/40 dark:border-slate-800/60 space-y-3">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cognitive & Voice Style</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div className="p-3 rounded-xl bg-white dark:bg-slate-850 border border-slate-150 dark:border-slate-800">
-                    <span className="text-[9px] uppercase font-bold text-slate-400">Cognitive Profile</span>
-                    <select 
-                      value={cognitiveStyle} 
-                      onChange={(e) => saveCognitiveStyle(e.target.value)}
-                      className="w-full mt-1 bg-transparent text-[10px] font-black text-slate-850 dark:text-slate-200 focus:outline-none cursor-pointer"
-                    >
-                      <option value="Visual & Active Spaced Recall">Visual Spaced Recall</option>
-                      <option value="Kinesthetic Practice & Coding Labs">Kinesthetic Lab Code</option>
-                      <option value="Verbal / Socratic Discussion">Socratic Discussion</option>
-                    </select>
-                  </div>
-                  <div className="p-3 rounded-xl bg-white dark:bg-slate-850 border border-slate-150 dark:border-slate-800">
-                    <span className="text-[9px] uppercase font-bold text-slate-400">AI Voice Assistant</span>
-                    <select 
-                      value={learningVoice} 
-                      onChange={(e) => saveLearningVoice(e.target.value)}
-                      className="w-full mt-1 bg-transparent text-[10px] font-black text-slate-850 dark:text-slate-200 focus:outline-none cursor-pointer"
-                    >
-                      <option value="Calm Academic Tutor voice">Calm Academic</option>
-                      <option value="Exciting & High-Energy Coach">High-Energy Coach</option>
-                      <option value="Gentle Slow Paced Listener">Slow Listener</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         ) : (
           /* TAB 2: ACCOUNT PREFERENCES */
           <div className="space-y-6 pt-6">
             <ProfileForm />
-
-            <div>
-              <h4 className="font-extrabold text-sm text-slate-800 dark:text-white flex items-center gap-2">
-                <Clock className="w-5 h-5 text-indigo-500" />
-                <span>Secure Session Auto-Logout Config</span>
-              </h4>
-              <p className="text-xs text-slate-400 font-semibold mt-1">Protect your academic workspace security by ending your inactive browser sessions automatically.</p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {[
-                { label: "Short Test (30s)", value: 30, desc: "Warns at 15s. Ideal for testing session expiry quickly." },
-                { label: "Standard (60s)", value: 60, desc: "Warns at 30s. Balance between protection and utility." },
-                { label: "Relaxed (5m / 300s)", value: 300, desc: "Warns at 150s. Suitable for continuous study." }
-              ].map((option) => (
-                <button
-                  key={option.value}
-                  onClick={() => handleTimeoutChange(option.value)}
-                  className={`p-5 rounded-2xl border text-left cursor-pointer transition-all flex flex-col justify-between focus:outline-none hover:scale-[1.02] ${
-                    sessionTimeout === option.value
-                      ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-lg shadow-indigo-600/10'
-                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800/80 text-slate-700 dark:text-slate-200 hover:border-indigo-300 dark:hover:border-indigo-800'
-                  }`}
-                >
-                  <div className="space-y-1">
-                    <p className={`font-black text-[10px] uppercase tracking-wide ${sessionTimeout === option.value ? 'text-indigo-200' : 'text-indigo-600 dark:text-indigo-400'}`}>
-                      {option.label}
-                    </p>
-                    <p className="font-extrabold text-xs tracking-tight leading-tight mt-1">{option.value} Seconds Inactivity</p>
-                  </div>
-                  <p className={`text-[10px] mt-4 leading-relaxed ${sessionTimeout === option.value ? 'text-indigo-100 opacity-90' : 'text-slate-400'}`}>
-                    {option.desc}
-                  </p>
-                </button>
-              ))}
-            </div>
-
-            {/* Timing Parameters Details Card */}
-            <div className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl p-5 border border-slate-200/80 dark:border-slate-800 space-y-4">
-              <div className="flex items-center gap-2">
-                <Settings className="w-5 h-5 text-indigo-500" />
-                <p className="font-bold text-sm text-slate-800 dark:text-white">Active Security Timing Metrics</p>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-semibold">
-                <div className="p-3.5 bg-white dark:bg-slate-900 rounded-xl border">
-                  <span className="text-[10px] uppercase font-bold text-slate-400">Total session length</span>
-                  <p className="text-sm font-black text-slate-850 dark:text-white mt-0.5">{sessionTimeout} seconds</p>
-                  <p className="text-[10px] text-slate-400 font-medium mt-1">Syllabus workspace logs out automatically after inactivity.</p>
-                </div>
-                <div className="p-3.5 bg-white dark:bg-slate-900 rounded-xl border">
-                  <span className="text-[10px] uppercase font-bold text-slate-400">Pre-Logout warning trigger</span>
-                  <p className="text-sm font-black text-amber-500 dark:text-amber-400 mt-0.5">{Math.round(sessionTimeout / 2)} seconds</p>
-                  <p className="text-[10px] text-slate-400 font-medium mt-1">Modal prompts active student action to extend session length.</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Real-time Theme Synchronization Section */}
-            <div className="space-y-4 pt-6 border-t border-slate-200/60 dark:border-slate-800">
-              <div>
-                <h4 className="font-extrabold text-sm text-slate-800 dark:text-white flex items-center gap-2">
-                  <Monitor className="w-5 h-5 text-indigo-500" />
-                  <span>Real-time Theme Customization</span>
-                </h4>
-                <p className="text-xs text-slate-400 font-semibold mt-1">
-                  Synchronize your active background interfaces cleanly with operating system dark mode thresholds.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {[
-                  { 
-                    id: "system", 
-                    label: "System Sync", 
-                    desc: "Follows system theme in real-time.", 
-                    icon: Monitor, 
-                    color: "text-indigo-500",
-                    bg: "bg-indigo-500/10 dark:bg-indigo-500/20"
-                  },
-                  { 
-                    id: "light", 
-                    label: "Light Override", 
-                    desc: "Always use standard light layout.", 
-                    icon: Sun, 
-                    color: "text-amber-500",
-                    bg: "bg-amber-500/10 dark:bg-amber-500/20"
-                  },
-                  { 
-                    id: "dark", 
-                    label: "Dark Override", 
-                    desc: "Always use high-contrast dark layout.", 
-                    icon: Moon, 
-                    color: "text-indigo-400",
-                    bg: "bg-indigo-500/10 dark:bg-indigo-500/20"
-                  }
-                ].map((option) => {
-                  const IconComponent = option.icon;
-                  const isSelected = themeMode === option.id;
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => handleThemeChange(option.id as any)}
-                      className={`p-5 rounded-2xl border text-left cursor-pointer transition-all flex flex-col justify-between focus:outline-none min-h-[140px] hover:scale-[1.02] ${
-                        isSelected
-                          ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-lg shadow-indigo-600/10'
-                          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:border-indigo-300 dark:hover:border-indigo-800'
-                      }`}
-                    >
-                      <div className="w-full flex items-start justify-between">
-                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${isSelected ? 'bg-white/20 text-white' : `${option.bg} ${option.color}`}`}>
-                          <IconComponent className="w-4.5 h-4.5" />
-                        </div>
-                        {isSelected && (
-                          <span className="text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-white/25 text-white animate-pulse">
-                            Active
-                          </span>
-                        )}
-                      </div>
-                      
-                      <div className="mt-4">
-                        <p className="font-extrabold text-xs">
-                          {option.label}
-                        </p>
-                        <p className={`text-[10px] mt-1 font-semibold leading-relaxed ${isSelected ? 'text-indigo-100 opacity-90' : 'text-slate-400'}`}>
-                          {option.desc}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
           </div>
         )}
       </div>

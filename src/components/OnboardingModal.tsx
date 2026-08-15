@@ -86,7 +86,18 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
   };
 
   const handleNext = () => {
-    if (step < 12) setStep(step + 1);
+    if (step < 12) setStep((prev) => prev + 1);
+  };
+
+  const handleOptionSelect = (key: string, value: any) => {
+    updateForm(key, value);
+    // Auto-advance logic for single-choice questions
+    const autoAdvanceFields = ['age', 'status', 'goal', 'time', 'device', 'challenge'];
+    if (autoAdvanceFields.includes(key) || (key === 'usesAi' && value === 'No')) {
+      setTimeout(() => {
+        setStep((prev) => (prev < 12 ? prev + 1 : prev));
+      }, 300);
+    }
   };
 
   const handleBack = () => {
@@ -181,7 +192,7 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                   <div className="grid gap-3">
                     {['Under 13', '13–15', '16–18', '19–22', '23–30', '30+'].map(opt => (
                       <label key={opt} className={`flex items-center p-4 border rounded-2xl cursor-pointer transition-all ${formData.age === opt ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 shadow-sm' : 'border-slate-200 dark:border-slate-800 hover:border-indigo-200 dark:hover:border-indigo-800'}`}>
-                        <input type="radio" name="age" className="hidden" value={opt} checked={formData.age === opt} onChange={() => updateForm('age', opt)} />
+                        <input type="radio" name="age" className="hidden" value={opt} checked={formData.age === opt} onChange={() => handleOptionSelect('age', opt)} />
                         <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center mr-3 ${formData.age === opt ? 'border-indigo-600 dark:border-indigo-400' : 'border-slate-300 dark:border-slate-600'}`}>
                           {formData.age === opt && <div className="w-2.5 h-2.5 rounded-full bg-indigo-600 dark:bg-indigo-400" />}
                         </div>
@@ -200,7 +211,7 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                   <div className="grid gap-3">
                     {['School Student', 'College Student', 'Preparing for Competitive Exams', 'Working Professional', 'Other'].map(opt => (
                       <label key={opt} className={`flex items-center p-4 border rounded-2xl cursor-pointer transition-all ${formData.status === opt ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 shadow-sm' : 'border-slate-200 dark:border-slate-800 hover:border-indigo-200 dark:hover:border-indigo-800'}`}>
-                        <input type="radio" name="status" className="hidden" value={opt} checked={formData.status === opt} onChange={() => updateForm('status', opt)} />
+                        <input type="radio" name="status" className="hidden" value={opt} checked={formData.status === opt} onChange={() => handleOptionSelect('status', opt)} />
                         <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center mr-3 ${formData.status === opt ? 'border-indigo-600 dark:border-indigo-400' : 'border-slate-300 dark:border-slate-600'}`}>
                           {formData.status === opt && <div className="w-2.5 h-2.5 rounded-full bg-indigo-600 dark:bg-indigo-400" />}
                         </div>
@@ -254,7 +265,7 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                   <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
                     {['Crack JEE', 'Crack NEET', 'UPSC Preparation', 'Learn Web Development', 'Learn AI', 'Learn Programming', 'Improve English', 'Get Better Grades', 'Get a Job', 'Other'].map(opt => (
                       <label key={opt} className={`flex items-center p-4 border rounded-2xl cursor-pointer transition-all ${formData.goal === opt ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 shadow-sm' : 'border-slate-200 dark:border-slate-800 hover:border-indigo-200 dark:hover:border-indigo-800'}`}>
-                        <input type="radio" name="goal" className="hidden" value={opt} checked={formData.goal === opt} onChange={() => updateForm('goal', opt)} />
+                        <input type="radio" name="goal" className="hidden" value={opt} checked={formData.goal === opt} onChange={() => handleOptionSelect('goal', opt)} />
                         <div className={`w-5 h-5 shrink-0 rounded-full border-2 flex items-center justify-center mr-3 ${formData.goal === opt ? 'border-indigo-600 dark:border-indigo-400' : 'border-slate-300 dark:border-slate-600'}`}>
                           {formData.goal === opt && <div className="w-2.5 h-2.5 rounded-full bg-indigo-600 dark:bg-indigo-400" />}
                         </div>
@@ -273,7 +284,7 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                   <div className="grid gap-3">
                     {['Less than 1 hour', '1–2 hours', '2–4 hours', '4–6 hours', 'More than 6 hours'].map(opt => (
                       <label key={opt} className={`flex items-center p-4 border rounded-2xl cursor-pointer transition-all ${formData.time === opt ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 shadow-sm' : 'border-slate-200 dark:border-slate-800 hover:border-indigo-200 dark:hover:border-indigo-800'}`}>
-                        <input type="radio" name="time" className="hidden" value={opt} checked={formData.time === opt} onChange={() => updateForm('time', opt)} />
+                        <input type="radio" name="time" className="hidden" value={opt} checked={formData.time === opt} onChange={() => handleOptionSelect('time', opt)} />
                         <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center mr-3 ${formData.time === opt ? 'border-indigo-600 dark:border-indigo-400' : 'border-slate-300 dark:border-slate-600'}`}>
                           {formData.time === opt && <div className="w-2.5 h-2.5 rounded-full bg-indigo-600 dark:bg-indigo-400" />}
                         </div>
@@ -325,7 +336,7 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                   <div className="grid gap-3">
                     {['Phone', 'Laptop', 'Tablet', 'Desktop'].map(opt => (
                       <label key={opt} className={`flex items-center p-4 border rounded-2xl cursor-pointer transition-all ${formData.device === opt ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 shadow-sm' : 'border-slate-200 dark:border-slate-800 hover:border-indigo-200 dark:hover:border-indigo-800'}`}>
-                        <input type="radio" name="device" className="hidden" value={opt} checked={formData.device === opt} onChange={() => updateForm('device', opt)} />
+                        <input type="radio" name="device" className="hidden" value={opt} checked={formData.device === opt} onChange={() => handleOptionSelect('device', opt)} />
                         <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center mr-3 ${formData.device === opt ? 'border-indigo-600 dark:border-indigo-400' : 'border-slate-300 dark:border-slate-600'}`}>
                           {formData.device === opt && <div className="w-2.5 h-2.5 rounded-full bg-indigo-600 dark:bg-indigo-400" />}
                         </div>
@@ -344,7 +355,7 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                   <div className="grid gap-3">
                     {["I don't know what to study.", 'Too many resources.', 'I get distracted.', 'I procrastinate.', 'I forget what I learn.', 'I struggle to stay consistent.', "I don't have enough time.", 'Other'].map(opt => (
                       <label key={opt} className={`flex items-center p-4 border rounded-2xl cursor-pointer transition-all ${formData.challenge === opt ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 shadow-sm' : 'border-slate-200 dark:border-slate-800 hover:border-indigo-200 dark:hover:border-indigo-800'}`}>
-                        <input type="radio" name="challenge" className="hidden" value={opt} checked={formData.challenge === opt} onChange={() => updateForm('challenge', opt)} />
+                        <input type="radio" name="challenge" className="hidden" value={opt} checked={formData.challenge === opt} onChange={() => handleOptionSelect('challenge', opt)} />
                         <div className={`w-5 h-5 shrink-0 rounded-full border-2 flex items-center justify-center mr-3 ${formData.challenge === opt ? 'border-indigo-600 dark:border-indigo-400' : 'border-slate-300 dark:border-slate-600'}`}>
                           {formData.challenge === opt && <div className="w-2.5 h-2.5 rounded-full bg-indigo-600 dark:bg-indigo-400" />}
                         </div>
@@ -364,7 +375,7 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                     <div className="grid grid-cols-2 gap-3">
                       {['Yes', 'No'].map(opt => (
                         <label key={opt} className={`flex items-center p-4 border rounded-2xl cursor-pointer transition-all ${formData.usesAi === opt ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 shadow-sm' : 'border-slate-200 dark:border-slate-800 hover:border-indigo-200 dark:hover:border-indigo-800'}`}>
-                          <input type="radio" name="usesAi" className="hidden" value={opt} checked={formData.usesAi === opt} onChange={() => updateForm('usesAi', opt)} />
+                          <input type="radio" name="usesAi" className="hidden" value={opt} checked={formData.usesAi === opt} onChange={() => handleOptionSelect('usesAi', opt)} />
                           <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center mr-3 ${formData.usesAi === opt ? 'border-indigo-600 dark:border-indigo-400' : 'border-slate-300 dark:border-slate-600'}`}>
                             {formData.usesAi === opt && <div className="w-2.5 h-2.5 rounded-full bg-indigo-600 dark:bg-indigo-400" />}
                           </div>
@@ -508,7 +519,7 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
         </div>
 
         {/* Footer Actions */}
-        {step > 0 && step < 12 && (
+        {step > 0 && step < 12 && ![1, 2, 5, 6, 8, 9].includes(step) && !(step === 10 && formData.usesAi !== 'Yes') && (
           <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-end">
             <button
               onClick={handleNext}
