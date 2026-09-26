@@ -238,6 +238,7 @@ export default function WorkspaceChat({ workspace, onUpdateWorkspace }: Workspac
 
       const response = await fetch('/api/ai-tutor', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json'
         },

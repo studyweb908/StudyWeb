@@ -1,19 +1,26 @@
 import { createClient } from '@supabase/supabase-js';
 import { generateEmbedding } from '../utils/embeddings.js';
 
-function getSupabaseClient() {
+function getSupabaseClient(authHeader?: string) {
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
   const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseKey) {
     throw new Error('Supabase credentials not configured.');
   }
-  return createClient(supabaseUrl, supabaseKey);
+  const options = authHeader ? { global: { headers: { Authorization: authHeader } } } : {};
+  return createClient(supabaseUrl, supabaseKey, options);
 }
 
-export async function retrieveKnowledge(workspaceId: string, userId: string, query: string, topK: number = 8, ai: any = null, filesFallback: any[] = [], notesFallback: any[] = []): Promise<string> {
+function getGeminiApiKey(): string | null {
+  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY || process.env.VITE_GEMINI_API_KEY;
+  if (!key || key === "MY_GEMINI_API_KEY" || key.trim() === "") return null;
+  return key.trim();
+}
+
+export async function retrieveKnowledge(workspaceId: string, userId: string, query: string, topK: number = 8, ai: any = null, filesFallback: any[] = [], notesFallback: any[] = [], authHeader?: string): Promise<string> {
   let queryEmbedding: number[] | null = null;
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (ai && query.trim() && apiKey && apiKey !== "MY_GEMINI_API_KEY") {
+  const apiKey = getGeminiApiKey();
+  if (ai && query.trim() && apiKey) {
     queryEmbedding = await generateEmbedding(query, apiKey);
   }
 
@@ -21,7 +28,7 @@ export async function retrieveKnowledge(workspaceId: string, userId: string, que
   knowledgeContext += "The following structured knowledge chunks were extracted from the user's workspace documents and notes. Use ONLY this information to generate your response. If the answer is not contained here, state that it's not covered by the workspace knowledge.\n\n";
 
   try {
-    const supabase = getSupabaseClient();
+    const supabase = getSupabaseClient(authHeader);
     
     if (queryEmbedding) {
       const vectorStr = '[' + queryEmbedding.join(',') + ']';

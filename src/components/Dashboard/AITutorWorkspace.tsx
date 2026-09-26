@@ -376,6 +376,7 @@ export default function AITutorWorkspace() {
     try {
       const response = await fetch("/api/knowledge/search", {
         method: "POST",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: queryToSearch,
@@ -443,6 +444,7 @@ export default function AITutorWorkspace() {
     try {
       const response = await fetch("/api/ai-tutor", {
         method: "POST",
+        credentials: "same-origin",
         headers: {
           "Content-Type": "application/json"
         },

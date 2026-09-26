@@ -53,6 +53,7 @@ import {
 } from 'lucide-react';
 
 import { Workspace, INITIAL_WORKSPACES } from './components/Dashboard/WorkspaceTypes';
+import { toValidUuid } from './utils/uuid.ts';
 import WorkspaceSelector from './components/Dashboard/WorkspaceSelector';
 import WorkspaceContainer from './components/Dashboard/WorkspaceContainer';
 import ToastContainer from './components/ToastContainer';
@@ -96,7 +97,22 @@ export default function App() {
     const local = localStorage.getItem('studyweb_workspaces_v2');
     if (local) {
       try {
-        return JSON.parse(local);
+        const parsed = JSON.parse(local);
+        if (Array.isArray(parsed)) {
+          let hasChanges = false;
+          const normalized = parsed.map((ws: Workspace) => {
+            const validId = toValidUuid(ws.id);
+            if (validId !== ws.id) {
+              hasChanges = true;
+              return { ...ws, id: validId };
+            }
+            return ws;
+          });
+          if (hasChanges) {
+            localStorage.setItem('studyweb_workspaces_v2', JSON.stringify(normalized));
+          }
+          return normalized;
+        }
       } catch (err) {}
     }
     return INITIAL_WORKSPACES;

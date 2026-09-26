@@ -1,331 +1,85 @@
--- ==========================================
--- STUDYWEB SUPABASE SCHEMA (RAG + CORE)
--- ==========================================
+-- ==============================================================================
+-- STUDYWEB SUPABASE MASTER SETUP SCRIPT
+-- ==============================================================================
+-- This script sets up everything requested:
+--   1. User Profiles & Account Details (profiles table with auto-sync trigger from auth.users)
+--   2. Onboarding Questionnaire Data (onboarding_data JSONB, academic level, goals, etc.)
+--   3. User Workspace Data (workspaces, workspace_files for PDFs, screenshots, PPTs, docs)
+--   4. Knowledge Engine & Vector Search (documents, document_chunks, pgvector embeddings)
+--   5. AI Tutor RAG function (match_documents for AI Tutor to query Supabase data)
+--   6. Storage Buckets (study-files & workspace-files for binary file uploads)
+--   7. Row-Level Security (RLS) policies allowing users full access to their data
+-- ==============================================================================
 
--- Enable pgvector extension
+-- 1. Enable pgvector extension for AI semantic search
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- Drop existing tables to start fresh (CASCADE to handle dependencies)
-DROP TABLE IF EXISTS retrieval_logs CASCADE;
-DROP TABLE IF EXISTS generated_notes CASCADE;
-DROP TABLE IF EXISTS generated_flashcards CASCADE;
-DROP TABLE IF EXISTS generated_quizzes CASCADE;
-DROP TABLE IF EXISTS knowledge_graph CASCADE;
-DROP TABLE IF EXISTS embeddings CASCADE;
-DROP TABLE IF EXISTS document_chunks CASCADE;
-DROP TABLE IF EXISTS processing_jobs CASCADE;
-DROP TABLE IF EXISTS document_metadata CASCADE;
-DROP TABLE IF EXISTS documents CASCADE;
-DROP TABLE IF EXISTS workspace_files CASCADE;
-DROP TABLE IF EXISTS workspace_flashcards CASCADE;
-DROP TABLE IF EXISTS workspace_quizzes CASCADE;
-DROP TABLE IF EXISTS workspace_notes CASCADE;
-DROP TABLE IF EXISTS workspace_planner_tasks CASCADE;
-DROP TABLE IF EXISTS concept_links CASCADE;
-DROP TABLE IF EXISTS concept_nodes CASCADE;
-DROP TABLE IF EXISTS workspaces CASCADE;
-
-
--- ==========================================
--- 0. CORE WORKSPACE TABLES
--- ==========================================
-CREATE TABLE workspaces (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID, -- References auth.users(id) if using Supabase Auth
-    name TEXT NOT NULL,
-    subject TEXT,
-    description TEXT,
-    color_theme TEXT,
-    cover_image TEXT,
-    emoji TEXT,
-    visibility TEXT DEFAULT 'private',
-    template TEXT,
-    pinned BOOLEAN DEFAULT FALSE,
-    favorite BOOLEAN DEFAULT FALSE,
-    streak INTEGER DEFAULT 0,
-    study_hours INTEGER DEFAULT 0,
-    last_opened TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    is_for_sale BOOLEAN DEFAULT FALSE,
-    price NUMERIC,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Workspace Files
-CREATE TABLE workspace_files (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID REFERENCES workspaces(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    type TEXT,
-    size TEXT,
-    upload_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    status TEXT,
-    pages INTEGER,
-    tags TEXT[],
-    summary TEXT,
-    highlights TEXT[],
-    transcription TEXT,
-    extracted_diagrams TEXT[],
-    formulas TEXT[],
-    url TEXT
-);
-
--- Workspace Flashcards
-CREATE TABLE workspace_flashcards (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID REFERENCES workspaces(id) ON DELETE CASCADE,
-    front TEXT NOT NULL,
-    back TEXT NOT NULL,
-    topic TEXT,
-    difficulty TEXT,
-    box INTEGER DEFAULT 1,
-    bookmarked BOOLEAN DEFAULT FALSE,
-    last_studied TIMESTAMP WITH TIME ZONE
-);
-
--- Workspace Quizzes
-CREATE TABLE workspace_quizzes (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID REFERENCES workspaces(id) ON DELETE CASCADE,
-    question TEXT NOT NULL,
-    options TEXT[] NOT NULL,
-    correct_index INTEGER NOT NULL,
-    explanation TEXT,
-    difficulty TEXT,
-    type TEXT
-);
-
--- Workspace Notes
-CREATE TABLE workspace_notes (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID REFERENCES workspaces(id) ON DELETE CASCADE,
-    title TEXT NOT NULL,
-    content TEXT,
-    tags TEXT[],
-    linked_concepts TEXT[],
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Workspace Planner Tasks
-CREATE TABLE workspace_planner_tasks (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID REFERENCES workspaces(id) ON DELETE CASCADE,
-    title TEXT NOT NULL,
-    due_date TIMESTAMP WITH TIME ZONE,
-    priority TEXT,
-    completed BOOLEAN DEFAULT FALSE,
-    revision_box INTEGER
-);
-
--- Concept Nodes
-CREATE TABLE concept_nodes (
-    id TEXT PRIMARY KEY,
-    workspace_id UUID REFERENCES workspaces(id) ON DELETE CASCADE,
-    label TEXT,
-    type TEXT,
-    color TEXT,
-    x NUMERIC,
-    y NUMERIC,
-    details TEXT
-);
-
--- Concept Links
-CREATE TABLE concept_links (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID REFERENCES workspaces(id) ON DELETE CASCADE,
-    source TEXT REFERENCES concept_nodes(id) ON DELETE CASCADE,
-    target TEXT REFERENCES concept_nodes(id) ON DELETE CASCADE,
-    label TEXT
-);
-
-
--- ==========================================
--- 1. KNOWLEDGE ENGINE TABLES (ADVANCED RAG)
--- ==========================================
-
--- Documents
-CREATE TABLE IF NOT EXISTS documents (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    type TEXT NOT NULL,
-    status TEXT DEFAULT 'pending',
-    url TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Document Metadata
-CREATE TABLE IF NOT EXISTS document_metadata (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
-    workspace_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    key TEXT NOT NULL,
-    value JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Processing Jobs
-CREATE TABLE IF NOT EXISTS processing_jobs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
-    workspace_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    status TEXT DEFAULT 'queued',
-    progress INTEGER DEFAULT 0,
-    message TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Document Chunks
-CREATE TABLE IF NOT EXISTS document_chunks (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
-    workspace_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    text TEXT NOT NULL,
-    topic TEXT,
-    subtopic TEXT,
-    source_type TEXT,
-    page_number INTEGER,
-    language TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Embeddings
-CREATE TABLE IF NOT EXISTS embeddings (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    chunk_id UUID REFERENCES document_chunks(id) ON DELETE CASCADE,
-    document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
-    workspace_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    vector vector(768),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS embeddings_vector_idx ON embeddings USING hnsw (vector vector_cosine_ops);
-
--- Knowledge Graph
-CREATE TABLE IF NOT EXISTS knowledge_graph (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    source_concept TEXT,
-    target_concept TEXT,
-    relationship TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Generated Quizzes
-CREATE TABLE IF NOT EXISTS generated_quizzes (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    title TEXT,
-    questions JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Generated Flashcards
-CREATE TABLE IF NOT EXISTS generated_flashcards (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    topic TEXT,
-    cards JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Generated Notes
-CREATE TABLE IF NOT EXISTS generated_notes (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    content TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Retrieval Logs
-CREATE TABLE IF NOT EXISTS retrieval_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    query TEXT,
-    results JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-
--- ==========================================
--- 2. MATCH DOCUMENTS FUNCTION (VECTOR SEARCH)
--- ==========================================
-CREATE OR REPLACE FUNCTION match_documents (
-  query_embedding vector(768),
-  match_count int,
-  p_workspace_id TEXT,
-  p_user_id TEXT
-) RETURNS TABLE (
-  id uuid,
-  chunk_id uuid,
-  document_id uuid,
-  text text,
-  topic text,
-  similarity float
-)
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  RETURN QUERY
-  SELECT
-    e.id,
-    e.chunk_id,
-    e.document_id,
-    c.text,
-    c.topic,
-    1 - (e.vector <=> query_embedding) AS similarity
-  FROM embeddings e
-  JOIN document_chunks c ON c.id = e.chunk_id
-  WHERE e.workspace_id = p_workspace_id
-  ORDER BY e.vector <=> query_embedding
-  LIMIT match_count;
-END;
-$$;
-CREATE TABLE IF NOT EXISTS profiles (
+-- 2. User Profiles & Account Details
+CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email TEXT,
   full_name TEXT,
   avatar_url TEXT,
-  academic_level TEXT,
+  current_study TEXT,            -- Academic grade / board (e.g. 10th CBSE, College, etc.)
+  school_name TEXT,              -- School or university name
+  age TEXT,                      -- Age or date of birth
+  primary_goal TEXT,             -- Exam prep, homework, deep understanding
+  study_routine TEXT,            -- Daily study hours or schedule
+  weak_areas TEXT[],             -- Difficult subjects / focus areas
+  strengths TEXT[],              -- Strong subjects
+  learning_style TEXT,           -- Visual, reading, auditory, practice
+  uses_ai BOOLEAN DEFAULT FALSE, -- Previous AI experience
+  onboarding_data JSONB DEFAULT '{}'::jsonb, -- Full structured answers to onboarding questions
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Enable RLS
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+-- Auto-sync trigger: Automatically creates a profile row whenever a new user signs up
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, full_name, avatar_url)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', ''),
+    COALESCE(NEW.raw_user_meta_data->>'avatar_url', '')
+  )
+  ON CONFLICT (id) DO UPDATE
+  SET
+    email = EXCLUDED.email,
+    full_name = CASE 
+      WHEN public.profiles.full_name IS NULL OR public.profiles.full_name = '' 
+      THEN EXCLUDED.full_name 
+      ELSE public.profiles.full_name 
+    END,
+    avatar_url = CASE 
+      WHEN public.profiles.avatar_url IS NULL OR public.profiles.avatar_url = '' 
+      THEN EXCLUDED.avatar_url 
+      ELSE public.profiles.avatar_url 
+    END,
+    updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Create Policies
-CREATE POLICY "Users can view own profile"
-  ON profiles FOR SELECT
-  USING ( auth.uid() = id );
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
-CREATE POLICY "Users can update own profile"
-  ON profiles FOR UPDATE
-  USING ( auth.uid() = id );
+-- Backfill any existing auth users into profiles
+INSERT INTO public.profiles (id, email, full_name, avatar_url)
+SELECT 
+  id, 
+  email, 
+  COALESCE(raw_user_meta_data->>'full_name', ''), 
+  COALESCE(raw_user_meta_data->>'avatar_url', '')
+FROM auth.users
+ON CONFLICT (id) DO NOTHING;
 
-CREATE POLICY "Users can insert own profile"
-  ON profiles FOR INSERT
-  WITH CHECK ( auth.uid() = id );
-CREATE TABLE IF NOT EXISTS workspaces (
+-- 3. Workspaces
+CREATE TABLE IF NOT EXISTS public.workspaces (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -347,73 +101,225 @@ CREATE TABLE IF NOT EXISTS workspaces (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Enable Row Level Security (RLS)
-ALTER TABLE workspaces ENABLE ROW LEVEL SECURITY;
+-- 4. Uploaded Workspace Files (PDFs, Screenshots, PPTs, Docs)
+CREATE TABLE IF NOT EXISTS public.workspace_files (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID REFERENCES public.workspaces(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type TEXT,                     -- 'pdf', 'ppt', 'image', 'doc', 'screenshot'
+  size TEXT,                     -- e.g. '2.4 MB'
+  url TEXT,                      -- Public or signed URL in Supabase Storage
+  storage_path TEXT,             -- Path inside storage bucket
+  summary TEXT,                  -- AI-generated overview
+  transcription TEXT,            -- Extracted text / OCR / transcript
+  tags TEXT[],                   -- Classification tags
+  highlights TEXT[],             -- Extracted key passages
+  formulas TEXT[],               -- Scientific/Math formulas
+  extracted_diagrams TEXT[],     -- Extracted figure references
+  pages INTEGER,                 -- Number of pages / slides
+  status TEXT DEFAULT 'indexed', -- 'uploading', 'processing', 'indexed', 'ready'
+  upload_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
--- Create Policies for CRUD operations
-CREATE POLICY "Users can view own workspaces"
-  ON workspaces FOR SELECT
-  USING ( auth.uid() = user_id );
+-- 5. Knowledge Engine / RAG Tables (For AI Tutor Retrieval)
+CREATE TABLE IF NOT EXISTS public.documents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID REFERENCES public.workspaces(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  size TEXT,
+  url TEXT,
+  storage_path TEXT,
+  description TEXT,
+  status TEXT DEFAULT 'ready',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
-CREATE POLICY "Users can insert own workspaces"
-  ON workspaces FOR INSERT
-  WITH CHECK ( auth.uid() = user_id );
+CREATE TABLE IF NOT EXISTS public.processing_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id UUID REFERENCES public.documents(id) ON DELETE CASCADE,
+  workspace_id UUID REFERENCES public.workspaces(id) ON DELETE CASCADE,
+  user_id UUID,
+  status TEXT NOT NULL,
+  progress INTEGER DEFAULT 0,
+  current_step TEXT,
+  error_message TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
-CREATE POLICY "Users can update own workspaces"
-  ON workspaces FOR UPDATE
-  USING ( auth.uid() = user_id );
+CREATE TABLE IF NOT EXISTS public.document_chunks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id UUID REFERENCES public.documents(id) ON DELETE CASCADE,
+  workspace_id UUID REFERENCES public.workspaces(id) ON DELETE CASCADE,
+  user_id UUID,
+  chunk_index INTEGER,
+  text TEXT NOT NULL,
+  source_type TEXT,
+  topic TEXT,
+  subtopic TEXT,
+  page_number INTEGER,
+  language TEXT DEFAULT 'auto-detected',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
-CREATE POLICY "Users can delete own workspaces"
-  ON workspaces FOR DELETE
-  USING ( auth.uid() = user_id );
-ALTER TABLE profiles ADD COLUMN IF NOT EXISTS onboarding_data JSONB;
--- Enable RLS and create policies for all tables
-ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Enable all for authenticated users" ON documents FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
-CREATE POLICY "Enable all for anon users" ON documents FOR ALL USING (auth.role() = 'anon') WITH CHECK (auth.role() = 'anon');
+CREATE TABLE IF NOT EXISTS public.embeddings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  chunk_id UUID REFERENCES public.document_chunks(id) ON DELETE CASCADE,
+  vector vector(768),
+  model TEXT DEFAULT 'text-embedding-004',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
-ALTER TABLE processing_jobs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Enable all for authenticated users" ON processing_jobs FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
-CREATE POLICY "Enable all for anon users" ON processing_jobs FOR ALL USING (auth.role() = 'anon') WITH CHECK (auth.role() = 'anon');
+CREATE TABLE IF NOT EXISTS public.generated_notes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id UUID REFERENCES public.documents(id) ON DELETE CASCADE,
+  workspace_id UUID REFERENCES public.workspaces(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  type TEXT NOT NULL,
+  content JSONB NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
-ALTER TABLE document_chunks ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Enable all for authenticated users" ON document_chunks FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
-CREATE POLICY "Enable all for anon users" ON document_chunks FOR ALL USING (auth.role() = 'anon') WITH CHECK (auth.role() = 'anon');
+CREATE TABLE IF NOT EXISTS public.retrieval_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID,
+  user_id UUID,
+  query TEXT NOT NULL,
+  results JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
-ALTER TABLE embeddings ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Enable all for authenticated users" ON embeddings FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
-CREATE POLICY "Enable all for anon users" ON embeddings FOR ALL USING (auth.role() = 'anon') WITH CHECK (auth.role() = 'anon');
+-- 6. AI Tutor Semantic Search Function (Used by AI Tutor to retrieve uploaded materials)
+CREATE OR REPLACE FUNCTION public.match_documents (
+  query_embedding vector(768),
+  match_count int DEFAULT 8,
+  p_workspace_id UUID DEFAULT NULL,
+  p_user_id UUID DEFAULT NULL
+)
+RETURNS TABLE (
+  id UUID,
+  document_id UUID,
+  workspace_id UUID,
+  text TEXT,
+  topic TEXT,
+  subtopic TEXT,
+  similarity float
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    dc.id,
+    dc.document_id,
+    dc.workspace_id,
+    dc.text,
+    dc.topic,
+    dc.subtopic,
+    1 - (e.vector <=> query_embedding) AS similarity
+  FROM public.document_chunks dc
+  JOIN public.embeddings e ON e.chunk_id = dc.id
+  WHERE (p_workspace_id IS NULL OR dc.workspace_id = p_workspace_id)
+    AND (p_user_id IS NULL OR dc.user_id = p_user_id OR dc.user_id IS NULL)
+  ORDER BY e.vector <=> query_embedding
+  LIMIT match_count;
+END;
+$$;
 
-ALTER TABLE generated_notes ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Enable all for authenticated users" ON generated_notes FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
-CREATE POLICY "Enable all for anon users" ON generated_notes FOR ALL USING (auth.role() = 'anon') WITH CHECK (auth.role() = 'anon');
+-- 7. Supabase Storage Buckets for Uploaded Files
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('study-files', 'study-files', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
 
-ALTER TABLE document_metadata ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Enable all for authenticated users" ON document_metadata FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
-CREATE POLICY "Enable all for anon users" ON document_metadata FOR ALL USING (auth.role() = 'anon') WITH CHECK (auth.role() = 'anon');
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('workspace-files', 'workspace-files', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
 
-ALTER TABLE retrieval_logs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Enable all for authenticated users" ON retrieval_logs FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
-CREATE POLICY "Enable all for anon users" ON retrieval_logs FOR ALL USING (auth.role() = 'anon') WITH CHECK (auth.role() = 'anon');
+-- Storage Policies
+DROP POLICY IF EXISTS "Public Access study-files" ON storage.objects;
+CREATE POLICY "Public Access study-files"
+  ON storage.objects FOR SELECT
+  USING ( bucket_id IN ('study-files', 'workspace-files') );
 
--- Enable RLS for workspace_files
-ALTER TABLE workspace_files ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can view own workspace files"
-  ON workspace_files FOR SELECT
-  USING (EXISTS (SELECT 1 FROM workspaces WHERE id = workspace_files.workspace_id AND user_id = auth.uid()));
-CREATE POLICY "Users can insert own workspace files"
-  ON workspace_files FOR INSERT
-  WITH CHECK (EXISTS (SELECT 1 FROM workspaces WHERE id = workspace_files.workspace_id AND user_id = auth.uid()));
-CREATE POLICY "Users can update own workspace files"
-  ON workspace_files FOR UPDATE
-  USING (EXISTS (SELECT 1 FROM workspaces WHERE id = workspace_files.workspace_id AND user_id = auth.uid()));
-CREATE POLICY "Users can delete own workspace files"
-  ON workspace_files FOR DELETE
-  USING (EXISTS (SELECT 1 FROM workspaces WHERE id = workspace_files.workspace_id AND user_id = auth.uid()));
+DROP POLICY IF EXISTS "Allow Uploads study-files" ON storage.objects;
+CREATE POLICY "Allow Uploads study-files"
+  ON storage.objects FOR INSERT
+  WITH CHECK ( bucket_id IN ('study-files', 'workspace-files') );
 
--- Enable realtime for workspace_files
-begin;
-  drop publication if exists supabase_realtime;
-  create publication supabase_realtime;
-commit;
-alter publication supabase_realtime add table workspace_files;
+DROP POLICY IF EXISTS "Allow Updates study-files" ON storage.objects;
+CREATE POLICY "Allow Updates study-files"
+  ON storage.objects FOR UPDATE
+  USING ( bucket_id IN ('study-files', 'workspace-files') );
+
+DROP POLICY IF EXISTS "Allow Deletes study-files" ON storage.objects;
+CREATE POLICY "Allow Deletes study-files"
+  ON storage.objects FOR DELETE
+  USING ( bucket_id IN ('study-files', 'workspace-files') );
+
+-- 8. Row Level Security (RLS) Configuration
+-- Profiles RLS
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public read of profiles" ON public.profiles;
+CREATE POLICY "Allow public read of profiles" ON public.profiles FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow users to insert their own profile" ON public.profiles;
+CREATE POLICY "Allow users to insert their own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
+DROP POLICY IF EXISTS "Allow users to update their own profile" ON public.profiles;
+CREATE POLICY "Allow users to update their own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+
+-- Workspaces RLS
+ALTER TABLE public.workspaces ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users can view own workspaces" ON public.workspaces;
+CREATE POLICY "Users can view own workspaces" ON public.workspaces FOR SELECT USING (auth.uid() = user_id OR user_id IS NULL);
+DROP POLICY IF EXISTS "Users can insert own workspaces" ON public.workspaces;
+CREATE POLICY "Users can insert own workspaces" ON public.workspaces FOR INSERT WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+DROP POLICY IF EXISTS "Users can update own workspaces" ON public.workspaces;
+CREATE POLICY "Users can update own workspaces" ON public.workspaces FOR UPDATE USING (auth.uid() = user_id OR user_id IS NULL);
+DROP POLICY IF EXISTS "Users can delete own workspaces" ON public.workspaces;
+CREATE POLICY "Users can delete own workspaces" ON public.workspaces FOR DELETE USING (auth.uid() = user_id OR user_id IS NULL);
+
+-- Workspace Files RLS
+ALTER TABLE public.workspace_files ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users can view own workspace files" ON public.workspace_files;
+CREATE POLICY "Users can view own workspace files" ON public.workspace_files FOR SELECT USING (auth.uid() = user_id OR user_id IS NULL);
+DROP POLICY IF EXISTS "Users can insert own workspace files" ON public.workspace_files;
+CREATE POLICY "Users can insert own workspace files" ON public.workspace_files FOR INSERT WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+DROP POLICY IF EXISTS "Users can update own workspace files" ON public.workspace_files;
+CREATE POLICY "Users can update own workspace files" ON public.workspace_files FOR UPDATE USING (auth.uid() = user_id OR user_id IS NULL);
+DROP POLICY IF EXISTS "Users can delete own workspace files" ON public.workspace_files;
+CREATE POLICY "Users can delete own workspace files" ON public.workspace_files FOR DELETE USING (auth.uid() = user_id OR user_id IS NULL);
+
+-- Knowledge Engine RLS
+ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Enable all documents" ON public.documents;
+CREATE POLICY "Enable all documents" ON public.documents FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE public.processing_jobs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Enable all processing_jobs" ON public.processing_jobs;
+CREATE POLICY "Enable all processing_jobs" ON public.processing_jobs FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE public.document_chunks ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Enable all document_chunks" ON public.document_chunks;
+CREATE POLICY "Enable all document_chunks" ON public.document_chunks FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE public.embeddings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Enable all embeddings" ON public.embeddings;
+CREATE POLICY "Enable all embeddings" ON public.embeddings FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE public.generated_notes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Enable all generated_notes" ON public.generated_notes;
+CREATE POLICY "Enable all generated_notes" ON public.generated_notes FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE public.retrieval_logs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Enable all retrieval_logs" ON public.retrieval_logs;
+CREATE POLICY "Enable all retrieval_logs" ON public.retrieval_logs FOR ALL USING (true) WITH CHECK (true);
+
+-- Enable Realtime for workspace_files
+BEGIN;
+  DROP PUBLICATION IF EXISTS supabase_realtime;
+  CREATE PUBLICATION supabase_realtime FOR TABLE public.workspace_files, public.workspaces;
+COMMIT;

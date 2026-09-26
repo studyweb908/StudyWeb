@@ -23,7 +23,12 @@ import {
   AlertCircle,
   MousePointer,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  X,
+  Wand2,
+  Search,
+  Tag,
+  Folder
 } from 'lucide-react';
 import { PDFDocument } from './types';
 import AutoSavingToast from '../AutoSavingToast';
@@ -251,19 +256,29 @@ export default function PDFWorkspaceView({ workspace, onUpdateWorkspace }: PDFWo
   React.useEffect(() => {
     if (workspace && workspace.files) {
       setDocuments(prev => {
-        const newDocs = [...prev];
+        let newDocs = [...prev];
         let hasNew = false;
+        let hasChanges = false;
         workspace.files.forEach(f => {
-          if (!newDocs.find(d => d.id === f.id)) {
+          const existingIdx = newDocs.findIndex(d => d.id === f.id);
+          if (existingIdx === -1) {
             hasNew = true;
+            hasChanges = true;
             newDocs.unshift({
               id: f.id,
               name: f.name,
               size: f.size || 'Unknown Size',
               pages: Math.floor(Math.random() * 20) + 1,
               highlights: [],
-              highlightColors: {}
+              highlightColors: {},
+              tags: f.tags || []
             });
+          } else {
+             // Sync tags if they were updated from outside
+             if (JSON.stringify(newDocs[existingIdx].tags) !== JSON.stringify(f.tags)) {
+                newDocs[existingIdx] = { ...newDocs[existingIdx], tags: f.tags || [] };
+                hasChanges = true;
+             }
           }
         });
         
@@ -274,7 +289,7 @@ export default function PDFWorkspaceView({ workspace, onUpdateWorkspace }: PDFWo
           setSelectedDocIds(prevIds => prevIds.includes(latestId) ? prevIds : [...prevIds, latestId]);
         }
         
-        return hasNew ? newDocs : prev;
+        return hasChanges ? newDocs : prev;
       });
     }
   }, [workspace]);
@@ -299,6 +314,22 @@ export default function PDFWorkspaceView({ workspace, onUpdateWorkspace }: PDFWo
   const [highlightColor, setHighlightColor] = useState<'yellow' | 'pink' | 'green' | 'blue'>('yellow');
   const [draftingNoteForParagraph, setDraftingNoteForParagraph] = useState<number | null>(null);
   const [newNoteText, setNewNoteText] = useState<string>('');
+  
+  // Custom tag states and modal controls
+  const [isTagModalOpen, setIsTagModalOpen] = useState(false);
+  const [tagSearchQuery, setTagSearchQuery] = useState('');
+  const [suggestedTags, setSuggestedTags] = useState<string[]>([]);
+  const [isSuggestingTags, setIsSuggestingTags] = useState(false);
+  
+  const handleUpdateFileTags = (docId: string, updatedTags: string[]) => {
+    // Update local preview state
+    setDocuments(prev => prev.map(d => d.id === docId ? {...d, tags: updatedTags} : d));
+    // Persist to workspace state if available
+    if (workspace && onUpdateWorkspace) {
+      const updatedFiles = (workspace.files || []).map(f => f.id === docId ? {...f, tags: updatedTags} : f);
+      onUpdateWorkspace({...workspace, files: updatedFiles});
+    }
+  };
   
   // Sticky notes map
   const [stickyNotes, setStickyNotes] = useState<Record<string, StickyNote[]>>({
@@ -409,6 +440,151 @@ export default function PDFWorkspaceView({ workspace, onUpdateWorkspace }: PDFWo
   const clampedPage = Math.min(Math.max(1, activePage), totalPages || 1);
   const activePageData = docPages[clampedPage - 1];
 
+  const handleSuggestTags = async () => {
+    if (!activeViewingDoc) return;
+    setIsSuggestingTags(true);
+    try {
+      let content = '';
+      if (activePageData && activePageData.paragraphs && activePageData.paragraphs.length > 0) {
+        content = activePageData.paragraphs.join(' ');
+      } else if (activeViewingDoc.highlights && activeViewingDoc.highlights.length > 0) {
+        content = activeViewingDoc.highlights.join(' ');
+      } else {
+        content = activeViewingDoc.name;
+      }
+      const res = await fetch('/api/knowledge/suggest-tags', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: content.substring(0, 5000) })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.tags && Array.isArray(data.tags)) {
+          setSuggestedTags(data.tags);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to suggest tags:', err);
+    } finally {
+      setIsSuggestingTags(false);
+    }
+  };
+
+  const handleOpenTagModal = () => {
+    setIsTagModalOpen(true);
+    setTagSearchQuery('');
+    if (suggestedTags.length === 0) {
+      handleSuggestTags();
+    }
+  };
+
+  const handleAddTag = (tagName: string) => {
+    const trimmed = tagName.trim();
+    if (!trimmed || !activeViewingDoc) return;
+    const currentTags = activeViewingDoc.tags || [];
+    if (!currentTags.includes(trimmed)) {
+      handleUpdateFileTags(activeViewingDoc.id, [...currentTags, trimmed]);
+    }
+    setTagSearchQuery('');
+  };
+
+  const handleToggleTag = (tagName: string) => {
+    const trimmed = tagName.trim();
+    if (!trimmed || !activeViewingDoc) return;
+    const currentTags = activeViewingDoc.tags || [];
+    if (currentTags.includes(trimmed)) {
+      handleUpdateFileTags(activeViewingDoc.id, currentTags.filter(t => t !== trimmed));
+    } else {
+      handleUpdateFileTags(activeViewingDoc.id, [...currentTags, trimmed]);
+    }
+  };
+
+  // Extract all existing workspace tags across files, notes, documents, and workspace metadata
+  const allWorkspaceTags = React.useMemo(() => {
+    const tagSet = new Set<string>();
+    
+    // Add tags from current documents
+    documents.forEach(doc => {
+      (doc.tags || []).forEach(t => {
+        if (t && t.trim()) tagSet.add(t.trim());
+      });
+    });
+
+    // Add tags from workspace files
+    if (workspace?.files) {
+      workspace.files.forEach(file => {
+        (file.tags || []).forEach(t => {
+          if (t && t.trim()) tagSet.add(t.trim());
+        });
+      });
+    }
+
+    // Add tags from workspace notes
+    if (workspace?.notes) {
+      workspace.notes.forEach(note => {
+        (note.tags || []).forEach(t => {
+          if (t && t.trim()) tagSet.add(t.trim());
+        });
+      });
+    }
+
+    // Include workspace subject as tag option
+    if (workspace?.subject && workspace.subject.trim()) {
+      tagSet.add(workspace.subject.trim());
+    }
+
+    // Relevant academic study tags
+    const defaults = ['Syllabus', 'Exam Prep', 'Lecture Notes', 'Summary', 'Key Concepts', 'Formulas', 'Research'];
+    defaults.forEach(d => tagSet.add(d));
+
+    return Array.from(tagSet).sort((a, b) => a.localeCompare(b));
+  }, [documents, workspace]);
+
+  // Usage frequency across workspace for tag badges
+  const tagUsageCounts = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    const countTag = (tag: string) => {
+      const trimmed = tag.trim();
+      if (!trimmed) return;
+      counts[trimmed] = (counts[trimmed] || 0) + 1;
+    };
+
+    documents.forEach(doc => (doc.tags || []).forEach(countTag));
+    if (workspace?.files) {
+      workspace.files.forEach(file => (file.tags || []).forEach(countTag));
+    }
+    if (workspace?.notes) {
+      workspace.notes.forEach(note => (note.tags || []).forEach(countTag));
+    }
+    return counts;
+  }, [documents, workspace]);
+
+  // Filtered workspace tags based on search query
+  const filteredWorkspaceTags = React.useMemo(() => {
+    if (!tagSearchQuery.trim()) return allWorkspaceTags;
+    const q = tagSearchQuery.trim().toLowerCase();
+    return allWorkspaceTags.filter(t => t.toLowerCase().includes(q));
+  }, [allWorkspaceTags, tagSearchQuery]);
+
+  // Filtered AI suggestions based on search query
+  const filteredAiSuggestions = React.useMemo(() => {
+    if (!tagSearchQuery.trim()) return suggestedTags;
+    const q = tagSearchQuery.trim().toLowerCase();
+    return suggestedTags.filter(t => t.toLowerCase().includes(q));
+  }, [suggestedTags, tagSearchQuery]);
+
+  // Close tag modal on ESC key
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isTagModalOpen) {
+        setIsTagModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isTagModalOpen]);
+
   // Upload simulation with beautiful status feedback
   const handleUploadPDF = () => {
     const customNames = [
@@ -508,6 +684,7 @@ ${selectedHighlights}`;
     try {
       const response = await fetch("/api/ai-tutor", {
         method: "POST",
+        credentials: "same-origin",
         headers: {
           "Content-Type": "application/json"
         },
@@ -567,6 +744,7 @@ Student Question:
 
       const response = await fetch("/api/ai-tutor", {
         method: "POST",
+        credentials: "same-origin",
         headers: {
           "Content-Type": "application/json"
         },
@@ -676,10 +854,18 @@ Student Question:
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className={`truncate font-extrabold text-xs tracking-tight ${isViewing ? 'text-slate-900 dark:text-white font-black' : 'text-slate-800 dark:text-slate-200'}`}>{doc.name}</p>
-                        <div className="flex items-center gap-2 mt-1.5">
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                           <span className="text-[9px] text-slate-400 font-semibold">{doc.pages} Pages</span>
                           <span className="text-[8px] text-slate-300 dark:text-slate-700 font-bold">•</span>
                           <span className="text-[9px] text-slate-400 font-semibold">{doc.size}</span>
+                          {doc.tags && doc.tags.length > 0 && (
+                            <>
+                              <span className="text-[8px] text-slate-300 dark:text-slate-700 font-bold">•</span>
+                              <span className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.5 rounded">
+                                {doc.tags[0]}{doc.tags.length > 1 ? ` +${doc.tags.length - 1}` : ''}
+                              </span>
+                            </>
+                          )}
                         </div>
                       </div>
                       
@@ -976,9 +1162,41 @@ Student Question:
                     </div>
 
                     {/* PDF Header line */}
-                    <div className="pb-3 border-b border-dashed border-slate-200 dark:border-slate-800 text-[10px] text-slate-400 font-extrabold uppercase tracking-widest flex justify-between items-center mb-6 pl-4">
+                    <div className="pb-3 border-b border-dashed border-slate-200 dark:border-slate-800 text-[10px] text-slate-400 font-extrabold uppercase tracking-widest flex justify-between items-center mb-3 pl-4">
                       <span>DOCUMENT READER: {activeViewingDoc.name}</span>
                       <span>PAGE {clampedPage} OF {totalPages}</span>
+                    </div>
+
+                    {/* Tags section */}
+                    <div className="mb-6 pl-4 flex flex-wrap items-center gap-2">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 mr-1">
+                        <Tag className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>Tags:</span>
+                      </div>
+                      {(activeViewingDoc.tags || []).map((tag, idx) => (
+                        <span key={idx} className="text-[11px] font-bold text-indigo-700 bg-indigo-50 dark:bg-indigo-500/20 dark:text-indigo-300 px-2.5 py-1 rounded-lg flex items-center gap-1.5 group border border-indigo-100/80 dark:border-indigo-800/40">
+                          {tag}
+                          <button 
+                            onClick={() => {
+                               handleUpdateFileTags(activeViewingDoc.id, (activeViewingDoc.tags || []).filter(t => t !== tag));
+                            }}
+                            className="text-indigo-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors p-0.5 rounded cursor-pointer"
+                            title={`Remove tag ${tag}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                      
+                      <button 
+                        onClick={handleOpenTagModal}
+                        className="text-[11px] font-bold text-indigo-600 bg-indigo-50/80 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/50 border border-indigo-200/80 dark:border-indigo-800/80 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all shadow-2xs hover:shadow-xs cursor-pointer"
+                        title="Open Tag Selection Modal to search, filter existing workspace tags, or get AI suggestions"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Add Tag</span>
+                        <span className="text-[9px] text-indigo-400 dark:text-indigo-400 font-semibold">• Search & AI</span>
+                      </button>
                     </div>
 
                     {/* Paragraph list */}
@@ -1404,6 +1622,291 @@ Student Question:
           </div>
         </div>
       </div>
+
+      {/* Tag Selection Modal */}
+      <AnimatePresence>
+        {isTagModalOpen && (
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-900/60 backdrop-blur-sm"
+            onClick={() => setIsTagModalOpen(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.18 }}
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-xl overflow-hidden flex flex-col max-h-[88vh]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/60 dark:bg-slate-850/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shadow-xs shrink-0">
+                    <Tag className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-base font-black text-slate-900 dark:text-white tracking-tight">
+                      Tag Selection
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-xs sm:max-w-md font-medium">
+                      {activeViewingDoc.name}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsTagModalOpen(false)}
+                  className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                  title="Close (Esc)"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-6 overflow-y-auto space-y-6 flex-1 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800">
+                {/* SEARCH BAR */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                      <Search className="w-3.5 h-3.5 text-indigo-500" />
+                      <span>Search & Filter Tags</span>
+                    </label>
+                    {tagSearchQuery && (
+                      <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold lowercase">
+                        press enter to add
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={tagSearchQuery}
+                      onChange={(e) => setTagSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && tagSearchQuery.trim()) {
+                          e.preventDefault();
+                          handleAddTag(tagSearchQuery.trim());
+                        }
+                      }}
+                      autoFocus
+                      placeholder="Search workspace tags or type a new tag..."
+                      className="w-full pl-10 pr-10 py-2.5 text-sm bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-755 rounded-2xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 transition-all font-medium"
+                    />
+                    {tagSearchQuery && (
+                      <button
+                        onClick={() => setTagSearchQuery('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-md transition-colors cursor-pointer"
+                        title="Clear search"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Create New Tag Action (Search Fallback) */}
+                  {tagSearchQuery.trim() && (
+                    <div className="pt-1">
+                      {activeViewingDoc.tags?.includes(tagSearchQuery.trim()) ? (
+                        <div className="text-xs text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1.5 px-3.5 py-2.5 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 rounded-xl">
+                          <Check className="w-4 h-4 stroke-[2.5]" />
+                          <span>Tag <strong>"{tagSearchQuery.trim()}"</strong> is already attached to this document.</span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handleAddTag(tagSearchQuery.trim())}
+                          className="w-full flex items-center justify-between px-3.5 py-2.5 bg-gradient-to-r from-indigo-50 to-violet-50 hover:from-indigo-100 hover:to-violet-100 dark:from-indigo-950/40 dark:to-violet-950/40 dark:hover:from-indigo-950/60 dark:hover:to-violet-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-950 dark:text-indigo-200 rounded-xl transition-all text-xs font-bold group cursor-pointer shadow-xs"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
+                              <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                            </div>
+                            <span>Add new tag: <strong className="text-indigo-700 dark:text-indigo-300">"{tagSearchQuery.trim()}"</strong></span>
+                          </div>
+                          <span className="text-[10px] uppercase font-extrabold bg-indigo-200/80 dark:bg-indigo-800/80 text-indigo-800 dark:text-indigo-200 px-2 py-0.5 rounded-md">
+                            Press Enter ↵
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* CURRENTLY APPLIED TAGS */}
+                <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Applied Document Tags ({activeViewingDoc.tags?.length || 0})
+                    </span>
+                    {activeViewingDoc.tags && activeViewingDoc.tags.length > 0 && (
+                      <button
+                        onClick={() => handleUpdateFileTags(activeViewingDoc.id, [])}
+                        className="text-[10px] text-rose-500 hover:text-rose-600 dark:text-rose-400 font-semibold hover:underline cursor-pointer"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                  </div>
+
+                  {activeViewingDoc.tags && activeViewingDoc.tags.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {activeViewingDoc.tags.map((tag, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 text-white shadow-xs"
+                        >
+                          <Tag className="w-3 h-3 text-indigo-200" />
+                          <span>{tag}</span>
+                          <button
+                            onClick={() => handleToggleTag(tag)}
+                            className="ml-0.5 text-indigo-200 hover:text-white rounded p-0.5 hover:bg-indigo-700 transition-colors cursor-pointer"
+                            title={`Remove ${tag}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-slate-50 dark:bg-slate-850/60 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center">
+                      <p className="text-xs text-slate-400 font-medium">
+                        No tags attached to this document yet. Click suggestions or workspace tags below to add.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* AUTOMATED AI SUGGESTIONS */}
+                <div className="space-y-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>AI Suggested Tags</span>
+                      {filteredAiSuggestions.length > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 font-bold">
+                          {filteredAiSuggestions.length}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={handleSuggestTags}
+                      disabled={isSuggestingTags}
+                      className="text-xs font-bold text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 flex items-center gap-1.5 disabled:opacity-50 transition-opacity cursor-pointer"
+                      title="Analyze document text with Gemini to propose relevant tags"
+                    >
+                      <Wand2 className={`w-3.5 h-3.5 ${isSuggestingTags ? 'animate-spin' : ''}`} />
+                      <span>{isSuggestingTags ? 'Analyzing PDF...' : 'Regenerate Suggestions'}</span>
+                    </button>
+                  </div>
+
+                  {isSuggestingTags ? (
+                    <div className="p-3.5 bg-amber-50/50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/30 rounded-2xl flex items-center gap-3 text-amber-800 dark:text-amber-200 text-xs font-medium">
+                      <Wand2 className="w-4 h-4 animate-spin text-amber-500 shrink-0" />
+                      <span>Gemini is reading the document pages and generating relevant tags...</span>
+                    </div>
+                  ) : filteredAiSuggestions.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {filteredAiSuggestions.map((tag, idx) => {
+                        const isAdded = (activeViewingDoc.tags || []).includes(tag);
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => handleToggleTag(tag)}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                              isAdded
+                                ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700 shadow-2xs'
+                                : 'bg-amber-50/70 hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-900/30 text-amber-800 dark:text-amber-300 border-amber-200/80 dark:border-amber-900/40'
+                            }`}
+                          >
+                            <Sparkles className="w-3 h-3 text-amber-500" />
+                            <span>{tag}</span>
+                            {isAdded ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 stroke-[3]" />
+                            ) : (
+                              <Plus className="w-3 h-3 opacity-60" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-400 italic py-1">
+                      {suggestedTags.length === 0 
+                        ? "Click 'Regenerate Suggestions' above to generate tags with AI."
+                        : `No AI suggestions match "${tagSearchQuery}".`}
+                    </div>
+                  )}
+                </div>
+
+                {/* EXISTING WORKSPACE TAGS */}
+                <div className="space-y-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      <Folder className="w-3.5 h-3.5 text-indigo-500" />
+                      <span>Workspace Tags ({filteredWorkspaceTags.length})</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-medium">Click to add/remove</span>
+                  </div>
+
+                  {filteredWorkspaceTags.length > 0 ? (
+                    <div className="flex flex-wrap gap-2 max-h-44 overflow-y-auto pr-1">
+                      {filteredWorkspaceTags.map((tag, idx) => {
+                        const isAdded = (activeViewingDoc.tags || []).includes(tag);
+                        const count = tagUsageCounts[tag] || 1;
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => handleToggleTag(tag)}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                              isAdded
+                                ? 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700 shadow-2xs'
+                                : 'bg-white dark:bg-slate-850 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-750'
+                            }`}
+                          >
+                            <Tag className="w-3 h-3 text-slate-400" />
+                            <span>{tag}</span>
+                            {count > 1 && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-slate-100 dark:bg-slate-750 text-slate-500 dark:text-slate-400 font-semibold">
+                                {count}
+                              </span>
+                            )}
+                            {isAdded ? (
+                              <Check className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 stroke-[3]" />
+                            ) : (
+                              <Plus className="w-3 h-3 opacity-40 hover:opacity-100" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-slate-50 dark:bg-slate-850/60 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center">
+                      <p className="text-xs text-slate-500 font-medium">
+                        {tagSearchQuery
+                          ? `No existing workspace tags match "${tagSearchQuery}". You can create it above!`
+                          : "No existing workspace tags found."}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-850/70 flex items-center justify-between">
+                <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                  {(activeViewingDoc.tags || []).length} tag{(activeViewingDoc.tags || []).length === 1 ? '' : 's'} linked to document
+                </span>
+                <button
+                  onClick={() => setIsTagModalOpen(false)}
+                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors shadow-sm hover:shadow-md cursor-pointer"
+                >
+                  Done
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AutoSavingToast isSaving={isSaving} />
     </div>

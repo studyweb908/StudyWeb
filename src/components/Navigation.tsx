@@ -521,11 +521,17 @@ export default function Navigation() {
                 </button>
               </div>
 
-              {/* Form (Simulated submission) */}
+              {/* Form */}
               <form 
                 onSubmit={async (e) => {
                   e.preventDefault();
                   setAuthError('');
+                  
+                  if (password.length < 6) {
+                    setAuthError('Password should be at least 6 characters.');
+                    return;
+                  }
+
                   setAuthLoading(true);
                   try {
                     if (!supabase) {
@@ -544,53 +550,79 @@ export default function Navigation() {
 
                     if (authMode === 'signup') {
                       const { data, error } = await supabase.auth.signUp({
-                        email,
+                        email: email.trim(),
                         password,
                         options: {
                           data: {
-                            full_name: fullName,
+                            full_name: fullName.trim(),
                             avatar_url: profilePic || ''
                           }
                         }
                       });
                       if (error) throw error;
-                      
-                      if (data.user) {
-                        await supabase.from('profiles').upsert({
-                          id: data.user.id,
-                          full_name: fullName,
-                          avatar_url: profilePic || ''
-                        });
-                      }
 
-                      // Clear any stale local data
-                      ['studyweb_profile_name', 'studyweb_profile_avatar', 'studyweb_profile_class_board', 'studyweb_profile_school', 'studyweb_onboarding_draft', 'studyweb_onboarding_data'].forEach(k => localStorage.removeItem(k));
-                      localStorage.removeItem('studyweb_onboarding_complete');
+                      // Check if already registered (Supabase sometimes returns an empty identities array for existing users)
+                      if (data?.user?.identities && data.user.identities.length === 0) {
+                        setAuthError('User already registered. Please log in with your password.');
+                        return;
+                      }
                       
-                      (window as any).showToast?.('Welcome! Your StudyWeb account has been created.', 'success');
-                      window.dispatchEvent(new CustomEvent('studyweb-signup-success'));
+                      if (data.session) {
+                        // Email confirmation disabled in Supabase: session created immediately
+                        localStorage.setItem('studyweb_is_logged_in', 'true');
+                        if (data.user) {
+                          try {
+                            await supabase.from('profiles').upsert({
+                              id: data.user.id,
+                              email: data.user.email || email.trim(),
+                              full_name: fullName.trim(),
+                              avatar_url: profilePic || ''
+                            });
+                          } catch (pErr) {
+                            console.warn('Profile initial record sync notice:', pErr);
+                          }
+                        }
+
+                        // Clear stale local onboarding
+                        ['studyweb_profile_name', 'studyweb_profile_avatar', 'studyweb_profile_class_board', 'studyweb_profile_school', 'studyweb_onboarding_draft', 'studyweb_onboarding_data'].forEach(k => localStorage.removeItem(k));
+                        localStorage.removeItem('studyweb_onboarding_complete');
+
+                        (window as any).showToast?.('Welcome! Your StudyWeb account has been created.', 'success');
+                        window.dispatchEvent(new CustomEvent('studyweb-signup-success'));
+                        setIsAuthModalOpen(false);
+                      } else if (data.user) {
+                        // Email confirmation enabled: inform user
+                        (window as any).showToast?.('Registration successful! Please check your email inbox to confirm your account.', 'info');
+                        setAuthError('Registration email sent! Please verify your inbox, then log in.');
+                        setAuthMode('login');
+                      }
                     } else {
                       const { data, error } = await supabase.auth.signInWithPassword({
-                        email,
+                        email: email.trim(),
                         password,
                       });
                       if (error) throw error;
+
                       // Clear any stale local data
                       ['studyweb_profile_name', 'studyweb_profile_avatar', 'studyweb_profile_class_board', 'studyweb_profile_school', 'studyweb_onboarding_draft', 'studyweb_onboarding_data'].forEach(k => localStorage.removeItem(k));
                       
-                      // Explicitly set onboarding complete for existing users
                       localStorage.setItem('studyweb_onboarding_complete', 'true');
-                      
-                      (window as any).showToast?.('Successfully logged in to StudyWeb!', 'success');
                       localStorage.setItem('studyweb_is_logged_in', 'true');
+                      (window as any).showToast?.('Successfully logged in to StudyWeb!', 'success');
                       window.dispatchEvent(new CustomEvent('studyweb-login-success'));
+                      setIsAuthModalOpen(false);
                     }
-                    setIsAuthModalOpen(false);
                   } catch (err: any) {
                     console.error('Auth error:', err);
                     let errMsg = err.message || 'Authentication failed';
                     if (errMsg === 'Failed to fetch') {
                       errMsg = 'Network error or adblocker prevented connection to auth server. Please check your connection.';
+                    } else if (errMsg.toLowerCase().includes('invalid login credentials')) {
+                      errMsg = 'Invalid login credentials. Please verify your email and password, or create an account if you are new.';
+                    } else if (errMsg.toLowerCase().includes('user already registered')) {
+                      errMsg = 'User already registered with this email. Please switch to Log In.';
+                    } else if (errMsg.toLowerCase().includes('password should be at least')) {
+                      errMsg = 'Password should be at least 6 characters.';
                     }
                     setAuthError(errMsg);
                   } finally {
@@ -599,7 +631,35 @@ export default function Navigation() {
                 }} 
                 className="space-y-4"
               >
-                {authError && <div className="text-red-500 text-xs font-bold bg-red-500/10 p-2 rounded-lg">{authError}</div>}
+                {authError && (
+                  <div className="text-red-500 text-xs font-medium bg-red-500/10 border border-red-500/20 p-3 rounded-xl space-y-2">
+                    <p className="font-semibold">{authError}</p>
+                    {authError.toLowerCase().includes('already registered') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthError('');
+                          setAuthMode('login');
+                        }}
+                        className="text-xs text-brand-primary underline font-bold hover:opacity-80 block"
+                      >
+                        👉 Click here to switch to Log In
+                      </button>
+                    )}
+                    {authError.toLowerCase().includes('invalid login credentials') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthError('');
+                          setAuthMode('signup');
+                        }}
+                        className="text-xs text-brand-primary underline font-bold hover:opacity-80 block"
+                      >
+                        👉 Don't have an account? Click here to Sign Up
+                      </button>
+                    )}
+                  </div>
+                )}
                 {authMode === 'signup' && (
                   <>
                     <div className="space-y-1.5 flex flex-col items-center pb-2">
@@ -616,12 +676,11 @@ export default function Navigation() {
                           type="file"
                           accept="image/*"
                           onChange={handleProfilePicChange}
-                          required
                           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                         />
                       </div>
                       <label className="text-[10px] font-bold text-brand-text-light text-center">
-                        Upload Profile Picture
+                        Upload Profile Picture (Optional)
                       </label>
                     </div>
                     <div className="space-y-1.5">
@@ -679,9 +738,10 @@ export default function Navigation() {
                     <input
                       type={showPassword ? 'text' : 'password'}
                       required
+                      minLength={6}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••"
+                      placeholder="•••••••• (at least 6 characters)"
                       className="w-full pl-10 pr-10 py-3 rounded-xl border border-card-border bg-card-bg/50 dark:bg-brand-bg-dark/50 backdrop-blur-sm text-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
                     />
                     <button
@@ -692,6 +752,11 @@ export default function Navigation() {
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
+                  {password.length > 0 && password.length < 6 && (
+                    <p className="text-[11px] text-amber-500 font-medium pl-1">
+                      Password should be at least 6 characters (currently {password.length})
+                    </p>
+                  )}
                 </div>
 
                 {authMode === 'signup' && (

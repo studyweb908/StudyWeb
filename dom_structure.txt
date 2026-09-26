@@ -1,0 +1,110 @@
+<div className="bg-slate-50/50 dark:bg-slate-950/20 rounded-[28px] p-1.5 space-y-6 text-left text-xs sm:text-sm relative">
+  <div className="relative overflow-hidden rounded-[24px] bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/85 p-6 sm:p-8 shadow-sm">
+    <div className="absolute top-0 right-0 -mt-10 -mr-10 w-44 h-44 bg-gradient-to-tr from-indigo-500/10 to-violet-500/10 dark:from-indigo-500/5 dark:to-violet-500/5 rounded-full blur-2xl pointer-events-none" />
+      <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 relative z-10">
+        <div className="relative shrink-0">
+          <div
+            <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+            </div>
+          </div>
+          <div className="absolute inset-0 bg-indigo-600/25 flex items-center justify-center">
+          </div>
+        </div>
+        <div className="flex-1 text-center sm:text-left space-y-2">
+          <div className="space-y-3 max-w-md p-4 bg-slate-50 dark:bg-slate-950/40 rounded-2xl border border-slate-150/40 dark:border-slate-850">
+            <div>
+            </div>
+            <div>
+            </div>
+            <div>
+            </div>
+            <div className="flex gap-2 pt-1 justify-end">
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-center sm:justify-start gap-2">
+              <div className="flex justify-center items-center gap-1.5">
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3 pt-4 border-t border-slate-100 dark:border-slate-800/60 max-w-md mx-auto sm:mx-0">
+            <div className="p-2.5 text-center rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800/80 hover:scale-[1.02] transition-transform">
+            </div>
+            <div className="p-2.5 text-center rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800/80 hover:scale-[1.02] transition-transform">
+            </div>
+            <div className="p-2.5 text-center rounded-xl bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800/80 hover:scale-[1.02] transition-transform">
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="flex gap-6 border-b border-slate-100 dark:border-slate-800/80 pb-px mt-8">
+      </div>
+      <div className="grid grid-cols-1 gap-6 pt-6 max-w-3xl">
+        <div className="space-y-5 bg-slate-50/50 dark:bg-slate-900/30 p-5 rounded-2xl border border-slate-100 dark:border-slate-800">
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-xs font-semibold">
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850">
+              </div>
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850">
+              </div>
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850 col-span-2">
+              </div>
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850 col-span-2">
+              </div>
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850 col-span-2">
+              </div>
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850 col-span-2">
+              </div>
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850">
+              </div>
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850">
+              </div>
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-850 col-span-2">
+              </div>
+              <div className="p-3 bg-indigo-50 dark:bg-indigo-500/10 rounded-xl border border-indigo-100 dark:border-indigo-500/20 col-span-2">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="space-y-6 pt-6">
+      </div>
+    </div>
+    <div className="bg-rose-500/[0.02] dark:bg-rose-950/[0.05] border border-rose-200/60 dark:border-rose-900/40 rounded-[28px] p-6 sm:p-8 space-y-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
+        <div className="space-y-1.5 max-w-lg">
+        </div>
+      </div>
+    </div>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-600 border border-rose-100 dark:border-rose-900/50">
+      </div>
+      <div className="bg-rose-500/[0.015] dark:bg-rose-950/[0.03] border border-slate-100 dark:border-slate-850 rounded-2xl p-4 my-4 text-left space-y-2 text-[11px] font-bold text-slate-600 dark:text-slate-350">
+        <div className="flex items-center gap-2">
+        </div>
+        <div className="flex items-center gap-2">
+        </div>
+        <div className="flex items-center gap-2">
+        </div>
+        <div className="flex items-center gap-2">
+        </div>
+      </div>
+      <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
+      </div>
+    </div>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div className="py-8 space-y-4">
+        <div className="w-12 h-12 border-4 border-rose-500 border-t-transparent rounded-full animate-spin mx-auto" />
+        </div>
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-rose-50 dark:bg-rose-950/40 text-rose-600 border border-rose-100 dark:border-rose-900/50">
+        </div>
+        <div className="my-4 p-3.5 bg-rose-500/5 dark:bg-rose-500/10 border border-rose-500/15 rounded-xl">
+        </div>
+        <div className="mb-6">
+        </div>
+        <div className="flex flex-col sm:flex-row gap-2.5">
+        </div>
+      </div>
+    </div>

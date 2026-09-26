@@ -488,7 +488,9 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                         try {
                           const { data: { session } } = await supabase.auth.getSession();
                           if (session?.user) {
-                            await supabase.from('profiles').update({
+                            await supabase.from('profiles').upsert({
+                              id: session.user.id,
+                              email: session.user.email || '',
                               onboarding_data: formData,
                               age: formData.age,
                               current_study: formData.study,
@@ -496,7 +498,7 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                               primary_goal: formData.goal,
                               uses_ai: formData.usesAi === 'Yes' ? true : false,
                               updated_at: new Date()
-                            }).eq('id', session.user.id);
+                            });
                           }
                         } catch (err) {
                           console.error('Failed to save onboarding data to Supabase:', err);

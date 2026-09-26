@@ -352,6 +352,7 @@ export function NotesView() {
 
       const response = await fetch('/api/ai-tutor', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: promptText })
       });
@@ -1723,10 +1724,6 @@ export function ProfileView() {
     return localStorage.getItem('studyweb_profile_mascot') || 'athena';
   });
   
-  const [dailyGoalMinutes, setDailyGoalMinutes] = useState(() => {
-    return Number(localStorage.getItem('studyweb_profile_daily_goal')) || 60;
-  });
-
   const [cognitiveStyle, setCognitiveStyle] = useState(() => {
     return localStorage.getItem('studyweb_profile_cognitive_style') || 'Visual & Active Spaced Recall';
   });
@@ -1769,12 +1766,6 @@ export function ProfileView() {
     localStorage.setItem('studyweb_profile_mascot', id);
     const mascotName = MASCOTS.find(m => m.id === id)?.name || 'Companion';
     triggerToast(`🦉 ${mascotName} set as your active learning partner!`);
-  };
-
-  const saveDailyGoal = (min: number) => {
-    setDailyGoalMinutes(min);
-    localStorage.setItem('studyweb_profile_daily_goal', String(min));
-    triggerToast(`📅 Daily focus target set to ${min} minutes!`);
   };
 
   const saveCognitiveStyle = (style: string) => {
@@ -1996,51 +1987,8 @@ export function ProfileView() {
             
             {/* Left overview module: Interactive targets */}
             <div className="space-y-5 bg-slate-50/50 dark:bg-slate-900/30 p-5 rounded-2xl border border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <Target className="w-5 h-5 text-indigo-500 animate-pulse" />
-                <p className="font-extrabold text-sm text-slate-800 dark:text-white">Daily Study Target Goal</p>
-              </div>
-
-              {/* Interactive target pills */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-xs font-bold text-slate-600 dark:text-slate-300">
-                  <span>Daily Goal Target:</span>
-                  <span className="text-indigo-600 dark:text-indigo-400 bg-indigo-500/5 px-2.5 py-1 rounded-md border border-indigo-500/15 font-black">{dailyGoalMinutes} Minutes Focus</span>
-                </div>
-                
-                <div className="grid grid-cols-5 gap-1.5">
-                  {[30, 45, 60, 90, 120].map((min) => (
-                    <button
-                      key={min}
-                      onClick={() => saveDailyGoal(min)}
-                      className={`py-2 rounded-xl text-[10px] font-black tracking-wide border cursor-pointer transition-all ${
-                        dailyGoalMinutes === min 
-                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm shadow-indigo-600/10' 
-                          : 'bg-white dark:bg-slate-850 text-slate-600 dark:text-slate-300 border-slate-150 dark:border-slate-800 hover:border-indigo-300 hover:scale-105'
-                      }`}
-                    >
-                      {min}m
-                    </button>
-                  ))}
-                </div>
-
-                {/* Progress bar simulation towards goal */}
-                <div className="pt-2">
-                  <div className="w-full bg-slate-200 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                    <div 
-                      className="bg-indigo-500 h-full rounded-full transition-all duration-500" 
-                      style={{ width: `${Math.min(100, (60 / dailyGoalMinutes) * 100)}%` }} 
-                    />
-                  </div>
-                  <div className="flex justify-between items-center text-[9px] text-slate-400 font-bold mt-1">
-                    <span>Current Focus: 60m</span>
-                    <span>Target: {dailyGoalMinutes}m</span>
-                  </div>
-                </div>
-              </div>
-
               {/* Personal Information & Learning Profile Block */}
-              <div className="pt-4 border-t border-slate-200/40 dark:border-slate-800/60 space-y-4">
+              <div className="space-y-4">
                 <div className="flex items-center gap-2">
                   <Award className="w-4.5 h-4.5 text-indigo-500" />
                   <p className="font-extrabold text-xs text-slate-800 dark:text-white">Personal Information</p>

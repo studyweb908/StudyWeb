@@ -43,6 +43,7 @@ import {
   rectSortingStrategy, 
   useSortable 
 } from '@dnd-kit/sortable';
+import { generateUuid } from '../../utils/uuid.ts';
 import { CSS } from '@dnd-kit/utilities';
 import { Workspace } from './WorkspaceTypes';
 
@@ -363,7 +364,7 @@ export default function WorkspaceSelector({
     };
 
     const newWorkspace: Workspace = {
-      id: `ws-${Date.now()}`,
+      id: generateUuid(),
       name: newName,
       subject: newSubject,
       description: newDescription || 'Smart personalized study space for learning excellence.',

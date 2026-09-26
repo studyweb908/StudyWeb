@@ -3,6 +3,10 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { TaskProvider } from './context/TaskContext.tsx';
+import { FileUploadService } from './services/FileUploadService.ts';
+
+// Sanitize any oversized or stale browser cookies to ensure requests stay well within HTTP buffer limits
+FileUploadService.sanitizeBrowserCookies();
 
 // Asset diagnostics
 const checkAssets = async () => {

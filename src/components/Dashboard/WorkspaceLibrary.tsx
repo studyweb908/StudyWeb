@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Image as ImageIcon, Globe, Sparkles, ArrowRight, Upload, Link, Video, HardDrive, Clipboard, X, Loader2, Clock, Check, ChevronDown, Search, Trash2, FileText, Music, Lightbulb, BookOpen, HelpCircle, Info, Eye, ExternalLink, Calendar } from 'lucide-react';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import { supabase } from '../../lib/supabase';
+import { fileUploadService, FileUploadError } from '../../services/FileUploadService';
+import { toValidUuid } from '../../utils/uuid';
 import QuickPreviewModal from './QuickPreviewModal';
 
 interface WorkspaceLibraryProps {
@@ -14,6 +16,19 @@ interface WorkspaceLibraryProps {
 }
 
 export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, onClearAllFiles, onUpdateWorkspace }: WorkspaceLibraryProps) {
+  const getAuthInfo = async () => {
+    let token = undefined;
+    let userId = 'local-user';
+    if (supabase) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        token = session.access_token;
+        userId = session.user.id;
+      }
+    }
+    return { token, userId };
+  };
+
   // Real uploading states
   const [isUploading, setIsUploading] = useState(false);
   const [isDraggingLocal, setIsDraggingLocal] = useState(false);
@@ -107,6 +122,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
     try {
       const res = await fetch('/api/web-search-sources', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: webSearchQuery, mode: searchWebMode })
       });
@@ -145,7 +161,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
       }, 800);
 
     } catch (err) {
-      console.error(err);
+      console.warn(err);
       clearInterval(stepInterval);
       stepIntervalRef.current = null;
       setIsUploading(false);
@@ -190,37 +206,94 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
     libraryProgressRef.current = progress;
 
     try {
-      const response = await fetch('/api/knowledge/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspaceId: workspace.id,
-          userId: 'local-user',
-          name: title,
-          type: 'doc',
-          size: 'Pasted Document',
-          content: driveCopyText
-        })
-      });
+      const { jobId, documentId } = await fileUploadService.executeWithRetry(
+        async (attempt) => {
+          const { token, userId } = await getAuthInfo();
+          const response = await fetch('/api/knowledge/upload', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 
+              'Content-Type': 'application/json',
+              ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            },
+            body: JSON.stringify({
+              workspaceId: workspace.id,
+              userId: userId,
+              name: title,
+              type: 'doc',
+              size: 'Pasted Document',
+              content: driveCopyText
+            })
+          });
 
-      if (!response.ok) throw new Error("Document analysis failed");
-      const { jobId, documentId } = await response.json();
+          if (!response.ok) {
+            const txt = await response.text();
+            throw new Error("Document analysis failed: " + txt);
+          }
+          const contentType = response.headers.get('content-type') || '';
+          if (!contentType.includes('application/json')) {
+            const txt = await response.text();
+            throw new Error("Invalid response from server (expected JSON, received HTML/text): " + txt.substring(0, 100));
+          }
+          return await response.json();
+        },
+        {
+          context: `Pasted Document Analysis for "${title}"`,
+          onRetryNotice: (notice) => {
+            setUploadStep(notice);
+          }
+        }
+      );
 
       let isCompleted = false;
       let finalFileData = null;
       let finalNotes: any[] = [];
+      let pollRetries = 0;
       while (!isCompleted) {
         await new Promise(resolve => setTimeout(resolve, 1500));
-        const statusRes = await fetch(`/api/knowledge/status/${documentId}`);
-        if (statusRes.ok) {
-          const statusData = await statusRes.json();
-          if (statusData.status === 'completed') {
-            isCompleted = true;
-            finalFileData = statusData.document;
-            finalNotes = statusData.notes || [];
-          } else if (statusData.status === 'failed') {
-            throw new Error(statusData.message || 'Job failed');
+        try {
+          const { token } = await getAuthInfo();
+          const statusRes = await fetch(`/api/knowledge/status/${documentId}`, {
+            credentials: 'same-origin',
+            headers: { ...(token ? { 'Authorization': `Bearer ${token}` } : {}) }
+          });
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            if (statusData.status === 'completed') {
+              isCompleted = true;
+              finalFileData = statusData.document;
+              finalNotes = statusData.notes || [];
+            } else if (statusData.status === 'failed') {
+              const is104 = fileUploadService.is104Error(statusData.message);
+              if (is104 && pollRetries < 3) {
+                pollRetries++;
+                const delayMs = fileUploadService.calculateBackoffDelay(pollRetries, {
+                  initialDelayMs: 1000,
+                  backoffFactor: 2,
+                  maxDelayMs: 8000,
+                  jitter: true
+                });
+                setUploadStep(`⚠️ 104 reset in background worker. Retrying in ${(delayMs / 1000).toFixed(1)}s...`);
+                await new Promise(r => setTimeout(r, delayMs));
+                continue;
+              }
+              throw new Error(statusData.message || 'Job failed');
+            }
           }
+        } catch (pollErr: any) {
+          if (fileUploadService.is104Error(pollErr) && pollRetries < 3) {
+            pollRetries++;
+            const delayMs = fileUploadService.calculateBackoffDelay(pollRetries, {
+              initialDelayMs: 1000,
+              backoffFactor: 2,
+              maxDelayMs: 8000,
+              jitter: true
+            });
+            setUploadStep(`⚠️ 104 connection reset detected. Retrying in ${(delayMs / 1000).toFixed(1)}s...`);
+            await new Promise(r => setTimeout(r, delayMs));
+            continue;
+          }
+          throw pollErr;
         }
       }
 
@@ -243,16 +316,16 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
         if (supabase) {
           try {
             await supabase.from('workspace_files').insert({
-              id: fileData.id,
-              workspace_id: workspace.id,
+              id: toValidUuid(fileData.id),
+              workspace_id: toValidUuid(workspace.id),
               name: fileData.name,
               type: fileData.type,
               size: fileData.size,
               status: fileData.status,
               summary: fileData.summary
             });
-          } catch (e) {
-            console.error("Failed to insert workspace_file to supabase", e);
+          } catch {
+            // Non-fatal: Local state already has file
           }
         }
         // 🔥 Dopamine hit: Dispatch a powerful success toast event!
@@ -525,6 +598,21 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
       ];
     }
 
+    if (file) {
+      const validation = fileUploadService.validate(file);
+      if (!validation.valid) {
+        window.dispatchEvent(
+          new CustomEvent('studyweb-toast', {
+            detail: {
+              message: `⚠️ ${validation.error}`,
+              type: 'warning'
+            }
+          })
+        );
+        return;
+      }
+    }
+
     setIsUploading(true);
     setUploadPercent(0);
     setUploadSeconds(0);
@@ -576,46 +664,100 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
         fileBase64 = dataUrl.split(',')[1];
       }
 
-      // New Knowledge Engine Backend
-      const response = await fetch('/api/knowledge/upload', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
+      // New Knowledge Engine Backend with Exponential Backoff Retry for 104 errors
+      const { jobId, documentId } = await fileUploadService.executeWithRetry(
+        async (attempt) => {
+          const { token, userId } = await getAuthInfo();
+          const response = await fetch('/api/knowledge/upload', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            },
+            body: JSON.stringify({
+              workspaceId: toValidUuid(workspace.id),
+              userId: toValidUuid(userId),
+              name,
+              type,
+              size,
+              url,
+              fileBase64,
+              fileMimeType
+            })
+          });
+
+          if (!response.ok) {
+            const txt = await response.text();
+            throw new Error('Analysis failed: ' + txt);
+          }
+
+          const contentType = response.headers.get('content-type') || '';
+          if (!contentType.includes('application/json')) {
+            const txt = await response.text();
+            throw new Error('Invalid response from server (expected JSON, received HTML/text): ' + txt.substring(0, 100));
+          }
+
+          return await response.json();
         },
-        body: JSON.stringify({
-          workspaceId: workspace.id,
-          userId: 'local-user',
-          name,
-          type,
-          size,
-          url,
-          fileBase64,
-          fileMimeType
-        })
-      });
+        {
+          context: `Upload Analysis for "${name || url}"`,
+          onRetryNotice: (notice) => {
+            setUploadStep(notice);
+          }
+        }
+      );
 
-      if (!response.ok) {
-        throw new Error('Analysis failed');
-      }
-
-      const { jobId, documentId } = await response.json();
-
-      // Poll for status
+      // Poll for status with retry tolerance for transient 104/network glitches
       let isCompleted = false;
       let finalFileData = null;
       let finalNotes: any[] = [];
+      let pollRetries = 0;
       while (!isCompleted) {
         await new Promise(resolve => setTimeout(resolve, 1500));
-        const statusRes = await fetch(`/api/knowledge/status/${documentId}`);
-        if (statusRes.ok) {
-          const statusData = await statusRes.json();
-          if (statusData.status === 'completed') {
-            isCompleted = true;
-            finalFileData = statusData.document;
-            finalNotes = statusData.notes || [];
-          } else if (statusData.status === 'failed') {
-            throw new Error(statusData.message || 'Job failed');
+        try {
+          const { token } = await getAuthInfo();
+          const statusRes = await fetch(`/api/knowledge/status/${documentId}`, {
+            credentials: 'same-origin',
+            headers: { ...(token ? { 'Authorization': `Bearer ${token}` } : {}) }
+          });
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            if (statusData.status === 'completed') {
+              isCompleted = true;
+              finalFileData = statusData.document;
+              finalNotes = statusData.notes || [];
+            } else if (statusData.status === 'failed') {
+              const is104 = fileUploadService.is104Error(statusData.message);
+              if (is104 && pollRetries < 3) {
+                pollRetries++;
+                const delayMs = fileUploadService.calculateBackoffDelay(pollRetries, {
+                  initialDelayMs: 1000,
+                  backoffFactor: 2,
+                  maxDelayMs: 8000,
+                  jitter: true
+                });
+                setUploadStep(`⚠️ 104 reset in background worker. Retrying in ${(delayMs / 1000).toFixed(1)}s...`);
+                await new Promise(r => setTimeout(r, delayMs));
+                continue;
+              }
+              throw new Error(statusData.message || 'Job failed');
+            }
           }
+        } catch (pollErr: any) {
+          if (fileUploadService.is104Error(pollErr) && pollRetries < 3) {
+            pollRetries++;
+            const delayMs = fileUploadService.calculateBackoffDelay(pollRetries, {
+              initialDelayMs: 1000,
+              backoffFactor: 2,
+              maxDelayMs: 8000,
+              jitter: true
+            });
+            setUploadStep(`⚠️ 104 connection reset detected. Retrying in ${(delayMs / 1000).toFixed(1)}s...`);
+            await new Promise(r => setTimeout(r, delayMs));
+            continue;
+          }
+          throw pollErr;
         }
       }
 
@@ -677,8 +819,10 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
         setIsUploading(false);
       }, 800);
 
-    } catch (err) {
-      console.error("Backend failed or not implemented, falling back to mock upload", err);
+    } catch (err: any) {
+      const parsedError = FileUploadError.fromError(err, `Upload of ${name || url}`);
+      fileUploadService.log('warn', `Upload analysis encountered error: [${parsedError.code}] ${parsedError.message}`, parsedError);
+      
       // MOCK FALLBACK FOR FRONTEND DEMO
       let objectUrl = url;
       if (file) {
@@ -757,16 +901,16 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
              if (supabase) {
                try {
                  await supabase.from('workspace_files').insert({
-                   id: fileData.id,
-                   workspace_id: workspace.id,
+                   id: toValidUuid(fileData.id),
+                   workspace_id: toValidUuid(workspace.id),
                    name: fileData.name,
                    type: fileData.type,
                    size: fileData.size,
                    status: fileData.status,
                    summary: fileData.summary
                  });
-               } catch(e) {
-                 console.error("Failed to save to supabase workspace_files", e);
+               } catch {
+                 // Non-fatal fallback
                }
              }
              
@@ -1120,12 +1264,25 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
                     </div>
                     <div className="min-w-0 flex-1">
                       <h4 className="text-sm font-bold text-slate-800 line-clamp-1 group-hover:text-indigo-600 transition-colors">{file.name}</h4>
-                      <div className="flex items-center gap-2 mt-1">
+                      <div className="flex flex-wrap items-center gap-2 mt-1">
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{file.type}</span>
                         <span className="w-1 h-1 rounded-full bg-slate-300" />
                         <span className="text-[10px] font-semibold text-slate-400">{file.size}</span>
                         <span className="w-1 h-1 rounded-full bg-slate-300" />
                         <span className="text-[10px] font-semibold text-slate-400">{file.uploadDate}</span>
+                        
+                        {file.tags && file.tags.length > 0 && (
+                          <>
+                            <span className="w-1 h-1 rounded-full bg-slate-300 ml-1" />
+                            <div className="flex items-center gap-1.5 ml-1">
+                              {file.tags.map((tag, idx) => (
+                                <span key={idx} className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
