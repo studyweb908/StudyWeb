@@ -306,92 +306,91 @@ export function RecentStudyMaterials({
       try {
         setLoading(true);
         setError(null);
-        if (supabase) {
-           let query = supabase
-             .from('workspace_files')
-             .select('*')
-             .order('created_at', { ascending: false })
-             .limit(5);
-             
-           if (activeWorkspace) {
-             query = query.eq('workspace_id', activeWorkspace.id);
-           } else if (workspaces && workspaces.length > 0) {
-             query = query.in('workspace_id', workspaces.map(w => w.id));
-           } else {
-             setDbFiles([]);
-             setLoading(false);
-             return;
-           }
-              
-           const { data, error: fetchError } = await query;
-              
-           if (fetchError) {
-             console.warn('Supabase fetch error:', fetchError.message);
-             setDbFiles([]);
-           } else if (data && data.length > 0) {
-             setDbFiles(data.map(d => ({
-               id: d.id,
-               name: d.title || d.name || 'Untitled Document',
-               type: d.file_type || d.type || 'pdf',
-               uploadDate: d.created_at || d.created_at || new Date().toISOString(),
-               workspaceId: d.workspace_id
-             })));
-             setLoading(false);
-             return; // Success with Supabase
-           }
-        }
-      } catch (err: any) {
-        console.error("Error fetching documents from Supabase:", err);
-        setError(err.message || 'Failed to fetch documents');
-      }
 
-      // Fallback: If no supabase data or error occurred, try local workspace files
-      let localFiles: any[] = [];
-      if (activeWorkspace) {
-        localFiles = activeWorkspace.files ? activeWorkspace.files.map(f => ({ ...f, workspaceId: activeWorkspace.id })) : [];
-      } else {
-        workspaces.forEach(w => {
-          if (w.files) {
-            localFiles.push(...w.files.map(f => ({ ...f, workspaceId: w.id })));
+        // 1. First attempt to load via server proxy endpoint (reliable, immune to browser CORS and network fetch blocks)
+        try {
+          const params = new URLSearchParams();
+          if (activeWorkspace) {
+            params.append('workspaceId', activeWorkspace.id);
+          } else if (workspaces && workspaces.length > 0) {
+            params.append('workspaceIds', workspaces.map(w => w.id).join(','));
           }
-        });
+          params.append('limit', '5');
+
+          const res = await fetch(`/api/workspace-files?${params.toString()}`);
+          if (res.ok) {
+            const json = await res.json();
+            if (json.files && Array.isArray(json.files) && json.files.length > 0) {
+              setDbFiles(json.files.map((d: any) => ({
+                id: d.id,
+                name: d.title || d.name || 'Untitled Document',
+                type: d.file_type || d.type || 'pdf',
+                uploadDate: d.created_at || new Date().toISOString(),
+                workspaceId: d.workspace_id
+              })));
+              setLoading(false);
+              return;
+            }
+          }
+        } catch {
+          // Non-fatal, smoothly proceed to local files
+        }
+
+        // 2. Fallback: load directly from active workspace & workspaces state
+        let localFiles: any[] = [];
+        if (activeWorkspace) {
+          localFiles = activeWorkspace.files ? activeWorkspace.files.map(f => ({ ...f, workspaceId: activeWorkspace.id })) : [];
+        } else if (workspaces && workspaces.length > 0) {
+          workspaces.forEach(w => {
+            if (w.files) {
+              localFiles.push(...w.files.map(f => ({ ...f, workspaceId: w.id })));
+            }
+          });
+        }
+        localFiles.sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime());
+        setDbFiles(localFiles.slice(0, 5));
+      } catch {
+        // Fallback silently without throwing or setting error banners
+      } finally {
+        setLoading(false);
       }
-      localFiles.sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime());
-      setDbFiles(localFiles.slice(0, 5));
-      setLoading(false);
     }
     fetchDocuments();
     
     if (supabase) {
-      const channel = supabase
-        .channel('workspace_files_widgets')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'workspace_files' }, (payload) => {
-           const newDoc = payload.new;
-           
-           // Filter based on activeWorkspace
-           if (activeWorkspace && newDoc.workspace_id !== activeWorkspace.id) return;
-           
-           setDbFiles(prev => {
-             const newFile = {
-               id: newDoc.id,
-               name: newDoc.name || 'Untitled Document',
-               type: newDoc.type || 'pdf',
-               uploadDate: newDoc.created_at || new Date().toISOString(),
-               workspaceId: newDoc.workspace_id
-             };
-             const updated = [newFile, ...prev];
-             return updated.slice(0, 5);
-           });
-        })
-        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'workspace_files' }, (payload) => {
-           const oldDoc = payload.old;
-           setDbFiles(prev => prev.filter(f => f.id !== oldDoc.id));
-        })
-        .subscribe();
-        
-      return () => {
-        supabase.removeChannel(channel);
-      };
+      try {
+        const channel = supabase
+          .channel('workspace_files_widgets')
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'workspace_files' }, (payload) => {
+             const newDoc = payload.new;
+             
+             // Filter based on activeWorkspace
+             if (activeWorkspace && newDoc.workspace_id !== activeWorkspace.id) return;
+             
+             setDbFiles(prev => {
+               const newFile = {
+                 id: newDoc.id,
+                 name: newDoc.name || 'Untitled Document',
+                 type: newDoc.type || 'pdf',
+                 uploadDate: newDoc.created_at || new Date().toISOString(),
+                 workspaceId: newDoc.workspace_id
+               };
+               const updated = [newFile, ...prev];
+               return updated.slice(0, 5);
+             });
+          })
+          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'workspace_files' }, (payload) => {
+             const oldDoc = payload.old;
+             setDbFiles(prev => prev.filter(f => f.id !== oldDoc.id));
+          })
+          .subscribe();
+          
+        return () => {
+          try {
+            supabase.removeChannel(channel);
+          } catch {}
+        };
+      } catch {}
     }
   }, [activeWorkspace, workspaces]);
 

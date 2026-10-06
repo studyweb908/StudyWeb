@@ -1,0 +1,35 @@
+# StudyWeb Robots.txt
+# Optimized for Google, Bing, Yahoo, DuckDuckGo, and major AI Search Crawlers (ChatGPT, Perplexity, Claude, Gemini)
+
+User-agent: *
+Allow: /
+Allow: /assets/
+Allow: /logo.png
+Allow: /favicon.png
+Allow: /sw.js
+Disallow: /api/
+
+# AI Search Engine Crawlers & LLM Bots
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Bytespider
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+# Sitemap Location
+Sitemap: https://studyweb.com/sitemap.xml

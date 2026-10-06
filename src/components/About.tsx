@@ -146,7 +146,7 @@ export default function About() {
                 <Sparkles className="w-3.5 h-3.5 animate-spin duration-3000" /> Discover StudyWeb
               </motion.div>
               
-              <motion.h1
+              <motion.h2
                 initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
@@ -154,7 +154,7 @@ export default function About() {
                 className="text-4xl sm:text-5xl lg:text-6xl font-bold font-display tracking-tight text-brand-text leading-none"
               >
                 Helping Every Student Learn <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-primary via-brand-secondary to-brand-accent">Smarter, Not Harder.</span>
-              </motion.h1>
+              </motion.h2>
 
               <motion.p
                 initial={{ opacity: 0, y: 20 }}

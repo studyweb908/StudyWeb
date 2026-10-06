@@ -18,6 +18,8 @@ import Contact from './components/Contact';
 import FAQ from './components/FAQ';
 import FinalCTA from './components/FinalCTA';
 import Footer from './components/Footer';
+import SEOManager from './components/SEOManager';
+import LegalModals from './components/LegalModals';
 import { supabase } from './lib/supabase';
 
 // Authenticated Dashboard Components
@@ -54,8 +56,10 @@ import {
 
 import { Workspace, INITIAL_WORKSPACES } from './components/Dashboard/WorkspaceTypes';
 import { toValidUuid } from './utils/uuid.ts';
+import { WorkspaceSyncService } from './services/WorkspaceSyncService.ts';
 import WorkspaceSelector from './components/Dashboard/WorkspaceSelector';
 import WorkspaceContainer from './components/Dashboard/WorkspaceContainer';
+import WorkspaceChat from './components/Dashboard/WorkspaceChat';
 import ToastContainer from './components/ToastContainer';
 
 import {
@@ -79,9 +83,24 @@ export default function App() {
     restDelta: 0.001
   });
 
-  // Authentication State
+  // Authentication & Legal State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [legalModalType, setLegalModalType] = useState<'privacy' | 'terms' | null>(null);
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash;
+      if (hash === '#privacy') {
+        setLegalModalType('privacy');
+      } else if (hash === '#terms') {
+        setLegalModalType('terms');
+      }
+    };
+    handleHashChange();
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   const {
     activeWorkspace,
@@ -125,6 +144,8 @@ export default function App() {
     if (activeWorkspace && activeWorkspace.id === updated.id) {
       setActiveWorkspace(updated);
     }
+    // Synchronize updates directly to Supabase
+    WorkspaceSyncService.saveWorkspace(updated);
   };
 
   const handleSelectWorkspace = (ws: Workspace) => {
@@ -136,12 +157,18 @@ export default function App() {
     setWorkspaces(next);
     localStorage.setItem('studyweb_workspaces_v2', JSON.stringify(next));
     setActiveWorkspace(ws);
+    // Persist new workspace directly in Supabase
+    WorkspaceSyncService.saveWorkspace(ws);
   };
 
   const handleTogglePin = (id: string) => {
     const next = workspaces.map(w => w.id === id ? { ...w, pinned: !w.pinned } : w);
     setWorkspaces(next);
     localStorage.setItem('studyweb_workspaces_v2', JSON.stringify(next));
+    const target = next.find(w => w.id === id);
+    if (target) {
+      WorkspaceSyncService.saveWorkspace(target);
+    }
     if (activeWorkspace && activeWorkspace.id === id) {
       setActiveWorkspace({ ...activeWorkspace, pinned: !activeWorkspace.pinned });
     }
@@ -151,6 +178,10 @@ export default function App() {
     const next = workspaces.map(w => w.id === id ? { ...w, favorite: !w.favorite } : w);
     setWorkspaces(next);
     localStorage.setItem('studyweb_workspaces_v2', JSON.stringify(next));
+    const target = next.find(w => w.id === id);
+    if (target) {
+      WorkspaceSyncService.saveWorkspace(target);
+    }
     if (activeWorkspace && activeWorkspace.id === id) {
       setActiveWorkspace({ ...activeWorkspace, favorite: !activeWorkspace.favorite });
     }
@@ -163,12 +194,86 @@ export default function App() {
     if (activeWorkspace && activeWorkspace.id === id) {
       setActiveWorkspace(null);
     }
+    // Delete workspace and its files from Supabase
+    WorkspaceSyncService.deleteWorkspace(id);
   };
 
   const handleReorderWorkspaces = (newWorkspaces: Workspace[]) => {
     setWorkspaces(newWorkspaces);
     localStorage.setItem('studyweb_workspaces_v2', JSON.stringify(newWorkspaces));
   };
+
+  // Synchronize with Supabase on mount and on authentication changes
+  useEffect(() => {
+    const syncFromSupabase = async () => {
+      try {
+        const remoteWorkspaces = await WorkspaceSyncService.fetchWorkspaces();
+        if (remoteWorkspaces && remoteWorkspaces.length > 0) {
+          setWorkspaces((prev) => {
+            const remoteMap = new Map(remoteWorkspaces.map(w => [w.id, w]));
+            const missingRemote: Workspace[] = [];
+
+            prev.forEach(localWs => {
+              if (!remoteMap.has(localWs.id)) {
+                missingRemote.push(localWs);
+              }
+            });
+
+            // Push any local workspaces that are not in Supabase yet
+            if (missingRemote.length > 0) {
+              WorkspaceSyncService.syncLocalWorkspacesToSupabase(missingRemote);
+            }
+
+            const merged = remoteWorkspaces.map(remoteWs => {
+              const localMatch = prev.find(l => l.id === remoteWs.id);
+              if (localMatch) {
+                return {
+                  ...localMatch,
+                  ...remoteWs,
+                  files: [
+                    ...remoteWs.files,
+                    ...(localMatch.files || []).filter(lf => !remoteWs.files.some(rf => rf.id === lf.id))
+                  ]
+                };
+              }
+              return remoteWs;
+            });
+
+            const combined = [...merged, ...missingRemote];
+            localStorage.setItem('studyweb_workspaces_v2', JSON.stringify(combined));
+            return combined;
+          });
+        } else {
+          // If Supabase has no workspaces yet, sync existing local workspaces to Supabase!
+          const local = localStorage.getItem('studyweb_workspaces_v2');
+          if (local) {
+            try {
+              const parsed = JSON.parse(local);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                WorkspaceSyncService.syncLocalWorkspacesToSupabase(parsed);
+              }
+            } catch {}
+          }
+        }
+      } catch (err) {
+        console.debug('Initial Supabase workspace sync notice:', err);
+      }
+    };
+
+    syncFromSupabase();
+
+    const handleAuthChange = () => {
+      syncFromSupabase();
+    };
+
+    window.addEventListener('studyweb-login-success', handleAuthChange);
+    window.addEventListener('studyweb-signup-success', handleAuthChange);
+
+    return () => {
+      window.removeEventListener('studyweb-login-success', handleAuthChange);
+      window.removeEventListener('studyweb-signup-success', handleAuthChange);
+    };
+  }, []);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [showLoginToast, setShowLoginToast] = useState(false);
@@ -347,7 +452,16 @@ export default function App() {
                   onReorderWorkspaces={handleReorderWorkspaces}
                 />
               ) : activeTab === 'ai-tutor' ? (
-                renderFallback("Select a Workspace", "Your AI Tutor can answer questions using outside knowledge while strictly staying on topic, as well as use your active documents. Please select or create a study workspace to begin chatting.")
+                workspaces.length > 0 ? (
+                  <WorkspaceChat 
+                    workspace={workspaces[0]}
+                    workspaces={workspaces}
+                    onSelectWorkspace={handleSelectWorkspace}
+                    onUpdateWorkspace={handleUpdateWorkspace}
+                  />
+                ) : (
+                  renderFallback("Select a Workspace", "Your AI Tutor can answer questions using outside knowledge while strictly staying on topic, as well as use your active documents. Please select or create a study workspace to begin chatting.")
+                )
               ) : activeTab === 'notes' ? (
                 renderFallback("Notebook is Workspace-Grounded", "Write rich-text notes with real-time AI autocompletes linked directly to your materials. Select a study workspace first.")
               ) : activeTab === 'flashcards' ? (
@@ -876,6 +990,17 @@ export default function App() {
 
         <OfflineNotice />
         <ToastContainer />
+        <LegalModals 
+          isOpen={legalModalType !== null} 
+          type={legalModalType} 
+          onClose={() => {
+            setLegalModalType(null);
+            if (window.location.hash === '#privacy' || window.location.hash === '#terms') {
+              window.history.pushState(null, '', '#');
+            }
+          }} 
+        />
+        <SEOManager activeTask={activeTab} isLoggedIn={isLoggedIn} />
       </div>
     );
   }
@@ -883,6 +1008,7 @@ export default function App() {
   // 2. RENDERING PUBLIC LANDING PAGE
   return (
     <div className="min-h-screen font-sans selection:bg-brand-primary/20 selection:text-brand-primary relative">
+      <SEOManager isLoggedIn={isLoggedIn} />
 
       <motion.div
         className="fixed top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-brand-primary via-brand-secondary to-brand-accent origin-left z-[100]"
@@ -907,6 +1033,16 @@ export default function App() {
       <Footer />
       <OfflineNotice />
       <ToastContainer />
+      <LegalModals 
+        isOpen={legalModalType !== null} 
+        type={legalModalType} 
+        onClose={() => {
+          setLegalModalType(null);
+          if (window.location.hash === '#privacy' || window.location.hash === '#terms') {
+            window.history.pushState(null, '', '#');
+          }
+        }} 
+      />
     </div>
   );
 }

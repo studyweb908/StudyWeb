@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../../lib/supabase';
+import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import { 
   ArrowLeft,
   Settings,
@@ -205,21 +206,15 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
       nodes: [...workspace.nodes, newFileNode],
       links: [...workspace.links, newLink]
     });
+
+    // Save uploaded file directly to Supabase workspace_files
+    WorkspaceSyncService.saveWorkspaceFile(workspace.id, newFile);
   };
 
   const handleRemoveFile = async (fileId: string) => {
     // 1. Delete from Supabase Database
     try {
-      if (supabase) {
-        await supabase.from('workspace_files').delete().eq('id', fileId);
-        
-        // Also try to delete from storage if there's a record (though currently simulated)
-        // const { data: fileData } = await supabase.from('workspace_files').select('url').eq('id', fileId).single();
-        // if (fileData?.url?.includes('supabase.co/storage')) {
-        //   const path = fileData.url.split('/').pop();
-        //   if (path) await supabase.storage.from('workspace_files').remove([path]);
-        // }
-      }
+      await WorkspaceSyncService.deleteWorkspaceFile(fileId);
     } catch (e) {
       console.error("Failed to delete from Supabase:", e);
     }

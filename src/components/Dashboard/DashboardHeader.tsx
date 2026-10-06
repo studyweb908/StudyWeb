@@ -54,10 +54,19 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
   const [profilePic, setProfilePic] = useState<string | null>(null);
 
   useEffect(() => {
-    const savedPic = localStorage.getItem('studyweb_profile_avatar') || localStorage.getItem('studyweb_profile_pic');
-    if (savedPic) {
-      setProfilePic(savedPic);
-    }
+    const updatePic = () => {
+      const savedPic = localStorage.getItem('studyweb_profile_avatar') || localStorage.getItem('studyweb_profile_pic');
+      if (savedPic) {
+        setProfilePic(savedPic);
+      }
+    };
+    updatePic();
+    window.addEventListener('studyweb_profile_updated', updatePic);
+    window.addEventListener('storage', updatePic);
+    return () => {
+      window.removeEventListener('studyweb_profile_updated', updatePic);
+      window.removeEventListener('storage', updatePic);
+    };
   }, []);
 
   // Quick Add State

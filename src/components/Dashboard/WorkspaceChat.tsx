@@ -1,822 +1,1092 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sparkles, 
-  Send,
+  Send, 
   Mic, 
-  Search, 
-  X, 
+  Paperclip,
+  X,
+  RotateCcw, 
+  Copy, 
+  CheckCircle2, 
+  Loader2, 
+  Pin, 
+  ChevronDown, 
   BookOpen, 
-  ChevronRight, 
-  Clock, 
-  Bot, 
-  CornerDownLeft, 
-  Info,
-  Check,
-  Volume2,
-  VolumeX,
+  ArrowRight, 
+  GraduationCap,
   FileText,
-  Copy,
-  Share2
+  AlertTriangle
 } from 'lucide-react';
-import { Workspace } from './WorkspaceTypes';
+import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import { useMicrophoneWaveform } from '../../hooks/useMicrophoneWaveform';
 
-interface WorkspaceChatProps {
-  workspace: Workspace;
-  onUpdateWorkspace?: (updated: Workspace) => void;
+export type TutorPersona = 'plain_english' | 'socratic' | 'exam_prep' | 'flashcard';
+
+export const TUTOR_PERSONAS: Record<TutorPersona, {
+  name: string;
+  icon: string;
+  shortDesc: string;
+  samplePrompt: string;
+}> = {
+  plain_english: {
+    name: 'Simple Explainer',
+    icon: '💡',
+    shortDesc: 'Everyday words and easy analogies',
+    samplePrompt: 'Explain this in super simple words with an everyday analogy.'
+  },
+  socratic: {
+    name: 'Socratic Guide',
+    icon: '🧭',
+    shortDesc: 'Step-by-step guided questions',
+    samplePrompt: 'Guide me step-by-step to understand this through easy questions.'
+  },
+  exam_prep: {
+    name: 'Quiz & Exam Coach',
+    icon: '🎯',
+    shortDesc: 'High-yield points and test practice',
+    samplePrompt: 'Give me 3 practice quiz questions from my notes with explanations.'
+  },
+  flashcard: {
+    name: 'Quick Flashcards',
+    icon: '⚡',
+    shortDesc: 'Active memory drill',
+    samplePrompt: 'Give me a rapid active-recall flashcard question to test my memory.'
+  }
+};
+
+export interface Citation {
+  sourceName: string;
+  page?: number;
+  quote: string;
 }
 
 interface Message {
   id: string;
   sender: 'user' | 'ai';
   text: string;
-  citations?: Array<{
-    sourceName: string;
-    page?: number;
-    quote: string;
-  }>;
+  time: string;
+  source?: string;
+  persona?: TutorPersona;
+  citations?: Citation[];
+  attachedFileNames?: string[];
+  isError?: boolean;
+  failedPrompt?: string;
 }
 
-const CopySnippetButton = ({ text }: { text: string }) => {
-  const [copied, setCopied] = useState(false);
-  
-  const handleCopy = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+interface AttachedDraftFile {
+  id: string;
+  name: string;
+  size: string;
+  type: string;
+  content?: string;
+  fileObj: File;
+}
 
-  return (
-    <button 
-      onClick={handleCopy}
-      className="p-1 hover:bg-slate-700/50 rounded transition-colors text-slate-400 hover:text-slate-200 ml-auto shrink-0 cursor-pointer"
-      title="Copy snippet"
-    >
-      {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-    </button>
-  );
-};
+interface WorkspaceChatProps {
+  workspace: Workspace;
+  workspaces?: Workspace[];
+  onSelectWorkspace?: (ws: Workspace) => void;
+  onUpdateWorkspace?: (updated: Workspace) => void;
+  onOpenUploadModal?: () => void;
+}
 
-export default function WorkspaceChat({ workspace, onUpdateWorkspace }: WorkspaceChatProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      sender: 'ai',
-      text: `Hi! I'm your AI Study Assistant for **${workspace.name}**.\n\nI use your **${workspace.files.length} uploaded study materials** to answer questions, explain concepts, and provide exact citations. What would you like to learn today?`,
-    }
-  ]);
+export default function WorkspaceChat({
+  workspace,
+  workspaces,
+  onSelectWorkspace,
+  onUpdateWorkspace
+}: WorkspaceChatProps) {
+  // Chat input and state
   const [inputValue, setInputValue] = useState('');
   const [isThinking, setIsThinking] = useState(false);
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+  const [addedNoteMsgId, setAddedNoteMsgId] = useState<string | null>(null);
+  const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
+  const [showPersonaMenu, setShowPersonaMenu] = useState(false);
+  const [showFilesList, setShowFilesList] = useState(false);
+
+  // Attached files for the current pending draft message
+  const [attachedDrafts, setAttachedDrafts] = useState<AttachedDraftFile[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Active tutor persona (default: Simple Explainer)
+  const [activePersona, setActivePersona] = useState<TutorPersona>(() => {
+    try {
+      const saved = localStorage.getItem(`study_persona_${workspace.id}`);
+      if (saved && (saved in TUTOR_PERSONAS)) return saved as TutorPersona;
+    } catch {}
+    return 'plain_english';
+  });
+
+  // Voice dictation state
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
   const waveformLevels = useMicrophoneWaveform(isListening);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const startSpeechRecognition = () => {
-    if (isListening) {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
+  // Clean files list for grounding
+  const activeFiles = useMemo(() => {
+    return (workspace.files || []).map(f => {
+      const isPlaceholder = f.summary?.includes("comprehensively outlines") || f.summary?.includes("foundational definitions");
+      const cleanSummary = isPlaceholder 
+        ? (f.name ? `Study material: ${f.name}` : "Study material in workspace") 
+        : f.summary;
+      const cleanHighlights = (f.highlights || []).filter((h: string) => 
+        !h.includes("Foundational definitions") && 
+        !h.includes("Critical frameworks") && 
+        !h.includes("Structural analysis") &&
+        !h.includes("comprehensively outlines")
+      );
+      return {
+        ...f,
+        summary: cleanSummary,
+        highlights: cleanHighlights
+      };
+    });
+  }, [workspace.files]);
+
+  // Persistent conversation messages
+  const [messages, setMessages] = useState<Message[]>(() => {
+    try {
+      const stored = localStorage.getItem(`study_chat_history_${workspace.id}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
-      setIsListening(false);
-      return;
+    } catch {}
+
+    const hasDocs = (workspace.files || []).length > 0;
+    return [{
+      id: 'welcome-msg',
+      sender: 'ai',
+      text: hasDocs
+        ? `👋 **Hi! I'm your AI Study Tutor for ${workspace.name}!**\n\nI have loaded your **${workspace.files.length} study document${workspace.files.length === 1 ? '' : 's'}**. Ask me anything, speak using the **Voice** button, or attach documents with the **Attach** button!`
+        : `👋 **Hi! I'm your AI Study Tutor!**\n\nAsk me any question about your studies, homework, or concepts. You can type, speak using **Voice Input**, or attach notes using **Attach** to get started!`,
+      time: 'Just now',
+      persona: 'plain_english'
+    }];
+  });
+
+  // Save persona preference
+  useEffect(() => {
+    try {
+      localStorage.setItem(`study_persona_${workspace.id}`, activePersona);
+    } catch {}
+  }, [activePersona, workspace.id]);
+
+  // Save chat messages
+  useEffect(() => {
+    try {
+      if (messages.length > 0) {
+        localStorage.setItem(`study_chat_history_${workspace.id}`, JSON.stringify(messages));
+      }
+    } catch {}
+  }, [messages, workspace.id]);
+
+  // Scroll to bottom on new message
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isThinking, attachedDrafts]);
+
+  // Reset chat thread
+  const handleResetChat = () => {
+    if (!window.confirm("Start a new conversation?")) return;
+    try {
+      localStorage.removeItem(`study_chat_history_${workspace.id}`);
+    } catch {}
+    const p = TUTOR_PERSONAS[activePersona];
+    setMessages([{
+      id: `welcome-${Date.now()}`,
+      sender: 'ai',
+      text: `✨ **Fresh Conversation Started!**\n\nI'm ready in **${p.icon} ${p.name}** mode (*${p.shortDesc}*).\n\nWhat would you like to learn or practice right now?`,
+      time: 'Just now',
+      persona: activePersona
+    }]);
+  };
+
+  // File Attachment Handlers
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const newDrafts: AttachedDraftFile[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      let content: string | undefined = undefined;
+
+      // Read text content for common textual formats
+      if (file.type.startsWith('text/') || file.name.endsWith('.md') || file.name.endsWith('.txt')) {
+        try {
+          content = await file.text();
+        } catch {}
+      }
+
+      newDrafts.push({
+        id: `draft-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 4)}`,
+        name: file.name,
+        size: `${Math.max(1, Math.round(file.size / 1024))} KB`,
+        type: file.type || 'document',
+        content,
+        fileObj: file
+      });
     }
 
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      (window as any).showToast?.("Speech recognition is not supported in this browser.", "warning");
-      return;
-    }
+    setAttachedDrafts(prev => [...prev, ...newDrafts]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
+  const removeAttachedDraft = (id: string) => {
+    setAttachedDrafts(prev => prev.filter(f => f.id !== id));
+  };
+
+  // Voice input handler
+  const toggleListening = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-    recognitionRef.current = recognition;
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'en-US';
-
-    recognition.onstart = () => {
-      setIsListening(true);
-    };
-
-    recognition.onresult = (event: any) => {
-      const speechToText = event.results[0][0].transcript;
-      setInputValue(prev => prev + (prev ? ' ' : '') + speechToText);
-    };
-
-    recognition.onerror = (err: any) => {
-      console.error("Speech recognition error:", err.error || err);
-      (window as any).showToast?.(`Microphone error: ${err.error || "Unknown error"}. Make sure microphone permissions are granted.`, "error");
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-
-    recognition.start();
-  };
-  const [activeCitation, setActiveCitation] = useState<{
-    sourceName: string;
-    page?: number;
-    quote: string;
-  } | null>(null);
-  const [hoveredCitation, setHoveredCitation] = useState<{
-    id: string;
-    sourceName: string;
-    page?: number;
-    quote: string;
-  } | null>(null);
-
-  // Copy, share, note success feedback trackers
-  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
-  const [sharedMsgId, setSharedMsgId] = useState<string | null>(null);
-  const [addedNoteMsgId, setAddedNoteMsgId] = useState<string | null>(null);
-  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
-
-  const handleSpeakMessage = (id: string, text: string) => {
-    if (speakingMsgId === id) {
-      window.speechSynthesis.cancel();
-      setSpeakingMsgId(null);
+    if (!SpeechRecognition) {
+      alert("Voice input is not supported in this browser. Please use Google Chrome or Edge.");
       return;
     }
 
-    window.speechSynthesis.cancel();
+    if (isListening) {
+      if (recognitionRef.current) recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
 
-    // Strip markdown before speaking
-    const cleanText = text.replace(/[*_#`~]/g, '');
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    utterance.onend = () => setSpeakingMsgId(null);
-    utterance.onerror = () => setSpeakingMsgId(null);
-    
-    setSpeakingMsgId(id);
-    window.speechSynthesis.speak(utterance);
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => setIsListening(true);
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        if (transcript) {
+          setInputValue(prev => prev ? `${prev} ${transcript}` : transcript);
+        }
+      };
+      recognition.onerror = () => setIsListening(false);
+      recognition.onend = () => setIsListening(false);
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch {
+      setIsListening(false);
+    }
   };
 
-  const handleCopyMessage = (id: string, text: string) => {
+  // Copy message text
+  const handleCopy = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedMsgId(id);
     setTimeout(() => setCopiedMsgId(null), 2000);
   };
 
-  const handleShareMessage = async (id: string, text: string) => {
-    const shareData = {
-      title: 'StudyWeb AI Learning Briefing',
-      text: text,
-      url: window.location.href
-    };
-    if (navigator.share && navigator.canShare && navigator.canShare(shareData)) {
-      try {
-        await navigator.share(shareData);
-        setSharedMsgId(id);
-        setTimeout(() => setSharedMsgId(null), 2000);
-        return;
-      } catch (err) {
-        console.warn('Native share failed, falling back to copy:', err);
-      }
-    }
-    const formattedShareText = `StudyWeb AI Briefing 🧠\n\n"${text}"\n\nShared from StudyWeb Learning Hub: ${window.location.href}`;
-    navigator.clipboard.writeText(formattedShareText);
-    setSharedMsgId(id);
-    setTimeout(() => setSharedMsgId(null), 2000);
-  };
-
-  const handleAddToNotes = (id: string, text: string) => {
+  // Save answer to notes
+  const handleSaveToNotes = (id: string, text: string) => {
     if (!onUpdateWorkspace) return;
 
-    const cleanTitle = `AI Insight: ${text.slice(0, 35).replace(/[\n#*`]/g, '')}...`;
-    const cleanContent = `<h3>AI Study Insight</h3>\n<p>${text.replace(/\n/g, '<br />')}</p>\n\n<p><em>Generated inside **${workspace.name}** active chat.</em></p>`;
+    const firstLine = text.split('\n')[0].replace(/^[#*\s-]+/, '').slice(0, 45);
+    const cleanTitle = firstLine ? `AI Tutor: ${firstLine}` : `AI Tutor Note - ${new Date().toLocaleDateString()}`;
+    const cleanContent = `<h3>AI Study Tutor Note</h3>\n<p>${text.replace(/\n/g, '<br />')}</p>\n\n<p><em>Saved from AI Tutor in ${workspace.name}.</em></p>`;
     
     const newNote = {
       id: `ai-note-${Date.now()}`,
       title: cleanTitle,
       content: cleanContent,
       updatedAt: new Date().toLocaleDateString(),
-      tags: ['AI Tutor', 'Grounded Insight', workspace.subject || 'Syllabus'].filter(Boolean) as string[],
+      tags: ['AI Tutor', workspace.subject || 'Notes']
     };
 
-    const updatedWorkspace = {
+    onUpdateWorkspace({
       ...workspace,
       notes: [newNote, ...(workspace.notes || [])]
-    };
+    });
 
-    onUpdateWorkspace(updatedWorkspace);
     setAddedNoteMsgId(id);
     setTimeout(() => setAddedNoteMsgId(null), 2000);
   };
 
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  // Send message
+  const handleSend = async (customPrompt?: string) => {
+    const textToSend = (customPrompt || inputValue).trim();
+    if ((!textToSend && attachedDrafts.length === 0) || isThinking) return;
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isThinking]);
+    const currentDrafts = [...attachedDrafts];
+    const draftNames = currentDrafts.map(d => d.name);
 
-  useEffect(() => {
-    return () => {
-      window.speechSynthesis.cancel();
-    };
-  }, []);
-
-  const handleSend = async (textToSend: string) => {
-    if (!textToSend.trim() || isThinking) return;
-
+    // Build user message
     const userMsg: Message = {
-      id: `msg-${Date.now()}`,
+      id: `msg-user-${Date.now()}`,
       sender: 'user',
-      text: textToSend
+      text: textToSend || `Please analyze the attached document: ${draftNames.join(', ')}`,
+      attachedFileNames: draftNames.length > 0 ? draftNames : undefined,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    setMessages(prev => [...prev, userMsg]);
     setInputValue('');
+    setAttachedDrafts([]); // Clear attachment queue
     setIsThinking(true);
 
-    try {
-      const isComplexQuery = textToSend.toLowerCase().includes('detailed') || 
-                             textToSend.toLowerCase().includes('explain in depth') || 
-                             textToSend.toLowerCase().includes('prove') || 
-                             textToSend.toLowerCase().includes('analyze') ||
-                             textToSend.toLowerCase().includes('derive');
+    // Convert attached drafts into WorkspaceFile objects
+    const newlyConvertedFiles: WorkspaceFile[] = currentDrafts.map(d => {
+      const lower = d.name.toLowerCase();
+      const fileType: WorkspaceFile['type'] = lower.endsWith('.pdf') 
+        ? 'pdf' 
+        : lower.match(/\.(png|jpg|jpeg|webp|gif|svg)$/) 
+        ? 'image' 
+        : lower.match(/\.(mp3|wav|m4a|ogg)$/) 
+        ? 'audio' 
+        : lower.match(/\.(mp4|webm|mov)$/) 
+        ? 'video' 
+        : 'doc';
 
+      return {
+        id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        name: d.name,
+        size: d.size,
+        type: fileType,
+        uploadDate: new Date().toISOString(),
+        status: 'indexed',
+        tags: ['Attachment', 'Chat Upload'],
+        summary: d.content ? d.content.slice(0, 400) : `Uploaded study file: ${d.name}`,
+        transcription: d.content,
+        highlights: [d.content ? d.content.slice(0, 200) : `Study document: ${d.name}`]
+      };
+    });
+
+    // Optionally save newly attached files into workspace
+    if (onUpdateWorkspace && newlyConvertedFiles.length > 0) {
+      onUpdateWorkspace({
+        ...workspace,
+        files: [...(workspace.files || []), ...newlyConvertedFiles]
+      });
+    }
+
+    const effectiveFiles = [...activeFiles, ...newlyConvertedFiles];
+    const startTime = Date.now();
+    const history = messages.slice(-8).map(m => ({
+      role: m.sender === 'ai' ? 'model' : 'user',
+      content: m.text
+    }));
+
+    try {
       const response = await fetch('/api/ai-tutor', {
         method: 'POST',
         credentials: 'same-origin',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: textToSend,
+          prompt: userMsg.text,
+          history,
+          persona: activePersona,
+          modelMode: 'auto',
           workspaceId: workspace.id,
-          attachedFiles: workspace.files,
-          citationMode: true,
-          deepResearch: isComplexQuery,
-          model: 'auto'
+          attachedFiles: effectiveFiles,
+          citationMode: true
         })
       });
 
-      if (!response.ok) {
-        throw new Error('API server returned error status');
-      }
-
       const data = await response.json();
 
+      if (!response.ok || data.error) {
+        throw new Error(data.error || 'Failed to generate response. Please try again.');
+      }
+
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 400) {
+        await new Promise(r => setTimeout(r, 400 - elapsed));
+      }
+
       const aiMsg: Message = {
-        id: `msg-${Date.now() + 1}`,
+        id: `msg-ai-${Date.now() + 1}`,
         sender: 'ai',
-        text: data.text || 'Sorry, I could not generate a response.',
-        citations: data.citations
+        text: data.reply || data.text || 'I am ready to help you with your question.',
+        citations: data.citations,
+        source: data.source || 'Gemini AI',
+        persona: (data.personaUsed as TutorPersona) || activePersona,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
 
-      setMessages((prev) => [...prev, aiMsg]);
-    } catch (err) {
-      console.warn('Real AI Tutor failed, falling back to simulated analysis:', err);
-      // Fallback to offline simulation based on workspace content
-      setTimeout(() => {
-        let replyText = '';
-        let replyCitations: Message['citations'] = [];
+      setMessages(prev => [...prev, aiMsg]);
+    } catch (err: any) {
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 400) {
+        await new Promise(r => setTimeout(r, 400 - elapsed));
+      }
 
-        const query = textToSend.toLowerCase();
+      const errorMsg: Message = {
+        id: `msg-error-${Date.now()}`,
+        sender: 'ai',
+        text: err?.message || 'Failed to generate response. Please try again.',
+        isError: true,
+        failedPrompt: userMsg.text,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
 
-        if (query.includes('mendel') || query.includes('genetic') || query.includes('heredity') || query.includes('law')) {
-          replyText = "Based on Gregor Mendel's genetic principles, alleles separate independently during the formation of gametes. This segregation means that each gamete carries only one allele for each gene, which then fuse at fertilization to form heterozygous or homozygous offspring.";
-          replyCitations = [
-            {
-              sourceName: workspace.files[0]?.name || 'Principles of Genetics.pdf',
-              page: 4,
-              quote: "Gregor Mendel's law of segregation states that the two alleles for each gene separate during gamete formation."
-            }
-          ];
-        } else if (query.includes('glycolysis') || query.includes('respiration') || query.includes('krebs') || query.includes('mitochondria')) {
-          replyText = "In cellular respiration, glycolysis converts one glucose into two pyruvates within the cytoplasm, generating a net of 2 ATP and 2 NADH. Pyruvate then transfers into the mitochondria, entering the Krebs Cycle to release carbon dioxide, NADH, and FADH₂.";
-          replyCitations = [
-            {
-              sourceName: workspace.files[1]?.name || 'Cellular Respiration Pathways.ppt',
-              page: 12,
-              quote: "Glycolysis splits one glucose molecule into two pyruvates, yielding 2 net ATP and 2 NADH in the cytoplasm."
-            }
-          ];
-        } else {
-          replyText = "I have analyzed your request based on the files in this workspace. Here are some key points:\n\n" +
-            (workspace.files.length > 0 
-              ? `According to **${workspace.files[0].name}**, we can synthesize key concepts, tags, and lecture transcript details for your preparation.`
-              : "To help maintain strict factual integrity, please upload more reference files in your Library tab!");
-        }
-
-        const aiMsg: Message = {
-          id: `msg-${Date.now() + 1}`,
-          sender: 'ai',
-          text: replyText,
-          citations: replyCitations
-        };
-
-        setMessages((prev) => [...prev, aiMsg]);
-      }, 800);
+      setMessages(prev => [...prev, errorMsg]);
     } finally {
       setIsThinking(false);
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-      handleSend(inputValue);
+      e.preventDefault();
+      handleSend();
     }
   };
 
-  // Quick Action Prompts
-  const suggestedChips = workspace.id === 'ws-ap-biology' ? [
-    'Explain law of segregation',
-    'Summarize glycolysis outputs',
-    'What is maternal mitochondrial inheritance?',
-    'What is Hardy-Weinberg equilibrium?'
-  ] : [
-    'Explain Gibbs Free Energy spontaneity',
-    'What happens to entropy during evaporation?',
-    'Explain Hess Law'
+  // Minimalist Markdown Formatter
+  const renderMessageContent = (text: string) => {
+    const lines = text.split('\n');
+    return (
+      <div className="space-y-2 text-sm sm:text-[15px] leading-relaxed">
+        {lines.map((line, idx) => {
+          const trimmed = line.trim();
+          if (!trimmed) return <div key={idx} className="h-1.5" />;
+
+          // Heading 3
+          if (trimmed.startsWith('### ')) {
+            return (
+              <h4 key={idx} className="font-extrabold text-base text-slate-900 dark:text-white pt-1">
+                {trimmed.replace('### ', '')}
+              </h4>
+            );
+          }
+          // Heading 2 or 1
+          if (trimmed.startsWith('## ') || trimmed.startsWith('# ')) {
+            return (
+              <h3 key={idx} className="font-extrabold text-base sm:text-lg text-slate-900 dark:text-white pt-1">
+                {trimmed.replace(/^#+\s*/, '')}
+              </h3>
+            );
+          }
+
+          // Bullet points
+          if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+            const content = trimmed.substring(2);
+            return (
+              <div key={idx} className="flex items-start gap-2 pl-1">
+                <span className="text-indigo-600 dark:text-indigo-400 font-bold shrink-0 mt-0.5">•</span>
+                <span 
+                  className="flex-1"
+                  dangerouslySetInnerHTML={{ 
+                    __html: content
+                      .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>')
+                      .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
+                  }} 
+                />
+              </div>
+            );
+          }
+
+          // Numbered lists
+          const numMatch = trimmed.match(/^(\d+)\.\s+(.*)/);
+          if (numMatch) {
+            return (
+              <div key={idx} className="flex items-start gap-2 pl-1">
+                <span className="font-bold text-indigo-600 dark:text-indigo-400 shrink-0 font-mono text-xs mt-0.5">
+                  {numMatch[1]}.
+                </span>
+                <span 
+                  className="flex-1"
+                  dangerouslySetInnerHTML={{ 
+                    __html: numMatch[2]
+                      .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>')
+                      .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
+                  }} 
+                />
+              </div>
+            );
+          }
+
+          // Standard paragraph
+          return (
+            <p 
+              key={idx} 
+              dangerouslySetInnerHTML={{ 
+                __html: trimmed
+                  .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>')
+                  .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
+              }} 
+            />
+          );
+        })}
+      </div>
+    );
+  };
+
+  // Easy starter prompts
+  const starterCards = [
+    {
+      icon: '💡',
+      title: 'Explain in simple words',
+      prompt: 'Explain the most important concepts from my notes in very simple everyday language.'
+    },
+    {
+      icon: '🎯',
+      title: 'Test me with a quiz question',
+      prompt: 'Ask me one practice question to test my understanding, and wait for my answer.'
+    },
+    {
+      icon: '🔑',
+      title: 'Top 3 key takeaways',
+      prompt: 'What are the top 3 key takeaways I must know for an exam?'
+    },
+    {
+      icon: '🌍',
+      title: 'Give me a real-life example',
+      prompt: 'Give me a fun, relatable real-world example that illustrates the main concept.'
+    }
   ];
 
   return (
-    <div className="flex flex-col lg:flex-row h-[580px] bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 rounded-[24px] overflow-hidden text-left relative animate-fade-in">
-      {/* LEFT SIDEBAR: WORKSPACE DOCUMENTS PANEL */}
-      <div className="w-full lg:w-72 border-b lg:border-b-0 lg:border-r border-slate-150 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/10 flex flex-col h-48 lg:h-full shrink-0">
-        <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/20 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <BookOpen className="w-4 h-4 text-indigo-500" />
-            <h4 className="font-extrabold text-[11px] text-slate-800 dark:text-slate-200 uppercase tracking-wider">Workspace Materials</h4>
+    <div className="w-full h-[calc(100vh-130px)] min-h-[620px] flex flex-col bg-white dark:bg-slate-950 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm relative font-sans overflow-hidden">
+      
+      {/* ============================================================== */}
+      {/* 1. MINIMALIST TOP HEADER                                       */}
+      {/* ============================================================== */}
+      <header className="px-4 sm:px-6 py-3 border-b border-slate-200/80 dark:border-slate-800/80 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm flex items-center justify-between gap-3 shrink-0 z-20">
+        
+        {/* Left: Tutor Branding & Workspace indicator */}
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center text-lg shadow-sm shadow-indigo-600/20 shrink-0">
+            <GraduationCap className="w-5 h-5" />
           </div>
-          <span className="text-[10px] bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-full font-black">
-            {workspace.files.length}
-          </span>
+
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h2 className="font-extrabold text-slate-900 dark:text-white text-base leading-tight truncate">
+                AI Study Tutor
+              </h2>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" title="Online & ready" />
+            </div>
+
+            <div className="flex items-center gap-2 mt-0.5">
+              {/* Workspace Switcher or Name */}
+              {workspaces && workspaces.length > 1 && onSelectWorkspace ? (
+                <div className="relative">
+                  <button
+                    onClick={() => setShowWorkspaceMenu(prev => !prev)}
+                    className="text-xs font-semibold text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-300 flex items-center gap-1 cursor-pointer transition-colors truncate max-w-[160px] sm:max-w-xs"
+                  >
+                    <span>{workspace.name}</span>
+                    <ChevronDown className="w-3 h-3 text-slate-400" />
+                  </button>
+
+                  {showWorkspaceMenu && (
+                    <div className="absolute left-0 mt-2 w-56 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl p-1.5 z-50 space-y-0.5">
+                      <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                        Switch Study Workspace
+                      </div>
+                      {workspaces.map(ws => (
+                        <button
+                          key={ws.id}
+                          onClick={() => {
+                            onSelectWorkspace(ws);
+                            setShowWorkspaceMenu(false);
+                          }}
+                          className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
+                            ws.id === workspace.id
+                              ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold'
+                              : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          <span className="truncate">{ws.name}</span>
+                          <span className="text-[10px] text-slate-400 font-normal">
+                            {ws.files?.length || 0} docs
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400 truncate max-w-[180px] sm:max-w-xs">
+                  {workspace.name}
+                </span>
+              )}
+
+              {/* Source docs count pill */}
+              {(workspace.files || []).length > 0 && (
+                <button
+                  onClick={() => setShowFilesList(prev => !prev)}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-950/50 cursor-pointer transition-colors"
+                  title="Click to see loaded documents"
+                >
+                  <BookOpen className="w-3 h-3 text-indigo-500" />
+                  <span>{workspace.files.length} doc{workspace.files.length === 1 ? '' : 's'}</span>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* Scrollable files list */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-2.5 scrollbar-thin">
-          {workspace.files.length === 0 ? (
-            <div className="text-center py-6 px-4">
-              <BookOpen className="w-7 h-7 text-slate-300 dark:text-slate-750 mx-auto mb-1.5" />
-              <p className="text-[10px] text-slate-400 font-bold">No materials uploaded.</p>
-              <p className="text-[9px] text-slate-400 mt-1 leading-normal">Add files in the 'Upload Material' tab to ground your AI Tutor sessions!</p>
-            </div>
-          ) : (
-            workspace.files.map((file) => {
-              // Check if cited in the LAST AI message
-              const lastAIMsg = [...messages].reverse().find(m => m.sender === 'ai');
-              const fileKeyword = file.name.split('.')[0].toLowerCase();
-              const isCitedInLastResponse = lastAIMsg?.citations?.some(c => 
-                c.sourceName.toLowerCase() === file.name.toLowerCase() ||
-                file.name.toLowerCase().includes(c.sourceName.toLowerCase()) ||
-                c.sourceName.toLowerCase().includes(file.name.toLowerCase()) ||
-                (fileKeyword.length > 4 && c.sourceName.toLowerCase().includes(fileKeyword))
-              );
+        {/* Right: Tutor Style Toggle & New Chat Button */}
+        <div className="flex items-center gap-2">
+          
+          {/* Persona Style Dropdown / Toggle */}
+          <div className="relative">
+            <button
+              onClick={() => setShowPersonaMenu(prev => !prev)}
+              className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors border border-slate-200/80 dark:border-slate-700/80"
+              title="Change teaching style"
+            >
+              <span>{TUTOR_PERSONAS[activePersona].icon}</span>
+              <span className="hidden sm:inline">{TUTOR_PERSONAS[activePersona].name}</span>
+              <ChevronDown className="w-3 h-3 text-slate-400 ml-0.5" />
+            </button>
 
-              // Find cited pages and quotes for this file in the last response
-              const matchingCitations = lastAIMsg?.citations?.filter(c => 
-                c.sourceName.toLowerCase() === file.name.toLowerCase() ||
-                file.name.toLowerCase().includes(c.sourceName.toLowerCase()) ||
-                c.sourceName.toLowerCase().includes(file.name.toLowerCase()) ||
-                (fileKeyword.length > 4 && c.sourceName.toLowerCase().includes(fileKeyword))
-              ) || [];
+            {showPersonaMenu && (
+              <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl p-1.5 z-50 space-y-1">
+                <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                  Tutor Teaching Style
+                </div>
+                {(Object.keys(TUTOR_PERSONAS) as TutorPersona[]).map(key => {
+                  const p = TUTOR_PERSONAS[key];
+                  const isCur = activePersona === key;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        setActivePersona(key);
+                        setShowPersonaMenu(false);
+                      }}
+                      className={`w-full text-left p-2.5 rounded-xl transition-all flex items-start gap-2.5 text-xs cursor-pointer ${
+                        isCur
+                          ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-900 dark:text-indigo-200 font-bold'
+                          : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      <span className="text-base mt-0.5">{p.icon}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold flex items-center justify-between">
+                          <span>{p.name}</span>
+                          {isCur && <span className="text-[10px] text-indigo-600 font-bold">Active</span>}
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 font-normal leading-tight mt-0.5">
+                          {p.shortDesc}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
-              return (
-                <div 
-                  key={file.id}
-                  onClick={() => {
-                    // Clicking a file card opens its grounding or summary
-                    if (matchingCitations.length > 0) {
-                      setActiveCitation({
-                        sourceName: file.name,
-                        page: matchingCitations[0].page,
-                        quote: matchingCitations[0].quote
-                      });
-                    } else {
-                      // fallback to file summary
-                      setActiveCitation({
-                        sourceName: file.name,
-                        quote: file.summary || "This file has been successfully indexed. Ask the AI assistant to summarize key chapters or extract crucial takeaways."
-                      });
-                    }
-                  }}
-                  className={`p-3 rounded-xl border transition-all cursor-pointer text-xs flex flex-col gap-1.5 ${
-                    isCitedInLastResponse
-                      ? 'border-amber-400 dark:border-amber-500/80 bg-amber-500/5 dark:bg-amber-500/10 shadow-sm shadow-amber-500/10 ring-1 ring-amber-400/30 dark:ring-amber-500/30'
-                      : 'border-slate-150 dark:border-slate-800/80 bg-white dark:bg-slate-900 hover:border-slate-200 dark:hover:border-slate-750'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <FileText className={`w-3.5 h-3.5 shrink-0 ${isCitedInLastResponse ? 'text-amber-500 animate-pulse' : 'text-slate-400'}`} />
-                    <span className="font-bold text-slate-700 dark:text-slate-250 truncate flex-1 leading-tight">{file.name}</span>
-                  </div>
+          {/* New Chat Button */}
+          <button
+            onClick={handleResetChat}
+            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer border border-slate-200/80 dark:border-slate-700/80"
+            title="Start new conversation"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+        </div>
+      </header>
 
-                  {isCitedInLastResponse && (
-                    <div className="flex items-center justify-between mt-1">
-                      <span className="inline-flex items-center gap-1 text-[9px] font-black text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse">
-                        <Sparkles className="w-2 h-2" /> Cited
+      {/* Popover file list if user taps document badge */}
+      {showFilesList && (workspace.files || []).length > 0 && (
+        <div className="bg-slate-50 dark:bg-slate-900/90 border-b border-slate-200 dark:border-slate-800 px-6 py-2.5 flex items-center justify-between text-xs animate-in slide-in-from-top-2">
+          <div className="flex items-center gap-2 overflow-x-auto py-1 scrollbar-none">
+            <span className="text-slate-400 font-medium shrink-0">Study documents:</span>
+            {workspace.files.map(f => (
+              <span
+                key={f.id}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-medium shrink-0"
+              >
+                <FileText className="w-3 h-3 text-indigo-500" />
+                <span className="truncate max-w-[150px]">{f.name}</span>
+              </span>
+            ))}
+          </div>
+          <button
+            onClick={() => setShowFilesList(false)}
+            className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 ml-3 shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* 2. FULL-WIDTH CONVERSATION AREA                                */}
+      {/* ============================================================== */}
+      <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 space-y-6">
+        <div className="max-w-3xl mx-auto space-y-6">
+          
+          {/* Welcome Card & Starter Suggestions if conversation is fresh */}
+          {messages.length <= 1 && (
+            <div className="p-6 sm:p-8 rounded-3xl bg-slate-50/80 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800/80 text-center space-y-5 my-4">
+              <div className="w-14 h-14 rounded-2xl bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-3xl mx-auto shadow-inner">
+                {TUTOR_PERSONAS[activePersona].icon}
+              </div>
+
+              <div className="space-y-1.5 max-w-lg mx-auto">
+                <h3 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white">
+                  How can I help you study today?
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+                  I can explain concepts, give you practice quizzes, or break down difficult topics from your notes into simple terms.
+                </p>
+              </div>
+
+              {/* 4 Easy Starter Buttons */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-xl mx-auto pt-2 text-left">
+                {starterCards.map((card, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleSend(card.prompt)}
+                    disabled={isThinking}
+                    className="p-3.5 rounded-2xl bg-white dark:bg-slate-850 hover:bg-indigo-50/80 dark:hover:bg-indigo-950/40 border border-slate-200/80 dark:border-slate-750 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all flex items-center justify-between group cursor-pointer shadow-xs disabled:opacity-50"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="text-xl shrink-0">{card.icon}</span>
+                      <span className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                        {card.title}
                       </span>
-                      <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline">
-                        View Passage &rarr;
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Conversation Stream */}
+          {messages.map((msg) => (
+            <div
+              key={msg.id}
+              className={`flex gap-3.5 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              {/* AI Avatar */}
+              {msg.sender === 'ai' && (
+                <div className="w-9 h-9 rounded-2xl bg-indigo-600 text-white flex items-center justify-center text-sm shadow-sm shrink-0 mt-0.5">
+                  <GraduationCap className="w-4 h-4" />
+                </div>
+              )}
+
+              {/* Message Bubble Container */}
+              <div className={`space-y-1.5 max-w-2xl ${msg.sender === 'user' ? 'text-right' : 'text-left'}`}>
+                
+                {/* Bubble */}
+                <div className={`p-4 sm:p-5 rounded-3xl ${
+                  msg.sender === 'user'
+                    ? 'bg-indigo-600 text-white font-medium text-[15px] shadow-sm rounded-tr-sm'
+                    : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-sm shadow-xs'
+                }`}>
+                  
+                  {/* AI Message Header */}
+                  {msg.sender === 'ai' && (
+                    <div className="flex items-center justify-between gap-2 mb-2.5 pb-2 border-b border-slate-100 dark:border-slate-800 text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                          AI Tutor
+                        </span>
+                        {msg.persona && TUTOR_PERSONAS[msg.persona] && (
+                          <span className="text-[11px] text-slate-400">
+                            · {TUTOR_PERSONAS[msg.persona].icon} {TUTOR_PERSONAS[msg.persona].name}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-slate-400">
+                        {msg.time}
                       </span>
                     </div>
                   )}
 
-                  {!isCitedInLastResponse && file.summary && (
-                    <p className="text-[10px] text-slate-400 line-clamp-1 italic font-medium">
-                      {file.summary}
-                    </p>
+                  {/* Attached files indicator on user message */}
+                  {msg.sender === 'user' && msg.attachedFileNames && msg.attachedFileNames.length > 0 && (
+                    <div className="mb-2 pb-2 border-b border-indigo-500/40 flex flex-wrap gap-1.5 justify-end">
+                      {msg.attachedFileNames.map((fn, fIdx) => (
+                        <span
+                          key={fIdx}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-700/80 text-white text-[11px] font-semibold"
+                        >
+                          <Paperclip className="w-3 h-3 text-indigo-200" />
+                          <span className="truncate max-w-[150px]">{fn}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Body Text or Error Banner */}
+                  {msg.isError ? (
+                    <div className="p-3.5 sm:p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 space-y-2.5">
+                      <div className="flex items-center gap-2 font-bold text-xs sm:text-sm">
+                        <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                        <span>Failed to generate response</span>
+                      </div>
+                      <p className="text-xs text-rose-700 dark:text-rose-300 font-normal">
+                        {msg.text || "There was a problem contacting the Gemini API. Please try again."}
+                      </p>
+                      {msg.failedPrompt && (
+                        <button
+                          type="button"
+                          onClick={() => handleSend(msg.failedPrompt)}
+                          disabled={isThinking}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs cursor-pointer transition-colors disabled:opacity-50"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Retry Question</span>
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    renderMessageContent(msg.text)
+                  )}
+
+                  {/* Clean Citation Footnotes */}
+                  {msg.citations && msg.citations.length > 0 && (
+                    <div className="mt-3.5 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-1.5 text-xs">
+                      <span className="text-[11px] font-bold text-slate-400">Sources:</span>
+                      {msg.citations.map((c, cIdx) => (
+                        <span
+                          key={cIdx}
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-medium"
+                        >
+                          <BookOpen className="w-3 h-3 text-indigo-500" />
+                          <span>{c.sourceName}</span>
+                          {c.page && <span className="opacity-70">p.{c.page}</span>}
+                        </span>
+                      ))}
+                    </div>
                   )}
                 </div>
-              );
-            })
-          )}
-        </div>
-      </div>
 
-      {/* RIGHT AREA: CHAT WINDOW */}
-      <div className="flex-1 flex flex-col min-w-0 h-full relative">
-        {/* CHAT HEADER */}
-        <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8.5 h-8.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-              <Bot className="w-5 h-5 animate-pulse" />
-            </div>
-            <div>
-              <h3 className="text-xs sm:text-sm font-bold text-slate-850 dark:text-slate-200">
-                Workspace AI Assistant
-              </h3>
-              <p className="text-[10px] text-emerald-500 font-bold flex items-center gap-1">
-                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
-                <span>Grounded in Active Files ({workspace.files.length})</span>
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* CHAT WINDOW */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4 scrollbar-thin">
-          {messages.map((msg) => (
-            <div key={msg.id} className={`flex gap-3.5 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-              {msg.sender === 'ai' && (
-                <div className="w-8.5 h-8.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-150 dark:border-slate-750 flex items-center justify-center shrink-0">
-                  <Bot className="w-4 h-4 text-slate-500 dark:text-slate-350" />
-                </div>
-              )}
-
-              <div className={`max-w-[85%] rounded-2xl p-4 text-xs sm:text-sm space-y-3 transition-all duration-300 ${
-                msg.sender === 'user' 
-                  ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-950 rounded-tr-none font-medium shadow-sm' 
-                  : 'bg-white dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800/80 text-slate-800 dark:text-slate-100 rounded-tl-none leading-relaxed shadow-sm hover:shadow-md hover:border-slate-300 dark:hover:border-slate-750'
-              }`}>
-                <p className="whitespace-pre-line font-medium leading-relaxed">{msg.text}</p>
-
-                {/* Citations list */}
-                {msg.citations && msg.citations.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800/60">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Citations:</span>
-                    {msg.citations.map((cite, idx) => {
-                      const citeId = `${msg.id}-${idx}`;
-                      return (
-                        <div
-                          key={idx}
-                          className="relative"
-                          onMouseEnter={() => setHoveredCitation({
-                            id: citeId,
-                            sourceName: cite.sourceName,
-                            page: cite.page,
-                            quote: cite.quote
-                          })}
-                          onMouseLeave={() => setHoveredCitation(null)}
-                        >
-                          <button
-                            onClick={() => setActiveCitation(cite)}
-                            className="px-2 py-0.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-black text-[9px] rounded transition-all cursor-pointer flex items-center gap-1"
-                          >
-                            <FileText className="w-2.5 h-2.5 shrink-0" />
-                            <span>[{idx + 1}] {cite.sourceName.slice(0, 16)}...</span>
-                          </button>
-
-                          <AnimatePresence>
-                            {hoveredCitation?.id === citeId && (
-                              <motion.div
-                                initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                                animate={{ opacity: 1, y: 0, scale: 1 }}
-                                exit={{ opacity: 0, y: 6, scale: 0.95 }}
-                                transition={{ duration: 0.15, ease: 'easeOut' }}
-                                className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-3 bg-slate-900/95 dark:bg-slate-950/95 text-white rounded-xl shadow-xl border border-slate-850 dark:border-slate-800 backdrop-blur-md z-[100] text-[11px] text-left leading-relaxed flex flex-col gap-1.5 cursor-default"
-                              >
-                                <div className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-1.5 mb-1 shrink-0">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <FileText className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                                    <span className="font-extrabold text-[10px] text-slate-200 truncate">{cite.sourceName}</span>
-                                  </div>
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    {cite.page !== undefined && (
-                                      <span className="font-bold text-[8px] text-amber-400 font-mono bg-amber-500/10 px-1 py-0.5 rounded uppercase tracking-wider">
-                                        Page {cite.page}
-                                      </span>
-                                    )}
-                                    <CopySnippetButton text={cite.quote} />
-                                  </div>
-                                </div>
-                                <p className="italic font-medium text-slate-300 leading-normal line-clamp-3 relative pl-2 border-l-2 border-indigo-500">
-                                  "{cite.quote}"
-                                </p>
-                                <div 
-                                  className="text-[10px] text-indigo-400 mt-1 font-bold flex items-center gap-1 cursor-pointer hover:text-indigo-300 transition-colors w-fit"
-                                >
-                                  <span>View Source</span>
-                                  <span>&rarr;</span>
-                                </div>
-                                {/* Triangle arrow */}
-                                <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-slate-900/95 dark:border-t-slate-950/95" />
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* AI response actions */}
+                {/* AI Bubble Actions: Copy & Save to Notes */}
                 {msg.sender === 'ai' && (
-                  <div className="flex flex-wrap items-center gap-1.5 pt-2.5 border-t border-slate-100 dark:border-slate-800/60 text-[10px] text-slate-400">
+                  <div className="flex items-center gap-3 pl-2 text-xs text-slate-400">
                     <button
-                      onClick={() => handleSpeakMessage(msg.id, msg.text)}
-                      className="inline-flex items-center gap-1 hover:text-indigo-600 dark:hover:text-indigo-400 font-bold transition-all px-2.5 py-1 rounded bg-slate-50 dark:bg-slate-800/40 border border-slate-150 dark:border-slate-700/40 cursor-pointer active:scale-95"
-                      title={speakingMsgId === msg.id ? "Stop reading" : "Read aloud"}
-                    >
-                      {speakingMsgId === msg.id ? (
-                        <>
-                          <VolumeX className="w-3 h-3 text-indigo-500" />
-                          <span className="text-indigo-500">Stop</span>
-                        </>
-                      ) : (
-                        <>
-                          <Volume2 className="w-3 h-3 text-slate-400 hover:text-slate-600" />
-                          <span>Listen</span>
-                        </>
-                      )}
-                    </button>
-
-                    <button
-                      onClick={() => handleCopyMessage(msg.id, msg.text)}
-                      className="inline-flex items-center gap-1 hover:text-indigo-600 dark:hover:text-indigo-400 font-bold transition-all px-2.5 py-1 rounded bg-slate-50 dark:bg-slate-800/40 border border-slate-150 dark:border-slate-700/40 cursor-pointer active:scale-95"
-                      title="Copy content to clipboard"
+                      onClick={() => handleCopy(msg.id, msg.text)}
+                      className="hover:text-indigo-600 flex items-center gap-1 cursor-pointer transition-colors"
+                      title="Copy text to clipboard"
                     >
                       {copiedMsgId === msg.id ? (
                         <>
-                          <Check className="w-3 h-3 text-emerald-500" />
-                          <span className="text-emerald-500 font-extrabold">Copied!</span>
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                          <span className="text-emerald-500 font-semibold">Copied</span>
                         </>
                       ) : (
                         <>
-                          <Copy className="w-3 h-3 text-slate-400 hover:text-slate-600" />
+                          <Copy className="w-3.5 h-3.5" />
                           <span>Copy</span>
                         </>
                       )}
                     </button>
 
+                    <span>·</span>
+
                     <button
-                      onClick={() => handleShareMessage(msg.id, msg.text)}
-                      className="inline-flex items-center gap-1 hover:text-indigo-600 dark:hover:text-indigo-400 font-bold transition-all px-2.5 py-1 rounded bg-slate-50 dark:bg-slate-800/40 border border-slate-150 dark:border-slate-700/40 cursor-pointer active:scale-95"
-                      title="Share with friends"
+                      onClick={() => handleSaveToNotes(msg.id, msg.text)}
+                      className="hover:text-indigo-600 flex items-center gap-1 cursor-pointer transition-colors"
+                      title="Save answer into your Workspace notes"
                     >
-                      {sharedMsgId === msg.id ? (
+                      {addedNoteMsgId === msg.id ? (
                         <>
-                          <Check className="w-3 h-3 text-emerald-500" />
-                          <span className="text-emerald-500 font-extrabold">Shared!</span>
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                          <span className="text-emerald-500 font-semibold">Saved to Notes</span>
                         </>
                       ) : (
                         <>
-                          <Share2 className="w-3 h-3 text-slate-400 hover:text-slate-600" />
-                          <span>Share</span>
+                          <Pin className="w-3.5 h-3.5" />
+                          <span>Save to Notes</span>
                         </>
                       )}
                     </button>
-
-                    {onUpdateWorkspace && (
-                      <button
-                        onClick={() => handleAddToNotes(msg.id, msg.text)}
-                        className="inline-flex items-center gap-1 hover:text-indigo-600 dark:hover:text-indigo-400 font-bold transition-all px-2.5 py-1 rounded bg-slate-50 dark:bg-slate-800/40 border border-slate-150 dark:border-slate-700/40 cursor-pointer active:scale-95 ml-auto"
-                        title="Add response to study notes"
-                      >
-                        {addedNoteMsgId === msg.id ? (
-                          <>
-                            <Check className="w-3 h-3 text-emerald-500" />
-                            <span className="text-emerald-500 font-extrabold">Saved to Notes!</span>
-                          </>
-                        ) : (
-                          <>
-                            <FileText className="w-3 h-3 text-slate-400 hover:text-slate-600" />
-                            <span>Add to Notes</span>
-                          </>
-                        )}
-                      </button>
-                    )}
                   </div>
                 )}
               </div>
+
+              {/* User Avatar */}
+              {msg.sender === 'user' && (
+                <div className="w-9 h-9 rounded-2xl bg-slate-800 dark:bg-slate-700 text-white flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                  You
+                </div>
+              )}
             </div>
           ))}
 
+          {/* Thinking Indicator */}
           {isThinking && (
-            <div className="flex gap-3.5 justify-start">
-              <div className="w-8.5 h-8.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-150 dark:border-slate-750 flex items-center justify-center shrink-0">
-                <Bot className="w-4 h-4 text-indigo-500 animate-spin" />
+            <div className="flex gap-3.5 items-center">
+              <div className="w-9 h-9 rounded-2xl bg-indigo-600 text-white flex items-center justify-center text-sm shadow-sm shrink-0">
+                <Loader2 className="w-4 h-4 animate-spin" />
               </div>
-              <div className="bg-slate-50 dark:bg-slate-950/20 border border-slate-100 dark:border-slate-850 p-4 rounded-2xl rounded-tl-none">
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-400">
-                  <span className="animate-pulse">Active AI processes files...</span>
-                  <span className="flex gap-0.5">
-                    <span className="w-1 h-1 bg-slate-400 rounded-full animate-bounce delay-100" />
-                    <span className="w-1 h-1 bg-slate-400 rounded-full animate-bounce delay-200" />
-                    <span className="w-1 h-1 bg-slate-400 rounded-full animate-bounce delay-300" />
-                  </span>
-                </div>
+              <div className="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-xs font-semibold text-slate-500 flex items-center gap-2 shadow-xs">
+                <Sparkles className="w-4 h-4 text-indigo-500 animate-pulse" />
+                <span>Thinking of a simple explanation...</span>
               </div>
             </div>
           )}
+
           <div ref={chatEndRef} />
-        </div>
-
-        {/* FIXED CHIPS SUGGESTIONS */}
-        <div className="px-5 py-2 overflow-x-auto flex gap-2 scrollbar-none border-t border-slate-100 dark:border-slate-800/60 bg-white dark:bg-slate-900 z-10">
-          {suggestedChips.map((chip, idx) => (
-            <button
-              key={idx}
-              onClick={() => handleSend(chip)}
-              className="px-3 py-1 bg-slate-50 hover:bg-indigo-50 dark:bg-slate-950/40 dark:hover:bg-indigo-950/20 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-200/50 dark:border-slate-800 rounded-lg text-[10px] font-bold text-slate-500 whitespace-nowrap transition-colors cursor-pointer shrink-0"
-            >
-              {chip}
-            </button>
-          ))}
-        </div>
-
-        {/* INPUT FORM CONTAINER */}
-        <div className="p-4 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-950/20 flex gap-2">
-          <div className="flex-1 relative flex items-center">
-            <input 
-              type="text" 
-              placeholder="Ask anything about your notes, flashcards, or topics..."
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyPress}
-              disabled={isThinking}
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs sm:text-sm font-semibold text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500 disabled:opacity-50 pr-12"
-            />
-            <AnimatePresence>
-              {isListening && (
-                <motion.div 
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  className="absolute right-3 flex items-center gap-1 h-4"
-                >
-                  {[0, 1, 2, 3].map((i) => (
-                    <motion.div
-                      key={i}
-                      className="w-1 bg-red-500 rounded-full origin-bottom"
-                      animate={{ height: `${waveformLevels[i]}px` }}
-                      transition={{ type: "tween", duration: 0.1 }}
-                    />
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-          <button
-            type="button"
-            onClick={startSpeechRecognition}
-            className={`w-10 h-10 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 ${
-              isListening 
-                ? 'text-red-500 bg-red-500/10 animate-pulse' 
-                : 'text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-800'
-            }`}
-            title={isListening ? "Listening... Click to stop" : "Dictate your question"}
-          >
-            <Mic className="w-4.5 h-4.5" />
-          </button>
-          <button
-            onClick={() => handleSend(inputValue)}
-            disabled={!inputValue.trim() || isThinking}
-            className="w-10 h-10 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 flex items-center justify-center text-white dark:text-slate-900 transition-colors disabled:opacity-50 cursor-pointer shrink-0"
-          >
-            <Send className="w-4 h-4" />
-          </button>
         </div>
       </div>
 
-      {/* CITATION INSPECT MODAL OVERLAY (Extended with matching source document and relative passage information) */}
-      <AnimatePresence>
-        {activeCitation && (() => {
-          const matchingFile = workspace.files.find(f => {
-            const keyword = f.name.split('.')[0].toLowerCase();
-            const sourceNameLower = activeCitation.sourceName.toLowerCase();
-            return f.name.toLowerCase() === sourceNameLower ||
-              f.name.toLowerCase().includes(sourceNameLower) ||
-              sourceNameLower.includes(f.name.toLowerCase()) ||
-              (keyword.length > 4 && sourceNameLower.includes(keyword));
-          });
-
-          return (
-            <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <motion.div
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-lg w-full shadow-2xl relative text-xs text-left flex flex-col gap-4 overflow-y-auto max-h-[90%]"
-              >
-                <button 
-                  onClick={() => setActiveCitation(null)}
-                  className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+      {/* ============================================================== */}
+      {/* 3. MINIMALIST FULL-WIDTH CHAT INPUT DOCK                       */}
+      {/* ============================================================== */}
+      <footer className="p-4 sm:p-5 border-t border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm shrink-0">
+        <div className="max-w-3xl mx-auto space-y-2.5">
+          
+          {/* Attached Files Queue (Visual chips indicating attached documents) */}
+          {attachedDrafts.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 p-2.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/70 dark:border-indigo-800/60 animate-in fade-in slide-in-from-bottom-1">
+              <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1 pl-1 shrink-0">
+                <Paperclip className="w-3.5 h-3.5" />
+                Attached ({attachedDrafts.length}):
+              </span>
+              {attachedDrafts.map((draft) => (
+                <span
+                  key={draft.id}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white dark:bg-slate-850 border border-indigo-200 dark:border-indigo-800/80 text-xs font-semibold text-slate-800 dark:text-slate-200 shadow-2xs"
                 >
-                  <X className="w-4 h-4" />
-                </button>
-
-                <div>
-                  <span className="text-[10px] bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1.5 w-fit mb-2 animate-pulse">
-                    <Sparkles className="w-3 h-3" /> Grounded Source Passage
-                  </span>
-                  <h4 className="font-black text-base text-slate-900 dark:text-white flex items-center gap-2 pr-6">
-                    <FileText className="w-5 h-5 text-indigo-500 shrink-0" />
-                    <span className="truncate">{activeCitation.sourceName}</span>
-                  </h4>
-                </div>
-
-                <div className="space-y-4">
-                  {/* Quoted Excerpt section with elegant highlighted paper/slate background */}
-                  <div className="space-y-1.5">
-                    <p className="font-extrabold text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">Grounded Excerpt used in AI answer</p>
-                    <div className="p-4 bg-amber-500/[0.04] dark:bg-amber-500/[0.06] border-l-4 border-amber-400 rounded-r-xl relative overflow-hidden">
-                      {activeCitation.page && (
-                        <span className="absolute top-2 right-3 text-[10px] font-black font-mono text-amber-600/60 dark:text-amber-400/60">
-                          PAGE {activeCitation.page}
-                        </span>
-                      )}
-                      <p className="italic font-semibold text-slate-755 dark:text-slate-200 leading-relaxed text-xs sm:text-[13px] pt-1">
-                        "{activeCitation.quote}"
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Matching Document Details Section */}
-                  {matchingFile ? (
-                    <div className="border-t border-slate-100 dark:border-slate-800/80 pt-4 space-y-3">
-                      <div className="grid grid-cols-2 gap-3 bg-slate-50 dark:bg-slate-950/40 p-3 rounded-xl border border-slate-100 dark:border-slate-800/50">
-                        <div>
-                          <p className="font-extrabold text-[9px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">Format</p>
-                          <p className="font-bold text-slate-700 dark:text-slate-200 capitalize text-xs">{matchingFile.type}</p>
-                        </div>
-                        <div>
-                          <p className="font-extrabold text-[9px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">Size</p>
-                          <p className="font-bold text-slate-700 dark:text-slate-200 text-xs">{matchingFile.size}</p>
-                        </div>
-                      </div>
-
-                      {matchingFile.summary && (
-                        <div className="space-y-1">
-                          <p className="font-extrabold text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">AI Document Summary</p>
-                          <p className="text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
-                            {matchingFile.summary}
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Related Semantic Passages inside the document */}
-                      {matchingFile.highlights && matchingFile.highlights.length > 0 && (
-                        <div className="space-y-2">
-                          <p className="font-extrabold text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider">Other Relevant Passages in Document</p>
-                          <div className="max-h-24 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
-                            {matchingFile.highlights.map((high, idx) => (
-                              <div key={idx} className="p-2.5 bg-slate-50/50 dark:bg-slate-950/30 border-l-2 border-slate-300 dark:border-slate-700 rounded-r-lg font-medium text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                                {high}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Tags */}
-                      {matchingFile.tags && matchingFile.tags.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 pt-1">
-                          {matchingFile.tags.map((tag, idx) => (
-                            <span key={idx} className="text-[9px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded">
-                              #{tag}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="border-t border-slate-100 dark:border-slate-800/80 pt-4 flex items-start gap-2 text-slate-400">
-                      <Info className="w-4 h-4 shrink-0 mt-0.5" />
-                      <p className="text-[11px] leading-normal font-medium">
-                        This citation represents a verified reference that was dynamically retrieved during reasoning. To see detailed OCR summary scans, make sure this file remains in your Library.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
+                  <FileText className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <span className="truncate max-w-[140px] sm:max-w-[200px]">{draft.name}</span>
+                  <span className="text-[10px] text-slate-400 font-normal">({draft.size})</span>
+                  <button
+                    type="button"
+                    onClick={() => removeAttachedDraft(draft.id)}
+                    className="p-0.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-rose-500 cursor-pointer transition-colors"
+                    title="Remove attached file"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </span>
+              ))}
             </div>
-          );
-        })()}
-      </AnimatePresence>
+          )}
+
+          {/* Quick suggestion chips above input */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none text-xs">
+            <span className="text-[11px] font-bold text-slate-400 shrink-0">Suggestions:</span>
+            {[
+              "💡 Explain simply",
+              "🎯 Quiz me",
+              "🔑 Top takeaways",
+              "⚡ Quick flashcard"
+            ].map((chip, idx) => (
+              <button
+                key={idx}
+                onClick={() => {
+                  if (chip.includes("Explain")) handleSend("Explain the core ideas from my notes in simple everyday language.");
+                  else if (chip.includes("Quiz")) handleSend("Ask me a practice quiz question from my notes with multiple choices, and wait for my response.");
+                  else if (chip.includes("takeaways")) handleSend("What are the 3 most important takeaways from my study materials?");
+                  else handleSend("Give me a quick active recall flashcard question to test my memory.");
+                }}
+                disabled={isThinking}
+                className="px-3 py-1 rounded-full bg-slate-100 hover:bg-indigo-50 dark:bg-slate-850 dark:hover:bg-indigo-950/60 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 text-xs font-semibold shrink-0 cursor-pointer transition-colors border border-slate-200/60 dark:border-slate-800"
+              >
+                {chip}
+              </button>
+            ))}
+          </div>
+
+          {/* Hidden Native File Input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".pdf,.txt,.md,.doc,.docx,.png,.jpg,.jpeg,.webp"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+
+          {/* Clean Input Bar */}
+          <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-750 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all shadow-xs">
+            
+            {/* 1. ATTACH BUTTON (Visually signals its purpose clearly) */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isThinking}
+              className="px-2.5 sm:px-3 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-indigo-50/70 dark:hover:bg-slate-750 border border-slate-200/90 dark:border-slate-700 shadow-2xs group"
+              title="Attach study material (PDF, image, notes, or document)"
+              aria-label="Attach study file"
+            >
+              <Paperclip className="w-4 h-4 text-slate-500 group-hover:text-indigo-600 dark:text-slate-400 dark:group-hover:text-indigo-400 transition-colors" />
+              <span className="text-xs font-bold hidden sm:inline text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-300">
+                Attach
+              </span>
+            </button>
+
+            {/* 2. VOICE INPUT BUTTON (Visually signals its purpose clearly) */}
+            <button
+              type="button"
+              onClick={toggleListening}
+              disabled={isThinking}
+              className={`px-2.5 sm:px-3 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0 border ${
+                isListening
+                  ? 'bg-rose-500 text-white border-rose-600 shadow-md shadow-rose-500/25 animate-pulse'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-indigo-50/70 dark:hover:bg-slate-750 border-slate-200/90 dark:border-slate-700 shadow-2xs group'
+              }`}
+              title={isListening ? "Listening... click to stop" : "Voice Input: Speak your question"}
+              aria-label="Voice Input"
+            >
+              {isListening ? (
+                <>
+                  <div className="flex items-center gap-0.5">
+                    {[0, 1, 2].map((i) => (
+                      <span
+                        key={i}
+                        className="w-1 bg-white rounded-full animate-bounce"
+                        style={{ height: `${waveformLevels[i] || 12}px` }}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-xs font-bold text-white">Listening</span>
+                </>
+              ) : (
+                <>
+                  <Mic className="w-4 h-4 text-slate-500 group-hover:text-indigo-600 dark:text-slate-400 dark:group-hover:text-indigo-400 transition-colors" />
+                  <span className="text-xs font-bold hidden sm:inline text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-300">
+                    Voice
+                  </span>
+                </>
+              )}
+            </button>
+
+            {/* Input Box */}
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder={
+                attachedDrafts.length > 0 
+                  ? "Add instructions for attached document, or press Send..." 
+                  : "Ask anything about your notes, or type a question..."
+              }
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isThinking}
+              className="flex-1 px-2.5 sm:px-3 py-2 bg-transparent text-sm sm:text-base font-normal text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none"
+            />
+
+            {/* Send Button */}
+            <button
+              type="button"
+              onClick={() => handleSend()}
+              disabled={(!inputValue.trim() && attachedDrafts.length === 0) || isThinking}
+              className="w-10 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed shadow-md shadow-indigo-600/25 shrink-0 active:scale-95"
+              title="Send message"
+            >
+              {isThinking ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+            </button>
+          </div>
+
+        </div>
+      </footer>
+
     </div>
   );
 }

@@ -3,42 +3,147 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Meet your AI Study Assistant! Instantly generate smart revision notes, flashcards, and quizzes to ace your exams with StudyWeb." />
-    <meta name="keywords" content="AI Study Assistant, Smart Revision, Automated Study Planning, AI-Powered Note Taking, AI Study Tool, AI Learning Platform, Study Notes, Flashcards, Quiz Generator, Exam Preparation, Revision Tool, Student Productivity, AI Tutor" />
+    <title>StudyWeb – AI-Powered Learning Platform & Smart Study Assistant</title>
+    
+    <!-- Core Search Engine Meta Tags -->
+    <meta name="description" content="StudyWeb is an AI study platform helping students study smarter with revision notes, flashcards, quizzes, PDF analysis, and parent tracking. Join free today!" />
+    <meta name="keywords" content="AI Study Assistant, Smart Revision Notes, Automated Flashcard Generator, Practice Quiz Creator, PDF Workspace Analyzer, AI Tutor, Student Productivity, Exam Preparation, Spaced Repetition, Active Recall, Parent Dashboard, StudyWeb" />
     <meta name="author" content="StudyWeb" />
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
     <link rel="canonical" href="https://studyweb.com/" />
-    <meta property="og:title" content="StudyWeb: Your Ultimate AI Study Assistant" />
-    <meta property="og:description" content="Start studying smarter with StudyWeb! Instantly turn your notes into AI flashcards and quizzes to ace exams." />
-    <meta property="og:image" content="/logo.png" />
-    <meta property="og:url" content="https://studyweb.com/" />
-    <meta property="og:type" content="website" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="StudyWeb: Your Ultimate AI Study Assistant" />
-    <meta name="twitter:description" content="Start studying smarter with StudyWeb! Instantly turn your notes into AI flashcards and quizzes to ace exams." />
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <title>StudyWeb: Your Ultimate AI Study Assistant</title>
+    <link rel="apple-touch-icon" href="/logo.png" />
+
+    <!-- Open Graph / Facebook / LinkedIn / Slack Metadata -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="StudyWeb" />
+    <meta property="og:title" content="StudyWeb – AI-Powered Learning Platform & Smart Study Assistant" />
+    <meta property="og:description" content="Turn complex textbook topics into simplified revision notes, flashcards, and quizzes automatically with StudyWeb AI." />
+    <meta property="og:image" content="https://studyweb.com/logo.png" />
+    <meta property="og:image:width" content="512" />
+    <meta property="og:image:height" content="512" />
+    <meta property="og:image:alt" content="StudyWeb Logo - AI Study Platform" />
+    <meta property="og:url" content="https://studyweb.com/" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter / X Card Metadata -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@StudyWebai" />
+    <meta name="twitter:creator" content="@StudyWebai" />
+    <meta name="twitter:title" content="StudyWeb – AI-Powered Learning Platform & Smart Study Assistant" />
+    <meta name="twitter:description" content="Turn complex textbook topics into simplified revision notes, flashcards, and quizzes automatically with StudyWeb AI." />
+    <meta name="twitter:image" content="https://studyweb.com/logo.png" />
+    <meta name="twitter:image:alt" content="StudyWeb Logo - AI Study Platform" />
+
+    <!-- Schema.org Structured Data (JSON-LD) -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@graph": [
           {
-            "@type": "SoftwareApplication",
+            "@type": "WebApplication",
+            "@id": "https://studyweb.com/#software",
             "name": "StudyWeb",
             "applicationCategory": "EducationalApplication",
-            "operatingSystem": "Web",
-            "description": "Meet your AI Study Assistant! Instantly generate smart revision notes, flashcards, and quizzes to ace your exams with StudyWeb.",
-            "url": "https://studyweb.com/"
+            "operatingSystem": "All",
+            "description": "StudyWeb is an AI-powered learning platform helping students study smarter with revision notes, flashcards, quizzes, PDF analysis, and parent tracking.",
+            "url": "https://studyweb.com/",
+            "image": "https://studyweb.com/logo.png",
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD",
+              "availability": "https://schema.org/InStock"
+            },
+            "featureList": [
+              "Socratic AI Tutor",
+              "Automated Flashcard Deck Generation",
+              "Interactive Quiz Creator",
+              "PDF Textbook Analysis & Notes Extraction",
+              "Parent Insight Progress Dashboard",
+              "Spaced Repetition & Active Recall Tracking"
+            ]
           },
           {
             "@type": "EducationalOrganization",
+            "@id": "https://studyweb.com/#organization",
             "name": "StudyWeb",
             "url": "https://studyweb.com/",
             "logo": "https://studyweb.com/logo.png",
-            "description": "An AI-powered learning platform helping students ace exams with smart revision tools."
+            "description": "An AI-powered educational technology organization helping students ace exams with smart revision tools and parent peace of mind.",
+            "sameAs": [
+              "https://x.com/StudyWebai",
+              "https://www.facebook.com/profile.php?id=61591705465611",
+              "https://www.instagram.com/studywebai/",
+              "https://www.linkedin.com/in/study-web-a823b9417",
+              "https://youtube.com/@studywebai"
+            ]
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://studyweb.com/#website",
+            "name": "StudyWeb",
+            "url": "https://studyweb.com/",
+            "publisher": {
+              "@id": "https://studyweb.com/#organization"
+            },
+            "potentialAction": {
+              "@type": "SearchAction",
+              "target": "https://studyweb.com/?s={search_term_string}",
+              "query-input": "required name=search_term_string"
+            }
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://studyweb.com/#faq-schema",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Is StudyWeb free?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes, we offer a generous free plan that includes our basic study planner and core AI features. You can upgrade to Premium or Family plans anytime for unlimited access."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Can parents monitor progress?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes! Our Family plan includes a dedicated Parent Dashboard where parents can view study time, achievements, and weekly progress reports."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Is the AI safe for students?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes. Our AI is strictly trained on educational content and is designed to guide students to answers through Socratic questioning rather than just giving direct answers."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Can I access StudyWeb on mobile?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes, StudyWeb is fully responsive and works seamlessly across phones, tablets, and desktops with real-time sync."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Will my data stay secure?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Data privacy is our top priority. We use industry-standard encryption, never sell student data, and adhere to COPPA and FERPA privacy guidelines."
+                }
+              }
+            ]
           }
         ]
       }
     </script>
+
+    <!-- Pre-hydration Theme Initialization Script -->
     <script>
       (function() {
         try {
