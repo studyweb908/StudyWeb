@@ -18,8 +18,9 @@ Production-grade redesign of the **StudyWeb** student dashboard inspired by mode
 
 ## Implemented Components & Structure
 
-### 1. Deep Navy Navigation Sidebar (`DashboardSidebar.tsx`)
-- Sleek `#10172D` navy container with brand logo, "StudyWeb" header, and tagline *"From Confusion to Clarity"*.
+### 1. Pristine White Navigation Sidebar (`DashboardSidebar.tsx`)
+- Crisp white background container (`bg-white dark:bg-[#0E1528]`) with subtle borders.
+- Real brand logo (`/logo.png`) placed upfront in the sidebar header alongside "StudyWeb" and tagline *"From Confusion to Clarity"*.
 - Active tab state highlighted with `#5145F5` and glowing pill effect.
 - Special highlighted "AI" badge next to the AI Tutor tab.
 - Integrated profile settings and logout with soft rose styling.

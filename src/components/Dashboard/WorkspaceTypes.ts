@@ -96,8 +96,213 @@ export interface Workspace {
   price?: number;
 }
 
-// Initial Sample Data (Empty by default for clean user experience)
-export const INITIAL_WORKSPACES: Workspace[] = [];
+// Initial Sample Workspaces for seamless first-load and deployed experience
+export const INITIAL_WORKSPACES: Workspace[] = [
+  {
+    id: '11111111-1111-4111-8111-111111111111',
+    name: 'Physics: Mechanics & Motion',
+    subject: 'Physics',
+    description: "Newton's Laws, Rotational Dynamics, Work-Energy Theorem, and Gravitation.",
+    colorTheme: 'indigo',
+    coverImage: 'https://images.unsplash.com/photo-1507842217343-583bb7270b66?auto=format&fit=crop&q=80&w=800',
+    emoji: '⚡',
+    visibility: 'private',
+    template: 'semester',
+    pinned: true,
+    favorite: true,
+    files: [
+      {
+        id: '11111111-1111-4111-8111-111111111101',
+        name: 'Newton_Laws_and_Friction_Formulae.pdf',
+        type: 'pdf',
+        size: '2.4 MB',
+        uploadDate: new Date(Date.now() - 86400000 * 2).toISOString(),
+        status: 'indexed',
+        pages: 14,
+        tags: ['Kinematics', "Newton's Laws", 'Friction'],
+        summary: "Comprehensive derivation of Newton's 3 laws, coefficient of static/kinetic friction, and free body analysis."
+      },
+      {
+        id: '11111111-1111-4111-8111-111111111102',
+        name: 'Rotational_Dynamics_Summary.pdf',
+        type: 'pdf',
+        size: '1.8 MB',
+        uploadDate: new Date(Date.now() - 86400000).toISOString(),
+        status: 'indexed',
+        pages: 9,
+        tags: ['Torque', 'Angular Momentum', 'Inertia'],
+        summary: 'Formulas and problem sets covering angular momentum conservation, torque cross products, and rotational inertia.'
+      }
+    ],
+    flashcards: [
+      {
+        id: 'fc-phys-1',
+        front: "What is Newton's Second Law in derivative form?",
+        back: 'F_net = dp/dt (Force equals rate of change of linear momentum). When mass is constant, F = ma.',
+        topic: 'Mechanics',
+        difficulty: 'Medium',
+        box: 1,
+        bookmarked: true
+      },
+      {
+        id: 'fc-phys-2',
+        front: 'Define the Moment of Inertia for a solid cylinder of mass M and radius R about its central axis.',
+        back: 'I = 0.5 * M * R^2',
+        topic: 'Rotation',
+        difficulty: 'Easy',
+        box: 2,
+        bookmarked: false
+      }
+    ],
+    quizzes: [
+      {
+        id: 'qz-phys-1',
+        question: 'Which physical quantity is strictly conserved in an isolated system undergoing an inelastic collision?',
+        options: [
+          'Kinetic energy only',
+          'Linear momentum only',
+          'Both kinetic energy and momentum',
+          'Mechanical energy'
+        ],
+        correctIndex: 1,
+        explanation: 'In an inelastic collision, kinetic energy is partially converted into internal thermal energy or deformation, but total linear momentum is always conserved in an isolated system.',
+        difficulty: 'Medium',
+        type: 'MCQ'
+      }
+    ],
+    notes: [
+      {
+        id: 'nt-phys-1',
+        title: 'Conservation of Energy & Work-Energy Theorem',
+        content: 'Work done by non-conservative forces equals the change in total mechanical energy: W_nc = ΔE = ΔK + ΔU. For conservative fields, mechanical energy is invariant.',
+        updatedAt: 'Today, 10:15 AM',
+        tags: ['Work', 'Energy', 'Conservations']
+      }
+    ],
+    plannerTasks: [
+      {
+        id: 'pt-phys-1',
+        title: 'Complete Rotational Inertia Exercises',
+        dueDate: 'Today, 4:00 PM',
+        priority: 'High',
+        completed: false
+      }
+    ],
+    nodes: [],
+    links: [],
+    streak: 6,
+    studyHours: 14.5,
+    lastOpened: new Date().toISOString()
+  },
+  {
+    id: '22222222-2222-4222-8222-222222222222',
+    name: 'Calculus & Mathematical Analysis',
+    subject: 'Mathematics',
+    description: 'Limits, Derivatives, Integration Techniques, Vectors, and Matrices.',
+    colorTheme: 'emerald',
+    coverImage: 'https://images.unsplash.com/photo-1513542789411-b6a5d4f31634?auto=format&fit=crop&q=80&w=800',
+    emoji: '📐',
+    visibility: 'private',
+    template: 'semester',
+    pinned: false,
+    favorite: true,
+    files: [
+      {
+        id: '22222222-2222-4222-8222-222222222201',
+        name: 'Fundamental_Theorems_of_Calculus.pdf',
+        type: 'pdf',
+        size: '3.1 MB',
+        uploadDate: new Date(Date.now() - 86400000 * 3).toISOString(),
+        status: 'indexed',
+        pages: 18,
+        tags: ['Derivatives', 'Integration', 'Limits'],
+        summary: 'In-depth proofs of FTC Part 1 and 2, substitution method, integration by parts, and trigonometric substitutions.'
+      }
+    ],
+    flashcards: [
+      {
+        id: 'fc-calc-1',
+        front: 'State the Fundamental Theorem of Calculus Part 1.',
+        back: "If f is continuous on [a, b], then g(x) = ∫[a to x] f(t) dt is continuous and g'(x) = f(x).",
+        topic: 'Integration',
+        difficulty: 'Medium',
+        box: 2,
+        bookmarked: true
+      }
+    ],
+    quizzes: [
+      {
+        id: 'qz-calc-1',
+        question: 'What is the derivative of f(x) = ln(3x^2) with respect to x?',
+        options: ['2/x', '6x', '1/(3x^2)', '3/x'],
+        correctIndex: 0,
+        explanation: "Using logarithm properties ln(3x^2) = ln(3) + 2*ln(x). Differentiating yields 0 + 2/x = 2/x.",
+        difficulty: 'Easy',
+        type: 'MCQ'
+      }
+    ],
+    notes: [
+      {
+        id: 'nt-calc-1',
+        title: 'Integration by Parts Strategy (LIATE rule)',
+        content: 'Formula: ∫ u dv = u*v - ∫ v du. Choose u according to LIATE priority: Logarithmic, Inverse trig, Algebraic, Trigonometric, Exponential.',
+        updatedAt: 'Yesterday, 3:30 PM',
+        tags: ['Calculus', 'Techniques']
+      }
+    ],
+    plannerTasks: [],
+    nodes: [],
+    links: [],
+    streak: 4,
+    studyHours: 9.2,
+    lastOpened: new Date(Date.now() - 86400000).toISOString()
+  },
+  {
+    id: '33333333-3333-4333-8333-333333333333',
+    name: 'Organic Chemistry Mechanisms',
+    subject: 'Chemistry',
+    description: 'Reaction Mechanisms, Hybridization, Isomerism, and Functional Groups.',
+    colorTheme: 'amber',
+    coverImage: 'https://images.unsplash.com/photo-1481627834876-b7833e8f5570?auto=format&fit=crop&q=80&w=800',
+    emoji: '🧪',
+    visibility: 'private',
+    template: 'semester',
+    pinned: false,
+    favorite: false,
+    files: [
+      {
+        id: '33333333-3333-4333-8333-333333333301',
+        name: 'Nucleophilic_Substitution_Mechanisms.pdf',
+        type: 'pdf',
+        size: '1.9 MB',
+        uploadDate: new Date(Date.now() - 86400000 * 4).toISOString(),
+        status: 'indexed',
+        pages: 12,
+        tags: ['SN1', 'SN2', 'Stereochemistry'],
+        summary: 'Solvent effects, leaving group tendencies, and stereochemical inversion in nucleophilic aliphatic substitutions.'
+      }
+    ],
+    flashcards: [
+      {
+        id: 'fc-chem-1',
+        front: 'Does an SN2 reaction proceed with retention or inversion of stereochemical configuration?',
+        back: 'Inversion of configuration (Walden inversion) due to backside attack of the nucleophile.',
+        topic: 'Aliphatic Reactions',
+        difficulty: 'Easy',
+        box: 3,
+        bookmarked: false
+      }
+    ],
+    quizzes: [],
+    notes: [],
+    plannerTasks: [],
+    nodes: [],
+    links: [],
+    streak: 3,
+    studyHours: 7.0,
+    lastOpened: new Date(Date.now() - 86400000 * 2).toISOString()
+  }
+];
 
 import { z } from 'zod';
 

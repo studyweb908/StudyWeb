@@ -537,9 +537,15 @@ export default function Navigation() {
                     if (!supabase) {
                       // Mock auth if no supabase configured
                       if (authMode === 'signup') {
+                        if (fullName.trim()) {
+                          localStorage.setItem('studyweb_profile_name', fullName.trim());
+                        }
                         (window as any).showToast?.('Welcome! Your StudyWeb account has been created.', 'success');
                         window.dispatchEvent(new CustomEvent('studyweb-signup-success'));
                       } else {
+                        const emailPrefix = email.split('@')[0];
+                        const mockName = emailPrefix ? (emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1)) : 'Scholar';
+                        localStorage.setItem('studyweb_profile_name', mockName);
                         (window as any).showToast?.('Successfully logged in to StudyWeb!', 'success');
                         localStorage.setItem('studyweb_is_logged_in', 'true');
                         window.dispatchEvent(new CustomEvent('studyweb-login-success'));
@@ -570,6 +576,9 @@ export default function Navigation() {
                       if (data.session) {
                         // Email confirmation disabled in Supabase: session created immediately
                         localStorage.setItem('studyweb_is_logged_in', 'true');
+                        if (fullName.trim()) {
+                          localStorage.setItem('studyweb_profile_name', fullName.trim());
+                        }
                         if (data.user) {
                           try {
                             await supabase.from('profiles').upsert({
@@ -582,10 +591,6 @@ export default function Navigation() {
                             console.warn('Profile initial record sync notice:', pErr);
                           }
                         }
-
-                        // Clear stale local onboarding
-                        ['studyweb_profile_name', 'studyweb_profile_avatar', 'studyweb_profile_class_board', 'studyweb_profile_school', 'studyweb_onboarding_draft', 'studyweb_onboarding_data'].forEach(k => localStorage.removeItem(k));
-                        localStorage.removeItem('studyweb_onboarding_complete');
 
                         (window as any).showToast?.('Welcome! Your StudyWeb account has been created.', 'success');
                         window.dispatchEvent(new CustomEvent('studyweb-signup-success'));
@@ -603,8 +608,14 @@ export default function Navigation() {
                       });
                       if (error) throw error;
 
-                      // Clear any stale local data
-                      ['studyweb_profile_name', 'studyweb_profile_avatar', 'studyweb_profile_class_board', 'studyweb_profile_school', 'studyweb_onboarding_draft', 'studyweb_onboarding_data'].forEach(k => localStorage.removeItem(k));
+                      const user = data.user;
+                      let resolvedName = user?.user_metadata?.full_name || user?.user_metadata?.name || '';
+                      if (!resolvedName && user?.email) {
+                        const emailPrefix = user.email.split('@')[0];
+                        resolvedName = emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1);
+                      }
+                      if (!resolvedName) resolvedName = 'Scholar';
+                      localStorage.setItem('studyweb_profile_name', resolvedName);
                       
                       localStorage.setItem('studyweb_onboarding_complete', 'true');
                       localStorage.setItem('studyweb_is_logged_in', 'true');

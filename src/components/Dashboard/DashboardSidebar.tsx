@@ -75,18 +75,22 @@ export default function DashboardSidebar({
   const renderSidebarContent = (layoutIdPrefix: string, forceExpanded = false) => {
     const isCollapsedState = isCollapsed && !forceExpanded;
     return (
-      <div className="flex flex-col h-full bg-[#10172D] text-white border-r border-[#1B2547] selection:bg-[#5145F5] selection:text-white">
+      <div className="flex flex-col h-full bg-white dark:bg-[#0E1528] text-slate-800 dark:text-slate-100 border-r border-[#E2E8F0] dark:border-slate-800 selection:bg-[#5145F5] selection:text-white shadow-xs">
         {/* Brand Logo Header */}
-        <div className={`flex items-center ${isCollapsedState ? 'justify-center py-5 px-0' : 'justify-between px-5 py-5'} border-b border-[#1B2547]`}>
+        <div className={`flex items-center ${isCollapsedState ? 'justify-center py-4 px-2' : 'justify-between px-4 sm:px-5 py-4'} border-b border-[#E2E8F0] dark:border-slate-800 bg-white dark:bg-[#0E1528]`}>
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#5145F5] to-[#7668FF] flex items-center justify-center p-1.5 shadow-md shadow-[#5145F5]/20 shrink-0">
-              <Sparkles className="w-5 h-5 text-white" />
+            <div className="flex items-center justify-center shrink-0">
+              <img 
+                src="/logo.png" 
+                alt="StudyWeb Logo" 
+                className={`${isCollapsedState ? 'h-9 w-9' : 'h-10 w-auto max-w-[42px]'} object-contain dark:invert transition-all`} 
+              />
             </div>
             <div className={`${isCollapsedState ? 'hidden' : 'block'} min-w-0`}>
               <div className="flex items-center gap-1.5">
-                <span className="font-extrabold text-[17px] tracking-tight text-white">StudyWeb</span>
+                <span className="font-extrabold text-[17px] tracking-tight text-[#151D3B] dark:text-white">StudyWeb</span>
               </div>
-              <p className="text-[10px] font-medium text-[#7E8DAF] tracking-wide truncate">
+              <p className="text-[10.5px] font-medium text-[#69779C] dark:text-[#7E8DAF] tracking-wide truncate">
                 From Confusion to Clarity
               </p>
             </div>
@@ -96,7 +100,7 @@ export default function DashboardSidebar({
             {onToggleCollapse && !forceExpanded && (
               <button
                 onClick={onToggleCollapse}
-                className="hidden md:flex p-1.5 rounded-lg text-[#7E8DAF] hover:text-white hover:bg-[#182240] transition-colors cursor-pointer"
+                className="hidden md:flex p-1.5 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                 title={isCollapsedState ? "Expand Sidebar" : "Collapse Sidebar"}
               >
                 <ChevronRight className={`w-4 h-4 transition-transform duration-200 ${isCollapsedState ? '' : 'rotate-180'}`} />
@@ -105,7 +109,7 @@ export default function DashboardSidebar({
             
             <button 
               onClick={onClose}
-              className="md:hidden p-1.5 rounded-lg text-[#7E8DAF] hover:text-white hover:bg-[#182240] transition-colors cursor-pointer"
+              className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -113,7 +117,7 @@ export default function DashboardSidebar({
         </div>
 
         {/* Nav Items (Scrollable) */}
-        <div className="flex-1 overflow-y-auto px-3 py-5 space-y-1 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-1 custom-scrollbar">
           {menuItems.filter(i => !i.comingSoon).map((item) => {
             const isActive = activeTab === item.id;
             return (
@@ -126,14 +130,14 @@ export default function DashboardSidebar({
                 className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3.5'} py-2.5 rounded-xl text-sm font-semibold relative isolate group cursor-pointer transition-all duration-200 ${
                   isActive 
                     ? 'text-white' 
-                    : 'text-[#8E9DBE] hover:text-white hover:bg-[#182240]'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/80 dark:hover:bg-slate-800/80'
                 }`}
                 title={isCollapsedState ? item.label : undefined}
               >
                 {isActive && (
                   <motion.div
                     layoutId={`activeSidebarTab-${layoutIdPrefix}`}
-                    className="absolute inset-0 bg-[#5145F5] rounded-xl -z-10 shadow-lg shadow-[#5145F5]/30"
+                    className="absolute inset-0 bg-[#5145F5] rounded-xl -z-10 shadow-md shadow-[#5145F5]/30"
                     transition={{ type: "spring", stiffness: 380, damping: 30 }}
                   />
                 )}
@@ -142,7 +146,7 @@ export default function DashboardSidebar({
                   <span className={`flex items-center justify-center w-7 h-7 rounded-lg shrink-0 transition-colors ${
                     isActive 
                       ? 'bg-white/20 text-white' 
-                      : 'bg-[#182240] text-[#8E9DBE] group-hover:text-white group-hover:bg-[#202D52]'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 group-hover:text-[#5145F5] dark:group-hover:text-white group-hover:bg-indigo-50 dark:group-hover:bg-slate-700'
                   }`}>
                     {item.icon}
                   </span>
@@ -154,8 +158,8 @@ export default function DashboardSidebar({
                 {item.highlight && !isCollapsedState && (
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
                     isActive 
-                      ? 'bg-white/25 text-white' 
-                      : 'bg-[#5145F5]/20 text-[#A59DFF] border border-[#5145F5]/40'
+                      ? 'bg-white/25 text-white border border-white/30' 
+                      : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/80 dark:border-indigo-800'
                   }`}>
                     AI
                   </span>
@@ -166,7 +170,7 @@ export default function DashboardSidebar({
 
           {menuItems.some(i => i.comingSoon) && !isCollapsedState && (
             <div className="pt-4 pb-1">
-              <span className="px-3 text-[10px] font-bold text-[#4E5C7D] uppercase tracking-wider">Features</span>
+              <span className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Features</span>
             </div>
           )}
 
@@ -182,19 +186,19 @@ export default function DashboardSidebar({
                   onClose();
                 }}
                 className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3.5'} py-2 rounded-xl text-sm font-medium transition-all relative isolate group ${
-                  isComingSoon ? 'opacity-40 grayscale cursor-not-allowed' : 'cursor-pointer hover:bg-[#182240]'
-                } text-[#7080A4]`}
+                  isComingSoon ? 'opacity-50 grayscale cursor-not-allowed' : 'cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800'
+                } text-slate-500 dark:text-slate-400`}
                 title={isCollapsedState ? `${item.label} (Coming Soon)` : undefined}
               >
                 <div className="flex items-center gap-3 relative z-10 min-w-0">
-                  <span className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0 bg-[#151D37] text-[#7080A4]">
+                  <span className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500">
                     {item.icon}
                   </span>
                   <span className={`tracking-tight text-[12.5px] truncate ${isCollapsedState ? 'hidden' : 'block'}`}>{item.label}</span>
                 </div>
 
                 {!isCollapsedState && (
-                  <span className="text-[9px] font-semibold tracking-wider text-[#57668A] uppercase mr-1 shrink-0">
+                  <span className="text-[9px] font-semibold tracking-wider text-slate-400 dark:text-slate-500 uppercase mr-1 shrink-0 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
                     Soon
                   </span>
                 )}
@@ -204,7 +208,7 @@ export default function DashboardSidebar({
         </div>
 
         {/* Footer / Settings & Logout */}
-        <div className={`p-3.5 border-t border-[#1B2547] space-y-1 bg-[#0D1327] flex flex-col ${isCollapsedState ? 'items-center' : ''}`}>
+        <div className={`p-3.5 border-t border-[#E2E8F0] dark:border-slate-800 space-y-1 bg-slate-50/70 dark:bg-[#0B1020]/80 flex flex-col ${isCollapsedState ? 'items-center' : ''}`}>
           <button
             onClick={() => {
               setActiveTab('profile');
@@ -213,7 +217,7 @@ export default function DashboardSidebar({
             className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3'} py-2 rounded-xl text-sm font-medium cursor-pointer relative isolate group transition-colors ${
               activeTab === 'profile' 
                 ? 'bg-[#5145F5] text-white shadow-md shadow-[#5145F5]/25 font-bold' 
-                : 'text-[#8E9DBE] hover:text-white hover:bg-[#182240]'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white dark:hover:bg-slate-800 shadow-none hover:shadow-xs border border-transparent hover:border-slate-200 dark:hover:border-slate-700'
             }`}
             title="Settings"
           >
@@ -221,7 +225,7 @@ export default function DashboardSidebar({
               <span className={`flex items-center justify-center w-7 h-7 rounded-lg shrink-0 ${
                 activeTab === 'profile'
                   ? 'bg-white/20 text-white'
-                  : 'bg-[#182240] text-[#8E9DBE] group-hover:text-white'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 group-hover:text-[#5145F5] dark:group-hover:text-white'
               }`}>
                 <Settings className="w-4 h-4" />
               </span>
@@ -231,11 +235,11 @@ export default function DashboardSidebar({
 
           <button
             onClick={onLogout}
-            className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3'} py-2 rounded-xl text-sm font-medium text-rose-400 hover:text-rose-300 hover:bg-rose-950/20 transition-colors cursor-pointer group`}
+            className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3'} py-2 rounded-xl text-sm font-medium text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-colors cursor-pointer group`}
             title="Logout"
           >
             <div className="flex items-center gap-3 min-w-0">
-              <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-rose-950/30 text-rose-400 shrink-0 group-hover:bg-rose-900/40">
+              <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-rose-50 dark:bg-rose-950/30 text-rose-500 dark:text-rose-400 shrink-0 group-hover:bg-rose-100 dark:group-hover:bg-rose-900/40">
                 <LogOut className="w-4 h-4" />
               </span>
               <span className={`tracking-tight text-[13px] truncate ${isCollapsedState ? 'hidden' : 'block'}`}>Logout</span>

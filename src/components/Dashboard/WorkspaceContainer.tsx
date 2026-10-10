@@ -423,7 +423,7 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
       )}
 
       {/* RENDER ACTIVE TAB COMPONENT CONTAINER */}
-      <div className="transition-all bg-white dark:bg-white rounded-[24px]">
+      <div className="transition-all bg-white dark:bg-slate-900 rounded-[24px]">
         <div className={activeTab === 'overview' ? 'block' : 'hidden'}>
           <WorkspaceOverview 
             workspace={workspace} 

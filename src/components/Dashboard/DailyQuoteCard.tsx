@@ -148,7 +148,6 @@ interface DailyQuoteCardProps {
 
 export default function DailyQuoteCard({ className = '' }: DailyQuoteCardProps) {
   const [copied, setCopied] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(false);
 
   // Compute deterministic daily quote based on local calendar day
   const { quote, dayNumber, dateFormatted } = useMemo(() => {
@@ -188,50 +187,83 @@ export default function DailyQuoteCard({ className = '' }: DailyQuoteCardProps) 
   return (
     <div className={`relative overflow-hidden rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 shadow-sm group transition-colors ${className}`}>
       {/* ================================================================= */}
-      {/* 1. SCENIC MOUNTAIN BACKGROUND WITH THEMED OVERLAY                 */}
+      {/* 1. SCENIC MOUNTAIN DAWN BACKDROP WITH MEASURED CONTRAST OVERLAY   */}
       {/* ================================================================= */}
-      {/* High-resolution serene mountain landscape */}
-      <img
-        src="https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&q=80"
-        alt="Scenic misty alpine mountain ridges at dawn"
-        onLoad={() => setImageLoaded(true)}
-        className={`absolute inset-0 w-full h-full object-cover object-center transform scale-105 group-hover:scale-100 transition-transform duration-700 ease-out z-0 opacity-20 dark:opacity-25 mix-blend-luminosity dark:mix-blend-overlay ${
-          imageLoaded ? 'block' : 'hidden'
-        }`}
-      />
-
-      {/* Layered mountain vector silhouette backdrop fallback */}
-      <div className="absolute inset-0 bg-gradient-to-br from-indigo-50/60 via-slate-50/30 to-white dark:from-slate-950 dark:via-indigo-950/40 dark:to-slate-900 z-0">
-        <svg className="w-full h-full object-cover opacity-15 dark:opacity-25" viewBox="0 0 600 360" preserveAspectRatio="none">
-          <path d="M0,260 L140,160 L240,220 L380,120 L500,230 L600,150 L600,360 L0,360 Z" fill="#4F46E5" />
-          <path d="M0,290 L100,220 L220,280 L340,190 L460,270 L600,210 L600,360 L0,360 Z" fill="#6366F1" opacity="0.7" />
-          <path d="M0,320 L160,270 L300,310 L440,260 L600,300 L600,360 L0,360 Z" fill="#818CF8" opacity="0.5" />
+      <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+        {/* Layered Scenic Mountain Horizon SVG */}
+        <svg 
+          className="w-full h-full object-cover object-center transform scale-105 group-hover:scale-100 transition-transform duration-1000 ease-out" 
+          viewBox="0 0 800 480" 
+          preserveAspectRatio="xMidYMid slice" 
+          fill="none" 
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <defs>
+            <linearGradient id="dqSky" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#0F172A" />
+              <stop offset="45%" stopColor="#1E1B4B" />
+              <stop offset="75%" stopColor="#312E81" />
+              <stop offset="100%" stopColor="#4338CA" />
+            </linearGradient>
+            <radialGradient id="dqSunGlow" cx="65%" cy="35%" r="55%">
+              <stop offset="0%" stopColor="#F59E0B" stopOpacity="0.65" />
+              <stop offset="35%" stopColor="#EC4899" stopOpacity="0.3" />
+              <stop offset="100%" stopColor="#4338CA" stopOpacity="0" />
+            </radialGradient>
+            <linearGradient id="dqPeakFar" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#6366F1" stopOpacity="0.45" />
+              <stop offset="100%" stopColor="#312E81" stopOpacity="0.2" />
+            </linearGradient>
+            <linearGradient id="dqPeakMid" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#4338CA" stopOpacity="0.7" />
+              <stop offset="100%" stopColor="#1E1B4B" stopOpacity="0.8" />
+            </linearGradient>
+            <linearGradient id="dqPeakNear" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#1E1B4B" stopOpacity="0.95" />
+              <stop offset="100%" stopColor="#0B0F19" stopOpacity="1" />
+            </linearGradient>
+          </defs>
+          
+          {/* Dawn Sky Canvas */}
+          <rect width="800" height="480" fill="url(#dqSky)" />
+          {/* Dawn Sun Glow */}
+          <rect width="800" height="480" fill="url(#dqSunGlow)" />
+          
+          {/* Distant Mountain Ridge */}
+          <path d="M0,280 L90,210 L190,260 L290,170 L390,240 L500,150 L610,230 L720,180 L800,240 L800,480 L0,480 Z" fill="url(#dqPeakFar)" />
+          {/* Mid-range Alpine Peaks */}
+          <path d="M0,320 L120,230 L220,290 L340,200 L460,280 L560,210 L680,270 L800,220 L800,480 L0,480 Z" fill="url(#dqPeakMid)" />
+          {/* Near Mountain Ridgeline with Pines */}
+          <path d="M0,370 L140,280 L280,350 L420,270 L540,330 L660,270 L800,340 L800,480 L0,480 Z" fill="url(#dqPeakNear)" />
+          
+          {/* Subtle Pine Tree Silhouettes */}
+          <path d="M80,340 L85,325 L90,340 M82,333 L85,325 L88,333 M120,350 L125,330 L130,350 M320,335 L325,318 L330,335 M322,328 L325,318 L328,328 M620,330 L625,312 L630,330 M622,322 L625,312 L628,322" stroke="#0B0F19" strokeWidth="2.5" opacity="0.8" />
         </svg>
       </div>
 
-      {/* Multi-stop overlay harmonizing with website surface palette */}
-      <div className="absolute inset-0 bg-gradient-to-t from-white/95 via-white/80 to-indigo-50/40 dark:from-slate-900/95 dark:via-slate-900/85 dark:to-indigo-950/40 z-1" />
+      {/* Measured Dark Contrast Scrim for Pristine Legibility */}
+      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-900/65 to-slate-900/30 z-1" />
 
-      {/* Subtle atmospheric brand glow accents */}
-      <div className="absolute -top-16 -right-16 w-48 h-48 bg-indigo-500/10 dark:bg-indigo-500/15 rounded-full blur-3xl pointer-events-none z-1" />
-      <div className="absolute -bottom-16 -left-16 w-48 h-48 bg-amber-500/10 dark:bg-amber-500/10 rounded-full blur-3xl pointer-events-none z-1" />
+      {/* Subtle Atmospheric Brand Glow Highlights */}
+      <div className="absolute -top-16 -right-16 w-52 h-52 bg-amber-500/15 rounded-full blur-3xl pointer-events-none z-1" />
+      <div className="absolute -bottom-16 -left-16 w-52 h-52 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none z-1" />
 
       {/* ================================================================= */}
       {/* 2. CARD CONTENT                                                   */}
       {/* ================================================================= */}
-      <div className="relative z-10 p-6 sm:p-7 flex flex-col justify-between h-full space-y-4 text-slate-900 dark:text-white">
+      <div className="relative z-10 p-6 sm:p-7 flex flex-col justify-between h-full space-y-4 text-white">
         
         {/* Header Bar */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-900/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+            <div className="w-7 h-7 rounded-lg bg-white/10 backdrop-blur-md border border-white/15 flex items-center justify-center text-indigo-300">
               <Mountain className="w-4 h-4" />
             </div>
             <div>
-              <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400 block">
+              <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300 block">
                 Daily Quote
               </span>
-              <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 block">
+              <span className="text-[11px] font-medium text-slate-300 block">
                 {dateFormatted} · Day #{dayNumber}
               </span>
             </div>
@@ -242,49 +274,49 @@ export default function DailyQuoteCard({ className = '' }: DailyQuoteCardProps) 
             onClick={handleCopy}
             title="Copy Quote"
             aria-label="Copy Daily Quote"
-            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 active:scale-95 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200/80 dark:border-slate-700 transition-all duration-200 cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
+            className="p-2 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 text-slate-200 hover:text-white border border-white/15 backdrop-blur-sm transition-all duration-200 cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
           >
             {copied ? (
               <>
-                <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                <span className="text-emerald-600 dark:text-emerald-400 text-[11px]">Copied</span>
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="text-emerald-400 text-[11px]">Copied</span>
               </>
             ) : (
               <>
                 <Copy className="w-3.5 h-3.5" />
-                <span className="text-slate-600 dark:text-slate-400 text-[11px] hidden sm:inline">Copy</span>
+                <span className="text-slate-300 text-[11px] hidden sm:inline">Copy</span>
               </>
             )}
           </button>
         </div>
 
         {/* Decorative Quote Icon */}
-        <div className="text-indigo-500/20 dark:text-indigo-400/20 -mb-2">
-          <Quote className="w-8 h-8 fill-indigo-500/15 dark:fill-indigo-400/15 rotate-180" />
+        <div className="text-indigo-400/40 -mb-2">
+          <Quote className="w-8 h-8 fill-indigo-400/20 rotate-180" />
         </div>
 
         {/* The Motivational Quote Text */}
         <blockquote className="space-y-2">
-          <p className="text-base sm:text-lg font-serif italic text-slate-900 dark:text-white leading-relaxed tracking-wide">
+          <p className="text-base sm:text-lg font-serif italic text-white/95 leading-relaxed tracking-wide drop-shadow-xs">
             "{quote.quote}"
           </p>
         </blockquote>
 
         {/* Author Attribution & Footer */}
-        <div className="pt-3 border-t border-slate-200/80 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="pt-3 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
-            <cite className="not-italic text-sm font-bold text-indigo-600 dark:text-indigo-400 tracking-wide block">
+            <cite className="not-italic text-sm font-bold text-indigo-300 tracking-wide block">
               — {quote.author}
             </cite>
             {quote.title && (
-              <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+              <span className="text-[11px] text-slate-300 block mt-0.5">
                 {quote.title}
               </span>
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
-            <Sparkles className="w-3 h-3 text-amber-500" />
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-300">
+            <Sparkles className="w-3 h-3 text-amber-400" />
             <span>Curated Wisdom</span>
           </div>
         </div>
