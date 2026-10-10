@@ -1,11 +1,10 @@
 // StudyWeb Offline Service Worker
-const CACHE_NAME = 'studyweb-cache-v1';
+const CACHE_NAME = 'studyweb-cache-v2';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',
-  '/src/main.tsx',
-  '/src/index.css',
   '/logo.png',
+  '/favicon.png',
   '/favicon.ico'
 ];
 

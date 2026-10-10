@@ -18,6 +18,7 @@ import {
   User
 } from 'lucide-react';
 import { useThemeMode } from '../../hooks/useThemeMode';
+import { supabase } from '../../lib/supabase';
 
 const tabLabels: Record<string, string> = {
   'dashboard': 'Home',
@@ -53,7 +54,53 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
   const { themeMode, toggleTheme } = useThemeMode();
   const [profilePic, setProfilePic] = useState<string | null>(null);
 
+  // Dynamic user profile state for greeting
+  const [userName, setUserName] = useState<string>(() => {
+    return localStorage.getItem('studyweb_profile_name') || 'Alex Johnson';
+  });
+
+  // Dynamic time-based greeting ('Good morning', 'Good afternoon', 'Good evening')
+  const [timeGreeting, setTimeGreeting] = useState<string>(() => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return 'Good morning';
+    if (hour >= 12 && hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  });
+
   useEffect(() => {
+    // 1. Fetch authenticated user profile name from Supabase or localStorage
+    const fetchUserProfile = async () => {
+      try {
+        if (supabase) {
+          const { data } = await supabase.auth.getUser();
+          if (data?.user) {
+            const metaName = data.user.user_metadata?.full_name || data.user.user_metadata?.name;
+            if (metaName) {
+              setUserName(metaName);
+              localStorage.setItem('studyweb_profile_name', metaName);
+              return;
+            } else if (data.user.email) {
+              const emailName = data.user.email.split('@')[0];
+              const formatted = emailName.charAt(0).toUpperCase() + emailName.slice(1);
+              setUserName(formatted);
+              return;
+            }
+          }
+        }
+      } catch (err) {}
+
+      const savedName = localStorage.getItem('studyweb_profile_name');
+      if (savedName) setUserName(savedName);
+    };
+
+    fetchUserProfile();
+
+    const handleProfileUpdate = () => {
+      const savedName = localStorage.getItem('studyweb_profile_name');
+      if (savedName) setUserName(savedName);
+    };
+
+    // 2. Track avatar and profile updates
     const updatePic = () => {
       const savedPic = localStorage.getItem('studyweb_profile_avatar') || localStorage.getItem('studyweb_profile_pic');
       if (savedPic) {
@@ -61,13 +108,36 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
       }
     };
     updatePic();
+
+    // 3. Keep time-based greeting updated across minute/hour intervals
+    const updateTimeGreeting = () => {
+      const hour = new Date().getHours();
+      if (hour >= 5 && hour < 12) setTimeGreeting('Good morning');
+      else if (hour >= 12 && hour < 17) setTimeGreeting('Good afternoon');
+      else setTimeGreeting('Good evening');
+    };
+
+    updateTimeGreeting();
+    const interval = setInterval(updateTimeGreeting, 60000);
+
     window.addEventListener('studyweb_profile_updated', updatePic);
+    window.addEventListener('studyweb_profile_updated', handleProfileUpdate);
     window.addEventListener('storage', updatePic);
+    window.addEventListener('storage', handleProfileUpdate);
+
     return () => {
+      clearInterval(interval);
       window.removeEventListener('studyweb_profile_updated', updatePic);
+      window.removeEventListener('studyweb_profile_updated', handleProfileUpdate);
       window.removeEventListener('storage', updatePic);
+      window.removeEventListener('storage', handleProfileUpdate);
     };
   }, []);
+
+  const firstName = React.useMemo(() => {
+    const parts = userName.trim().split(' ');
+    return parts[0] || 'Scholar';
+  }, [userName]);
 
   // Quick Add State
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
@@ -195,68 +265,79 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
   };
 
   return (
-    <header className="sticky top-0 right-0 z-20 w-full bg-white/90 dark:bg-[#10172D]/90 backdrop-blur-md border-b border-[#E8ECF6] dark:border-[#1E294B] px-4 sm:px-8 py-3.5 transition-all duration-300">
+    <header className="sticky top-0 right-0 z-20 w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 shadow-[0_1px_3px_0_rgba(0,0,0,0.05),0_1px_2px_0_rgba(0,0,0,0.03)] dark:shadow-[0_1px_3px_0_rgba(0,0,0,0.3)] px-4 sm:px-6 py-3.5 transition-all duration-300">
       {/* Mobile search expanded overlay */}
       {isMobileSearchExpanded && (
-        <div className="absolute inset-0 z-30 bg-white dark:bg-[#10172D] px-4 py-2.5 flex items-center gap-3">
-          <Search className="w-5 h-5 text-[#5145F5] shrink-0" />
+        <div className="absolute inset-0 z-30 bg-white dark:bg-slate-900 px-4 py-2.5 flex items-center gap-3">
+          <Search className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
           <input
             autoFocus
             type="text"
             placeholder="Search notes, quizzes, flashcards, or topics..."
-            className="flex-1 bg-transparent text-sm font-semibold text-[#151D3B] dark:text-white placeholder-[#69779C] focus:outline-none"
+            className="flex-1 bg-transparent text-sm font-semibold text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none"
           />
           <button 
             onClick={() => setIsMobileSearchExpanded(false)}
-            className="p-1.5 rounded-lg text-[#69779C] hover:text-[#151D3B] dark:hover:text-white"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
       )}
-      <div className="flex items-center justify-between gap-4">
-        {/* Hamburger & Logo */}
-        <div className="flex items-center gap-2 sm:gap-3 md:pr-4">
+      <div className="flex items-center justify-between gap-3 sm:gap-4">
+        {/* Left Side: Mobile Hamburger & Dynamic Greeting */}
+        <div className="flex items-center gap-2 sm:gap-3.5 min-w-0">
           <button 
             onClick={onMenuToggle}
-            className={`md:hidden p-1.5 rounded-lg text-[#69779C] hover:text-[#151D3B] dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0 ${isFocusMode ? 'hidden' : ''}`}
+            className={`md:hidden p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0 ${isFocusMode ? 'hidden' : ''}`}
           >
             <Menu className="w-6 h-6" />
           </button>
-        </div>
 
-        {/* Breadcrumb Navigation Trail - Desktop Only */}
-        <div className={`${isFocusMode ? 'hidden' : 'hidden md:flex'} items-center gap-1.5 text-xs sm:text-sm font-medium text-[#69779C] dark:text-slate-400 select-none bg-slate-50 dark:bg-slate-850 px-3.5 py-1.5 rounded-xl border border-[#E8ECF6] dark:border-[#1E294B]`}>
-          <button 
-            onClick={() => setActiveTab('dashboard')}
-            className={`transition-colors hover:text-[#5145F5] font-semibold cursor-pointer ${
-              activeTab === 'dashboard'
-                ? 'text-[#5145F5] font-bold'
-                : 'text-[#69779C]'
-            }`}
-          >
-            Dashboard
-          </button>
-          {activeTab !== 'dashboard' && (
-            <>
-              <ChevronRight className="w-3.5 h-3.5 text-slate-300 dark:text-slate-600 shrink-0" />
-              <span className="text-[#151D3B] dark:text-slate-200 font-bold tracking-tight">
-                {tabLabels[activeTab] || activeTab}
+          {/* Dynamic Profile Greeting */}
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white tracking-tight truncate">
+                <span>{timeGreeting}, </span>
+                <span className="text-indigo-600 dark:text-indigo-400 font-extrabold">{firstName}</span>
+                <span className="ml-1 inline-block">👋</span>
               </span>
-            </>
-          )}
+            </div>
+          </div>
+
+          {/* Breadcrumb Navigation Trail - Desktop Only */}
+          <div className={`${isFocusMode ? 'hidden' : 'hidden lg:flex'} items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400 select-none bg-slate-50 dark:bg-slate-800/40 px-3 py-1 rounded-xl border border-slate-100 dark:border-slate-800/80 shrink-0 ml-1`}>
+            <button 
+              onClick={() => setActiveTab('dashboard')}
+              className={`transition-colors hover:text-indigo-600 dark:hover:text-indigo-400 font-semibold cursor-pointer ${
+                activeTab === 'dashboard'
+                  ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                  : 'text-slate-400 dark:text-slate-500'
+              }`}
+            >
+              Dashboard
+            </button>
+            {activeTab !== 'dashboard' && (
+              <>
+                <ChevronRight className="w-3.5 h-3.5 text-slate-300 dark:text-slate-600 shrink-0" />
+                <span className="text-slate-800 dark:text-slate-200 font-bold tracking-tight">
+                  {tabLabels[activeTab] || activeTab}
+                </span>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Search Bar - Expanded on desktop */}
-        <div className={`${isFocusMode ? 'hidden' : 'hidden md:flex'} flex-1 max-w-md relative`}>
-          <Search className={`absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200 ${isSearchFocused ? 'text-[#5145F5]' : 'text-[#69779C]'}`} />
+        <div className={`${isFocusMode ? 'hidden' : 'hidden md:flex'} flex-1 max-w-sm lg:max-w-md relative`}>
+          <Search className={`absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 transition-colors duration-200 ${isSearchFocused ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'}`} />
           <input
             id="header-search-input"
             type="text"
-            placeholder="Search notes, workspaces, flashcards, or topics..."
+            placeholder="Search notes, quizzes, flashcards, or topics..."
             onFocus={() => setIsSearchFocused(true)}
             onBlur={() => setIsSearchFocused(false)}
-            className="w-full pl-10 pr-4 py-2 text-xs sm:text-sm rounded-xl border border-[#E8ECF6] dark:border-[#1E294B] bg-[#F6F8FD] dark:bg-slate-900/60 text-[#151D3B] dark:text-slate-100 placeholder-[#69779C] focus:outline-none focus:ring-2 focus:ring-[#5145F5]/20 focus:border-[#5145F5] transition-all"
+            className="w-full pl-10 pr-4 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-600/20 focus:border-indigo-600 dark:focus:border-indigo-400 transition-all"
           />
         </div>
 
@@ -266,10 +347,10 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
           <div className={`${isFocusMode ? 'hidden' : 'hidden md:flex'} items-center gap-2`}>
             <button
               onClick={() => setActiveTab('ai-tutor')}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#5145F5] hover:bg-[#4336E0] text-white text-xs font-bold transition-all shadow-md shadow-[#5145F5]/20 cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/10 cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Ask AI Tutor</span>
+              <span>Ask AI</span>
             </button>
           </div>
 
