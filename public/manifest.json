@@ -1,0 +1,34 @@
+{
+  "short_name": "StudyWeb",
+  "name": "StudyWeb – AI-Powered Learning Platform",
+  "description": "The AI-powered learning platform that transforms confusion into clarity with notes, quizzes, flashcards, and smart study plans.",
+  "icons": [
+    {
+      "src": "/favicon-32x32.png",
+      "type": "image/png",
+      "sizes": "32x32"
+    },
+    {
+      "src": "/favicon-192x192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "type": "image/png",
+      "sizes": "180x180"
+    },
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "https://studywebai.vercel.app/",
+  "background_color": "#0F172A",
+  "theme_color": "#4338CA",
+  "display": "standalone",
+  "scope": "/"
+}

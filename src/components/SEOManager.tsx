@@ -16,52 +16,52 @@ const SECTION_SEO_MAP: Record<string, {
   home: {
     title: 'StudyWeb – AI-Powered Learning Platform & Smart Study Assistant',
     description: 'StudyWeb is an AI study platform helping students study smarter with revision notes, flashcards, quizzes, PDF analysis, and parent tracking. Join free today!',
-    canonical: 'https://studyweb.com/',
+    canonical: 'https://studywebai.vercel.app/',
   },
   'for-students': {
     title: 'StudyWeb for Students – AI Revision Notes, Flashcards & Practice Quizzes',
     description: 'Master subjects faster with AI active recall, spaced repetition flashcards, automated quiz generation, and personalized study schedules on StudyWeb.',
-    canonical: 'https://studyweb.com/#for-students',
+    canonical: 'https://studywebai.vercel.app/#for-students',
   },
   'study-tools': {
     title: 'AI Study Tools & Features – Notes, Quizzes, Flashcards & PDF Workspace | StudyWeb',
     description: 'Explore StudyWeb’s suite of AI study tools: Socratic AI Tutor, automated flashcard creator, quiz generator, PDF note analyzer, and study planner.',
-    canonical: 'https://studyweb.com/#study-tools',
+    canonical: 'https://studywebai.vercel.app/#study-tools',
   },
   'interactive-demo': {
     title: 'Interactive AI Study Demo – Experience StudyWeb Live',
     description: 'Try StudyWeb live! Upload study notes or ask questions to see how AI transforms complex textbook topics into simplified revision flashcards and quizzes.',
-    canonical: 'https://studyweb.com/#interactive-demo',
+    canonical: 'https://studywebai.vercel.app/#interactive-demo',
   },
   pricing: {
     title: 'StudyWeb Pricing – Free & Family Plans for Students & Parents',
     description: 'Simple, affordable pricing for students and families. Start with our free forever plan or upgrade to Premium for unlimited AI revision and parent reporting.',
-    canonical: 'https://studyweb.com/#pricing',
+    canonical: 'https://studywebai.vercel.app/#pricing',
   },
   about: {
     title: 'About StudyWeb – Empowering Student Success & Parent Peace of Mind',
     description: 'Learn about StudyWeb’s mission to transform education through safe, COPPA-compliant AI tools, active recall techniques, and parent insight dashboards.',
-    canonical: 'https://studyweb.com/#about',
+    canonical: 'https://studywebai.vercel.app/#about',
   },
   faq: {
     title: 'Frequently Asked Questions – StudyWeb AI Learning Platform',
     description: 'Find answers to common questions about StudyWeb, AI safety, pricing, parent dashboard monitoring, mobile support, and student data security.',
-    canonical: 'https://studyweb.com/#faq',
+    canonical: 'https://studywebai.vercel.app/#faq',
   },
   contact: {
     title: 'Contact StudyWeb – Customer Support & Educational Inquiries',
     description: 'Have questions or need assistance? Contact the StudyWeb team for support, feature feedback, parent account help, or school partnerships.',
-    canonical: 'https://studyweb.com/#contact',
+    canonical: 'https://studywebai.vercel.app/#contact',
   },
   privacy: {
     title: 'Privacy Policy & Student Data Protection – StudyWeb',
     description: 'Read StudyWeb’s privacy policy. We prioritize COPPA and FERPA compliance, zero data selling, encrypted study notes, and full parent control.',
-    canonical: 'https://studyweb.com/#privacy',
+    canonical: 'https://studywebai.vercel.app/#privacy',
   },
   terms: {
     title: 'Terms of Service & Usage Agreement – StudyWeb',
     description: 'Review the Terms of Service for StudyWeb’s educational platform, user accounts, subscription tiers, and academic integrity guidelines.',
-    canonical: 'https://studyweb.com/#terms',
+    canonical: 'https://studywebai.vercel.app/#terms',
   },
 };
 
@@ -155,7 +155,7 @@ export default function SEOManager({ activeSection = 'home', activeTask, isLogge
           '@type': 'ListItem',
           'position': 1,
           'name': 'Home',
-          'item': 'https://studyweb.com/'
+          'item': 'https://studywebai.vercel.app/'
         },
         activeSection !== 'home' ? {
           '@type': 'ListItem',

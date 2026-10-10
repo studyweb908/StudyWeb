@@ -32,4 +32,4 @@ User-agent: Google-Extended
 Allow: /
 
 # Sitemap Location
-Sitemap: https://studyweb.com/sitemap.xml
+Sitemap: https://studywebai.vercel.app/sitemap.xml
