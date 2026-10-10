@@ -452,9 +452,9 @@ export default function App() {
                   onReorderWorkspaces={handleReorderWorkspaces}
                 />
               ) : activeTab === 'ai-tutor' ? (
-                workspaces.length > 0 ? (
+                (activeWorkspace || workspaces.length > 0) ? (
                   <WorkspaceChat 
-                    workspace={workspaces[0]}
+                    workspace={activeWorkspace || workspaces[0]}
                     workspaces={workspaces}
                     onSelectWorkspace={handleSelectWorkspace}
                     onUpdateWorkspace={handleUpdateWorkspace}

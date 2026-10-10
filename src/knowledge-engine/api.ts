@@ -321,6 +321,13 @@ async function processDocument(docId: string, workspaceId: string, userId: strin
       let aiMetadata = { topic: "General", subtopic: "Detail" };
       const chunkId = generateUuid();
       
+      let vector: number[] | null = null;
+      if (apiKey) {
+        try {
+          vector = await generateEmbedding(chunkText, apiKey);
+        } catch {}
+      }
+
       if (useMemory || !supabase) {
         memoryStore.documentChunks.set(chunkId, {
           id: chunkId,
@@ -329,6 +336,7 @@ async function processDocument(docId: string, workspaceId: string, userId: strin
           normalized_workspace_id: normWsId,
           user_id: userId,
           text: chunkText,
+          vector,
           source_type: type,
           topic: aiMetadata.topic || 'Extracted Topic',
           subtopic: aiMetadata.subtopic || 'Subtopic',
@@ -354,14 +362,27 @@ async function processDocument(docId: string, workspaceId: string, userId: strin
             .single();
                
           if (chunkError || !chunkData) {
-             // Fallback into memory store for this chunk
              memoryStore.documentChunks.set(chunkId, {
                id: chunkId,
                document_id: docId,
                workspace_id: workspaceId,
                text: chunkText,
+               vector,
                source_type: type
              });
+          } else if (vector && vector.length > 0) {
+            try {
+              const vectorStr = '[' + vector.join(',') + ']';
+              await supabase.from('embeddings').insert({
+                chunk_id: chunkData.id,
+                document_id: normDocId,
+                workspace_id: normWsId,
+                user_id: normUserId,
+                vector: vectorStr
+              });
+            } catch (vErr) {
+              console.warn("Notice: Vector embedding insertion warning:", vErr);
+            }
           }
         } catch {
           memoryStore.documentChunks.set(chunkId, {
@@ -369,6 +390,7 @@ async function processDocument(docId: string, workspaceId: string, userId: strin
             document_id: docId,
             workspace_id: workspaceId,
             text: chunkText,
+            vector,
             source_type: type
           });
         }
@@ -684,5 +706,46 @@ knowledgeRouter.post('/suggest-tags', async (req, res) => {
   } catch(err: any) {
     console.error("Tags generation error", err);
     res.json({ tags: ["Review", "Important", "Draft"] });
+  }
+});
+
+knowledgeRouter.post('/delete', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const { documentId, workspaceId, userId } = req.body;
+    if (!documentId) return res.status(400).json({ error: "documentId required" });
+
+    const normDocId = toValidUuid(documentId);
+
+    // Clean up memory store
+    memoryStore.documents.delete(documentId);
+    memoryStore.documents.delete(normDocId);
+    memoryStore.processingJobs.delete(documentId);
+    memoryStore.processingJobs.delete(normDocId);
+
+    for (const [chunkId, chunk] of memoryStore.documentChunks.entries()) {
+      if (chunk.document_id === documentId || chunk.document_id === normDocId) {
+        memoryStore.documentChunks.delete(chunkId);
+      }
+    }
+
+    // Clean up Supabase
+    const hasAuthToken = Boolean(authHeader && authHeader.startsWith('Bearer ') && authHeader.length > 20);
+    if (hasAuthToken) {
+      try {
+        const supabase = getSupabaseClient(authHeader);
+        await supabase.from('embeddings').delete().eq('document_id', normDocId);
+        await supabase.from('document_chunks').delete().eq('document_id', normDocId);
+        await supabase.from('processing_jobs').delete().eq('document_id', normDocId);
+        await supabase.from('documents').delete().eq('id', normDocId);
+        await supabase.from('workspace_files').delete().eq('id', normDocId);
+      } catch (e: any) {
+        console.warn("Notice: Supabase file deletion cleanup warning:", e?.message || e);
+      }
+    }
+
+    res.json({ success: true, message: "Document and associated vectors deleted successfully." });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });

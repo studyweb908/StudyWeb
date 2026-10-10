@@ -1003,8 +1003,8 @@ ${fileOverviewContext}
 - Workspace Materials Context & Retrieved Passages:
 ${groundedSourceContext}`;
 
-      // Candidate Models: prioritize active working flash models gemini-3.5-flash, gemini-3.1-flash-lite, gemini-2.5-flash, gemini-3.8-flash
-      const candidateModels: string[] = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-3.8-flash"];
+      // Candidate Models: standard valid Gemini 3 series models
+      const candidateModels: string[] = ["gemini-3.8-flash", "gemini-3.1-flash-lite"];
 
       const isComplexQuery = deepResearch || 
         modelMode === 'pro' || 
@@ -1098,23 +1098,39 @@ ${groundedSourceContext}`;
 
             if (effectiveFiles && effectiveFiles.length > 0) {
               for (const file of effectiveFiles.slice(0, 3)) {
+                let rawBase64 = "";
+                let mimeType = file.fileMimeType || "application/pdf";
+
                 if (file.url && typeof file.url === "string" && file.url.startsWith("data:")) {
                   const match = file.url.match(/^data:([^;]+);base64,(.+)$/);
                   if (match) {
+                    mimeType = match[1];
+                    rawBase64 = match[2];
+                  }
+                } else if (file.fileBase64) {
+                  rawBase64 = String(file.fileBase64);
+                  if (rawBase64.includes(";base64,")) {
+                    rawBase64 = rawBase64.split(";base64,")[1];
+                  }
+                }
+
+                rawBase64 = rawBase64.replace(/[\r\n\s]/g, "");
+
+                // Ensure rawBase64 is valid and not excessively large (limit to ~15MB base64 ~ 11MB file)
+                if (rawBase64 && rawBase64.length > 20 && rawBase64.length < 20000000) {
+                  const isSupportedType = mimeType.startsWith("image/") || 
+                    mimeType === "application/pdf" || 
+                    mimeType.startsWith("text/") || 
+                    mimeType.startsWith("audio/");
+
+                  if (isSupportedType) {
                     currentTurnParts.push({
                       inlineData: {
-                        mimeType: match[1],
-                        data: match[2]
+                        mimeType,
+                        data: rawBase64
                       }
                     });
                   }
-                } else if (file.fileBase64 && file.fileMimeType) {
-                  currentTurnParts.push({
-                    inlineData: {
-                      mimeType: file.fileMimeType,
-                      data: file.fileBase64
-                    }
-                  });
                 }
               }
             }
@@ -1376,6 +1392,12 @@ If this is a YouTube video or specific web page, search Google for "${targetName
       };
 
       if (fileBase64 && fileMimeType) {
+        let cleanBase64 = String(fileBase64);
+        if (cleanBase64.includes(";base64,")) {
+          cleanBase64 = cleanBase64.split(";base64,")[1];
+        }
+        cleanBase64 = cleanBase64.replace(/[\r\n\s]/g, "");
+
         contents = [
           {
             text: `Carefully inspect and perform OCR on this uploaded study resource "${targetName}" (${type || 'image/document'}). Read all visible text, headers, bullet points, numbers, diagrams, formulas, questions, and charts. Extract:
@@ -1388,7 +1410,7 @@ Return a valid JSON object matching the requested schema.`
           },
           {
             inlineData: {
-              data: fileBase64,
+              data: cleanBase64,
               mimeType: fileMimeType
             }
           }

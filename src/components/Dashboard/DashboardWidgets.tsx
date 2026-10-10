@@ -213,12 +213,6 @@ export function AIInsightsCard() {
           <p className="text-[15px] text-slate-600 dark:text-slate-300 leading-relaxed">
             You struggled with <strong className="text-slate-900 dark:text-white font-semibold">Mitochondria</strong> yesterday during your biology quiz.
           </p>
-          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700/50">
-            <p className="text-sm text-slate-700 dark:text-slate-300 font-medium flex items-center gap-2">
-              <Brain className="w-4 h-4 text-indigo-500" />
-              Ready for a 5-minute refresher?
-            </p>
-          </div>
         </div>
       </div>
 

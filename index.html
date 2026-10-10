@@ -143,9 +143,34 @@
       }
     </script>
 
-    <!-- Pre-hydration Theme Initialization Script -->
+    <!-- Pre-hydration Theme Initialization Script & Error Suppression -->
     <script>
       (function() {
+        // Suppress WebSocket and Vite HMR connection errors in preview iframe
+        function isWebSocketError(err) {
+          if (!err) return false;
+          var str = String(err.message || err.reason || err.stack || err);
+          return (
+            str.indexOf('WebSocket') !== -1 ||
+            str.indexOf('websocket') !== -1 ||
+            str.indexOf('vite') !== -1
+          );
+        }
+
+        window.addEventListener('unhandledrejection', function(event) {
+          if (isWebSocketError(event.reason)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+
+        window.addEventListener('error', function(event) {
+          if (isWebSocketError(event.error || event.message) || (event.filename && event.filename.indexOf('@vite/client') !== -1)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+
         try {
           var storedTheme = localStorage.getItem('theme');
           var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;

@@ -836,12 +836,6 @@ export function ProfileSettingsHub() {
                 <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
                   {fullName}
                 </h1>
-                
-                {/* Scholar Rank - Clean unboxed text badge */}
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-500/15 border border-indigo-200 dark:border-indigo-400/30 text-indigo-700 dark:text-indigo-300 text-xs font-semibold shadow-xs">
-                  <Flame className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
-                  <span>AP Elite Scholar</span>
-                </div>
               </div>
 
               {/* Unboxed Metadata with Typographic Separator */}
@@ -852,63 +846,16 @@ export function ProfileSettingsHub() {
                 <span className="text-slate-300 dark:text-slate-600 font-bold" aria-hidden="true">·</span>
                 <span className="font-mono text-slate-500 dark:text-slate-400">{userEmail}</span>
               </div>
-
-              {/* Real-time Cloud Sync Pill & Action */}
-              <div className="flex items-center justify-center sm:justify-start gap-3 pt-1">
-                <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold border ${
-                  syncStatus === 'synced'
-                    ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
-                    : syncStatus === 'syncing'
-                    ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300'
-                    : 'bg-slate-100 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-                }`}>
-                  {syncStatus === 'synced' && <span className="w-2 h-2 rounded-full bg-emerald-500" />}
-                  {syncStatus === 'syncing' && <RefreshCw className="w-3 h-3 animate-spin text-amber-500" />}
-                  {syncStatus === 'local' && <span className="w-2 h-2 rounded-full bg-slate-400" />}
-                  <span>
-                    {syncStatus === 'synced' ? 'Supabase Synced' : syncStatus === 'syncing' ? 'Syncing...' : 'Local Cache Active'}
-                  </span>
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">({lastSyncedTime})</span>
-                </div>
-
-                <button
-                  onClick={handleForceSync}
-                  className="p-1.5 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
-                  title="Resync with Supabase Cloud"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                </button>
-              </div>
             </div>
           </div>
 
           {/* Right: Quick Action Controls */}
           <div className="flex items-center gap-2.5 self-center md:self-start">
-            <button
-              onClick={handleExportVault}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-100/90 hover:bg-slate-200/90 dark:bg-white/10 dark:hover:bg-white/15 text-slate-700 dark:text-white text-xs font-semibold border border-slate-200/90 dark:border-white/10 transition-all hover:scale-102 active:scale-98 shadow-sm cursor-pointer"
-              title="Download your full study data vault"
-            >
-              <Download className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-300" />
-              <span>Export Vault</span>
-            </button>
-
-            <button
-              onClick={() => {
-                const text = `🎓 Scholar Profile: ${fullName}\nCurriculum: ${currentStudy}\nMastery Tier: AP Elite\nPlatform: StudyWeb Scholar`;
-                navigator.clipboard.writeText(text);
-                triggerToast('📋 Profile summary copied to clipboard!');
-              }}
-              className="p-2.5 rounded-xl bg-slate-100/90 hover:bg-slate-200/90 dark:bg-white/10 dark:hover:bg-white/15 text-slate-700 dark:text-white text-xs border border-slate-200/90 dark:border-white/10 transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-sm"
-              title="Share profile summary"
-            >
-              <Share2 className="w-4 h-4 text-slate-600 dark:text-slate-300" />
-            </button>
           </div>
         </div>
 
         {/* METRIC STRIP: Tabular figures with zero-pill rule */}
-        <div className="mt-8 pt-6 border-t border-slate-100 dark:border-white/10 grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="mt-8 pt-6 border-t border-slate-100 dark:border-white/10 grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="p-3.5 rounded-2xl bg-white/70 dark:bg-white/5 border border-slate-200/70 dark:border-white/5 shadow-xs hover:border-amber-500/30 transition-all">
             <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs font-medium mb-1">
               <Flame className="w-4 h-4 text-amber-500" />
@@ -918,17 +865,6 @@ export function ProfileSettingsHub() {
               14 <span className="text-xs font-sans text-slate-500 dark:text-slate-400 font-normal">Days</span>
             </div>
             <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5">Top 5% of Scholars</p>
-          </div>
-
-          <div className="p-3.5 rounded-2xl bg-white/70 dark:bg-white/5 border border-slate-200/70 dark:border-white/5 shadow-xs hover:border-indigo-500/30 transition-all">
-            <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs font-medium mb-1">
-              <Award className="w-4 h-4 text-indigo-500" />
-              <span>Mastery Index</span>
-            </div>
-            <div className="text-xl sm:text-2xl font-mono font-bold tabular-nums text-slate-900 dark:text-white">
-              84% <span className="text-xs font-sans text-slate-500 dark:text-slate-400 font-normal">Score</span>
-            </div>
-            <p className="text-[11px] text-indigo-600 dark:text-indigo-300 font-medium mt-0.5">Tier 1 Excellence</p>
           </div>
 
           <div className="p-3.5 rounded-2xl bg-white/70 dark:bg-white/5 border border-slate-200/70 dark:border-white/5 shadow-xs hover:border-sky-500/30 transition-all">
@@ -992,18 +928,6 @@ export function ProfileSettingsHub() {
           <GraduationCap className="w-4 h-4" />
           <span>Study Goals</span>
         </button>
-
-        <button
-          onClick={() => setActiveTab('security')}
-          className={`flex-1 min-w-[140px] flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
-            activeTab === 'security'
-              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/80 dark:hover:bg-white/5'
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4" />
-          <span>Security & Cloud</span>
-        </button>
       </div>
 
       {/* 3. TAB CONTENT PANELS */}
@@ -1015,91 +939,8 @@ export function ProfileSettingsHub() {
         {activeTab === 'overview' && (
           <div className="space-y-6">
             
-            {/* Top Grid: Mastery Breakdown & Active AI Companion */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              
-              {/* Card 1: Academic Mastery & Subject Readiness */}
-              <div className="rounded-[28px] bg-white/85 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-7 space-y-6 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                      <TrendingUp className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                      <span>Academic Mastery & Readiness</span>
-                    </h3>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Spaced retention and recall accuracy across subjects</p>
-                  </div>
-                  <span className="font-mono text-xs font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-200 dark:border-emerald-500/20">
-                    +4.2% this week
-                  </span>
-                </div>
-
-                {/* Circular Gauge Representation */}
-                <div className="flex items-center gap-6 p-4 rounded-2xl bg-slate-50/80 dark:bg-white/5 border border-slate-200/60 dark:border-white/5">
-                  <div className="relative w-20 h-20 shrink-0 flex items-center justify-center">
-                    <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-                      <path
-                        className="text-slate-200 dark:text-slate-800"
-                        strokeWidth="3.5"
-                        stroke="currentColor"
-                        fill="none"
-                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      />
-                      <path
-                        className="text-indigo-600 dark:text-indigo-500"
-                        strokeDasharray="84, 100"
-                        strokeWidth="3.5"
-                        strokeLinecap="round"
-                        stroke="currentColor"
-                        fill="none"
-                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      />
-                    </svg>
-                    <div className="absolute text-center">
-                      <span className="font-mono text-lg font-extrabold text-slate-900 dark:text-white">84%</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1 text-xs">
-                    <p className="font-semibold text-slate-900 dark:text-white">AP Mastery Tier: Elite Scholar</p>
-                    <p className="text-slate-500 dark:text-slate-400 text-[11px] leading-relaxed">
-                      You are in the top 5th percentile for memory retention in American History and Calculus.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Progress Bars for Core Subjects */}
-                <div className="space-y-3 pt-2 text-xs">
-                  <div>
-                    <div className="flex justify-between font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                      <span>AP US History (APUSH)</span>
-                      <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">92%</span>
-                    </div>
-                    <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                      <div className="h-full bg-indigo-600 rounded-full" style={{ width: '92%' }} />
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                      <span>AP Calculus BC</span>
-                      <span className="font-mono font-bold text-sky-600 dark:text-cyan-400">86%</span>
-                    </div>
-                    <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                      <div className="h-full bg-sky-500 rounded-full" style={{ width: '86%' }} />
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                      <span>AP Chemistry & Physics</span>
-                      <span className="font-mono font-bold text-purple-600 dark:text-purple-400">79%</span>
-                    </div>
-                    <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                      <div className="h-full bg-purple-500 rounded-full" style={{ width: '79%' }} />
-                    </div>
-                  </div>
-                </div>
-              </div>
+            {/* Top Grid: Active AI Companion */}
+            <div className="grid grid-cols-1 gap-6">
 
               {/* Card 2: Active Learning AI Companion (Mascot Switcher) */}
               <div className="rounded-[28px] bg-white/85 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-7 space-y-5 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors">
@@ -1182,47 +1023,6 @@ export function ProfileSettingsHub() {
               </div>
             </div>
 
-            {/* Bottom Row: Verified Scholar Achievements */}
-            <div className="rounded-[28px] bg-white/85 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-7 space-y-4 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Award className="w-4 h-4 text-amber-500 dark:text-amber-400" />
-                <span>Earned Scholar Milestones & Badges</span>
-              </h3>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-white/5 border border-slate-200/60 dark:border-white/5 flex items-center gap-3">
-                  <div className="text-2xl p-2 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20">🔥</div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">14-Day Streak</h4>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Consistency Mastery</p>
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-white/5 border border-slate-200/60 dark:border-white/5 flex items-center gap-3">
-                  <div className="text-2xl p-2 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">⚡</div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">500+ Flashcards</h4>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Active Recall Legend</p>
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-white/5 border border-slate-200/60 dark:border-white/5 flex items-center gap-3">
-                  <div className="text-2xl p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">📚</div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">AP Exam Ready</h4>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">90%+ Core Coverage</p>
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-white/5 border border-slate-200/60 dark:border-white/5 flex items-center gap-3">
-                  <div className="text-2xl p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">💎</div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">Vault Custodian</h4>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Cloud Sync Active</p>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         )}
 

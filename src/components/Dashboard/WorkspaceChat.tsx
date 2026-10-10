@@ -377,7 +377,7 @@ export default function WorkspaceChat({
     try {
       const response = await fetch('/api/ai-tutor', {
         method: 'POST',
-        credentials: 'same-origin',
+        credentials: 'omit',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: userMsg.text,

@@ -31,6 +31,7 @@ import {
   Copy
 } from 'lucide-react';
 import { useMicrophoneWaveform } from '../../hooks/useMicrophoneWaveform';
+import { useTaskContext } from '../../context/TaskContext';
 
 interface Message {
   id: string;
@@ -198,6 +199,9 @@ function parseTextWithHighlights(
 }
 
 export default function AITutorWorkspace() {
+  const { activeWorkspace } = useTaskContext();
+  const targetWsId = activeWorkspace?.id || 'local-workspace';
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -376,11 +380,11 @@ export default function AITutorWorkspace() {
     try {
       const response = await fetch("/api/knowledge/search", {
         method: "POST",
-        credentials: "same-origin",
+        credentials: "omit",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: queryToSearch,
-          workspaceId: "local-workspace"
+          workspaceId: targetWsId
         })
       });
 
@@ -444,7 +448,7 @@ export default function AITutorWorkspace() {
     try {
       const response = await fetch("/api/ai-tutor", {
         method: "POST",
-        credentials: "same-origin",
+        credentials: "omit",
         headers: {
           "Content-Type": "application/json"
         },
@@ -452,7 +456,7 @@ export default function AITutorWorkspace() {
           prompt: textToSend || `Please analyze my attached documents: ${attachedFiles.map(f => f.name).join(', ')}`,
           deepResearch,
           citationMode,
-          workspaceId: "local-workspace",
+          workspaceId: targetWsId,
           attachedFiles,
           model: selectedModel
         })

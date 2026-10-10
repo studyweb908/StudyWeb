@@ -311,31 +311,50 @@ export class FileUploadService {
   /**
    * Proactively purges bloated or non-essential browser cookies so requests stay well under Nginx limits.
    */
+  /**
+   * Proactively purges bloated or non-essential browser cookies so requests stay well under Nginx limits.
+   */
   public static sanitizeBrowserCookies(): void {
     if (typeof document === 'undefined' || !document.cookie) return;
     try {
       const rawCookies = document.cookie.split(';');
       const hostname = window.location.hostname;
       const hostParts = hostname.split('.');
-      const domains = ['', hostname, `.${hostname}`];
+
+      // Build complete list of domain targets (including domain-less / null)
+      const domains: (string | null)[] = [null, '', hostname];
+      if (hostname.startsWith('.')) {
+        domains.push(hostname.substring(1));
+      } else {
+        domains.push(`.${hostname}`);
+      }
       if (hostParts.length > 2) {
         domains.push(`.${hostParts.slice(-2).join('.')}`);
+        domains.push(hostParts.slice(-2).join('.'));
       }
+
+      // Build complete list of path targets
+      const paths = ['/', '/api', ''];
+
+      const totalLen = document.cookie.length;
+      const forcePurge = totalLen > 400;
 
       for (const cookie of rawCookies) {
         const parts = cookie.split('=');
         const name = parts[0]?.trim();
         if (!name) continue;
-        // Never clear internal AI Studio auth bridge tokens or Supabase session
-        if (name.includes('aistudio') || name.startsWith('__SECURE-') || name.startsWith('sb-')) continue;
 
         const val = parts.slice(1).join('=');
-        if (val.length > 256 || name.startsWith('sb-temp') || name.startsWith('_temp') || name.includes('preview')) {
-          for (const d of domains) {
-            const domainAttr = d ? `; domain=${d}` : '';
-            document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0${domainAttr}`;
-            document.cookie = `${name}=; path=/api; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0${domainAttr}`;
-            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0${domainAttr}`;
+        // Primary access token kept if size is tiny, otherwise purged because auth is in Authorization header
+        const isTinyAccessToken = name === 'sb-access-token' && val.length < 200;
+
+        if (!isTinyAccessToken || forcePurge) {
+          for (const path of paths) {
+            for (const domain of domains) {
+              const domainAttr = domain ? `; domain=${domain}` : '';
+              const pathAttr = path ? `; path=${path}` : '';
+              document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0${pathAttr}${domainAttr}`;
+            }
           }
         }
       }
@@ -556,8 +575,10 @@ export class FileUploadService {
 
       attempt++;
       try {
+        FileUploadService.sanitizeBrowserCookies();
         return await operation(attempt);
       } catch (rawError: any) {
+        FileUploadService.sanitizeBrowserCookies();
         if (options?.signal?.aborted) {
           throw new FileUploadError(`Operation "${context}" aborted by user.`, {
             code: 'ERR_TIMEOUT',
@@ -748,7 +769,7 @@ export class FileUploadService {
       let statusRes: Response;
       try {
         statusRes = await fetch(`/api/knowledge/status/${documentId}`, {
-          credentials: 'same-origin',
+          credentials: 'omit',
           headers: authHeaders,
           signal
         });
@@ -902,7 +923,7 @@ export class FileUploadService {
         const authHeaders = await this.getAuthHeaders();
         const response = await fetch('/api/knowledge/upload-multipart', {
           method: 'POST',
-          credentials: 'same-origin',
+          credentials: 'omit',
           headers: {
             ...authHeaders
           },
@@ -1016,7 +1037,8 @@ export class FileUploadService {
   // 11. Full Upload and Processing Pipeline
   // ==========================================
   public async uploadAndProcess(file: File, options: UploadOptions): Promise<FileUploadResult> {
-    if (options.useMultipart) {
+    FileUploadService.sanitizeBrowserCookies();
+    if (options.useMultipart !== false || file.size > 256 * 1024 || file.type.includes('pdf') || file.type.includes('word') || file.type.includes('image')) {
       return this.uploadMultipart(file, options);
     }
 
@@ -1096,7 +1118,7 @@ export class FileUploadService {
           const authHeaders = await this.getAuthHeaders();
           const response = await fetch('/api/knowledge/upload', {
             method: 'POST',
-            credentials: 'same-origin',
+            credentials: 'omit',
             headers: {
               'Content-Type': 'application/json',
               ...authHeaders

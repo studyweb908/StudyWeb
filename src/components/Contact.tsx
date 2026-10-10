@@ -97,7 +97,7 @@ export default function Contact() {
     try {
       const response = await fetch('/api/contact', {
         method: 'POST',
-        credentials: 'same-origin',
+        credentials: 'omit',
         headers: {
           'Content-Type': 'application/json',
         },

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Image as ImageIcon, Globe, Sparkles, ArrowRight, Upload, Link, Video, HardDrive, Clipboard, X, Loader2, Clock, Check, ChevronDown, Search, Trash2, FileText, Music, Lightbulb, BookOpen, HelpCircle, Info, Eye, ExternalLink, Calendar } from 'lucide-react';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import { supabase } from '../../lib/supabase';
-import { fileUploadService, FileUploadError } from '../../services/FileUploadService';
+import { fileUploadService, FileUploadService, FileUploadError } from '../../services/FileUploadService';
 import { toValidUuid } from '../../utils/uuid';
 import QuickPreviewModal from './QuickPreviewModal';
 
@@ -122,7 +122,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
     try {
       const res = await fetch('/api/web-search-sources', {
         method: 'POST',
-        credentials: 'same-origin',
+        credentials: 'omit',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: webSearchQuery, mode: searchWebMode })
       });
@@ -211,7 +211,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
           const { token, userId } = await getAuthInfo();
           const response = await fetch('/api/knowledge/upload', {
             method: 'POST',
-            credentials: 'same-origin',
+            credentials: 'omit',
             headers: { 
               'Content-Type': 'application/json',
               ...(token ? { 'Authorization': `Bearer ${token}` } : {})
@@ -654,31 +654,40 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
     let fileMimeType = "";
 
     try {
+      FileUploadService.sanitizeBrowserCookies();
+
       if (file) {
-        fileMimeType = file.type;
-        const reader = new FileReader();
-        const promise = new Promise<string>((resolve, reject) => {
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = error => reject(error);
-        });
-        reader.readAsDataURL(file);
-        dataUrl = await promise;
-        fileBase64 = dataUrl.split(',')[1];
+        fileMimeType = file.type || 'application/pdf';
+        if (file.size < 1024 * 1024) {
+          try {
+            const reader = new FileReader();
+            const promise = new Promise<string>((resolve, reject) => {
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = error => reject(error);
+            });
+            reader.readAsDataURL(file);
+            dataUrl = await promise;
+            fileBase64 = dataUrl.split(',')[1] || '';
+            if (fileBase64.length > 100000) {
+              fileBase64 = fileBase64.substring(0, 100000);
+            }
+          } catch {}
+        }
       }
 
-      // Analyze resource directly with Gemini 3.8 Flash (Multimodal OCR / Vision for images & PDFs)
+      // Analyze resource directly with Gemini 3.8 Flash
       let analysisResult: any = null;
       try {
         const analyzeRes = await fetch('/api/analyze-resource', {
           method: 'POST',
-          credentials: 'same-origin',
+          credentials: 'omit',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name,
             type,
             size,
             url: dataUrl || url,
-            fileBase64,
+            fileBase64: fileBase64.length > 100000 ? fileBase64.substring(0, 100000) : fileBase64,
             fileMimeType
           })
         });
@@ -692,50 +701,67 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
       // Knowledge Engine Backend upload
       let documentId = `file-${Date.now()}`;
       try {
-        const uploadResult = await fileUploadService.executeWithRetry(
-          async (attempt) => {
-            const { token, userId } = await getAuthInfo();
-            const response = await fetch('/api/knowledge/upload', {
-              method: 'POST',
-              credentials: 'same-origin',
-              headers: {
-                'Content-Type': 'application/json',
-                ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-              },
-              body: JSON.stringify({
-                workspaceId: toValidUuid(workspace.id),
-                userId: toValidUuid(userId),
-                name,
-                type,
-                size,
-                url: dataUrl || url,
-                fileBase64,
-                fileMimeType
-              })
-            });
-
-            if (!response.ok) {
-              const txt = await response.text();
-              throw new Error('Analysis failed: ' + txt);
-            }
-
-            const contentType = response.headers.get('content-type') || '';
-            if (!contentType.includes('application/json')) {
-              const txt = await response.text();
-              throw new Error('Invalid response from server: ' + txt.substring(0, 100));
-            }
-
-            return await response.json();
-          },
-          {
-            context: `Upload Analysis for "${name || url}"`,
-            onRetryNotice: (notice) => {
-              setUploadStep(notice);
-            }
+        if (file) {
+          const uploadResult = await fileUploadService.uploadAndProcess(file, {
+            workspaceId: workspace.id,
+            useMultipart: true
+          });
+          if (uploadResult?.documentId) {
+            documentId = uploadResult.documentId;
           }
-        );
-        if (uploadResult?.documentId) {
-          documentId = uploadResult.documentId;
+          if (uploadResult?.summary) {
+            analysisResult = {
+              summary: uploadResult.summary,
+              highlights: uploadResult.highlights,
+              tags: uploadResult.tags
+            };
+          }
+        } else {
+          const uploadResult = await fileUploadService.executeWithRetry(
+            async (attempt) => {
+              const { token, userId } = await getAuthInfo();
+              const response = await fetch('/api/knowledge/upload', {
+                method: 'POST',
+                credentials: 'omit',
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                },
+                body: JSON.stringify({
+                  workspaceId: toValidUuid(workspace.id),
+                  userId: toValidUuid(userId),
+                  name,
+                  type,
+                  size,
+                  url: dataUrl || url,
+                  fileBase64: fileBase64.length > 100000 ? fileBase64.substring(0, 100000) : fileBase64,
+                  fileMimeType
+                })
+              });
+
+              if (!response.ok) {
+                const txt = await response.text();
+                throw new Error('Analysis failed: ' + txt);
+              }
+
+              const contentType = response.headers.get('content-type') || '';
+              if (!contentType.includes('application/json')) {
+                const txt = await response.text();
+                throw new Error('Invalid response from server: ' + txt.substring(0, 100));
+              }
+
+              return await response.json();
+            },
+            {
+              context: `Upload Analysis for "${name || url}"`,
+              onRetryNotice: (notice) => {
+                setUploadStep(notice);
+              }
+            }
+          );
+          if (uploadResult?.documentId) {
+            documentId = uploadResult.documentId;
+          }
         }
       } catch (kErr) {
         console.warn("Knowledge backend upload warning, continuing with verified analysis:", kErr);
