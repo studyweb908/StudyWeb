@@ -1,47 +1,54 @@
-# Implementation Plan - Real Gemini API Backed AI Tutor (End-to-End)
+# Implementation Plan - StudyWeb Dashboard Redesign
 
-Replace all mock/hardcoded responses in the AI Tutor with real, live Gemini API integration using `@google/genai` and `process.env.GEMINI_API_KEY`.
-
----
-
-## User Preferences & Decisions
-- **Model Tier**: Try `gemini-2.5-flash` first with automatic fallback to `gemini-1.5-flash` / `gemini-3.5-flash`.
-- **Error Presentation**: Red alert banner inside the chat bubble with an interactive "Retry" button.
-- **Knowledge Integration**: Use full Gemini academic knowledge combined with grounded workspace document notes & citations.
+Production-grade redesign of the **StudyWeb** student dashboard inspired by modern AI-powered education platforms, featuring the brand identity *"From Confusion to Clarity"*.
 
 ---
 
-## Proposed Changes
-
-### 1. Backend API Endpoint (`server.ts` -> `/api/ai-tutor`)
-- **Gemini Client**: Connect route directly to `@google/genai` initialized with `process.env.GEMINI_API_KEY`.
-- **System Instruction**: Set strict tutor persona instructions:
-  > *"You are an intelligent, friendly, and adaptive AI Study Tutor. When a student asks a question, explain concepts clearly using simple analogies, key points, and examples. If workspace documents or images are provided, ground your answer in them and cite them. If a question is general knowledge (like 'what is a cell'), answer it thoroughly using your general academic knowledge. NEVER output placeholder text or repeat file names as content."*
-- **Model Resolution Order**: Try `gemini-2.5-flash` -> `gemini-1.5-flash` -> `gemini-3.5-flash`.
-- **Prompt Construction**: Combine student query, conversation history, and workspace materials/attached notes into the model request.
-- **Purge Mocks**: Completely remove mock generators (`generateLocalAITutorResponse` or canned string fallbacks).
-- **Error Status**: Return HTTP 500/429 JSON `{ error: 'Failed to generate response. Please try again.' }` on API errors or quota limits.
-
----
-
-### 2. Frontend Chat Component (`WorkspaceChat.tsx`)
-- **Live API Fetch**: Update `handleSend` to call `POST /api/ai-tutor` with user prompt, chat history, and attached workspace documents.
-- **Direct Rendering**: Display exact `reply` / `text` string returned by Gemini inside the AI message bubble with rich Markdown formatting.
-- **Purge Client Mocks**: Delete hardcoded fallback strings (*"Material uploaded directly in AI Tutor chat..."*, *"🌟 Key Finding: Study material..."*).
-- **Loading Skeleton & Typing Indicator**: Show a clean pulsing loading state while waiting for Gemini.
-- **Error UI & Retry Button**: Render a red alert banner inside the message bubble when an API call fails, allowing 1-click retry.
+## Visual Design System & Color Palette
+- **Deep Navy Sidebar**: `#10172D` with subtle `#1B2547` borders
+- **Primary Purple**: `#5145F5` (interactive buttons, active tabs, progress fills)
+- **Secondary Purple**: `#7668FF` (soft gradient transitions)
+- **Main Background**: `#F6F8FD` (with dark mode support `dark:bg-[#0B1021]`)
+- **Card Backgrounds**: `#FFFFFF` / `dark:bg-[#151D3B]` with card borders `#E8ECF6`
+- **Primary Text**: `#151D3B` (rich navy dark tone)
+- **Secondary Text**: `#69779C` (calm slate blue)
+- **Accent Pastels**: Soft Lavender (`#EFEDFF`), Success Green (`#19A974`), Light Blue (`#EAF3FF`), Soft Peach (`#FFF0E5`)
 
 ---
 
-## Verification Plan
+## Implemented Components & Structure
 
-### Automated / Command Verification
-1. Run linter (`npm run lint`) to verify TypeScript types and syntax.
-2. Compile applet using `compile_applet`.
-3. Test backend route `/api/ai-tutor` via server fetch to verify real Gemini response generation and error handling.
+### 1. Deep Navy Navigation Sidebar (`DashboardSidebar.tsx`)
+- Sleek `#10172D` navy container with brand logo, "StudyWeb" header, and tagline *"From Confusion to Clarity"*.
+- Active tab state highlighted with `#5145F5` and glowing pill effect.
+- Special highlighted "AI" badge next to the AI Tutor tab.
+- Integrated profile settings and logout with soft rose styling.
 
-### Manual / Browser Verification
-1. Open the AI Tutor in the workspace.
-2. Ask a general knowledge question (e.g. *"What is cellular respiration?"*) and verify a real Gemini response is rendered.
-3. Attach a workspace document or image, ask a question about it, and verify grounded answers with citations.
-4. Verify loading indicators during request and red error banners with Retry functionality on API failure.
+### 2. Header & Search Bar (`DashboardHeader.tsx`)
+- Minimalist header with `#E8ECF6` bottom border and breadcrumb trail.
+- Universal search input with smooth focus ring and `#69779C` icon.
+- 1-Click "Ask AI Tutor" action button with `#5145F5` primary styling.
+
+### 3. Hero & Daily Motivational Quote Banner (`DashboardHome.tsx`)
+- Rich dark gradient banner with ambient glowing orbs.
+- Personalized student greeting with time-of-day awareness.
+- Interactive Daily Motivational Quote card with rotating inspirational thoughts and 1-click refresh.
+- High-visibility action triggers: "Launch AI Tutor" and "View All Workspaces".
+
+### 4. Learning Momentum Strip (`DashboardHome.tsx`)
+- 4 clean metric cards:
+  - **Workspaces Count**: Total active subjects and linked materials.
+  - **Daily Study Streak**: `🔥 7 Days` with consistency percentile.
+  - **Clarity Score**: Active recall retention indicator.
+  - **Study Time**: Real-time focus tracker.
+
+### 5. Active Workspaces Showcase (`DashboardHome.tsx`)
+- Interactive card grid presenting the user's workspaces with subject tags, file counts, and direct "Enter Workspace" links.
+- Dashed "+ Create New Workspace" quick launch card.
+
+### 6. Main Dashboard Grid (`DashboardWidgets.tsx`)
+- **Today's Focus & Study Tasks**: Interactive task tracker with completion progress, priority tags, and inline task creator.
+- **AI Study Insights**: Personalized active recall recommendations with a 1-click refresher quiz trigger.
+- **Recent Study Materials**: File type badges, document preview modal, and tutor inquiry shortcut.
+- **Interactive Study Calendar**: Month navigation, study session indicator dots, and date selection.
+- **Knowledge Storage Quota**: Visual progress bar tracking usage out of 1 GB.

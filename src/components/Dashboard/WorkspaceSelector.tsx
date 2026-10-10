@@ -424,113 +424,20 @@ export default function WorkspaceSelector({
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto px-4 md:px-6 text-left">
-      {/* Recent Resources Section */}
-      {(() => {
-        // Gather all resources across all workspaces
-        const allResources = workspaces.flatMap(ws => 
-          ws.files ? ws.files.map(file => ({ ...file, workspaceName: ws.name, workspaceId: ws.id })) : []
-        ).sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime());
 
-        if (allResources.length === 0) return null;
-
-        return (
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-3xl shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
-                  <FileText className="w-4 h-4" />
-                </div>
-                <h3 className="font-black text-slate-800 dark:text-slate-100 tracking-tight text-lg">Recent Study Materials</h3>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {allResources.slice(0, 3).map((file, idx) => (
-                <div key={file.id || idx} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors cursor-pointer group" onClick={() => onSelectWorkspace(workspaces.find(w => w.id === file.workspaceId)!)}>
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                    file.type === 'pdf' ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400' :
-                    file.type === 'video' ? 'bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400' :
-                    file.type === 'audio' ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400' :
-                    file.type === 'url' ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400' :
-                    'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                  }`}>
-                    {file.type === 'pdf' ? <FileText className="w-5 h-5" /> :
-                     file.type === 'video' ? <Video className="w-5 h-5" /> :
-                     file.type === 'audio' ? <Music className="w-5 h-5" /> :
-                     file.type === 'url' ? <Globe className="w-5 h-5" /> :
-                     <FileText className="w-5 h-5" />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{file.name}</h4>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{file.type}</span>
-                      <span className="w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-700" />
-                      <span className="text-[10px] text-slate-400 truncate">{file.workspaceName}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* FILTER RAILS & SEARCH CONTROL PANEL */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 p-6 rounded-[20px] flex flex-col md:flex-row md:items-center justify-between gap-4">
-        {/* Subject scrollable badges */}
-        <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1">
-          {subjects.map((sub) => (
-            <button
-              key={sub}
-              onClick={() => setSelectedSubject(sub)}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all border cursor-pointer ${
-                selectedSubject === sub
-                  ? 'bg-slate-950 border-slate-950 text-white dark:bg-white dark:border-white dark:text-slate-950 shadow-sm'
-                  : 'bg-transparent border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-750 hover:bg-slate-50 dark:hover:bg-slate-950/40'
-              }`}
-            >
-              {sub}
-            </button>
-          ))}
+      {/* WORKSPACE HEADER BAR */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 p-6 rounded-[20px] flex items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">Your Workspaces</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">Manage and organize your study spaces</p>
         </div>
-
-        {/* Search and sorting container */}
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative max-w-xs w-full">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
-            <input 
-              type="text" 
-              placeholder="Search your workspaces..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9.5 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 text-xs font-semibold focus:outline-none focus:border-indigo-500 text-slate-850 dark:text-white"
-            />
-          </div>
-
-          <div className="flex gap-2">
-            <div className="relative flex items-center w-full sm:w-[120px]">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as any)}
-                className="appearance-none w-full pl-3 pr-7 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 text-xs font-extrabold text-slate-600 dark:text-slate-350 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 transition-all cursor-pointer hover:bg-slate-100/50 dark:hover:bg-slate-800/50"
-              >
-                <option value="manual" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">Custom Order</option>
-                <option value="lastOpened" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">Last Opened</option>
-                <option value="name" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">Alphabetical</option>
-                <option value="files" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">Total Documents</option>
-              </select>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 pointer-events-none" />
-            </div>
-
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 font-extrabold rounded-xl text-xs flex items-center gap-1.5 shadow shadow-indigo-600/10 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Create Workspace</span>
-            </button>
-          </div>
-        </div>
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="px-4 py-2.5 bg-indigo-600 text-white hover:bg-indigo-700 font-extrabold rounded-xl text-xs flex items-center gap-1.5 shadow shadow-indigo-600/10 cursor-pointer transition-colors"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Create Workspace</span>
+        </button>
       </div>
 
       {/* WORKSPACE CARDS GRID OR EMPTY STATES */}

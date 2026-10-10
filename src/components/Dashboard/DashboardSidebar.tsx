@@ -75,15 +75,20 @@ export default function DashboardSidebar({
   const renderSidebarContent = (layoutIdPrefix: string, forceExpanded = false) => {
     const isCollapsedState = isCollapsed && !forceExpanded;
     return (
-      <div className="flex flex-col h-full bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border-r border-slate-200 dark:border-slate-800/80">
+      <div className="flex flex-col h-full bg-[#10172D] text-white border-r border-[#1B2547] selection:bg-[#5145F5] selection:text-white">
         {/* Brand Logo Header */}
-        <div className={`flex items-center ${isCollapsedState ? 'justify-center py-5 px-0' : 'justify-between px-6 py-5'} border-b border-slate-200 dark:border-slate-800/60`}>
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden shrink-0">
-              <img src="/logo.png" alt="StudyWeb Logo" className="w-full h-full object-contain" />
+        <div className={`flex items-center ${isCollapsedState ? 'justify-center py-5 px-0' : 'justify-between px-5 py-5'} border-b border-[#1B2547]`}>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#5145F5] to-[#7668FF] flex items-center justify-center p-1.5 shadow-md shadow-[#5145F5]/20 shrink-0">
+              <Sparkles className="w-5 h-5 text-white" />
             </div>
-            <div className={`${isCollapsedState ? 'hidden' : 'block'}`}>
-              <span className="font-extrabold text-lg tracking-tight bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-300 bg-clip-text text-transparent truncate block">StudyWeb</span>
+            <div className={`${isCollapsedState ? 'hidden' : 'block'} min-w-0`}>
+              <div className="flex items-center gap-1.5">
+                <span className="font-extrabold text-[17px] tracking-tight text-white">StudyWeb</span>
+              </div>
+              <p className="text-[10px] font-medium text-[#7E8DAF] tracking-wide truncate">
+                From Confusion to Clarity
+              </p>
             </div>
           </div>
           
@@ -91,7 +96,7 @@ export default function DashboardSidebar({
             {onToggleCollapse && !forceExpanded && (
               <button
                 onClick={onToggleCollapse}
-                className="hidden md:flex p-1.5 rounded-lg text-slate-400 hover:text-slate-800 dark:text-slate-500 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                className="hidden md:flex p-1.5 rounded-lg text-[#7E8DAF] hover:text-white hover:bg-[#182240] transition-colors cursor-pointer"
                 title={isCollapsedState ? "Expand Sidebar" : "Collapse Sidebar"}
               >
                 <ChevronRight className={`w-4 h-4 transition-transform duration-200 ${isCollapsedState ? '' : 'rotate-180'}`} />
@@ -100,7 +105,7 @@ export default function DashboardSidebar({
             
             <button 
               onClick={onClose}
-              className="md:hidden p-1.5 rounded-lg text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="md:hidden p-1.5 rounded-lg text-[#7E8DAF] hover:text-white hover:bg-[#182240] transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -108,7 +113,7 @@ export default function DashboardSidebar({
         </div>
 
         {/* Nav Items (Scrollable) */}
-        <div className="flex-1 overflow-y-auto px-4 py-6 space-y-1.5 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto px-3 py-5 space-y-1 custom-scrollbar">
           {menuItems.filter(i => !i.comingSoon).map((item) => {
             const isActive = activeTab === item.id;
             return (
@@ -118,30 +123,42 @@ export default function DashboardSidebar({
                   setActiveTab(item.id);
                   onClose();
                 }}
-                className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3'} py-2.5 rounded-xl text-sm font-semibold relative isolate group cursor-pointer ${
+                className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3.5'} py-2.5 rounded-xl text-sm font-semibold relative isolate group cursor-pointer transition-all duration-200 ${
                   isActive 
-                    ? 'text-slate-900 dark:text-white' 
-                    : 'text-slate-600 dark:text-slate-300'
+                    ? 'text-white' 
+                    : 'text-[#8E9DBE] hover:text-white hover:bg-[#182240]'
                 }`}
                 title={isCollapsedState ? item.label : undefined}
               >
                 {isActive && (
                   <motion.div
                     layoutId={`activeSidebarTab-${layoutIdPrefix}`}
-                    className="absolute inset-0 bg-slate-100 dark:bg-slate-800/60 rounded-xl -z-10 border border-slate-200/40 dark:border-slate-700/30"
+                    className="absolute inset-0 bg-[#5145F5] rounded-xl -z-10 shadow-lg shadow-[#5145F5]/30"
                     transition={{ type: "spring", stiffness: 380, damping: 30 }}
                   />
                 )}
                 
                 <div className="flex items-center gap-3 relative z-10 min-w-0 flex-1">
-                  <span className={`flex items-center justify-center w-8 h-8 rounded-lg shrink-0 ${item.bgClass} ${item.colorClass}`}>
+                  <span className={`flex items-center justify-center w-7 h-7 rounded-lg shrink-0 transition-colors ${
+                    isActive 
+                      ? 'bg-white/20 text-white' 
+                      : 'bg-[#182240] text-[#8E9DBE] group-hover:text-white group-hover:bg-[#202D52]'
+                  }`}>
                     {item.icon}
                   </span>
-                  <span className={`tracking-tight text-[13px] truncate ${isCollapsedState ? 'hidden' : 'block'} ${isActive ? 'font-extrabold' : ''}`}>{item.label}</span>
+                  <span className={`tracking-tight text-[13px] truncate ${isCollapsedState ? 'hidden' : 'block'} ${isActive ? 'font-bold text-white' : ''}`}>
+                    {item.label}
+                  </span>
                 </div>
 
-                {item.highlight && !isActive && !isCollapsedState && (
-                  <span className="w-2 h-2 rounded-full bg-indigo-500 animate-ping mr-1 shrink-0" />
+                {item.highlight && !isCollapsedState && (
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
+                    isActive 
+                      ? 'bg-white/25 text-white' 
+                      : 'bg-[#5145F5]/20 text-[#A59DFF] border border-[#5145F5]/40'
+                  }`}>
+                    AI
+                  </span>
                 )}
               </button>
             );
@@ -149,7 +166,7 @@ export default function DashboardSidebar({
 
           {menuItems.some(i => i.comingSoon) && !isCollapsedState && (
             <div className="pt-4 pb-1">
-              <span className="px-3 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">In Development</span>
+              <span className="px-3 text-[10px] font-bold text-[#4E5C7D] uppercase tracking-wider">Features</span>
             </div>
           )}
 
@@ -164,20 +181,20 @@ export default function DashboardSidebar({
                   setActiveTab(item.id);
                   onClose();
                 }}
-                className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3'} py-2.5 rounded-xl text-sm font-semibold transition-all relative isolate group ${
-                  isComingSoon ? 'opacity-50 grayscale cursor-not-allowed hover:bg-slate-50/50 dark:hover:bg-slate-800/30' : 'cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800'
-                } text-slate-600 dark:text-slate-300`}
+                className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3.5'} py-2 rounded-xl text-sm font-medium transition-all relative isolate group ${
+                  isComingSoon ? 'opacity-40 grayscale cursor-not-allowed' : 'cursor-pointer hover:bg-[#182240]'
+                } text-[#7080A4]`}
                 title={isCollapsedState ? `${item.label} (Coming Soon)` : undefined}
               >
                 <div className="flex items-center gap-3 relative z-10 min-w-0">
-                  <span className={`flex items-center justify-center w-8 h-8 rounded-lg shrink-0 ${item.bgClass} ${item.colorClass}`}>
+                  <span className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0 bg-[#151D37] text-[#7080A4]">
                     {item.icon}
                   </span>
-                  <span className={`tracking-tight text-[13px] truncate ${isCollapsedState ? 'hidden' : 'block'}`}>{item.label}</span>
+                  <span className={`tracking-tight text-[12.5px] truncate ${isCollapsedState ? 'hidden' : 'block'}`}>{item.label}</span>
                 </div>
 
                 {!isCollapsedState && (
-                  <span className="text-[9px] font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase mr-1 shrink-0">
+                  <span className="text-[9px] font-semibold tracking-wider text-[#57668A] uppercase mr-1 shrink-0">
                     Soon
                   </span>
                 )}
@@ -187,45 +204,38 @@ export default function DashboardSidebar({
         </div>
 
         {/* Footer / Settings & Logout */}
-        <div className={`p-4 border-t border-slate-200 dark:border-slate-800/60 space-y-1.5 bg-slate-50 dark:bg-slate-900 flex flex-col ${isCollapsedState ? 'items-center' : ''}`}>
+        <div className={`p-3.5 border-t border-[#1B2547] space-y-1 bg-[#0D1327] flex flex-col ${isCollapsedState ? 'items-center' : ''}`}>
           <button
             onClick={() => {
               setActiveTab('profile');
               onClose();
             }}
-            className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3'} py-2.5 rounded-xl text-sm font-semibold cursor-pointer relative isolate group ${
+            className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3'} py-2 rounded-xl text-sm font-medium cursor-pointer relative isolate group transition-colors ${
               activeTab === 'profile' 
-                ? 'text-slate-900 dark:text-white' 
-                : 'text-slate-600 dark:text-slate-300'
+                ? 'bg-[#5145F5] text-white shadow-md shadow-[#5145F5]/25 font-bold' 
+                : 'text-[#8E9DBE] hover:text-white hover:bg-[#182240]'
             }`}
             title="Settings"
           >
-            {activeTab === 'profile' && (
-              <motion.div
-                layoutId={`activeSidebarTab-${layoutIdPrefix}`}
-                className="absolute inset-0 bg-slate-100 dark:bg-slate-800/60 rounded-xl -z-10 border border-slate-200/40 dark:border-slate-700/30"
-                transition={{ type: "spring", stiffness: 380, damping: 30 }}
-              />
-            )}
             <div className="flex items-center gap-3 relative z-10 min-w-0">
-              <span className={`flex items-center justify-center w-8 h-8 rounded-lg shrink-0 ${
+              <span className={`flex items-center justify-center w-7 h-7 rounded-lg shrink-0 ${
                 activeTab === 'profile'
-                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-[#182240] text-[#8E9DBE] group-hover:text-white'
               }`}>
                 <Settings className="w-4 h-4" />
               </span>
-              <span className={`tracking-tight text-[13px] relative z-10 truncate ${isCollapsedState ? 'hidden' : 'block'} ${activeTab === 'profile' ? 'font-extrabold' : ''}`}>Settings</span>
+              <span className={`tracking-tight text-[13px] relative z-10 truncate ${isCollapsedState ? 'hidden' : 'block'}`}>Settings</span>
             </div>
           </button>
 
           <button
             onClick={onLogout}
-            className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3'} py-2.5 rounded-xl text-sm font-semibold text-rose-600 dark:text-rose-400 cursor-pointer group`}
+            className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3'} py-2 rounded-xl text-sm font-medium text-rose-400 hover:text-rose-300 hover:bg-rose-950/20 transition-colors cursor-pointer group`}
             title="Logout"
           >
             <div className="flex items-center gap-3 min-w-0">
-              <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 shrink-0">
+              <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-rose-950/30 text-rose-400 shrink-0 group-hover:bg-rose-900/40">
                 <LogOut className="w-4 h-4" />
               </span>
               <span className={`tracking-tight text-[13px] truncate ${isCollapsedState ? 'hidden' : 'block'}`}>Logout</span>

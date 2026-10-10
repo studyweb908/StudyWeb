@@ -686,7 +686,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
             name,
             type,
             size,
-            url: dataUrl || url,
+            url: (url && !url.startsWith('data:')) ? url : (dataUrl && dataUrl.length < 2000 ? dataUrl : ''),
             fileBase64: fileBase64.length > 100000 ? fileBase64.substring(0, 100000) : fileBase64,
             fileMimeType
           })
@@ -733,7 +733,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
                   name,
                   type,
                   size,
-                  url: dataUrl || url,
+                  url: (url && !url.startsWith('data:')) ? url : (dataUrl && dataUrl.length < 2000 ? dataUrl : ''),
                   fileBase64: fileBase64.length > 100000 ? fileBase64.substring(0, 100000) : fileBase64,
                   fileMimeType
                 })

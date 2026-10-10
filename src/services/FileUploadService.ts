@@ -136,6 +136,13 @@ export class FileUploadError extends Error {
    */
   static is104(err: any): boolean {
     if (!err) return false;
+
+    // Hard exclusion: HTTP 400 Bad Request or client errors are NEVER 104 errors
+    const status = err.status || err.statusCode;
+    if (status === 400 || (typeof status === 'number' && status >= 400 && status < 500 && status !== 429)) {
+      return false;
+    }
+
     if (err instanceof FileUploadError && (err.is104 || err.code === 'ERR_NVIDIA_104' || err.status === 104)) {
       return true;
     }
@@ -144,8 +151,20 @@ export class FileUploadError extends Error {
     }
 
     const msg = (err.message || err.technicalDetails || err.error || String(err)).toLowerCase();
+    // Exclude if it's an HTTP 400 or cookie/header issue
+    if (
+      msg.includes('400 bad request') ||
+      msg.includes('http 400') ||
+      msg.includes('header or cookie') ||
+      msg.includes('cookie too large')
+    ) {
+      return false;
+    }
+
     return (
-      msg.includes('104') ||
+      msg.includes('error 104') ||
+      msg.includes('status 104') ||
+      msg.includes('code 104') ||
       msg.includes('nvidia api return error 104') ||
       msg.includes('nvidia api return error') ||
       msg.includes('communication instruction failed') ||
@@ -165,6 +184,39 @@ export class FileUploadError extends Error {
 
     const msg = err?.message || String(err) || 'An unknown error occurred during file upload';
     const status = err?.status || err?.statusCode;
+
+    // Detect Nginx 400 Request Header Or Cookie Too Large
+    if (
+      status === 400 ||
+      msg.toLowerCase().includes('cookie too large') || 
+      msg.toLowerCase().includes('header or cookie') ||
+      msg.toLowerCase().includes('request header')
+    ) {
+      FileUploadService.sanitizeBrowserCookies();
+      return new FileUploadError(`Request Header Or Cookie Too Large (400): ${msg}`, {
+        code: 'ERR_HEADER_TOO_LARGE',
+        status: 400,
+        technicalDetails: `Nginx rejected request due to oversized headers or browser cookies. Cleaned cookie state. Immediately non-retryable.`,
+        retryable: false,
+        userMessage: 'The upload request contains too much session or header data. Please try uploading again.'
+      });
+    }
+
+    // Detect general HTTP 400 Bad Request
+    if (
+      status === 400 ||
+      msg.toLowerCase().includes('http 400') ||
+      msg.toLowerCase().includes('400 bad request') ||
+      msg.toLowerCase().includes('status 400')
+    ) {
+      return new FileUploadError(`HTTP 400 Bad Request: ${msg}`, {
+        code: 'ERR_FILE_VALIDATION',
+        status: 400,
+        technicalDetails: `Server rejected client request with HTTP 400 Bad Request: ${msg}. Non-retryable.`,
+        retryable: false,
+        userMessage: 'The upload request was invalid (HTTP 400). Please check your file and try again.'
+      });
+    }
 
     // Detect NVIDIA API Error 104 (Protocol/Connection Reset)
     if (FileUploadError.is104(err)) {
@@ -189,6 +241,17 @@ export class FileUploadError extends Error {
       });
     }
 
+    // Detect 5xx Server Errors (500, 502, 503, 504)
+    if (status && status >= 500 && status <= 599) {
+      return new FileUploadError(`Server Error (${status}): ${msg}`, {
+        code: status === 503 ? 'ERR_MODEL_OVERLOAD_503' : 'ERR_SERVER_UNKNOWN',
+        status,
+        technicalDetails: `Upstream server returned HTTP ${status}: ${msg}. Eligible for exponential backoff retry.`,
+        retryable: true,
+        userMessage: `The server encountered a temporary error (${status}). Retrying with exponential backoff...`
+      });
+    }
+
     // Detect Supabase Storage / RLS / Auth issues
     if (
       msg.toLowerCase().includes('supabase') ||
@@ -197,11 +260,12 @@ export class FileUploadError extends Error {
       msg.toLowerCase().includes('row-level security') ||
       msg.toLowerCase().includes('failure to fetch workspace file')
     ) {
+      const isNet = msg.toLowerCase().includes('failure to fetch') || msg.toLowerCase().includes('network');
       return new FileUploadError(`Supabase Storage / Database Error: ${msg}`, {
         code: 'ERR_SUPABASE_STORAGE',
         status: status || 403,
         technicalDetails: `Supabase integration issue: ${msg}. Context: ${context || 'workspace_files storage'}.`,
-        retryable: msg.toLowerCase().includes('failure to fetch') || msg.toLowerCase().includes('network'),
+        retryable: isNet,
         userMessage: 'Could not synchronize file with cloud Supabase storage. File content is cached locally in workspace memory for study.'
       });
     }
@@ -224,23 +288,6 @@ export class FileUploadError extends Error {
         technicalDetails: `Network timeout during request: ${context || 'upload transfer'}.`,
         retryable: true,
         userMessage: 'Network upload connection was interrupted. Retrying with exponential backoff...'
-      });
-    }
-
-    // Detect Nginx 400 Request Header Or Cookie Too Large
-    if (
-      status === 400 ||
-      msg.toLowerCase().includes('cookie too large') || 
-      msg.toLowerCase().includes('header or cookie') ||
-      msg.toLowerCase().includes('request header')
-    ) {
-      FileUploadService.sanitizeBrowserCookies();
-      return new FileUploadError(`Request Header Or Cookie Too Large (400): ${msg}`, {
-        code: 'ERR_HEADER_TOO_LARGE',
-        status: 400,
-        technicalDetails: `Nginx rejected request due to oversized headers or browser cookies. Cleaned cookie state and omitted credentials on retry.`,
-        retryable: true,
-        userMessage: 'Browser header or cookie limit reached. Retrying with sanitized credentials...'
       });
     }
 
@@ -308,54 +355,29 @@ export class FileUploadService {
     return FileUploadService.instance;
   }
 
-  /**
-   * Proactively purges bloated or non-essential browser cookies so requests stay well under Nginx limits.
-   */
-  /**
-   * Proactively purges bloated or non-essential browser cookies so requests stay well under Nginx limits.
-   */
   public static sanitizeBrowserCookies(): void {
     if (typeof document === 'undefined' || !document.cookie) return;
     try {
+      // Only purge if total cookie length exceeds 2048 bytes
+      if (document.cookie.length < 2048) return;
+
       const rawCookies = document.cookie.split(';');
+      if (rawCookies.length === 0) return;
+
       const hostname = window.location.hostname;
-      const hostParts = hostname.split('.');
-
-      // Build complete list of domain targets (including domain-less / null)
-      const domains: (string | null)[] = [null, '', hostname];
-      if (hostname.startsWith('.')) {
-        domains.push(hostname.substring(1));
-      } else {
-        domains.push(`.${hostname}`);
-      }
-      if (hostParts.length > 2) {
-        domains.push(`.${hostParts.slice(-2).join('.')}`);
-        domains.push(hostParts.slice(-2).join('.'));
-      }
-
-      // Build complete list of path targets
-      const paths = ['/', '/api', ''];
-
-      const totalLen = document.cookie.length;
-      const forcePurge = totalLen > 400;
+      const paths = ['/', ''];
 
       for (const cookie of rawCookies) {
         const parts = cookie.split('=');
         const name = parts[0]?.trim();
         if (!name) continue;
+        // Do not clear primary active auth token
+        if (name === 'studyweb-auth') continue;
 
-        const val = parts.slice(1).join('=');
-        // Primary access token kept if size is tiny, otherwise purged because auth is in Authorization header
-        const isTinyAccessToken = name === 'sb-access-token' && val.length < 200;
-
-        if (!isTinyAccessToken || forcePurge) {
-          for (const path of paths) {
-            for (const domain of domains) {
-              const domainAttr = domain ? `; domain=${domain}` : '';
-              const pathAttr = path ? `; path=${path}` : '';
-              document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0${pathAttr}${domainAttr}`;
-            }
-          }
+        for (const path of paths) {
+          const pathAttr = path ? `; path=${path}` : '';
+          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0${pathAttr}`;
+          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0${pathAttr}; domain=${hostname}`;
         }
       }
     } catch {
@@ -463,7 +485,9 @@ export class FileUploadService {
     const headers: Record<string, string> = {};
 
     if (customToken) {
-      headers['Authorization'] = `Bearer ${customToken}`;
+      if (customToken.length < 3000) {
+        headers['Authorization'] = `Bearer ${customToken}`;
+      }
       return headers;
     }
 
@@ -471,8 +495,11 @@ export class FileUploadService {
       try {
         const { data: sessionData, error } = await supabase.auth.getSession();
         if (!error && sessionData?.session?.access_token) {
-          headers['Authorization'] = `Bearer ${sessionData.session.access_token}`;
-          this.log('debug', 'Attached Supabase user JWT bearer token to request.');
+          const token = sessionData.session.access_token;
+          if (token && token.length < 3000) {
+            headers['Authorization'] = `Bearer ${token}`;
+            this.log('debug', 'Attached Supabase user JWT bearer token to request.');
+          }
         } else {
           this.log('debug', 'No active Supabase session token found; proceeding with anonymous client.');
         }
@@ -496,33 +523,119 @@ export class FileUploadService {
   }
 
   /**
-   * Tests if an error is eligible for retry (specifically 104 errors, 429 rate limits, 503 overloads, or network drops).
+   * Safely extracts the HTTP status code from diverse error representations.
    */
-  public isRetryable(err: any): boolean {
-    if (!err) return false;
-    if (this.is104Error(err)) return true;
-    if (err instanceof FileUploadError && err.retryable) return true;
+  public getErrorStatus(err: any): number | undefined {
+    if (!err) return undefined;
+    if (typeof err.status === 'number') return err.status;
+    if (typeof err.statusCode === 'number') return err.statusCode;
+    if (typeof err.status === 'string' && !isNaN(Number(err.status))) return Number(err.status);
+    if (typeof err.statusCode === 'string' && !isNaN(Number(err.statusCode))) return Number(err.statusCode);
 
-    const status = err.status || err.statusCode;
-    if (status === 104 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504) {
+    const msg = (err.message || err.technicalDetails || err.error || String(err)).toLowerCase();
+    const statusMatch = msg.match(/\b(http\s*)?([45]\d{2})\b/i);
+    if (statusMatch && statusMatch[2]) {
+      return Number(statusMatch[2]);
+    }
+    return undefined;
+  }
+
+  /**
+   * Detects HTTP 400 Bad Request, oversized header/cookie errors, or client validation failures.
+   */
+  public is400Error(err: any): boolean {
+    if (!err) return false;
+
+    const status = this.getErrorStatus(err);
+    if (status === 400) return true;
+
+    if (err?.code === 'ERR_HEADER_TOO_LARGE' || err?.code === 'ERR_FILE_VALIDATION') {
       return true;
     }
 
-    const msg = (err.message || String(err)).toLowerCase();
+    const msg = (err.message || err.technicalDetails || err.error || String(err)).toLowerCase();
     if (
-      msg.includes('network') ||
-      msg.includes('timeout') ||
-      msg.includes('failed to fetch') ||
-      msg.includes('fetch failed') ||
-      msg.includes('econnreset') ||
-      msg.includes('socket hang up') ||
-      msg.includes('temporarily unavailable') ||
-      msg.includes('failure to fetch workspace file')
+      msg.includes('400 bad request') ||
+      msg.includes('http 400') ||
+      msg.includes('status 400') ||
+      msg.includes('status: 400') ||
+      msg.includes('cookie too large') ||
+      msg.includes('header or cookie') ||
+      msg.includes('request header too large') ||
+      msg.includes('request header or cookie too large')
     ) {
       return true;
     }
 
     return false;
+  }
+
+  /**
+   * Identifies 5xx server errors and low-level network errors eligible for exponential backoff retry.
+   */
+  public isNetworkOr5xxError(err: any): boolean {
+    if (!err) return false;
+
+    // Hard stop: HTTP 400 or other 4xx errors are never retried
+    if (this.is400Error(err)) return false;
+
+    const status = this.getErrorStatus(err);
+    if (status) {
+      // 5xx Server Errors (500, 502, 503, 504) are eligible for retry
+      if (status >= 500 && status <= 599) return true;
+      // 429 Rate limit is retryable
+      if (status === 429) return true;
+      // All other 4xx (400, 401, 403, 404, 410, 422) are non-retryable client errors
+      if (status >= 400 && status < 500) return false;
+    }
+
+    // NVIDIA 104 Connection Reset
+    if (this.is104Error(err)) return true;
+
+    // Low-level network disconnects and timeouts
+    const msg = (err.message || err.technicalDetails || err.error || String(err)).toLowerCase();
+    return (
+      err.name === 'AbortError' ||
+      msg.includes('network') ||
+      msg.includes('timeout') ||
+      msg.includes('timed out') ||
+      msg.includes('failed to fetch') ||
+      msg.includes('fetch failed') ||
+      msg.includes('econnreset') ||
+      msg.includes('econnrefused') ||
+      msg.includes('etimedout') ||
+      msg.includes('socket hang up') ||
+      msg.includes('connection reset') ||
+      msg.includes('temporarily unavailable') ||
+      msg.includes('service unavailable') ||
+      msg.includes('gateway timeout') ||
+      msg.includes('bad gateway') ||
+      msg.includes('failure to fetch workspace file')
+    );
+  }
+
+  /**
+   * Tests if an error is eligible for retry.
+   * Smarter retry strategy:
+   * - Immediately aborts for HTTP 400 errors and client validation/request errors.
+   * - Only applies exponential backoff to 5xx server errors or network-level errors.
+   */
+  public isRetryable(err: any): boolean {
+    if (!err) return false;
+
+    // 1. Immediately abort on HTTP 400 or client validation error
+    if (this.is400Error(err)) return false;
+
+    // Respect explicit non-retryable flag
+    if (err instanceof FileUploadError && !err.retryable) return false;
+
+    const status = this.getErrorStatus(err);
+    if (status && status >= 400 && status < 500 && status !== 429) {
+      return false;
+    }
+
+    // 2. Only 5xx or network-level errors qualify for exponential backoff
+    return this.isNetworkOr5xxError(err);
   }
 
   /**
@@ -549,8 +662,10 @@ export class FileUploadService {
   }
 
   /**
-   * Robust generic retry execution engine with exponential backoff,
-   * specially tuned to mitigate transient NVIDIA API 104 errors and socket resets.
+   * Robust generic retry execution engine with exponential backoff.
+   * Smarter retry strategy:
+   * - Immediately aborts retries for HTTP 400 errors to stop pointless request cycles.
+   * - Only applies exponential backoff to 5xx or network-level errors.
    */
   public async executeWithRetry<T>(
     operation: (attempt: number) => Promise<T>,
@@ -586,8 +701,20 @@ export class FileUploadService {
           });
         }
 
-        const is104 = this.is104Error(rawError);
         const parsedError = FileUploadError.fromError(rawError, `${context} [attempt ${attempt}]`);
+
+        // SMARTER RETRY STRATEGY: Immediately abort retries for HTTP 400 errors
+        const is400 = this.is400Error(rawError) || this.is400Error(parsedError);
+        if (is400) {
+          this.log(
+            'error',
+            `🛑 [${context}] HTTP 400 error detected on attempt ${attempt}. Immediately aborting retries to stop pointless request cycles: ${parsedError.message}`,
+            { code: parsedError.code, status: 400, is104: false, retryable: false }
+          );
+          throw parsedError;
+        }
+
+        const is104 = this.is104Error(rawError) || this.is104Error(parsedError);
 
         let canRetry = false;
         if (config.target104Only) {
@@ -595,7 +722,8 @@ export class FileUploadService {
         } else if (config.retryCondition) {
           canRetry = config.retryCondition(parsedError, attempt);
         } else {
-          canRetry = is104 || this.isRetryable(parsedError);
+          // Only apply exponential backoff to 5xx or network-level errors
+          canRetry = this.isRetryable(parsedError);
         }
 
         const retriesExhausted = attempt > config.maxRetries;
@@ -608,21 +736,21 @@ export class FileUploadService {
           throw parsedError;
         }
 
-        // Calculate jittered exponential backoff delay
+        // Calculate jittered exponential backoff delay for 5xx or network-level errors
         const delayMs = this.calculateBackoffDelay(attempt, config);
         const errorDesc = is104
           ? 'NVIDIA/Meta Llama 104 Connection Reset (transient socket hang up)'
-          : `[${parsedError.code}] ${parsedError.message}`;
+          : `[${parsedError.code || 'HTTP_' + (parsedError.status || 'ERR')}] ${parsedError.message}`;
 
         this.log(
           'warn',
-          `⚠️ [${context}] Attempt ${attempt}/${config.maxRetries + 1} failed with ${errorDesc}. Applying exponential backoff: waiting ${delayMs}ms before retry ${attempt + 1}...`,
+          `⚠️ [${context}] Attempt ${attempt}/${config.maxRetries + 1} encountered transient 5xx/network error: ${errorDesc}. Applying exponential backoff: waiting ${delayMs}ms before retry ${attempt + 1}...`,
           { attempt, delayMs, maxRetries: config.maxRetries, is104 }
         );
 
         const retryNotice = is104
           ? `⚠️ NVIDIA/Llama API 104 reset detected. Retrying in ${(delayMs / 1000).toFixed(1)}s (Attempt ${attempt + 1} of ${config.maxRetries + 1})...`
-          : `⚠️ Transient issue detected. Retrying in ${(delayMs / 1000).toFixed(1)}s (Attempt ${attempt + 1} of ${config.maxRetries + 1})...`;
+          : `⚠️ Transient server/network issue detected. Retrying in ${(delayMs / 1000).toFixed(1)}s (Attempt ${attempt + 1} of ${config.maxRetries + 1})...`;
 
         if (options?.onRetryNotice) {
           options.onRetryNotice(retryNotice, attempt, delayMs, parsedError);
@@ -824,7 +952,15 @@ export class FileUploadService {
         }
       } else {
         const errStatus = statusRes.status;
-        if (errStatus === 104 || errStatus >= 500) {
+        if (errStatus === 400) {
+          throw new FileUploadError(`Polling received HTTP 400 Bad Request for document ${documentId}`, {
+            code: 'ERR_FILE_VALIDATION',
+            status: 400,
+            retryable: false,
+            userMessage: 'Document processing status request was invalid (HTTP 400).'
+          });
+        }
+        if (errStatus === 104 || (errStatus >= 500 && errStatus <= 599)) {
           consecutiveErrors++;
           const backoffDelay = this.calculateBackoffDelay(consecutiveErrors, {
             initialDelayMs: 1200,
@@ -834,6 +970,13 @@ export class FileUploadService {
           });
           this.log('warn', `Polling received HTTP ${errStatus}. Backing off ${backoffDelay}ms...`);
           await new Promise((resolve) => setTimeout(resolve, backoffDelay));
+        } else {
+          throw new FileUploadError(`Polling failed with HTTP ${errStatus} for document ${documentId}`, {
+            code: 'ERR_SERVER_UNKNOWN',
+            status: errStatus,
+            retryable: false,
+            userMessage: `Document processing status request returned HTTP ${errStatus}.`
+          });
         }
       }
     }
@@ -933,7 +1076,10 @@ export class FileUploadService {
 
         if (!response.ok) {
           const errText = await response.text();
-          throw new Error(`Server returned HTTP ${response.status}: ${errText}`);
+          const err: any = new Error(`Server returned HTTP ${response.status}: ${errText}`);
+          err.status = response.status;
+          err.statusCode = response.status;
+          throw err;
         }
 
         const contentType = response.headers.get('content-type') || '';
@@ -1139,7 +1285,10 @@ export class FileUploadService {
 
           if (!response.ok) {
             const errorBody = await response.text();
-            throw new Error(`Server returned HTTP ${response.status}: ${errorBody}`);
+            const err: any = new Error(`Server returned HTTP ${response.status}: ${errorBody}`);
+            err.status = response.status;
+            err.statusCode = response.status;
+            throw err;
           }
 
           const contentType = response.headers.get('content-type') || '';

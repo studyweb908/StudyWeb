@@ -312,6 +312,8 @@ export default function App() {
     const handleLoginSuccess = () => {
       setIsLoggedIn(true);
       localStorage.setItem('studyweb_is_logged_in', 'true');
+      const prevIdx = parseInt(localStorage.getItem('studyweb_banner_quote_index') || '0', 10);
+      localStorage.setItem('studyweb_banner_quote_index', String((prevIdx + 1) % 21));
       setActiveTab('dashboard');
       setShowLoginToast(true);
     };
@@ -319,6 +321,8 @@ export default function App() {
     const handleSignupSuccess = () => {
       setIsLoggedIn(true);
       localStorage.setItem('studyweb_is_logged_in', 'true');
+      const prevIdx = parseInt(localStorage.getItem('studyweb_banner_quote_index') || '0', 10);
+      localStorage.setItem('studyweb_banner_quote_index', String((prevIdx + 1) % 21));
       setActiveTab('dashboard');
       setShowOnboarding(true);
     };

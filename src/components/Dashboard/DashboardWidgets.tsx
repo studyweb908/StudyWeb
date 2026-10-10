@@ -35,17 +35,17 @@ export function CalendarWidget() {
   };
 
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300 flex flex-col h-full w-full overflow-hidden">
+    <div className="bg-white dark:bg-[#151D3B] border border-[#E8ECF6] dark:border-[#222E54] rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300 flex flex-col h-full w-full overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-        <h3 className="font-bold text-base text-slate-900 dark:text-white tracking-tight">Calendar</h3>
-        <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-800/50 rounded-lg p-1">
-          <button onClick={prevMonth} aria-label="Previous Month" className="focus-visible:ring-2 focus-visible:ring-slate-900 dark:focus-visible:ring-white outline-none p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-md shadow-sm transition-colors cursor-pointer text-slate-600 dark:text-slate-300">
+        <h3 className="font-bold text-base text-[#151D3B] dark:text-white tracking-tight">Study Calendar</h3>
+        <div className="flex items-center gap-1 bg-[#F6F8FD] dark:bg-slate-800/60 rounded-xl p-1 border border-[#E8ECF6] dark:border-[#222E54]">
+          <button onClick={prevMonth} aria-label="Previous Month" className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg shadow-xs transition-colors cursor-pointer text-[#69779C] dark:text-slate-300">
             <ChevronLeft className="w-3.5 h-3.5" />
           </button>
-          <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 min-w-16 text-center uppercase tracking-wider">
+          <span className="text-[11px] font-bold text-[#151D3B] dark:text-slate-200 min-w-16 text-center uppercase tracking-wider">
             {monthNames[currentDate.getMonth()].slice(0, 3)} {currentDate.getFullYear()}
           </span>
-          <button onClick={nextMonth} aria-label="Next Month" className="focus-visible:ring-2 focus-visible:ring-slate-900 dark:focus-visible:ring-white outline-none p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-md shadow-sm transition-colors cursor-pointer text-slate-600 dark:text-slate-300">
+          <button onClick={nextMonth} aria-label="Next Month" className="p-1.5 hover:bg-white dark:hover:bg-slate-700 rounded-lg shadow-xs transition-colors cursor-pointer text-[#69779C] dark:text-slate-300">
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -53,7 +53,7 @@ export function CalendarWidget() {
 
       <div className="grid grid-cols-7 gap-1 mb-2">
         {daysOfWeek.map(day => (
-          <div key={day} className="text-center text-[10px] font-bold text-slate-400 uppercase tracking-wider py-1">
+          <div key={day} className="text-center text-[10px] font-bold text-[#69779C] uppercase tracking-wider py-1">
             {day}
           </div>
         ))}
@@ -72,15 +72,16 @@ export function CalendarWidget() {
           return (
             <motion.button
               key={day}
-              whileHover={{ scale: 1.1 }}
+              whileHover={{ scale: 1.08 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => setSelectedDate(day)}
-              aria-label={`Select date ${day}`} className={`relative h-8 rounded-lg focus-visible:ring-2 focus-visible:ring-slate-900 dark:focus-visible:ring-white outline-none flex items-center justify-center text-xs font-semibold cursor-pointer transition-colors ${
+              aria-label={`Select date ${day}`} 
+              className={`relative h-8 rounded-xl outline-none flex items-center justify-center text-xs font-semibold cursor-pointer transition-all ${
                 isSelected 
-                  ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm' 
+                  ? 'bg-[#5145F5] text-white shadow-md shadow-[#5145F5]/30 font-bold' 
                   : isToday
-                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-bold border border-slate-200 dark:border-slate-700'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                    ? 'bg-[#EFEDFF] text-[#5145F5] font-black border border-[#5145F5]/30'
+                    : 'text-[#151D3B] dark:text-slate-300 hover:bg-[#F6F8FD] dark:hover:bg-slate-800/50'
               }`}
             >
               {day}
@@ -90,9 +91,9 @@ export function CalendarWidget() {
                     <span 
                       key={idx} 
                       className={`w-1 h-1 rounded-full ${
-                        isSelected ? 'bg-white/80 dark:bg-slate-900/80' : 
-                        type === 'study' ? 'bg-indigo-400' : 
-                        type === 'revision' ? 'bg-emerald-400' : 'bg-amber-400'
+                        isSelected ? 'bg-white/90' : 
+                        type === 'study' ? 'bg-[#5145F5]' : 
+                        type === 'revision' ? 'bg-[#19A974]' : 'bg-[#F59E0B]'
                       }`}
                     />
                   ))}
@@ -111,40 +112,85 @@ export function CalendarWidget() {
 // -----------------------------------------
 export function TodayTasksCard() {
   const [tasks, setTasks] = useState([
-    { id: '1', title: 'Review Cell Biology Flashcards', completed: true },
-    { id: '2', title: 'Read Chapter 4', completed: false },
-    { id: '3', title: 'Solve 10 Biology MCQs', completed: false },
-    { id: '4', title: 'Watch Photosynthesis Lecture', completed: false },
+    { id: '1', title: 'Review Cell Biology Flashcards', completed: true, tag: 'High' },
+    { id: '2', title: 'Read Chapter 4 Notes', completed: false, tag: 'Medium' },
+    { id: '3', title: 'Complete Practice Quiz on Photosynthesis', completed: false, tag: 'High' },
+    { id: '4', title: 'Ask AI Tutor about Krebs Cycle', completed: false, tag: 'Low' },
   ]);
+
+  const [newTaskInput, setNewTaskInput] = useState('');
+  const [showInput, setShowInput] = useState(false);
 
   const toggleTask = (id: string) => {
     setTasks(tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
+  };
+
+  const handleAddTask = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTaskInput.trim()) return;
+    setTasks([...tasks, {
+      id: Date.now().toString(),
+      title: newTaskInput.trim(),
+      completed: false,
+      tag: 'Medium'
+    }]);
+    setNewTaskInput('');
+    setShowInput(false);
   };
 
   const completedCount = tasks.filter(t => t.completed).length;
   const progress = Math.round((completedCount / Math.max(tasks.length, 1)) * 100);
 
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300 flex flex-col h-full group relative overflow-hidden">
-      <div className="flex items-center justify-between gap-2 mb-6">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 bg-slate-50 dark:bg-slate-800/50 rounded-md border border-slate-100 dark:border-slate-700/50 text-slate-600 dark:text-slate-400">
+    <div className="bg-white dark:bg-[#151D3B] border border-[#E8ECF6] dark:border-[#222E54] rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300 flex flex-col h-full group relative overflow-hidden">
+      <div className="flex items-center justify-between gap-2 mb-5">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 bg-[#EFEDFF] dark:bg-[#5145F5]/20 rounded-xl text-[#5145F5]">
             <CheckSquare className="w-4 h-4" />
           </div>
-          <h3 className="font-bold text-base text-slate-900 dark:text-white tracking-tight">Today's Tasks</h3>
+          <div>
+            <h3 className="font-bold text-base text-[#151D3B] dark:text-white tracking-tight">Today's Focus</h3>
+            <p className="text-[11px] text-[#69779C] font-medium">Daily study goals & tasks</p>
+          </div>
         </div>
+
+        <button
+          onClick={() => setShowInput(!showInput)}
+          className="text-xs font-bold text-[#5145F5] hover:text-[#4336E0] bg-[#EFEDFF] hover:bg-[#E3E0FF] px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+        >
+          {showInput ? 'Cancel' : '+ Add'}
+        </button>
       </div>
+
+      {showInput && (
+        <form onSubmit={handleAddTask} className="mb-4 flex gap-2">
+          <input
+            type="text"
+            value={newTaskInput}
+            onChange={(e) => setNewTaskInput(e.target.value)}
+            placeholder="What will you learn next?..."
+            className="flex-1 text-xs px-3 py-2 rounded-xl border border-[#E8ECF6] bg-[#F6F8FD] text-[#151D3B] focus:outline-none focus:border-[#5145F5]"
+            autoFocus
+          />
+          <button
+            type="submit"
+            className="px-3 py-2 bg-[#5145F5] text-white text-xs font-bold rounded-xl cursor-pointer hover:bg-[#4336E0]"
+          >
+            Add
+          </button>
+        </form>
+      )}
 
       {tasks.length > 0 ? (
         <>
-          <div className="mb-6">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Progress</span>
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{completedCount} / {tasks.length} Completed</span>
+          <div className="mb-5">
+            <div className="flex justify-between items-center mb-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#69779C]">Progress</span>
+              <span className="text-xs font-bold text-[#5145F5]">{completedCount} of {tasks.length} Completed ({progress}%)</span>
             </div>
-            <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-[#F6F8FD] dark:bg-slate-800 rounded-full overflow-hidden border border-[#E8ECF6]/60 dark:border-slate-700">
               <motion.div 
-                className="h-full bg-indigo-500 rounded-full"
+                className="h-full bg-gradient-to-r from-[#5145F5] to-[#7668FF] rounded-full"
                 initial={{ width: 0 }}
                 animate={{ width: `${progress}%` }}
                 transition={{ duration: 0.8, type: 'spring' }}
@@ -152,7 +198,7 @@ export function TodayTasksCard() {
             </div>
           </div>
 
-          <div className="space-y-2.5 flex-1">
+          <div className="space-y-2 flex-1 overflow-y-auto max-h-[220px] pr-1">
             <AnimatePresence>
               {tasks.map(task => (
                 <motion.div
@@ -161,23 +207,36 @@ export function TodayTasksCard() {
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.9 }}
-                  role="button" tabIndex={0} aria-label={`Toggle task ${task.title}`} onKeyDown={(e) => e.key === "Enter" && toggleTask(task.id)} className={`group/item flex items-center focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 ${
+                  role="button" 
+                  tabIndex={0} 
+                  aria-label={`Toggle task ${task.title}`} 
+                  onKeyDown={(e) => e.key === "Enter" && toggleTask(task.id)} 
+                  className={`group/item flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all duration-200 ${
                     task.completed 
-                      ? 'bg-slate-50/50 dark:bg-slate-800/20 border-slate-100 dark:border-slate-800/40 text-slate-400 dark:text-slate-500 line-through' 
-                      : 'bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-700/60 hover:border-slate-300 dark:hover:border-slate-600 shadow-sm text-slate-700 dark:text-slate-200'
+                      ? 'bg-[#F6F8FD]/60 dark:bg-slate-800/20 border-[#E8ECF6] text-[#69779C] line-through' 
+                      : 'bg-white dark:bg-slate-800/40 border-[#E8ECF6] dark:border-slate-700 hover:border-[#5145F5]/40 shadow-2xs text-[#151D3B] dark:text-slate-100'
                   }`}
                   onClick={() => toggleTask(task.id)}
                 >
                   <div className="flex-shrink-0 relative flex items-center justify-center w-5 h-5">
                     {task.completed ? (
-                      <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="text-white bg-indigo-500 rounded flex items-center justify-center w-4 h-4">
+                      <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="text-white bg-[#5145F5] rounded-md flex items-center justify-center w-4 h-4 shadow-2xs shadow-[#5145F5]/30">
                         <Check className="w-3 h-3 stroke-[3]" />
                       </motion.div>
                     ) : (
-                      <div className="w-4 h-4 border-2 border-slate-300 dark:border-slate-600 rounded group-hover/item:border-indigo-400 transition-colors" />
+                      <div className="w-4 h-4 border-2 border-[#CBD5E1] dark:border-slate-600 rounded-md group-hover/item:border-[#5145F5] transition-colors" />
                     )}
                   </div>
-                  <span className="text-[13px] font-medium truncate select-none flex-1 min-w-0">{task.title}</span>
+                  <span className="text-[12.5px] font-semibold truncate select-none flex-1 min-w-0">{task.title}</span>
+                  {task.tag && (
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md ${
+                      task.tag === 'High' ? 'bg-[#FFF0E5] text-[#D97706]' :
+                      task.tag === 'Medium' ? 'bg-[#EFEDFF] text-[#5145F5]' :
+                      'bg-[#EAF3FF] text-[#2563EB]'
+                    }`}>
+                      {task.tag}
+                    </span>
+                  )}
                 </motion.div>
               ))}
             </AnimatePresence>
@@ -185,10 +244,10 @@ export function TodayTasksCard() {
         </>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center py-6 text-center">
-          <div className="w-12 h-12 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mb-3">
-             <CheckSquare className="w-5 h-5 text-slate-400" />
+          <div className="w-10 h-10 bg-[#EFEDFF] rounded-full flex items-center justify-center mb-2 text-[#5145F5]">
+             <CheckSquare className="w-5 h-5" />
           </div>
-          <p className="text-sm font-medium text-slate-500">You've completed all your tasks for today. Great job!</p>
+          <p className="text-xs font-semibold text-[#69779C]">You've completed all your tasks for today. Great job!</p>
         </div>
       )}
     </div>
@@ -198,32 +257,57 @@ export function TodayTasksCard() {
 // -----------------------------------------
 // 3. AI Insights Widget
 // -----------------------------------------
-export function AIInsightsCard() {
+export function AIInsightsCard({ onStartRefresher }: { onStartRefresher?: () => void }) {
   return (
-    <div className="relative overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 shadow-sm hover:shadow-md transition-all duration-300 flex flex-col justify-between h-full group">
+    <div className="relative overflow-hidden bg-white dark:bg-[#151D3B] border border-[#E8ECF6] dark:border-[#222E54] rounded-2xl p-6 sm:p-7 shadow-sm hover:shadow-md transition-all duration-300 flex flex-col justify-between h-full group">
       <div>
-        <div className="flex items-center gap-3 mb-6 relative z-10">
-          <div className="p-2 bg-indigo-50 dark:bg-indigo-500/10 rounded-lg text-indigo-600 dark:text-indigo-400">
-            <Sparkles className="w-4 h-4" />
+        <div className="flex items-center justify-between mb-4 relative z-10">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-[#EFEDFF] dark:bg-[#5145F5]/20 rounded-xl text-[#5145F5]">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="font-bold text-base text-[#151D3B] dark:text-white tracking-tight">AI Study Insights</h3>
+              <p className="text-[11px] text-[#69779C] font-medium">Personalized recommendations</p>
+            </div>
           </div>
-          <h3 className="font-bold text-base text-slate-900 dark:text-white tracking-tight">AI Insights</h3>
+          <span className="text-[10px] font-bold bg-[#EFEDFF] text-[#5145F5] px-2 py-0.5 rounded-full border border-[#5145F5]/20">
+            Active Recall
+          </span>
         </div>
 
-        <div className="space-y-4 relative z-10">
-          <p className="text-[15px] text-slate-600 dark:text-slate-300 leading-relaxed">
-            You struggled with <strong className="text-slate-900 dark:text-white font-semibold">Mitochondria</strong> yesterday during your biology quiz.
-          </p>
+        <div className="space-y-3 relative z-10 mt-2">
+          <div className="p-3.5 rounded-xl bg-[#F6F8FD] dark:bg-slate-800/40 border border-[#E8ECF6] dark:border-slate-700">
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className="w-2 h-2 rounded-full bg-[#19A974]" />
+              <span className="text-[11px] font-bold text-[#19A974] uppercase tracking-wide">High Retention</span>
+            </div>
+            <p className="text-xs text-[#151D3B] dark:text-slate-200 font-semibold">
+              Mastery in <strong>Cell Structure & Organelles</strong> (92%)
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-[#FFF0E5]/60 dark:bg-amber-950/20 border border-amber-200/50 dark:border-amber-900/30">
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className="w-2 h-2 rounded-full bg-[#D97706]" />
+              <span className="text-[11px] font-bold text-[#D97706] uppercase tracking-wide">Suggested Review</span>
+            </div>
+            <p className="text-xs text-[#151D3B] dark:text-slate-200 font-semibold">
+              You had questions on <strong>Krebs Cycle & ATP synthesis</strong> yesterday. Recommended: 5-minute refresher quiz.
+            </p>
+          </div>
         </div>
       </div>
 
-      <div className="mt-8 relative z-10">
+      <div className="mt-5 relative z-10">
         <motion.button
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
-          className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold shadow-sm transition-all duration-300 cursor-pointer group/btn"
+          onClick={onStartRefresher}
+          className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-[#5145F5] hover:bg-[#4336E0] text-white rounded-xl text-xs font-bold shadow-md shadow-[#5145F5]/20 transition-all duration-300 cursor-pointer group/btn"
         >
-          <span>Start Refresher Quiz</span>
-          <ArrowRight className="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform" />
+          <span>Start 5-Min Refresher Quiz</span>
+          <ArrowRight className="w-3.5 h-3.5 group-hover/btn:translate-x-0.5 transition-transform" />
         </motion.button>
       </div>
     </div>
@@ -442,47 +526,50 @@ export function RecentStudyMaterials({
   };
 
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300 flex flex-col h-full group relative overflow-hidden">
+    <div className="bg-white dark:bg-[#151D3B] border border-[#E8ECF6] dark:border-[#222E54] rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300 flex flex-col h-full group relative overflow-hidden">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="font-bold text-base text-slate-900 dark:text-white tracking-tight">Recent Study Materials</h3>
+        <div>
+          <h3 className="font-bold text-base text-[#151D3B] dark:text-white tracking-tight">Recent Study Materials</h3>
+          <p className="text-[11px] text-[#69779C] font-medium">Uploaded notes, documents & guides</p>
+        </div>
         <button 
           onClick={() => setActiveTab && setActiveTab('workspaces')}
-          className="text-[11px] text-slate-500 dark:text-slate-400 font-bold hover:text-slate-700 dark:hover:text-slate-200 uppercase tracking-wider cursor-pointer transition-colors"
+          className="text-[11px] text-[#5145F5] dark:text-[#7668FF] font-bold hover:underline uppercase tracking-wider cursor-pointer transition-colors"
         >
           View All
         </button>
       </div>
       
       <div className="flex items-center justify-between gap-4 mb-4">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide flex-1">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-hide flex-1">
           {['All', 'Documents', 'Images', 'Links'].map(f => (
             <button
               key={f}
               onClick={() => setFilter(f as any)}
-              className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors ${
+              className={`px-3 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
                 filter === f
-                  ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'
+                  ? 'bg-[#EFEDFF] text-[#5145F5] font-bold border border-[#5145F5]/30 dark:bg-[#5145F5]/20 dark:text-[#7668FF]'
+                  : 'bg-[#F6F8FD] text-[#69779C] hover:bg-[#E8ECF6] dark:bg-slate-800 dark:text-slate-300'
               }`}
             >
               {f}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg shrink-0">
+        <div className="flex items-center gap-1 bg-[#F6F8FD] dark:bg-slate-800 p-1 rounded-xl shrink-0 border border-[#E8ECF6] dark:border-slate-700">
           <button 
             onClick={() => setViewMode('list')}
-            className={`p-1.5 rounded-md transition-colors cursor-pointer ${viewMode === 'list' ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-800 dark:text-slate-200' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'}`}
+            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${viewMode === 'list' ? 'bg-white dark:bg-slate-700 shadow-xs text-[#5145F5] dark:text-white font-bold' : 'text-[#69779C] hover:text-[#151D3B] dark:text-slate-400'}`}
             title="List View"
           >
-            <Layout className="w-4 h-4" />
+            <Layout className="w-3.5 h-3.5" />
           </button>
           <button 
             onClick={() => setViewMode('grid')}
-            className={`p-1.5 rounded-md transition-colors cursor-pointer ${viewMode === 'grid' ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-800 dark:text-slate-200' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'}`}
+            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${viewMode === 'grid' ? 'bg-white dark:bg-slate-700 shadow-xs text-[#5145F5] dark:text-white font-bold' : 'text-[#69779C] hover:text-[#151D3B] dark:text-slate-400'}`}
             title="Grid View"
           >
-            <Grid className="w-4 h-4" />
+            <Grid className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
@@ -497,19 +584,19 @@ export function RecentStudyMaterials({
       {loading ? (
         <div className={`flex-1 animate-pulse ${viewMode === 'grid' ? 'grid grid-cols-2 gap-4' : 'space-y-2'}`}>
           {[1, 2, 3, 4].map(i => (
-            <div key={i} className={`rounded-xl bg-slate-50 dark:bg-slate-800/50 ${viewMode === 'grid' ? 'p-4 aspect-square flex flex-col justify-center items-center' : 'flex items-center justify-between p-3'}`}>
+            <div key={i} className={`rounded-xl bg-[#F6F8FD] dark:bg-slate-800/50 ${viewMode === 'grid' ? 'p-4 aspect-square flex flex-col justify-center items-center' : 'flex items-center justify-between p-3'}`}>
               <div className={`${viewMode === 'grid' ? 'flex flex-col items-center gap-3 w-full' : 'flex items-center gap-3 w-full'}`}>
-                <div className={`${viewMode === 'grid' ? 'w-12 h-12 rounded-xl' : 'w-10 h-10 rounded-lg'} bg-slate-200 dark:bg-slate-700`}></div>
+                <div className={`${viewMode === 'grid' ? 'w-12 h-12 rounded-xl' : 'w-10 h-10 rounded-lg'} bg-[#E8ECF6] dark:bg-slate-700`}></div>
                 <div className={`space-y-2 ${viewMode === 'grid' ? 'w-full text-center flex flex-col items-center' : ''}`}>
-                  <div className="w-32 h-2.5 bg-slate-200 dark:bg-slate-700 rounded-full"></div>
-                  <div className="w-20 h-2 bg-slate-200 dark:bg-slate-700 rounded-full"></div>
+                  <div className="w-32 h-2.5 bg-[#E8ECF6] dark:bg-slate-700 rounded-full"></div>
+                  <div className="w-20 h-2 bg-[#E8ECF6] dark:bg-slate-700 rounded-full"></div>
                 </div>
               </div>
             </div>
           ))}
         </div>
       ) : recentFiles.length > 0 ? (
-        <div className={`flex-1 ${viewMode === 'grid' ? 'grid grid-cols-2 gap-3' : 'space-y-2'}`}>
+        <div className={`flex-1 overflow-y-auto max-h-[260px] pr-1 ${viewMode === 'grid' ? 'grid grid-cols-2 gap-3' : 'space-y-2'}`}>
           {recentFiles.map((file) => {
             const { icon: Icon, color, bg } = getFileStyle(file.type);
             
@@ -518,28 +605,16 @@ export function RecentStudyMaterials({
                 <div 
                   key={file.id} 
                   onClick={() => handleOpenFile(file.workspaceId, file)}
-                  className="flex flex-col items-center justify-center p-4 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 group/item gap-3 cursor-pointer text-center relative overflow-hidden"
+                  className="flex flex-col items-center justify-center p-4 rounded-xl bg-[#F6F8FD]/60 dark:bg-slate-800/40 hover:bg-white dark:hover:bg-slate-800 transition-all border border-[#E8ECF6] dark:border-slate-800 hover:border-[#5145F5]/30 group/item gap-2.5 cursor-pointer text-center relative overflow-hidden shadow-2xs hover:shadow-xs"
                 >
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${bg} ${color}`}>
-                    <Icon className="w-6 h-6 group-hover/item:scale-110 transition-transform duration-300" />
+                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${bg} ${color}`}>
+                    <Icon className="w-5 h-5 group-hover/item:scale-110 transition-transform duration-300" />
                   </div>
                   <div className="min-w-0 w-full px-1">
-                    <p className="text-[12px] font-bold text-slate-800 dark:text-slate-200 truncate group-hover/item:text-indigo-600 dark:group-hover/item:text-indigo-400 transition-colors">{file.name}</p>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium tracking-wide mt-1">
+                    <p className="text-[12px] font-bold text-[#151D3B] dark:text-slate-200 truncate group-hover/item:text-[#5145F5] transition-colors">{file.name}</p>
+                    <p className="text-[10px] text-[#69779C] font-medium tracking-wide mt-0.5">
                       {new Date(file.uploadDate).toLocaleDateString()}
                     </p>
-                  </div>
-                  <div className="absolute inset-0 bg-white/60 dark:bg-slate-900/80 backdrop-blur-sm opacity-0 group-hover/item:opacity-100 transition-opacity flex items-center justify-center p-2">
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      disabled
-                      onClick={(e) => { e.stopPropagation(); }}
-                      className="flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-xl bg-indigo-50/50 dark:bg-indigo-900/30 text-indigo-700/50 dark:text-indigo-300/50 text-xs font-bold transition-all cursor-not-allowed w-full opacity-60 grayscale"
-                    >
-                      <Sparkles className="w-4 h-4" />
-                      <span>Quiz</span>
-                    </motion.button>
                   </div>
                 </div>
               );
@@ -549,41 +624,42 @@ export function RecentStudyMaterials({
               <div 
                 key={file.id} 
                 onClick={() => handleOpenFile(file.workspaceId, file)}
-                className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 group/item gap-3 cursor-pointer min-w-0"
+                className="flex items-center justify-between p-3 rounded-xl bg-[#F6F8FD]/50 dark:bg-slate-800/30 hover:bg-white dark:hover:bg-slate-800/60 transition-all border border-[#E8ECF6] dark:border-slate-800 hover:border-[#5145F5]/30 group/item gap-3 cursor-pointer min-w-0 shadow-2xs hover:shadow-xs"
               >
                 <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${bg} ${color}`}>
-                    <Icon className="w-5 h-5 group-hover/item:scale-110 transition-transform duration-300" />
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${bg} ${color}`}>
+                    <Icon className="w-4.5 h-4.5 group-hover/item:scale-110 transition-transform duration-300" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-semibold text-slate-800 dark:text-slate-200 truncate group-hover/item:text-indigo-600 dark:group-hover/item:text-indigo-400 transition-colors">{file.name}</p>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium tracking-wide mt-0.5">
-                      {file.type} &bull; {new Date(file.uploadDate).toLocaleDateString()}
+                    <p className="text-[13px] font-semibold text-[#151D3B] dark:text-slate-200 truncate group-hover/item:text-[#5145F5] transition-colors">{file.name}</p>
+                    <p className="text-[10px] text-[#69779C] font-medium tracking-wide mt-0.5">
+                      {file.type.toUpperCase()} &bull; {new Date(file.uploadDate).toLocaleDateString()}
                     </p>
                   </div>
                 </div>
                 
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  disabled
-                  onClick={(e) => { e.stopPropagation(); }}
-                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold transition-all cursor-not-allowed self-start sm:self-auto opacity-60 grayscale"
-                >
-                  <Sparkles className="w-3 h-3" />
-                  <span className="hidden sm:inline">Generate Quiz</span>
-                  <span className="sm:hidden">Quiz</span>
-                </motion.button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (setActiveTab) setActiveTab('ai-tutor');
+                    }}
+                    className="flex items-center justify-center gap-1 px-2.5 py-1 rounded-lg bg-[#EFEDFF] text-[#5145F5] text-xs font-bold hover:bg-[#E3E0FF] transition-colors cursor-pointer"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>Ask Tutor</span>
+                  </button>
+                </div>
               </div>
             );
           })}
         </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center py-6 text-center">
-          <div className="w-12 h-12 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mb-3">
-             <FileText className="w-5 h-5 text-slate-400" />
+          <div className="w-10 h-10 bg-[#EFEDFF] rounded-full flex items-center justify-center mb-2 text-[#5145F5]">
+             <FileText className="w-5 h-5" />
           </div>
-          <p className="text-sm font-medium text-slate-500">No study materials have been added yet. Let's upload something!</p>
+          <p className="text-xs font-semibold text-[#69779C]">No study materials added yet. Create a workspace to upload materials!</p>
         </div>
       )}
 
@@ -609,28 +685,28 @@ export function RecentStudyMaterials({
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 w-full max-w-sm relative shadow-2xl border border-slate-200 dark:border-slate-800"
+              className="bg-white dark:bg-[#151D3B] rounded-3xl p-6 sm:p-8 w-full max-w-sm relative shadow-2xl border border-[#E8ECF6] dark:border-[#222E54]"
             >
               <div className="w-12 h-12 bg-rose-100 dark:bg-rose-900/40 rounded-full flex items-center justify-center mb-4 text-rose-500">
                 <AlertCircle className="w-6 h-6" />
               </div>
-              <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">Delete Material</h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-                Are you sure you want to delete <span className="font-bold text-slate-700 dark:text-slate-300">"{fileToDelete.name}"</span>? This action cannot be undone and will remove it from your workspace forever.
+              <h3 className="text-xl font-bold text-[#151D3B] dark:text-slate-100 mb-2">Delete Material</h3>
+              <p className="text-sm text-[#69779C] mb-6">
+                Are you sure you want to delete <span className="font-bold text-[#151D3B] dark:text-white">"{fileToDelete.name}"</span>?
               </p>
               
               <div className="flex gap-3">
                 <button
                   onClick={() => setFileToDelete(null)}
                   disabled={isDeleting}
-                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-[#69779C] bg-[#F6F8FD] hover:bg-[#E8ECF6] transition-colors disabled:opacity-50 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleDeleteFile}
                   disabled={isDeleting}
-                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-rose-500 hover:bg-rose-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-rose-500 hover:bg-rose-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
                 >
                   {isDeleting ? (
                     <>
@@ -686,31 +762,34 @@ export function StorageQuotaWidget({ workspaces = [] }: { workspaces?: Workspace
   };
 
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300 flex flex-col justify-between h-full group">
+    <div className="bg-white dark:bg-[#151D3B] border border-[#E8ECF6] dark:border-[#222E54] rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300 flex flex-col justify-between h-full group">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="font-bold text-base text-slate-900 dark:text-white tracking-tight">Storage Quota</h3>
-        <div className="w-10 h-10 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center shrink-0">
-          <HardDrive className="w-5 h-5 text-indigo-500" />
+        <div>
+          <h3 className="font-bold text-base text-[#151D3B] dark:text-white tracking-tight">Knowledge Storage</h3>
+          <p className="text-[11px] text-[#69779C] font-medium">Free Tier Vector Indexing</p>
+        </div>
+        <div className="w-10 h-10 rounded-xl bg-[#EFEDFF] dark:bg-[#5145F5]/20 flex items-center justify-center shrink-0">
+          <HardDrive className="w-5 h-5 text-[#5145F5]" />
         </div>
       </div>
       
       <div className="space-y-4">
         <div>
           <div className="flex items-end justify-between mb-2">
-            <span className="text-2xl font-black text-slate-900 dark:text-white tracking-tight leading-none">
+            <span className="text-2xl font-black text-[#151D3B] dark:text-white tracking-tight leading-none">
               {formatSize(usedBytes)}
             </span>
-            <span className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
-              / {formatSize(limitBytes)}
+            <span className="text-xs font-bold text-[#69779C] mb-0.5">
+              / {formatSize(limitBytes)} (1 GB)
             </span>
           </div>
           
-          <div className="h-3 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+          <div className="h-2.5 w-full bg-[#F6F8FD] dark:bg-slate-800 rounded-full overflow-hidden border border-[#E8ECF6] dark:border-slate-700">
             <motion.div
               initial={{ width: 0 }}
               animate={{ width: `${percentage}%` }}
               transition={{ duration: 1, ease: "easeOut" }}
-              className={`h-full rounded-full ${isNearingLimit ? 'bg-rose-500' : 'bg-indigo-500'}`}
+              className={`h-full rounded-full ${isNearingLimit ? 'bg-rose-500' : 'bg-gradient-to-r from-[#5145F5] to-[#7668FF]'}`}
             />
           </div>
         </div>
@@ -720,13 +799,13 @@ export function StorageQuotaWidget({ workspaces = [] }: { workspaces?: Workspace
             <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 mt-0.5 shrink-0" />
             <div>
               <p className="text-xs font-bold text-rose-700 dark:text-rose-300 mb-0.5">Approaching Limit</p>
-              <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">You've used over 85% of your free storage. Consider upgrading to Pro.</p>
+              <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">You've used over 85% of your free storage.</p>
             </div>
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-500" />
-            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Plenty of space available</p>
+            <div className="w-2 h-2 rounded-full bg-[#19A974]" />
+            <p className="text-xs font-semibold text-[#69779C]">Plenty of space available for notes & books</p>
           </div>
         )}
       </div>

@@ -14,7 +14,25 @@ const supabaseUrl = getEnvVar('VITE_SUPABASE_URL') || getEnvVar('SUPABASE_URL');
 const supabaseAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY') || getEnvVar('SUPABASE_ANON_KEY');
 
 export const supabase = supabaseUrl && supabaseAnonKey 
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        storageKey: 'studyweb-auth'
+      },
+      global: {
+        fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+          // Prevent browser cookies from bloating request headers when Authorization bearer token is present
+          const headers = new Headers(init?.headers);
+          const hasAuth = headers.has('Authorization');
+          return fetch(input, {
+            ...init,
+            credentials: hasAuth ? 'omit' : (init?.credentials || 'same-origin')
+          });
+        }
+      }
+    })
   : null;
 
 if (!supabaseUrl || !supabaseAnonKey) {
