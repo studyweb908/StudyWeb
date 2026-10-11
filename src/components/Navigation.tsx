@@ -307,7 +307,7 @@ export default function Navigation() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <a href="#" className="flex items-center gap-2">
-                <img src="/logo.png" alt="Study Web Logo" className="h-16 w-auto object-contain dark:invert transition-all" />
+                <img src="/logo.png" alt="Study Web Logo" className="h-10 sm:h-12 md:h-16 w-auto object-contain dark:invert transition-all" />
               </a>
             </div>
 
@@ -387,7 +387,7 @@ export default function Navigation() {
 
       {/* Fixed Docked Mobile Bottom Navigation Bar */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-t border-slate-200/80 dark:border-slate-800/80 shadow-[0_-8px_32px_rgba(0,0,0,0.04)] dark:shadow-[0_-8px_32px_rgba(0,0,0,0.35)]">
-        <div className="flex items-center justify-around relative max-w-lg mx-auto px-2 pt-2.5 pb-6">
+        <div className="flex items-center justify-around relative max-w-lg mx-auto px-2 pt-2 pb-[max(1.5rem,calc(env(safe-area-inset-bottom,0px)+0.5rem))]">
           {bottomNavLinks.map((link) => {
             const isActive = link.key === 'login' ? isAuthModalOpen : activeSection === link.key;
             

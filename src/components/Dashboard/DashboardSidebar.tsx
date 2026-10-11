@@ -264,11 +264,11 @@ export default function DashboardSidebar({
         {/* Backdrop */}
         <div 
           onClick={onClose}
-          className="absolute inset-0 bg-black/60" 
+          className="absolute inset-0 bg-black/60 backdrop-blur-xs transition-opacity" 
         />
         
         {/* Slide-out Panel */}
-        <div className={`absolute top-0 bottom-0 left-0 w-64 max-w-[80vw] transform transition-transform duration-300 ease-out ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className={`absolute top-0 bottom-0 left-0 w-72 max-w-[85vw] shadow-2xl transform transition-transform duration-300 ease-out ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
           {renderSidebarContent('mobile', true)}
         </div>
       </div>

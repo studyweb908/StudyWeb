@@ -218,6 +218,7 @@ export default function AITutorWorkspace() {
   const [deepResearch, setDeepResearch] = useState(false);
   const [citationMode, setCitationMode] = useState(true);
   const [attachedFiles, setAttachedFiles] = useState<{ name: string; type: string; size?: string }[]>([]);
+  const [showMobileDocs, setShowMobileDocs] = useState(false);
   const [selectedModel, setSelectedModel] = useState('auto');
   const [activeCitation, setActiveCitation] = useState<{
     sourceName: string;
@@ -675,7 +676,7 @@ Let me know if you would like me to clarify any specific point or provide an int
   };
 
   return (
-    <div className="h-[calc(100vh-100px)] flex flex-row relative bg-white dark:bg-slate-900 rounded-[24px] border border-slate-100 dark:border-slate-800/80 overflow-hidden shadow-sm text-left">
+    <div className="h-[calc(100dvh-175px)] sm:h-[calc(100dvh-135px)] md:h-[calc(100vh-100px)] min-h-[480px] flex flex-row relative bg-white dark:bg-slate-900 rounded-[20px] sm:rounded-[24px] border border-slate-100 dark:border-slate-800/80 overflow-hidden shadow-sm text-left">
       {/* Left Sidebar: Attached Materials */}
       <div className="w-72 border-r border-slate-100 dark:border-slate-800/60 bg-slate-50/30 dark:bg-slate-950/10 flex flex-col h-full shrink-0 hidden md:flex">
         <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/20 flex items-center justify-between shrink-0">
@@ -761,24 +762,24 @@ Let me know if you would like me to clarify any specific point or provide an int
       {/* Left Chat Area */}
       <div className="flex-1 flex flex-col min-w-0 h-full border-r border-slate-100 dark:border-slate-800/60">
         {/* Top Controller Bar */}
-        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-950/20 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 dark:bg-indigo-500/20 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+        <div className="px-3 sm:px-6 py-2.5 sm:py-4 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-950/20 flex flex-wrap items-center justify-between gap-2.5 sm:gap-4">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-indigo-500/10 dark:bg-indigo-500/20 flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600 dark:text-indigo-400" />
             </div>
-            <div>
-              <h3 className="font-extrabold text-slate-900 dark:text-white text-sm sm:text-base flex items-center gap-2">
-                Advanced AI Tutor
-                <span className="text-[10px] bg-emerald-500/10 text-emerald-600 px-2 py-0.5 rounded-full font-bold">
-                  Autonomous Engine
+            <div className="min-w-0">
+              <h3 className="font-extrabold text-slate-900 dark:text-white text-xs sm:text-base flex items-center gap-1.5 sm:gap-2 truncate">
+                <span>Advanced AI Tutor</span>
+                <span className="text-[9px] sm:text-[10px] bg-emerald-500/10 text-emerald-600 px-1.5 sm:px-2 py-0.5 rounded-full font-bold shrink-0">
+                  Autonomous
                 </span>
               </h3>
-              <p className="text-xs text-slate-400 font-medium mt-0.5">High-accuracy academic reasoning, math solver, and note synthesis</p>
+              <p className="text-[11px] sm:text-xs text-slate-400 font-medium mt-0.5 hidden xs:block truncate">High-accuracy academic reasoning, math solver, and note synthesis</p>
             </div>
           </div>
 
           {/* Workspace controls */}
-          <div className="flex items-center flex-wrap gap-3.5">
+          <div className="flex items-center flex-wrap gap-2 sm:gap-3.5">
 
             {/* Focus Timer Button */}
             <button

@@ -553,7 +553,7 @@ export default function App() {
           />
 
           {/* Active Workspace Viewport */}
-          <main id="workspace-main-content" className={`flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 md:p-8 pb-24 md:pb-8 ${isFocusMode ? 'max-w-none w-full' : 'max-w-7xl mx-auto w-full'} transition-all duration-300`}>
+          <main id="workspace-main-content" className={`flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 md:p-8 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-8 ${isFocusMode ? 'max-w-none w-full' : 'max-w-7xl mx-auto w-full'} transition-all duration-300`}>
             <AnimatePresence mode="wait">
               <motion.div
                 key={`workspace-main-${activeTab}-${activeWorkspace?.id || 'none'}`}
@@ -571,67 +571,82 @@ export default function App() {
           <QuickActions activeTab={activeTab} setActiveTab={setActiveTab} />
 
           {/* Mobile Bottom Navigation Bar */}
-          <div className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white/95 dark:bg-slate-900/95 border-t border-slate-200/80 dark:border-slate-800/80 backdrop-blur-lg grid grid-cols-5 items-center justify-items-center px-2 pb-safe z-40 shadow-lg">
+          <nav 
+            aria-label="Mobile Bottom Navigation"
+            className="md:hidden fixed bottom-0 left-0 right-0 h-[calc(4rem+env(safe-area-inset-bottom,0px))] bg-white/95 dark:bg-slate-900/95 border-t border-slate-200/80 dark:border-slate-800/80 backdrop-blur-lg grid grid-cols-5 items-center justify-items-center px-1 pb-[env(safe-area-inset-bottom,0px)] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.4)]"
+          >
+            {/* 1. Home / Dashboard */}
             <button
               onClick={() => {
-                setActiveTab('study-session');
+                setActiveWorkspace(null);
+                setActiveTab('dashboard');
               }}
-              className={`w-full h-full flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors ${
-                activeTab === 'study-session'
-                  ? 'text-indigo-600 dark:text-indigo-400'
+              className={`w-full min-h-[44px] h-full flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95 ${
+                activeTab === 'dashboard' && activeWorkspace === null
+                  ? 'text-indigo-600 dark:text-indigo-400 font-bold'
                   : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
               }`}
             >
-              <Clock className="w-5 h-5" />
-              <span className="text-[10px] font-extrabold text-center leading-none">Study Session</span>
+              <LayoutDashboard className="w-5 h-5" />
+              <span className="text-[10px] font-bold">Home</span>
             </button>
 
+            {/* 2. Workspaces */}
             <button
               onClick={() => {
                 setActiveWorkspace(null);
                 setActiveTab('workspaces');
               }}
-              className={`w-full h-full flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors ${
+              className={`w-full min-h-[44px] h-full flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95 ${
                 activeTab === 'workspaces' && activeWorkspace === null
-                  ? 'text-indigo-600 dark:text-indigo-400'
+                  ? 'text-indigo-600 dark:text-indigo-400 font-bold'
                   : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
               }`}
             >
               <Folder className="w-5 h-5" />
-              <span className="text-[10px] font-extrabold">Workspaces</span>
+              <span className="text-[10px] font-bold">Spaces</span>
             </button>
 
-            {/* Pulsing FAB Center Plus Button */}
+            {/* 3. Center Create Action Button */}
             <button
               onClick={() => setIsBottomSheetOpen(true)}
-              className="w-12 h-12 rounded-full bg-slate-950 dark:bg-white text-white dark:text-slate-950 flex items-center justify-center shadow-lg -mt-5 hover:scale-110 active:scale-95 transition-all cursor-pointer border-4 border-slate-50 dark:border-slate-950 z-45"
+              aria-label="Open creation menu"
+              className="w-12 h-12 rounded-full bg-indigo-600 dark:bg-indigo-500 text-white flex items-center justify-center shadow-lg shadow-indigo-600/30 -mt-5 hover:scale-110 active:scale-95 transition-all cursor-pointer border-4 border-slate-50 dark:border-slate-950 z-45 shrink-0"
             >
               <Plus className="w-6 h-6 stroke-[3]" />
             </button>
 
+            {/* 4. AI Tutor */}
             <button
-              disabled
-              className="w-full h-full flex flex-col items-center justify-center gap-1 cursor-not-allowed opacity-50 grayscale text-slate-400"
+              onClick={() => {
+                setActiveTab('ai-tutor');
+              }}
+              className={`w-full min-h-[44px] h-full flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95 ${
+                activeTab === 'ai-tutor'
+                  ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+              }`}
             >
-              <Calendar className="w-5 h-5" />
-              <span className="text-[10px] font-extrabold">Planner</span>
+              <Sparkles className="w-5 h-5" />
+              <span className="text-[10px] font-bold">AI Tutor</span>
             </button>
 
+            {/* 5. Profile */}
             <button
               onClick={() => {
                 setActiveTab('profile');
                 setActiveWorkspace(null);
               }}
-              className={`w-full h-full flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors ${
+              className={`w-full min-h-[44px] h-full flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95 ${
                 activeTab === 'profile'
-                  ? 'text-indigo-600 dark:text-indigo-400'
+                  ? 'text-indigo-600 dark:text-indigo-400 font-bold'
                   : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
               }`}
             >
               <User className="w-5 h-5" />
-              <span className="text-[10px] font-extrabold">Profile</span>
+              <span className="text-[10px] font-bold">Profile</span>
             </button>
-          </div>
+          </nav>
 
           {/* Mobile Bottom Sheet (Create Modal) */}
           <AnimatePresence>

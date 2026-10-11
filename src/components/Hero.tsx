@@ -4,7 +4,7 @@ import FloatingElements from './FloatingElements';
 
 export default function Hero() {
   return (
-    <section id="home" className="relative min-h-screen pt-32 pb-20 overflow-hidden flex items-center bg-gradient-to-br from-brand-bg-light via-brand-primary/5 to-brand-secondary/5" aria-label="Hero Introduction">
+    <section id="home" className="relative min-h-screen pt-24 sm:pt-32 pb-16 sm:pb-20 overflow-hidden flex items-center bg-gradient-to-br from-brand-bg-light via-brand-primary/5 to-brand-secondary/5" aria-label="Hero Introduction">
       <FloatingElements />
       
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 w-full">
@@ -18,7 +18,7 @@ export default function Hero() {
             className="max-w-3xl text-center flex flex-col items-center"
           >
             {/* Primary H1 for SEO & Search Intent Alignment */}
-            <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold font-display leading-[1.1] tracking-tight mb-6 text-brand-text">
+            <h1 className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl font-bold font-display leading-[1.1] tracking-tight mb-4 sm:mb-6 text-brand-text">
               From Confusion<br />
               <span className="bg-gradient-to-r from-brand-primary via-brand-secondary to-brand-accent bg-clip-text text-transparent">
                 To Clarity

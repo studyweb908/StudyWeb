@@ -22,6 +22,7 @@ import {
   FileDown,
   Tag,
   Search,
+  ChevronLeft,
   Plus,
   Sparkles,
   Download,
@@ -188,6 +189,7 @@ export function NotesView() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [simulateOffline, setSimulateOffline] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'offline'>('saved');
+  const [mobileNotesView, setMobileNotesView] = useState<'list' | 'editor'>('list');
 
   // UI state overlays
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -461,6 +463,7 @@ export function NotesView() {
     setNotes(updatedNotes);
     setSelectedNote(newNote);
     localStorage.setItem('studyweb_selected_note_id', newNote.id);
+    setMobileNotesView('editor');
   };
 
   // Toggle Golden Pinning
@@ -792,9 +795,9 @@ export function NotesView() {
       </div>
 
       {/* Main Grid Workspace */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[500px]">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 min-h-[500px] lg:h-[620px]">
         {/* Left Column: List */}
-        <div className="border border-slate-150 dark:border-slate-850 rounded-2xl overflow-hidden flex flex-col bg-slate-50/50 dark:bg-slate-950/20 p-2.5 h-full">
+        <div className={`${mobileNotesView === 'list' ? 'flex' : 'hidden'} lg:flex border border-slate-150 dark:border-slate-850 rounded-2xl overflow-hidden flex-col bg-slate-50/50 dark:bg-slate-950/20 p-2.5 h-[500px] lg:h-full`}>
           <button
             onClick={handleCreateNote}
             className="w-full flex items-center justify-center gap-2 px-3 py-2.5 mb-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-all cursor-pointer"
@@ -814,6 +817,7 @@ export function NotesView() {
                     onClick={() => {
                       setSelectedNote(note);
                       localStorage.setItem('studyweb_selected_note_id', note.id);
+                      setMobileNotesView('editor');
                     }}
                     className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col group relative ${
                       isSelected
@@ -866,14 +870,22 @@ export function NotesView() {
         </div>
 
         {/* Right Column: Note detail editor */}
-        <div className="lg:col-span-2 border border-slate-150 dark:border-slate-850 rounded-2xl bg-white dark:bg-slate-900 flex flex-col h-full overflow-hidden relative">
+        <div className={`${mobileNotesView === 'editor' ? 'flex' : 'hidden'} lg:flex lg:col-span-2 border border-slate-150 dark:border-slate-850 rounded-2xl bg-white dark:bg-slate-900 flex-col min-h-[500px] lg:h-full overflow-hidden relative`}>
           {selectedNote ? (
             <div className="flex-1 flex flex-col h-full overflow-hidden">
               
               {/* Header section */}
-              <div className="p-4 border-b border-slate-100 dark:border-slate-800/80 space-y-3 shrink-0">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+              <div className="p-3 sm:p-4 border-b border-slate-100 dark:border-slate-800/80 space-y-3 shrink-0">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 sm:gap-3">
                   <div className="flex-1 min-w-0 w-full flex items-center gap-2">
+                    <button
+                      onClick={() => setMobileNotesView('list')}
+                      className="lg:hidden p-1.5 rounded-lg text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-black flex items-center gap-1 shrink-0 cursor-pointer"
+                      title="Back to Notes list"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      <span>Notes</span>
+                    </button>
                     <input
                       type="text"
                       value={selectedNote.title}

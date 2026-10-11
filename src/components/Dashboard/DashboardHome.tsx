@@ -350,7 +350,7 @@ export default function DashboardHome({
       {/* 1. PERSONALIZED GREETING BANNER                           */}
       {/* ========================================================= */}
       <motion.div variants={itemVariants} className="w-full">
-        <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm p-6 sm:p-8 md:p-10 transition-colors">
+        <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm p-4 sm:p-6 md:p-8 transition-colors">
           {/* Subtle scenic landscape atmospheric backdrop harmonized with website surfaces */}
           <div className="absolute inset-0 bg-gradient-to-r from-indigo-50/70 via-slate-50/40 to-white dark:from-slate-900 dark:via-indigo-950/30 dark:to-slate-900 pointer-events-none z-0" />
           
@@ -392,35 +392,35 @@ export default function DashboardHome({
             </svg>
           </div>
 
-          <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div className="space-y-2 max-w-2xl">
-              <div className="flex items-center gap-2 text-xs font-semibold text-indigo-600 dark:text-indigo-400 tracking-wide uppercase">
+          <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5 sm:gap-6">
+            <div className="space-y-1.5 sm:space-y-2 max-w-2xl text-left">
+              <div className="flex items-center gap-2 text-[11px] sm:text-xs font-semibold text-indigo-600 dark:text-indigo-400 tracking-wide uppercase">
                 <span>{formattedDate}</span>
                 <span aria-hidden="true">·</span>
                 <span>Active Semester</span>
               </div>
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white leading-tight">
+              <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white leading-tight">
                 {greeting}, {firstName}! 👋
               </h1>
-              <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 font-medium leading-relaxed">
+              <p className="text-xs sm:text-sm md:text-base text-slate-600 dark:text-slate-300 font-medium leading-relaxed">
                 Another day, another step towards your goals.
               </p>
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-normal">
+              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-normal">
                 Stay consistent. Your future self will thank you.
               </p>
             </div>
 
-            <div className="flex items-center gap-3 shrink-0">
+            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 shrink-0 w-full sm:w-auto">
               <button
                 onClick={() => setActiveTab('study-session')}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-sm transition-all duration-200 focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none cursor-pointer active:scale-95"
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs sm:text-sm shadow-sm transition-all duration-200 focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none cursor-pointer active:scale-95 text-center"
               >
                 <Zap className="w-4 h-4 fill-white/20" />
                 <span>Start Studying</span>
               </button>
               <button
                 onClick={() => setActiveTab('workspaces')}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium text-sm border border-slate-200/80 dark:border-slate-700/80 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none cursor-pointer"
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium text-xs sm:text-sm border border-slate-200/80 dark:border-slate-700/80 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none cursor-pointer text-center"
               >
                 <span>Workspaces</span>
                 <ChevronRight className="w-4 h-4" />
@@ -434,56 +434,56 @@ export default function DashboardHome({
       {/* 2. QUICK ACTIONS ROW (Section 13)                        */}
       {/* ========================================================= */}
       <motion.div variants={itemVariants} className="w-full">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
           <button
             onClick={handleQuickUploadTrigger}
-            className="flex items-center gap-3 p-3.5 sm:p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 shadow-sm hover:border-indigo-300 dark:hover:border-indigo-700/60 hover:shadow-md transition-all group text-left cursor-pointer"
+            className="flex items-center gap-2.5 sm:gap-3 p-3 sm:p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 shadow-sm hover:border-indigo-300 dark:hover:border-indigo-700/60 hover:shadow-md transition-all group text-left cursor-pointer active:scale-98"
           >
-            <div className="w-10 h-10 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-              <FileUp className="w-5 h-5" />
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+              <FileUp className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div className="min-w-0">
               <span className="block text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">Upload File</span>
-              <span className="block text-[11px] text-slate-500 dark:text-slate-400 truncate">PDF & documents</span>
+              <span className="block text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 truncate">PDF & docs</span>
             </div>
           </button>
 
           <button
             onClick={() => setActiveTab('notes')}
-            className="flex items-center gap-3 p-3.5 sm:p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 shadow-sm hover:border-emerald-300 dark:hover:border-emerald-700/60 hover:shadow-md transition-all group text-left cursor-pointer"
+            className="flex items-center gap-2.5 sm:gap-3 p-3 sm:p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 shadow-sm hover:border-emerald-300 dark:hover:border-emerald-700/60 hover:shadow-md transition-all group text-left cursor-pointer active:scale-98"
           >
-            <div className="w-10 h-10 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-100 dark:border-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-              <FileText className="w-5 h-5" />
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-100 dark:border-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+              <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div className="min-w-0">
               <span className="block text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">Create Note</span>
-              <span className="block text-[11px] text-slate-500 dark:text-slate-400 truncate">AI study notes</span>
+              <span className="block text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 truncate">AI study notes</span>
             </div>
           </button>
 
           <button
             onClick={() => setActiveTab('resources')}
-            className="flex items-center gap-3 p-3.5 sm:p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 shadow-sm hover:border-amber-300 dark:hover:border-amber-700/60 hover:shadow-md transition-all group text-left cursor-pointer"
+            className="flex items-center gap-2.5 sm:gap-3 p-3 sm:p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 shadow-sm hover:border-amber-300 dark:hover:border-amber-700/60 hover:shadow-md transition-all group text-left cursor-pointer active:scale-98"
           >
-            <div className="w-10 h-10 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-100 dark:border-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-              <Library className="w-5 h-5" />
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-100 dark:border-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+              <Library className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div className="min-w-0">
-              <span className="block text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">Browse Resources</span>
-              <span className="block text-[11px] text-slate-500 dark:text-slate-400 truncate">Library & formulas</span>
+              <span className="block text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">Resources</span>
+              <span className="block text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 truncate">Library & formulas</span>
             </div>
           </button>
 
           <button
             onClick={() => setActiveTab('ai-tutor')}
-            className="flex items-center gap-3 p-3.5 sm:p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 shadow-sm hover:border-violet-300 dark:hover:border-violet-700/60 hover:shadow-md transition-all group text-left cursor-pointer"
+            className="flex items-center gap-2.5 sm:gap-3 p-3 sm:p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 shadow-sm hover:border-violet-300 dark:hover:border-violet-700/60 hover:shadow-md transition-all group text-left cursor-pointer active:scale-98"
           >
-            <div className="w-10 h-10 rounded-lg bg-violet-50 dark:bg-violet-950/60 border border-violet-100 dark:border-violet-900/40 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-              <Bot className="w-5 h-5" />
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-violet-50 dark:bg-violet-950/60 border border-violet-100 dark:border-violet-900/40 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+              <Bot className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div className="min-w-0">
               <span className="block text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">Open AI Tutor</span>
-              <span className="block text-[11px] text-slate-500 dark:text-slate-400 truncate">Ask anything</span>
+              <span className="block text-[10px] sm:text-[11px] text-slate-500 dark:text-slate-400 truncate">Ask anything</span>
             </div>
           </button>
         </div>
@@ -492,16 +492,16 @@ export default function DashboardHome({
       {/* ========================================================= */}
       {/* 3. MAIN DASHBOARD CONTENT GRID (Left 7-8 cols / Right 4-5) */}
       {/* ========================================================= */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-start">
         
         {/* ======================================================= */}
         {/* LEFT COLUMN: Main Learning Stream (8 Cols)              */}
         {/* ======================================================= */}
-        <div className="lg:col-span-7 xl:col-span-8 space-y-6">
+        <div className="lg:col-span-7 xl:col-span-8 space-y-5 sm:space-y-6">
 
           {/* 3A. TODAY'S FOCUS (Section 6) */}
           <motion.div variants={itemVariants} className="w-full">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-6 sm:p-7 shadow-sm">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 sm:p-6 md:p-7 shadow-sm">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
                 <div>
                   <div className="flex items-center gap-2">
@@ -768,102 +768,7 @@ export default function DashboardHome({
             </div>
           </motion.div>
 
-          {/* 3C. YOUR PROGRESS (Section 7) */}
-          <motion.div variants={itemVariants} className="w-full">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-6 sm:p-7 shadow-sm">
-              <div className="flex items-center justify-between gap-3 mb-6">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <TrendingUp className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                    <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">Your Progress</h2>
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Semester mastery metrics and subject completion benchmarks.
-                  </p>
-                </div>
-                <button
-                  onClick={() => setActiveTab('analytics')}
-                  className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-1 cursor-pointer"
-                >
-                  <span>Analytics</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
-                {/* Circular Gauge on Left (4 cols) */}
-                <div className="md:col-span-4 flex flex-col items-center justify-center p-4 bg-slate-50 dark:bg-slate-850/50 rounded-xl border border-slate-200/60 dark:border-slate-800/60">
-                  <div className="relative w-32 h-32 flex items-center justify-center">
-                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 120 120">
-                      <circle
-                        cx="60"
-                        cy="60"
-                        r="48"
-                        stroke="currentColor"
-                        strokeWidth="10"
-                        className="text-slate-200 dark:text-slate-800"
-                        fill="transparent"
-                      />
-                      <circle
-                        cx="60"
-                        cy="60"
-                        r="48"
-                        stroke="currentColor"
-                        strokeWidth="10"
-                        strokeDasharray={2 * Math.PI * 48}
-                        strokeDashoffset={2 * Math.PI * 48 * (1 - 0.78)}
-                        strokeLinecap="round"
-                        className="text-indigo-600 transition-all duration-1000 ease-out"
-                        fill="transparent"
-                      />
-                    </svg>
-                    <div className="absolute flex flex-col items-center justify-center text-center">
-                      <span className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                        78%
-                      </span>
-                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                        Mastery
-                      </span>
-                    </div>
-                  </div>
-                  <p className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-2 text-center">
-                    Overall Curriculum Level
-                  </p>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 text-center mt-0.5">
-                    On track for Honors distinction
-                  </p>
-                </div>
-
-                {/* Subject-specific bars on Right (8 cols) */}
-                <div className="md:col-span-8 space-y-3.5">
-                  {[
-                    { name: 'Physics (Mechanics & Laws)', pct: 78, color: 'bg-indigo-600 dark:bg-indigo-500', icon: '⚡' },
-                    { name: 'Mathematics (Calculus & Trigonometry)', pct: 85, color: 'bg-amber-500 dark:bg-amber-400', icon: '📐' },
-                    { name: 'Chemistry (Bonding & Reaction Kinetics)', pct: 64, color: 'bg-rose-500 dark:bg-rose-400', icon: '🧪' },
-                    { name: 'English & Academic Writing', pct: 72, color: 'bg-emerald-600 dark:bg-emerald-500', icon: '📖' },
-                  ].map(sub => (
-                    <div key={sub.name}>
-                      <div className="flex items-center justify-between text-xs font-semibold mb-1">
-                        <div className="flex items-center gap-1.5">
-                          <span>{sub.icon}</span>
-                          <span className="text-slate-900 dark:text-white font-bold">{sub.name}</span>
-                        </div>
-                        <span className="text-slate-600 dark:text-slate-400 font-bold">{sub.pct}%</span>
-                      </div>
-                      <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                        <motion.div 
-                          className={`h-full ${sub.color} rounded-full`}
-                          initial={{ width: 0 }}
-                          animate={{ width: `${sub.pct}%` }}
-                          transition={{ duration: 0.8, ease: "easeOut" }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </motion.div>
 
           {/* 3D. RECENT ACTIVITY (Section 10) */}
           <motion.div variants={itemVariants} className="w-full">

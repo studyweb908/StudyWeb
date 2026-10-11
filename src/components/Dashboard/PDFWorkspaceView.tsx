@@ -305,6 +305,7 @@ export default function PDFWorkspaceView({ workspace, onUpdateWorkspace }: PDFWo
   const [isSaving, setIsSaving] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<string | null>(null);
   const [isAiPanelOpen, setIsAiPanelOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<'sources' | 'reader' | 'chat'>('reader');
 
   // Active viewing states
   const [viewingDocId, setViewingDocId] = useState<string>('ap-bio-genetics');
@@ -780,9 +781,46 @@ Student Question:
   };
 
   return (
-    <div className="min-h-[calc(100vh-100px)] lg:h-[calc(100vh-100px)] flex flex-col lg:flex-row bg-slate-50 dark:bg-slate-950 rounded-[28px] border border-slate-200/80 dark:border-slate-800/80 overflow-hidden shadow-xl text-left text-xs sm:text-sm">
+    <div className="min-h-[calc(100vh-100px)] lg:h-[calc(100vh-100px)] flex flex-col lg:flex-row bg-slate-50 dark:bg-slate-950 rounded-[24px] sm:rounded-[28px] border border-slate-200/80 dark:border-slate-800/80 overflow-hidden shadow-xl text-left text-xs sm:text-sm">
+      {/* Mobile View Switcher (visible on mobile / tablet < lg) */}
+      <div className="lg:hidden flex items-center justify-between p-2 sm:p-2.5 bg-white dark:bg-slate-900 border-b border-slate-200/80 dark:border-slate-800 gap-1.5 shrink-0">
+        <button
+          onClick={() => setMobileTab('sources')}
+          className={`flex-1 py-2 px-1.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            mobileTab === 'sources'
+              ? 'bg-indigo-600 text-white shadow-sm'
+              : 'text-slate-500 hover:text-slate-850 dark:hover:text-white bg-slate-100/70 dark:bg-slate-800/60'
+          }`}
+        >
+          <BookMarked className="w-3.5 h-3.5" />
+          <span>Sources ({documents.length})</span>
+        </button>
+        <button
+          onClick={() => setMobileTab('reader')}
+          className={`flex-1 py-2 px-1.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            mobileTab === 'reader'
+              ? 'bg-indigo-600 text-white shadow-sm'
+              : 'text-slate-500 hover:text-slate-850 dark:hover:text-white bg-slate-100/70 dark:bg-slate-800/60'
+          }`}
+        >
+          <BookOpen className="w-3.5 h-3.5" />
+          <span>Reader</span>
+        </button>
+        <button
+          onClick={() => setMobileTab('chat')}
+          className={`flex-1 py-2 px-1.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            mobileTab === 'chat'
+              ? 'bg-indigo-600 text-white shadow-sm'
+              : 'text-slate-500 hover:text-slate-850 dark:hover:text-white bg-slate-100/70 dark:bg-slate-800/60'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>AI Tutor</span>
+        </button>
+      </div>
+
       {/* LEFT COLUMN: PDF Sources (Notebook style) */}
-      <div className="w-full lg:w-80 min-h-[350px] lg:min-h-0 border-b lg:border-b-0 lg:border-r border-slate-200/80 dark:border-slate-800/60 bg-white/60 dark:bg-slate-900/60 backdrop-blur-md p-6 flex flex-col justify-between">
+      <div className={`${mobileTab === 'sources' ? 'flex' : 'hidden'} lg:flex w-full lg:w-80 min-h-[350px] lg:min-h-0 border-b lg:border-b-0 lg:border-r border-slate-200/80 dark:border-slate-800/60 bg-white/60 dark:bg-slate-900/60 backdrop-blur-md p-4 sm:p-6 flex flex-col justify-between`}>
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <div>
@@ -841,6 +879,7 @@ Student Question:
                       setViewingDocId(doc.id);
                       setActivePage(1);
                       setCenterTab('view');
+                      setMobileTab('reader');
                     }}
                     className={`p-3.5 rounded-2xl border cursor-pointer transition-all duration-350 relative group ${
                       isViewing 
@@ -911,7 +950,7 @@ Student Question:
       </div>
 
       {/* CENTER COLUMN: Document Viewer / Highlight Compiler */}
-      <div className="flex-1 min-h-[500px] lg:min-h-0 p-6 sm:p-8 flex flex-col justify-between overflow-y-auto bg-white dark:bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-200/80 dark:border-slate-800/65">
+      <div className={`${mobileTab === 'reader' ? 'flex' : 'hidden'} lg:flex flex-1 min-h-[450px] lg:min-h-0 p-4 sm:p-6 lg:p-8 flex-col justify-between overflow-y-auto bg-white dark:bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-200/80 dark:border-slate-800/65`}>
         <div className="space-y-6">
           {/* TAB BAR AND CONTROLS */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-5 border-b border-slate-200/60 dark:border-slate-800">
@@ -956,12 +995,15 @@ Student Question:
               </button>
               
               <button
-                onClick={() => setIsAiPanelOpen(!isAiPanelOpen)}
+                onClick={() => {
+                  setMobileTab('chat');
+                  setIsAiPanelOpen(true);
+                }}
                 className="lg:hidden flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/40 transition-all cursor-pointer text-[10px] sm:text-xs font-bold"
                 title="Toggle AI Chat Panel"
               >
                 <Sparkles className="w-3.5 h-3.5 text-indigo-500 animate-pulse" />
-                <span>{isAiPanelOpen ? 'Hide Chat' : 'Show Chat'}</span>
+                <span>AI Tutor Chat</span>
               </button>
             </div>
           </div>
@@ -1462,7 +1504,7 @@ Student Question:
       </div>
 
       {/* RIGHT COLUMN: Contextual Document AI Chat */}
-      <div className={`${isAiPanelOpen ? 'flex' : 'hidden'} lg:flex w-full lg:w-[420px] min-h-[500px] lg:min-h-0 flex-col bg-slate-50/50 dark:bg-slate-900/50 border-l border-slate-200/80 dark:border-slate-800`}>
+      <div className={`${mobileTab === 'chat' || isAiPanelOpen ? 'flex' : 'hidden'} lg:flex w-full lg:w-[420px] min-h-[450px] lg:min-h-0 flex-col bg-slate-50/50 dark:bg-slate-900/50 border-l border-slate-200/80 dark:border-slate-800`}>
         {/* Header indicator */}
         <div className="px-5 py-4 border-b border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-slate-900 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -1475,9 +1517,21 @@ Student Question:
             </div>
           </div>
           
-          <div className="flex items-center gap-1.5 bg-indigo-500/5 dark:bg-indigo-500/10 border border-indigo-500/10 text-[9px] font-black text-indigo-600 dark:text-indigo-400 px-2.5 py-1 rounded-full uppercase tracking-wider">
-            <Flame className="w-3 h-3 text-orange-500 animate-pulse" />
-            <span>GenAI Active</span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 bg-indigo-500/5 dark:bg-indigo-500/10 border border-indigo-500/10 text-[9px] font-black text-indigo-600 dark:text-indigo-400 px-2.5 py-1 rounded-full uppercase tracking-wider">
+              <Flame className="w-3 h-3 text-orange-500 animate-pulse" />
+              <span>GenAI Active</span>
+            </div>
+            <button
+              onClick={() => {
+                setIsAiPanelOpen(false);
+                setMobileTab('reader');
+              }}
+              className="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              title="Back to Reader"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
 

@@ -195,16 +195,16 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
   };
 
   return (
-    <header className="sticky top-0 right-0 z-20 w-full bg-white/90 dark:bg-[#10172D]/90 backdrop-blur-md border-b border-[#E8ECF6] dark:border-[#1E294B] px-4 sm:px-8 py-3.5 transition-all duration-300">
+    <header className="sticky top-0 right-0 z-20 w-full bg-white/90 dark:bg-[#10172D]/90 backdrop-blur-md border-b border-[#E8ECF6] dark:border-[#1E294B] px-3 sm:px-6 md:px-8 py-2.5 sm:py-3.5 transition-all duration-300">
       {/* Mobile search expanded overlay */}
       {isMobileSearchExpanded && (
-        <div className="absolute inset-0 z-30 bg-white dark:bg-[#10172D] px-4 py-2.5 flex items-center gap-3">
-          <Search className="w-5 h-5 text-[#5145F5] shrink-0" />
+        <div className="absolute inset-0 z-30 bg-white dark:bg-[#10172D] px-3 sm:px-4 py-2.5 flex items-center gap-2 sm:gap-3">
+          <Search className="w-4.5 h-4.5 sm:w-5 sm:h-5 text-[#5145F5] shrink-0" />
           <input
             autoFocus
             type="text"
             placeholder="Search notes, quizzes, flashcards, or topics..."
-            className="flex-1 bg-transparent text-sm font-semibold text-[#151D3B] dark:text-white placeholder-[#69779C] focus:outline-none"
+            className="flex-1 bg-transparent text-xs sm:text-sm font-semibold text-[#151D3B] dark:text-white placeholder-[#69779C] focus:outline-none"
           />
           <button 
             onClick={() => setIsMobileSearchExpanded(false)}
@@ -214,21 +214,24 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
           </button>
         </div>
       )}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-2 sm:gap-4">
         {/* Hamburger & Logo */}
-        <div className="flex items-center gap-2 sm:gap-3 md:pr-4">
+        <div className="flex items-center gap-2 sm:gap-3 md:pr-4 min-w-0">
           <button 
             onClick={onMenuToggle}
-            className={`md:hidden p-1.5 rounded-lg text-[#69779C] hover:text-[#151D3B] dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0 ${isFocusMode ? 'hidden' : ''}`}
+            className={`md:hidden min-w-[38px] min-h-[38px] flex items-center justify-center rounded-xl text-[#69779C] hover:text-[#151D3B] dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0 ${isFocusMode ? 'hidden' : ''}`}
             aria-label="Toggle navigation menu"
           >
-            <Menu className="w-6 h-6" />
+            <Menu className="w-5 h-5" />
           </button>
           <img 
             src="/logo.png" 
             alt="StudyWeb Logo" 
-            className="md:hidden h-8 w-auto object-contain dark:invert shrink-0" 
+            className="md:hidden h-7 sm:h-8 w-auto object-contain dark:invert shrink-0" 
           />
+          <span className="md:hidden text-xs font-extrabold text-slate-900 dark:text-white truncate max-w-[95px] xs:max-w-[140px] sm:max-w-[200px]">
+            {tabLabels[activeTab] || 'Home'}
+          </span>
         </div>
 
         {/* Breadcrumb Navigation Trail - Desktop Only */}
@@ -267,7 +270,7 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
         </div>
 
         {/* Metrics, Gamification & Profile Area */}
-        <div className="flex items-center gap-3 sm:gap-4 ml-auto">
+        <div className="flex items-center gap-1 sm:gap-2.5 md:gap-3 ml-auto shrink-0">
           {/* Quick Actions Shortcuts (Desktop Only) */}
           <div className={`${isFocusMode ? 'hidden' : 'hidden md:flex'} items-center gap-2`}>
             <button
@@ -279,10 +282,10 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
             </button>
           </div>
 
-          {/* Focus Mode Button */}
+          {/* Focus Mode Button - Hidden on mobile where screen is already compact */}
           <button
             onClick={onFocusModeToggle}
-            className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-center ${
+            className={`hidden sm:flex min-w-[38px] min-h-[38px] p-1.5 sm:p-2 rounded-xl border transition-all cursor-pointer items-center justify-center ${
               isFocusMode 
                 ? 'bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-950/40 dark:border-indigo-800 dark:text-indigo-400 ring-2 ring-indigo-500/10' 
                 : 'border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
@@ -290,22 +293,32 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
             aria-label="Toggle Focus Mode"
             title={isFocusMode ? "Exit Focus Mode" : "Enter Focus Mode"}
           >
-            {isFocusMode ? <Minimize2 className="w-5.5 h-5.5" /> : <Maximize2 className="w-5.5 h-5.5" />}
+            {isFocusMode ? <Minimize2 className="w-4.5 h-4.5 sm:w-5 sm:h-5" /> : <Maximize2 className="w-4.5 h-4.5 sm:w-5 sm:h-5" />}
+          </button>
+
+          {/* Mobile Search Toggle */}
+          <button
+            onClick={() => setIsMobileSearchExpanded(true)}
+            className="md:hidden min-w-[38px] min-h-[38px] flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+            title="Search"
+            aria-label="Open search"
+          >
+            <Search className="w-4 h-4" />
           </button>
 
           {/* Theme Toggle Button */}
           <button
             onClick={toggleTheme}
-            className="flex items-center gap-1.5 p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer group"
+            className="flex items-center justify-center min-w-[38px] min-h-[38px] sm:min-w-0 p-1.5 sm:p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer group"
             aria-label="Toggle theme mode"
             title={`Current: ${themeMode.charAt(0).toUpperCase() + themeMode.slice(1)} Mode`}
           >
             {themeMode === 'system' ? (
-              <Monitor className="w-5 h-5" />
+              <Monitor className="w-4 h-4 sm:w-5 sm:h-5" />
             ) : themeMode === 'light' ? (
-              <Sun className="w-5 h-5" />
+              <Sun className="w-4 h-4 sm:w-5 sm:h-5" />
             ) : (
-              <Moon className="w-5 h-5" />
+              <Moon className="w-4 h-4 sm:w-5 sm:h-5" />
             )}
             <span className="text-[10px] font-bold uppercase tracking-wider hidden lg:block mr-1 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
               {themeMode}
@@ -315,26 +328,16 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
           {/* Profile Picture */}
           <button 
             onClick={() => setActiveTab('profile')}
-            className="flex items-center justify-center w-10 h-10 rounded-full border-2 border-slate-200 dark:border-slate-800 overflow-hidden cursor-pointer hover:border-indigo-500 dark:hover:border-indigo-400 transition-colors shrink-0"
+            className="flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full border-2 border-slate-200 dark:border-slate-800 overflow-hidden cursor-pointer hover:border-indigo-500 dark:hover:border-indigo-400 transition-colors shrink-0"
             title="Profile Settings"
+            aria-label="Profile Settings"
           >
             {profilePic ? (
               <img src={profilePic} alt="User Profile" className="w-full h-full object-cover" />
             ) : (
-              <User className="w-5 h-5 text-slate-400" />
+              <User className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400" />
             )}
           </button>
-
-          {/* Mobile Search Toggle */}
-          <button
-            onClick={() => setIsMobileSearchExpanded(true)}
-            className="md:hidden p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
-            title="Search"
-          >
-            <Search className="w-5 h-5" />
-          </button>
-
-
         </div>
       </div>
 

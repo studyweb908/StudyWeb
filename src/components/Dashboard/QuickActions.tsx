@@ -135,8 +135,8 @@ export default function QuickActions({ activeTab, setActiveTab }: QuickActionsPr
         )}
       </AnimatePresence>
 
-      {/* 2. FLOATING ACTION BUTTON (FAB) */}
-      <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-3">
+      {/* 2. FLOATING ACTION BUTTON (FAB) - Visible on desktop & tablet */}
+      <div className="hidden md:flex fixed bottom-6 right-6 z-40 flex-col items-end gap-3">
         {/* Expanded Quick Options */}
         <AnimatePresence>
           {isOpen && (

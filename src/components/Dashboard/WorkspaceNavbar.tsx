@@ -181,8 +181,8 @@ export default function WorkspaceNavbar({
       </div>
 
       {/* Navigation features grid with fine-tuned design */}
-      <div className="p-3 bg-slate-50/15 dark:bg-slate-950/5 border-t border-slate-100 dark:border-slate-800/40">
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5 w-full">
+      <div className="p-2 sm:p-3 bg-slate-50/15 dark:bg-slate-950/5 border-t border-slate-100 dark:border-slate-800/40">
+        <div className="grid grid-cols-3 sm:grid-cols-3 lg:grid-cols-6 gap-1.5 sm:gap-2.5 w-full">
           {subFeatures.map((feat) => {
             const Icon = feat.icon;
             const isSelected = activeTab === feat.id;
@@ -196,7 +196,7 @@ export default function WorkspaceNavbar({
                   if (isComingSoon) return;
                   onTabChange(feat.id);
                 }}
-                className={`relative flex flex-col items-start p-4 rounded-2xl transition-all duration-300 border text-left w-full h-full select-none ${
+                className={`relative flex flex-col items-start p-2.5 sm:p-4 rounded-xl sm:rounded-2xl transition-all duration-300 border text-left w-full h-full select-none ${
                   isComingSoon ? 'opacity-50 grayscale cursor-not-allowed' : 'cursor-pointer active:scale-97'
                 } ${
                   isSelected
@@ -204,20 +204,20 @@ export default function WorkspaceNavbar({
                     : `bg-slate-50/50 dark:bg-slate-900/40 border-slate-100/80 dark:border-slate-800/60 text-slate-650 dark:text-slate-400 ${isComingSoon ? '' : theme.hoverBg}`
                 }`}
               >
-                <div className="flex items-center gap-2 w-full justify-between">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Icon className={`w-4 h-4 shrink-0 transition-transform duration-300 group-hover:scale-110 ${
+                <div className="flex items-center gap-1.5 sm:gap-2 w-full justify-between">
+                  <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                    <Icon className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 transition-transform duration-300 group-hover:scale-110 ${
                       isSelected ? 'text-white' : theme.activeText
                     }`} />
                     
-                    <span className="text-[13px] font-black tracking-tight leading-none truncate">
+                    <span className="text-[11px] sm:text-[13px] font-black tracking-tight leading-none truncate">
                       {feat.label}
                     </span>
                   </div>
                   
                   {/* Item counter badges */}
                   {typeof feat.badge === 'number' && feat.badge > 0 && (
-                    <span className={`text-[9.5px] px-1.5 py-0.5 rounded-lg font-black transition-all shrink-0 ${
+                    <span className={`text-[8.5px] sm:text-[9.5px] px-1 sm:px-1.5 py-0.5 rounded font-black transition-all shrink-0 ${
                       isSelected 
                         ? 'bg-white/20 text-white' 
                         : `${theme.badgeBg}`
@@ -228,7 +228,7 @@ export default function WorkspaceNavbar({
                 </div>
                 
                 {/* Secondary guide text */}
-                <span className={`text-[9.5px] mt-1.5 font-bold leading-tight transition-colors duration-300 ${
+                <span className={`text-[9.5px] mt-1.5 font-bold leading-tight transition-colors duration-300 hidden sm:block ${
                   isSelected ? 'text-white/80' : 'text-slate-400 dark:text-slate-500'
                 }`}>
                   {feat.desc}
@@ -236,7 +236,7 @@ export default function WorkspaceNavbar({
 
                 {/* Refined slide indicator line for active features */}
                 {isSelected && (
-                  <span className="absolute bottom-1 left-4 right-4 h-0.5 bg-white/65 rounded-full" />
+                  <span className="absolute bottom-1 left-2.5 right-2.5 sm:left-4 sm:right-4 h-0.5 bg-white/65 rounded-full" />
                 )}
               </button>
             );
