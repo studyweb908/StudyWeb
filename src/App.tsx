@@ -1026,7 +1026,7 @@ export default function App() {
 
   // 2. RENDERING PUBLIC LANDING PAGE
   return (
-    <div className="min-h-screen font-sans selection:bg-brand-primary/20 selection:text-brand-primary relative">
+    <div className="min-h-screen font-sans selection:bg-brand-primary/20 selection:text-brand-primary relative w-full max-w-full overflow-x-hidden">
       <SEOManager isLoggedIn={isLoggedIn} />
 
       <motion.div
@@ -1036,7 +1036,7 @@ export default function App() {
       
       <Navigation />
       
-      <main className="pb-24 md:pb-0">
+      <main className="pb-24 md:pb-0 w-full max-w-full overflow-x-hidden">
         <Hero />
         <SocialProof />
         <ForStudents />

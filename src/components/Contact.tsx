@@ -171,7 +171,7 @@ export default function Contact() {
       <div className="absolute bottom-1/4 right-10 w-[400px] h-[400px] bg-purple-500/10 rounded-full blur-[120px] pointer-events-none -z-10 animate-pulse duration-8000" />
       
       {/* Floating Sparkles & Educational Particles */}
-      <div className="absolute top-12 left-1/2 -translate-x-1/2 w-full max-w-7xl h-full pointer-events-none opacity-30">
+      <div className="absolute top-12 left-1/2 -translate-x-1/2 w-full max-w-7xl h-full pointer-events-none opacity-30 overflow-hidden">
         <motion.div 
           animate={{ y: [-15, 15, -15], rotate: 360 }}
           transition={{ duration: 12, repeat: Infinity, ease: 'easeInOut' }}
@@ -315,7 +315,7 @@ export default function Contact() {
 
           {/* RIGHT COLUMN (55%) - PREMIUM GLASSMORPHISM FORM */}
           <div className="lg:col-span-7">
-            <div className="relative bg-card-bg/80 backdrop-blur-2xl border border-card-border shadow-2xl rounded-3xl p-6 sm:p-8 hover:border-brand-primary/20 transition-all duration-500">
+            <div className="relative bg-card-bg/80 backdrop-blur-2xl border border-card-border shadow-2xl rounded-2xl sm:rounded-3xl p-4 sm:p-8 hover:border-brand-primary/20 transition-all duration-500">
               
               {/* Subtle visual glow under form */}
               <div className="absolute inset-x-0 -bottom-10 h-32 bg-gradient-to-t from-brand-primary/5 to-transparent blur-3xl pointer-events-none -z-10" />

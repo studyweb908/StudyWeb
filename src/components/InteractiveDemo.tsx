@@ -3,18 +3,18 @@ import { Play } from 'lucide-react';
 
 export default function InteractiveDemo() {
   return (
-    <section id="interactive-demo" className="py-24 bg-card-bg" aria-label="Interactive Demo Experience">
+    <section id="interactive-demo" className="py-16 sm:py-24 bg-card-bg overflow-hidden" aria-label="Interactive Demo Experience">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          className="max-w-3xl mx-auto mb-16"
+          className="max-w-3xl mx-auto mb-12 sm:mb-16"
         >
-          <h2 className="text-4xl md:text-5xl font-display font-bold text-brand-text mb-6">
+          <h2 className="text-2xl sm:text-4xl md:text-5xl font-display font-bold text-brand-text mb-4 sm:mb-6">
             See How StudyWeb Works
           </h2>
-          <p className="text-lg text-brand-text-light leading-relaxed">
+          <p className="text-sm sm:text-lg text-brand-text-light leading-relaxed">
             Take a quick peek inside the StudyWeb dashboard. Experience the magic of AI-powered study note summaries, active recall flashcards, and practice quizzes.
           </p>
         </motion.div>

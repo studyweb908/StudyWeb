@@ -26,17 +26,17 @@ export default function Hero() {
             </h1>
 
             {/* AEO / GEO Concise Definition Paragraph */}
-            <p className="text-lg sm:text-xl text-brand-text-light mb-10 leading-relaxed max-w-xl mx-auto">
+            <p className="text-base sm:text-xl text-brand-text-light mb-8 sm:mb-10 leading-relaxed max-w-xl mx-auto px-1 sm:px-0">
               <strong>StudyWeb</strong> is an all-in-one AI study platform designed to help students master complex subjects faster with personalized AI tutoring, automated flashcards, practice quizzes, and parent progress tracking.
             </p>
             
             {/* Primary Calls To Action */}
-            <div className="flex flex-col sm:flex-row justify-center gap-4 mb-10">
+            <div className="flex flex-col sm:flex-row justify-center gap-3.5 sm:gap-4 mb-8 sm:mb-10 w-full sm:w-auto px-4 sm:px-0">
               <button 
                 type="button"
                 onClick={() => (window as any).openStudyWebAuth?.('signup')}
                 aria-label="Start studying with StudyWeb for free"
-                className="group relative bg-brand-primary hover:bg-brand-secondary text-white px-8 py-4 rounded-full text-lg font-medium transition-all shadow-lg shadow-brand-primary/30 hover:shadow-xl hover:shadow-brand-secondary/40 flex items-center justify-center gap-2 transform hover:-translate-y-1 overflow-hidden cursor-pointer"
+                className="w-full sm:w-auto group relative bg-brand-primary hover:bg-brand-secondary text-white px-8 py-3.5 sm:py-4 rounded-full text-base sm:text-lg font-medium transition-all shadow-lg shadow-brand-primary/30 hover:shadow-xl hover:shadow-brand-secondary/40 flex items-center justify-center gap-2 transform hover:-translate-y-1 overflow-hidden cursor-pointer"
               >
                 <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-in-out" />
                 <Rocket className="w-5 h-5 relative z-10 group-hover:animate-bounce" />
@@ -46,7 +46,7 @@ export default function Hero() {
               <a 
                 href="#interactive-demo"
                 aria-label="Explore StudyWeb Interactive AI Study Demo"
-                className="bg-card-bg hover:bg-brand-bg-light text-brand-text border border-card-border px-8 py-4 rounded-full text-lg font-medium transition-all shadow-sm hover:shadow-md flex items-center justify-center gap-2 group"
+                className="w-full sm:w-auto bg-card-bg hover:bg-brand-bg-light text-brand-text border border-card-border px-8 py-3.5 sm:py-4 rounded-full text-base sm:text-lg font-medium transition-all shadow-sm hover:shadow-md flex items-center justify-center gap-2 group"
               >
                 <div className="bg-brand-primary/10 text-brand-primary p-1.5 rounded-full group-hover:bg-brand-primary group-hover:text-white transition-colors">
                   <Play className="w-4 h-4 ml-0.5" />

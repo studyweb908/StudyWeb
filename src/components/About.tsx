@@ -121,7 +121,7 @@ export default function About() {
   ];
 
   return (
-    <div id="about" className="relative w-full bg-brand-bg-light dark:bg-brand-bg-dark transition-colors duration-300">
+    <div id="about" className="relative w-full overflow-hidden bg-brand-bg-light dark:bg-brand-bg-dark transition-colors duration-300">
       
       {/* Background Decorative Blobs */}
       <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-brand-primary/10 rounded-full blur-[120px] pointer-events-none -z-10 animate-pulse duration-10000" />
@@ -189,20 +189,20 @@ export default function About() {
             </div>
 
             {/* Right Column: High-Quality 3D/Interactive Study Workspace Representation */}
-            <div className="lg:col-span-6 relative flex justify-center items-center">
+            <div className="lg:col-span-6 relative flex justify-center items-center w-full overflow-hidden">
               <motion.div
                 initial={{ opacity: 0, scale: 0.9 }}
                 whileInView={{ opacity: 1, scale: 1 }}
                 viewport={{ once: true }}
-                className="relative w-full max-w-lg aspect-square"
+                className="relative w-full max-w-sm sm:max-w-lg aspect-square"
               >
                 {/* Orbital Rings & Glowing Blobs */}
                 <div className="absolute inset-0 bg-gradient-to-tr from-brand-primary/10 to-brand-secondary/10 rounded-full animate-spin duration-30000 pointer-events-none" />
-                <div className="absolute inset-12 bg-gradient-to-bl from-brand-accent/5 to-brand-primary/5 rounded-full animate-spin duration-20000 pointer-events-none" />
+                <div className="absolute inset-8 sm:inset-12 bg-gradient-to-bl from-brand-accent/5 to-brand-primary/5 rounded-full animate-spin duration-20000 pointer-events-none" />
                 
                 {/* Central Device representation */}
-                <div className="absolute inset-24 bg-card-bg/80 backdrop-blur-xl border border-card-border rounded-[32px] shadow-2xl p-6 flex flex-col justify-between overflow-hidden group hover:border-brand-primary/30 transition-all duration-500">
-                  <div className="flex justify-between items-center border-b border-card-border pb-3">
+                <div className="absolute inset-4 sm:inset-12 md:inset-20 lg:inset-24 bg-card-bg/90 backdrop-blur-xl border border-card-border rounded-2xl sm:rounded-[32px] shadow-2xl p-4 sm:p-6 flex flex-col justify-between overflow-hidden group hover:border-brand-primary/30 transition-all duration-500">
+                  <div className="flex justify-between items-center border-b border-card-border pb-2.5 sm:pb-3">
                     <div className="flex gap-1.5">
                       <div className="w-2.5 h-2.5 rounded-full bg-rose-400" />
                       <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
@@ -211,32 +211,32 @@ export default function About() {
                     <span className="text-[10px] font-mono text-brand-text-light tracking-widest uppercase">studyweb_ai_os</span>
                   </div>
                   
-                  <div className="flex-1 py-4 flex flex-col justify-center space-y-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-brand-primary/10 flex items-center justify-center text-brand-primary">
-                        <Bot className="w-5 h-5" />
+                  <div className="flex-1 py-2 sm:py-4 flex flex-col justify-center space-y-2 sm:space-y-3">
+                    <div className="flex items-center gap-2.5 sm:gap-3">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-brand-primary/10 flex items-center justify-center text-brand-primary shrink-0">
+                        <Bot className="w-4 h-4 sm:w-5 sm:h-5" />
                       </div>
                       <div className="space-y-1">
-                        <div className="w-24 h-2 bg-brand-text rounded-full" />
-                        <div className="w-16 h-1.5 bg-brand-text-light rounded-full" />
+                        <div className="w-20 sm:w-24 h-2 bg-brand-text rounded-full" />
+                        <div className="w-14 sm:w-16 h-1.5 bg-brand-text-light rounded-full" />
                       </div>
                     </div>
-                    <div className="w-full p-3 rounded-xl bg-card-border/40 text-[11px] font-medium text-brand-text border border-card-border">
+                    <div className="w-full p-2.5 sm:p-3 rounded-xl bg-card-border/40 text-[10px] sm:text-[11px] font-medium text-brand-text border border-card-border leading-snug">
                       "Explain photosynthesis like I'm 10."
                     </div>
-                    <div className="w-full p-3 rounded-xl bg-brand-primary/5 text-[11px] text-brand-primary border border-brand-primary/15 font-medium">
+                    <div className="w-full p-2.5 sm:p-3 rounded-xl bg-brand-primary/5 text-[10px] sm:text-[11px] text-brand-primary border border-brand-primary/15 font-medium leading-snug">
                       🤖 Answer: "Think of a leaf like a tiny solar-powered food factory!"
                     </div>
                   </div>
 
-                  <div className="h-2 bg-gradient-to-r from-brand-primary via-brand-secondary to-brand-accent rounded-full" />
+                  <div className="h-1.5 sm:h-2 bg-gradient-to-r from-brand-primary via-brand-secondary to-brand-accent rounded-full" />
                 </div>
 
-                {/* Floating Workspace Icons (Using exact custom motion settings) */}
+                {/* Floating Workspace Icons (hidden on extra small to prevent horizontal tilt) */}
                 <motion.div
                   animate={{ y: [-8, 8, -8] }}
                   transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute top-4 left-6 p-3 rounded-2xl bg-card-bg/95 backdrop-blur-lg border border-card-border shadow-xl flex items-center gap-2.5"
+                  className="hidden sm:flex absolute top-4 left-6 p-2.5 sm:p-3 rounded-2xl bg-card-bg/95 backdrop-blur-lg border border-card-border shadow-xl items-center gap-2"
                 >
                   <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-500">
                     <GraduationCap className="w-4 h-4" />
@@ -247,7 +247,7 @@ export default function About() {
                 <motion.div
                   animate={{ y: [8, -8, 8] }}
                   transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute top-12 right-2 p-3 rounded-2xl bg-card-bg/95 backdrop-blur-lg border border-card-border shadow-xl flex items-center gap-2.5"
+                  className="hidden sm:flex absolute top-12 right-2 p-2.5 sm:p-3 rounded-2xl bg-card-bg/95 backdrop-blur-lg border border-card-border shadow-xl items-center gap-2"
                 >
                   <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
                     <Calendar className="w-4 h-4" />
@@ -258,7 +258,7 @@ export default function About() {
                 <motion.div
                   animate={{ y: [-10, 10, -10] }}
                   transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute bottom-16 -left-4 p-3 rounded-2xl bg-card-bg/95 backdrop-blur-lg border border-card-border shadow-xl flex items-center gap-2.5"
+                  className="hidden sm:flex absolute bottom-16 -left-4 p-2.5 sm:p-3 rounded-2xl bg-card-bg/95 backdrop-blur-lg border border-card-border shadow-xl items-center gap-2"
                 >
                   <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500">
                     <Trophy className="w-4 h-4" />
@@ -269,7 +269,7 @@ export default function About() {
                 <motion.div
                   animate={{ y: [6, -6, 6] }}
                   transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute bottom-6 right-6 p-3 rounded-2xl bg-card-bg/95 backdrop-blur-lg border border-card-border shadow-xl flex items-center gap-2.5"
+                  className="hidden sm:flex absolute bottom-6 right-6 p-2.5 sm:p-3 rounded-2xl bg-card-bg/95 backdrop-blur-lg border border-card-border shadow-xl items-center gap-2"
                 >
                   <div className="p-1.5 rounded-lg bg-rose-500/10 text-rose-500">
                     <Rocket className="w-4 h-4" />
@@ -280,7 +280,7 @@ export default function About() {
                 <motion.div
                   animate={{ scale: [0.95, 1.05, 0.95] }}
                   transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[420px] h-[420px] border border-dashed border-brand-primary/20 rounded-full pointer-events-none -z-10"
+                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[280px] sm:w-[420px] h-[280px] sm:h-[420px] border border-dashed border-brand-primary/20 rounded-full pointer-events-none -z-10"
                 />
               </motion.div>
             </div>

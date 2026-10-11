@@ -54,7 +54,7 @@ export default function Pricing() {
 
         {/* Pricing Cards */}
         <motion.div 
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 xl:gap-8 items-stretch mb-24 px-4 md:px-0"
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 xl:gap-8 items-stretch mb-24 w-full"
           initial="hidden"
           whileInView="visible"
           viewport={{ once: true, margin: "-50px" }}

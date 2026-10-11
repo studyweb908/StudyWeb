@@ -10,10 +10,10 @@ export default function SocialProof() {
   ];
 
   return (
-    <section className="py-20 bg-card-bg relative z-20 border-b border-card-border">
+    <section className="py-16 sm:py-20 bg-card-bg relative z-20 border-b border-card-border overflow-hidden">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
-        <div className="text-center mb-16">
+        <div className="text-center mb-12 sm:mb-16">
           <motion.h2 
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -29,7 +29,7 @@ export default function SocialProof() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 sm:gap-6 md:gap-8">
           {stats.map((stat, index) => (
             <motion.div
               key={index}
@@ -37,12 +37,12 @@ export default function SocialProof() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ delay: index * 0.1 }}
-              className="text-center p-6 rounded-2xl bg-brand-bg-light/50 border border-card-border hover:border-brand-primary/20 transition-colors"
+              className="text-center p-3.5 sm:p-6 rounded-2xl bg-brand-bg-light/50 border border-card-border hover:border-brand-primary/20 transition-colors"
             >
-              <div className="text-4xl md:text-5xl font-display font-bold text-transparent bg-clip-text bg-gradient-to-br from-brand-primary to-brand-secondary mb-2">
+              <div className="text-2xl sm:text-4xl md:text-5xl font-display font-bold text-transparent bg-clip-text bg-gradient-to-br from-brand-primary to-brand-secondary mb-1 sm:mb-2">
                 {stat.value}
               </div>
-              <div className="text-brand-text-light font-medium">
+              <div className="text-brand-text-light font-medium text-xs sm:text-base">
                 {stat.label}
               </div>
             </motion.div>

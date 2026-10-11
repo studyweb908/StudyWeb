@@ -204,7 +204,7 @@ export default function ForStudents() {
             {/* Background Glow Wrapper */}
             <div className="absolute inset-0 bg-gradient-to-tr from-brand-primary/10 to-brand-secondary/15 rounded-full blur-[80px] pointer-events-none -z-10" />
 
-            <div className="w-full max-w-lg aspect-square bg-card-bg/60 backdrop-blur-2xl border border-card-border rounded-3xl p-6 shadow-2xl flex flex-col justify-between overflow-hidden relative group hover:border-brand-primary/20 transition-all duration-500">
+            <div className="w-full max-w-lg min-h-[380px] sm:min-h-0 sm:aspect-square bg-card-bg/60 backdrop-blur-2xl border border-card-border rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-2xl flex flex-col justify-between overflow-hidden relative group hover:border-brand-primary/20 transition-all duration-500">
               
               {/* Device Window Header */}
               <div className="flex justify-between items-center border-b border-card-border pb-3 mb-4 flex-shrink-0">
