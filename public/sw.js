@@ -1,11 +1,15 @@
 // StudyWeb Offline Service Worker
-const CACHE_NAME = 'studyweb-cache-v2';
+const CACHE_NAME = 'studyweb-cache-v3';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',
   '/logo.png',
   '/favicon.png',
-  '/favicon.ico'
+  '/favicon.ico',
+  '/favicon-32x32.png',
+  '/favicon-16x16.png',
+  '/favicon-192x192.png',
+  '/apple-touch-icon.png'
 ];
 
 // Install Event - Pre-cache shell assets
