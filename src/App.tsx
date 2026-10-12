@@ -20,6 +20,7 @@ import FinalCTA from './components/FinalCTA';
 import Footer from './components/Footer';
 import SEOManager from './components/SEOManager';
 import LegalModals from './components/LegalModals';
+import ResetPasswordModal from './components/ResetPasswordModal';
 import { supabase } from './lib/supabase';
 
 // Authenticated Dashboard Components
@@ -1009,6 +1010,7 @@ export default function App() {
 
         <OfflineNotice />
         <ToastContainer />
+        <ResetPasswordModal />
         <LegalModals 
           isOpen={legalModalType !== null} 
           type={legalModalType} 
@@ -1052,6 +1054,7 @@ export default function App() {
       <Footer />
       <OfflineNotice />
       <ToastContainer />
+      <ResetPasswordModal />
       <LegalModals 
         isOpen={legalModalType !== null} 
         type={legalModalType} 
