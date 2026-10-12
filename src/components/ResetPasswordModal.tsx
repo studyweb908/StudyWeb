@@ -160,82 +160,82 @@ export default function ResetPasswordModal({ isOpen: externalIsOpen, onClose: ex
         />
 
         <motion.div
-          initial={{ opacity: 0, scale: 0.92, y: 16 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.92, y: 16 }}
-          transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-          className="relative w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10"
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.98 }}
+          transition={{ duration: 0.15 }}
+          className="relative w-full max-w-[380px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden z-10"
         >
           {/* Top Decorative Gradient Accent */}
-          <div className="h-2 bg-gradient-to-r from-brand-primary via-indigo-500 to-purple-600" />
+          <div className="h-1.5 bg-gradient-to-r from-brand-primary via-indigo-500 to-purple-600" />
 
           {/* Close button */}
           <button
             onClick={handleClose}
-            className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors cursor-pointer"
+            className="absolute top-2.5 right-2.5 p-1.5 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer z-20 shadow-sm flex items-center justify-center"
             aria-label="Close dialog"
           >
-            <X className="w-5 h-5" />
+            <X className="w-3.5 h-3.5" />
           </button>
 
-          <div className="p-6 md:p-8">
+          <div className="p-3.5 sm:p-5">
             {/* Header section */}
-            <div className="text-center space-y-3 mb-6">
-              <div className="w-14 h-14 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-800/60 rounded-2xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 mx-auto shadow-inner">
+            <div className="text-center space-y-2 mb-4 pr-3">
+              <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-800/60 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 mx-auto shadow-inner">
                 {success ? (
-                  <CheckCircle className="w-7 h-7 text-emerald-500" />
+                  <CheckCircle className="w-5 h-5 text-emerald-500" />
                 ) : (
-                  <KeyRound className="w-7 h-7" />
+                  <KeyRound className="w-5 h-5" />
                 )}
               </div>
-              <h2 className="text-2xl font-black text-slate-900 dark:text-slate-100 tracking-tight">
+              <h2 className="text-lg font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
                 {success ? 'Password Updated!' : 'Set New Password'}
               </h2>
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-xs mx-auto leading-relaxed">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-xs mx-auto leading-tight">
                 {success 
-                  ? 'Your password has been successfully updated. You can now use your new password to sign in.'
-                  : 'Please enter and confirm your new password below to update your StudyWeb account.'}
+                  ? 'Your password has been successfully updated.'
+                  : 'Enter and confirm your new password below.'}
               </p>
             </div>
 
             {/* Error banner */}
             {error && (
               <motion.div
-                initial={{ opacity: 0, y: -8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mb-5 p-3.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 rounded-xl text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2.5"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="mb-3 p-2 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 rounded-lg text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2"
               >
-                <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
-                <span className="font-medium leading-normal">{error}</span>
+                <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5" />
+                <span className="font-medium leading-tight text-[11px]">{error}</span>
               </motion.div>
             )}
 
             {/* Success View */}
             {success ? (
-              <div className="space-y-4 text-center">
-                <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-2xl text-xs text-emerald-800 dark:text-emerald-300 font-semibold leading-relaxed">
-                  ✨ Your account security credentials have been updated in real-time.
+              <div className="space-y-3 text-center">
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-xl text-xs text-emerald-800 dark:text-emerald-300 font-semibold leading-relaxed">
+                  ✨ Your password has been updated in real-time.
                 </div>
 
                 <button
                   onClick={handleClose}
-                  className="w-full py-3.5 px-5 bg-gradient-to-r from-brand-primary to-indigo-600 hover:from-brand-primary/90 hover:to-indigo-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-indigo-500/20 transition-transform active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+                  className="w-full py-2.5 px-4 bg-gradient-to-r from-brand-primary to-indigo-600 hover:from-brand-primary/90 hover:to-indigo-700 text-white font-bold text-xs rounded-lg shadow-md shadow-indigo-500/20 active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
                 >
                   <span>Continue to Dashboard</span>
-                  <ArrowRight className="w-4 h-4" />
+                  <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
             ) : (
               /* Password Reset Form */
-              <form onSubmit={handleUpdatePassword} className="space-y-4">
+              <form onSubmit={handleUpdatePassword} className="space-y-3">
                 {/* New Password */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
                     New Password
                   </label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                      <Lock className="w-4 h-4" />
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                      <Lock className="w-3.5 h-3.5" />
                     </div>
                     <input
                       type={showPassword ? 'text' : 'password'}
@@ -243,26 +243,26 @@ export default function ResetPasswordModal({ isOpen: externalIsOpen, onClose: ex
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="At least 6 characters"
                       required
-                      className="w-full pl-10 pr-10 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-primary/50 focus:border-brand-primary transition-all"
+                      className="w-full pl-8 pr-9 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-brand-primary/50 focus:border-brand-primary transition-all"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                      className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
                     >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                     </button>
                   </div>
                 </div>
 
                 {/* Confirm Password */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
                     Confirm New Password
                   </label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                      <KeyRound className="w-4 h-4" />
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                      <KeyRound className="w-3.5 h-3.5" />
                     </div>
                     <input
                       type={showConfirmPassword ? 'text' : 'password'}
@@ -270,14 +270,14 @@ export default function ResetPasswordModal({ isOpen: externalIsOpen, onClose: ex
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="Re-enter new password"
                       required
-                      className="w-full pl-10 pr-10 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-primary/50 focus:border-brand-primary transition-all"
+                      className="w-full pl-8 pr-9 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-brand-primary/50 focus:border-brand-primary transition-all"
                     />
                     <button
                       type="button"
                       onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                      className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
                     >
-                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      {showConfirmPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                     </button>
                   </div>
                 </div>
@@ -286,16 +286,16 @@ export default function ResetPasswordModal({ isOpen: externalIsOpen, onClose: ex
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full mt-2 py-3.5 px-5 bg-gradient-to-r from-brand-primary to-indigo-600 hover:from-brand-primary/90 hover:to-indigo-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/30 transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="w-full mt-1.5 py-2.5 px-4 bg-gradient-to-r from-brand-primary to-indigo-600 hover:from-brand-primary/90 hover:to-indigo-700 text-white font-bold text-xs rounded-lg shadow-md shadow-indigo-500/20 active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {loading ? (
-                    <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                       <span>Updating Password...</span>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="w-4 h-4" />
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5" />
                       <span>Update Password</span>
                     </div>
                   )}
