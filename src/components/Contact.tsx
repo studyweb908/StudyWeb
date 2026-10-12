@@ -20,8 +20,6 @@ import {
   GraduationCap, 
   BookOpen, 
   Sparkles,
-  ArrowRight,
-  HelpCircle,
   MessageSquare
 } from 'lucide-react';
 
@@ -141,28 +139,6 @@ export default function Contact() {
     }
   };
 
-  // Compact FAQ preview state
-  const [activeFaq, setActiveFaq] = useState<number | null>(null);
-
-  const faqItems = [
-    {
-      q: "When is StudyWeb launching?",
-      a: "We are currently in private beta, collecting feedback from early student testers. Our public global pre-launch is planned for late Summer 2026. Join our waitlist to secure your early access spot!"
-    },
-    {
-      q: "Is StudyWeb free to use?",
-      a: "Yes! StudyWeb is built student-first. We offer a generous Free Forever plan that includes basic AI study assistants, notes generators, and progress tracking. Premium tiers with advanced limits are completely optional."
-    },
-    {
-      q: "Can parents create accounts?",
-      a: "Absolutely. Parents can link their accounts to monitor their child's daily goals, check their streak consistency, and review AI tutor diagnostics while keeping private notes strictly secure."
-    },
-    {
-      q: "Will there be a mobile app?",
-      a: "Yes, fully optimized native apps for both iOS and Android are co-developing alongside our web suite to launch concurrently, supporting fully offline flashcards sync."
-    }
-  ];
-
   return (
     <section id="contact" className="py-24 relative overflow-hidden bg-gradient-to-b from-transparent via-brand-primary/5 to-transparent">
       
@@ -237,48 +213,38 @@ export default function Contact() {
           {/* LEFT COLUMN (45%) */}
           <div className="lg:col-span-5 space-y-6">
             
-            <div className="grid sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               
               {/* Card 1: Email */}
-              <div className="p-5 rounded-2xl bg-card-bg/60 backdrop-blur-md border border-card-border hover:border-brand-primary/30 shadow-md hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
-                <div className="w-10 h-10 rounded-xl bg-brand-primary/10 text-brand-primary flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                  <Mail className="w-5 h-5" />
+              <div className="p-4 rounded-2xl bg-card-bg/60 backdrop-blur-md border border-card-border hover:border-brand-primary/30 shadow-md hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
+                <div className="w-9 h-9 rounded-xl bg-brand-primary/10 text-brand-primary flex items-center justify-center mb-2.5 group-hover:scale-110 transition-transform">
+                  <Mail className="w-4 h-4" />
                 </div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-brand-text-light mb-1">Email Us</h4>
-                <a href="mailto:studyweb908@gmail.com" className="text-sm font-semibold text-brand-text hover:text-brand-primary block transition-colors">
+                <h4 className="text-[11px] font-bold uppercase tracking-wider text-brand-text-light mb-0.5">Email Us</h4>
+                <a href="mailto:studyweb908@gmail.com" className="text-xs font-semibold text-brand-text hover:text-brand-primary block transition-colors truncate" title="studyweb908@gmail.com">
                   studyweb908@gmail.com
                 </a>
-                <p className="text-[11px] text-brand-text-light mt-1">Reach us anytime.</p>
+                <p className="text-[10px] text-brand-text-light mt-0.5">Reach us anytime.</p>
               </div>
 
               {/* Card 2: Location */}
-              <div className="p-5 rounded-2xl bg-card-bg/60 backdrop-blur-md border border-card-border hover:border-brand-primary/30 shadow-md hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
-                <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                  <MapPin className="w-5 h-5" />
+              <div className="p-4 rounded-2xl bg-card-bg/60 backdrop-blur-md border border-card-border hover:border-brand-primary/30 shadow-md hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
+                <div className="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center mb-2.5 group-hover:scale-110 transition-transform">
+                  <MapPin className="w-4 h-4" />
                 </div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-brand-text-light mb-1">Location</h4>
-                <p className="text-sm font-semibold text-brand-text">India</p>
-                <p className="text-[11px] text-brand-text-light mt-1">Serving learners everywhere.</p>
+                <h4 className="text-[11px] font-bold uppercase tracking-wider text-brand-text-light mb-0.5">Location</h4>
+                <p className="text-xs font-semibold text-brand-text">India</p>
+                <p className="text-[10px] text-brand-text-light mt-0.5">Serving learners.</p>
               </div>
 
               {/* Card 3: Support Hours */}
-              <div className="p-5 rounded-2xl bg-card-bg/60 backdrop-blur-md border border-card-border hover:border-brand-primary/30 shadow-md hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
-                <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-500 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                  <Clock className="w-5 h-5" />
+              <div className="p-4 rounded-2xl bg-card-bg/60 backdrop-blur-md border border-card-border hover:border-brand-primary/30 shadow-md hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
+                <div className="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-500 flex items-center justify-center mb-2.5 group-hover:scale-110 transition-transform">
+                  <Clock className="w-4 h-4" />
                 </div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-brand-text-light mb-1">Support Hours</h4>
-                <p className="text-sm font-semibold text-brand-text leading-tight">24/7 Support</p>
-                <p className="text-xs font-medium text-brand-text-light mt-0.5">Available all the time</p>
-              </div>
-
-              {/* Card 4: Average Response */}
-              <div className="p-5 rounded-2xl bg-card-bg/60 backdrop-blur-md border border-card-border hover:border-brand-primary/30 shadow-md hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
-                <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                  <Zap className="w-5 h-5 animate-pulse" />
-                </div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-brand-text-light mb-1">Response Speed</h4>
-                <p className="text-sm font-semibold text-brand-text">24–48 Hours</p>
-                <p className="text-[11px] text-brand-text-light mt-1">Typically much faster.</p>
+                <h4 className="text-[11px] font-bold uppercase tracking-wider text-brand-text-light mb-0.5">Support Hours</h4>
+                <p className="text-xs font-semibold text-brand-text leading-tight">24/7 Support</p>
+                <p className="text-[10px] text-brand-text-light mt-0.5">Available all time</p>
               </div>
 
             </div>
@@ -492,11 +458,33 @@ export default function Contact() {
                       onChange={handleCheckboxChange}
                       className="mt-0.5 rounded border-card-border text-brand-primary focus:ring-brand-primary/20 w-4 h-4 cursor-pointer"
                     />
-                    <span>
+                    <span className="select-none">
                       I agree to the{' '}
-                      <a href="#privacy" className="text-brand-primary hover:underline font-semibold">Privacy Policy</a>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          window.location.hash = '#privacy';
+                          window.dispatchEvent(new HashChangeEvent('hashchange'));
+                        }}
+                        className="text-brand-primary hover:underline font-semibold cursor-pointer inline"
+                      >
+                        Privacy Policy
+                      </button>
                       {' '}and{' '}
-                      <a href="#terms" className="text-brand-primary hover:underline font-semibold">Terms</a>.
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          window.location.hash = '#terms';
+                          window.dispatchEvent(new HashChangeEvent('hashchange'));
+                        }}
+                        className="text-brand-primary hover:underline font-semibold cursor-pointer inline"
+                      >
+                        Terms of Service
+                      </button>.
                     </span>
                   </label>
                   {errors.agree && (
@@ -579,7 +567,7 @@ export default function Contact() {
         {/* ==========================================================
             TRUST SECTION (BELOW FORM)
            ========================================================== */}
-        <div className="grid md:grid-cols-3 gap-6 mb-24">
+        <div className="grid md:grid-cols-3 gap-6">
           
           <div className="p-5 rounded-2xl bg-card-bg/60 backdrop-blur-md border border-card-border flex items-start gap-4 hover:border-brand-primary/20 transition-all duration-300 shadow-sm hover:shadow-md">
             <div className="p-3 rounded-xl bg-indigo-500/10 text-indigo-500 flex-shrink-0">
@@ -611,62 +599,6 @@ export default function Contact() {
             </div>
           </div>
 
-        </div>
-
-        {/* ==========================================================
-            FAQ PREVIEW ACCORDION
-           ========================================================== */}
-        <div className="max-w-3xl mx-auto border border-card-border bg-card-bg/50 backdrop-blur-md rounded-3xl p-6 sm:p-8 shadow-lg">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-8">
-            <div className="text-left space-y-1">
-              <h3 className="text-xl font-bold text-brand-text flex items-center gap-2">
-                <HelpCircle className="w-5 h-5 text-brand-primary" /> Frequently Asked Questions
-              </h3>
-              <p className="text-xs text-brand-text-light">Quick answers to common questions about our system.</p>
-            </div>
-            <a
-              href="#faq"
-              className="px-4 py-2 border border-card-border hover:bg-card-border/40 text-brand-text rounded-xl text-xs font-semibold flex items-center gap-1 transition-all"
-            >
-              View All FAQs <ArrowRight className="w-3.5 h-3.5" />
-            </a>
-          </div>
-
-          <div className="space-y-3">
-            {faqItems.map((faq, index) => {
-              const isOpen = activeFaq === index;
-              return (
-                <div
-                  key={index}
-                  className="border border-card-border rounded-xl overflow-hidden transition-all"
-                >
-                  <button
-                    onClick={() => setActiveFaq(isOpen ? null : index)}
-                    className="w-full px-5 py-4 text-left flex items-center justify-between gap-4 bg-card-bg hover:bg-brand-primary/5 transition-colors focus:outline-none"
-                    aria-expanded={isOpen ? 'true' : 'false'}
-                  >
-                    <span className="text-sm font-semibold text-brand-text">{faq.q}</span>
-                    <ChevronDown className={`w-4 h-4 text-brand-text-light transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  <AnimatePresence initial={false}>
-                    {isOpen && (
-                      <motion.div
-                        initial={{ height: 0 }}
-                        animate={{ height: 'auto' }}
-                        exit={{ height: 0 }}
-                        className="overflow-hidden"
-                      >
-                        <div className="px-5 pb-4 pt-1 text-xs text-brand-text-light leading-relaxed bg-card-bg/40 border-t border-card-border">
-                          {faq.a}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              );
-            })}
-          </div>
         </div>
 
       </div>

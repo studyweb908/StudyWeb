@@ -32,7 +32,7 @@ export default function LegalModals({ isOpen, type, onClose }: LegalModalProps) 
   return (
     <AnimatePresence>
       <div 
-        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+        className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md"
         role="dialog"
         aria-modal="true"
         aria-labelledby={type === 'privacy' ? 'privacy-title' : 'terms-title'}
@@ -115,7 +115,7 @@ export default function LegalModals({ isOpen, type, onClose }: LegalModalProps) 
                 <section>
                   <h3 className="text-base font-bold text-brand-text mb-2">5. Parent Controls & Data Rights</h3>
                   <p>
-                    Parents and guardians have full visibility into connected student accounts through the StudyWeb Parent Dashboard. Users and parents can request complete data export or account deletion at any time by contacting our support team at <a href="mailto:privacy@studyweb.com" className="text-brand-primary underline">privacy@studyweb.com</a>.
+                    Parents and guardians have full visibility into connected student accounts through the StudyWeb Parent Dashboard. Users and parents can request complete data export or account deletion at any time by contacting our support team at <a href="mailto:studyweb908@gmail.com" className="text-brand-primary underline">studyweb908@gmail.com</a>.
                   </p>
                 </section>
               </>
@@ -155,7 +155,7 @@ export default function LegalModals({ isOpen, type, onClose }: LegalModalProps) 
                 <section>
                   <h3 className="text-base font-bold text-brand-text mb-2">5. Limitation of Liability & Support</h3>
                   <p>
-                    StudyWeb strives for 99.9% platform availability. If you experience any technical issues or need assistance, our support team is available at <a href="mailto:support@studyweb.com" className="text-brand-primary underline">support@studyweb.com</a>.
+                    StudyWeb strives for 99.9% platform availability. If you experience any technical issues or need assistance, our support team is available at <a href="mailto:studyweb908@gmail.com" className="text-brand-primary underline">studyweb908@gmail.com</a>.
                   </p>
                 </section>
               </>
@@ -166,9 +166,9 @@ export default function LegalModals({ isOpen, type, onClose }: LegalModalProps) 
           <div className="px-6 py-4 border-t border-card-border bg-brand-bg-light/30 flex justify-end">
             <button
               onClick={onClose}
-              className="px-6 py-2.5 rounded-full bg-brand-primary text-white font-medium hover:bg-brand-secondary transition-colors"
+              className="px-6 py-2.5 rounded-full bg-brand-primary text-white font-medium hover:bg-brand-secondary transition-colors cursor-pointer shadow-lg"
             >
-              I Understand
+              I Understand & Agree
             </button>
           </div>
         </motion.div>

@@ -13,6 +13,9 @@ import {
   Mail,
   Lock,
   ArrowRight,
+  ArrowLeft,
+  CheckCircle,
+  KeyRound,
   Eye,
   EyeOff,
   ImagePlus
@@ -24,7 +27,7 @@ export default function Navigation() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [activeSection, setActiveSection] = useState('home');
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'signup' | 'forgot' | 'reset-password'>('login');
   const [showPassword, setShowPassword] = useState(false);
   const [profilePic, setProfilePic] = useState<string | null>(null);
   const [email, setEmail] = useState('');
@@ -32,6 +35,13 @@ export default function Navigation() {
   const [fullName, setFullName] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState('');
+
+  // Password reset state
+  const [resetEmailSent, setResetEmailSent] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState(false);
 
   const isProgrammaticScrollRef = useRef(false);
   const scrollTimeoutRef = useRef<any>(null);
@@ -118,16 +128,45 @@ export default function Navigation() {
     };
 
     const handleOpenAuthModal = (e: Event) => {
-      const customEvent = e as CustomEvent<{ mode?: 'login' | 'signup' }>;
+      const customEvent = e as CustomEvent<{ mode?: 'login' | 'signup' | 'forgot' | 'reset-password' }>;
       const mode = customEvent.detail?.mode || 'login';
+      setAuthError('');
+      setResetEmailSent(false);
       setAuthMode(mode);
       setIsAuthModalOpen(true);
     };
 
-    (window as any).openStudyWebAuth = (mode?: 'login' | 'signup') => {
+    (window as any).openStudyWebAuth = (mode?: 'login' | 'signup' | 'forgot' | 'reset-password') => {
+      setAuthError('');
+      setResetEmailSent(false);
       setAuthMode(mode || 'login');
       setIsAuthModalOpen(true);
     };
+
+    // Check URL hash or query parameters for password recovery link
+    const checkHashRecovery = () => {
+      const hash = window.location.hash || window.location.search;
+      if (hash.includes('type=recovery') || hash.includes('reset-password')) {
+        setAuthError('');
+        setAuthMode('reset-password');
+        setIsAuthModalOpen(true);
+      }
+    };
+    checkHashRecovery();
+    window.addEventListener('hashchange', checkHashRecovery);
+
+    // Listen to Supabase password recovery event
+    let authUnsubscribe: (() => void) | null = null;
+    if (supabase) {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+        if (event === 'PASSWORD_RECOVERY') {
+          setAuthError('');
+          setAuthMode('reset-password');
+          setIsAuthModalOpen(true);
+        }
+      });
+      authUnsubscribe = () => subscription.unsubscribe();
+    }
 
     window.addEventListener('scroll', handleScroll);
     window.addEventListener('open-auth-modal', handleOpenAuthModal);
@@ -135,6 +174,8 @@ export default function Navigation() {
     return () => {
       window.removeEventListener('scroll', handleScroll);
       window.removeEventListener('open-auth-modal', handleOpenAuthModal);
+      window.removeEventListener('hashchange', checkHashRecovery);
+      if (authUnsubscribe) authUnsubscribe();
       delete (window as any).openStudyWebAuth;
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
@@ -488,319 +529,608 @@ export default function Navigation() {
               <div className="text-center space-y-2 mb-6">
                 <img src="/logo.png" alt="StudyWeb Logo" className="h-12 mx-auto dark:invert mb-1" />
                 <h3 className="text-2xl font-extrabold font-display text-brand-text">
-                  {authMode === 'login' ? 'Welcome Back!' : 'Create Your Account'}
+                  {authMode === 'login' && 'Welcome Back!'}
+                  {authMode === 'signup' && 'Create Your Account'}
+                  {authMode === 'forgot' && 'Reset Your Password'}
+                  {authMode === 'reset-password' && 'Set New Password'}
                 </h3>
                 <p className="text-xs text-brand-text-light font-medium">
-                  {authMode === 'login' 
-                    ? 'Log in to continue your automated, smart study sessions' 
-                    : 'Join thousands of students and study smarter with AI'}
+                  {authMode === 'login' && 'Log in to continue your automated, smart study sessions'}
+                  {authMode === 'signup' && 'Join thousands of students and study smarter with AI'}
+                  {authMode === 'forgot' && 'Paste your email ID below to receive a password reset link through Supabase'}
+                  {authMode === 'reset-password' && 'Enter a strong new password for your StudyWeb account'}
                 </p>
               </div>
 
-              {/* Tab Selector */}
-              <div className="flex bg-card-border/30 p-1.5 rounded-xl mb-6">
-                <button
-                  onClick={() => setAuthMode('login')}
-                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                    authMode === 'login'
-                      ? 'bg-brand-primary text-white shadow-md'
-                      : 'text-brand-text-light hover:text-brand-text'
-                  }`}
-                >
-                  Log In
-                </button>
-                <button
-                  onClick={() => setAuthMode('signup')}
-                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                    authMode === 'signup'
-                      ? 'bg-brand-primary text-white shadow-md'
-                      : 'text-brand-text-light hover:text-brand-text'
-                  }`}
-                >
-                  Sign Up
-                </button>
-              </div>
+              {/* Tab Selector or Back Button */}
+              {(authMode === 'login' || authMode === 'signup') ? (
+                <div className="flex bg-card-border/30 p-1.5 rounded-xl mb-6">
+                  <button
+                    onClick={() => {
+                      setAuthError('');
+                      setAuthMode('login');
+                    }}
+                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                      authMode === 'login'
+                        ? 'bg-brand-primary text-white shadow-md'
+                        : 'text-brand-text-light hover:text-brand-text'
+                    }`}
+                  >
+                    Log In
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAuthError('');
+                      setAuthMode('signup');
+                    }}
+                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                      authMode === 'signup'
+                        ? 'bg-brand-primary text-white shadow-md'
+                        : 'text-brand-text-light hover:text-brand-text'
+                    }`}
+                  >
+                    Sign Up
+                  </button>
+                </div>
+              ) : (
+                <div className="mb-6 flex justify-start">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthError('');
+                      setResetEmailSent(false);
+                      setAuthMode('login');
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-primary hover:underline cursor-pointer"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" /> Back to Log In
+                  </button>
+                </div>
+              )}
 
-              {/* Form */}
-              <form 
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  setAuthError('');
-                  
-                  if (password.length < 6) {
-                    setAuthError('Password should be at least 6 characters.');
-                    return;
-                  }
-
-                  setAuthLoading(true);
-                  try {
-                    if (!supabase) {
-                      // Mock auth if no supabase configured
-                      if (authMode === 'signup') {
-                        if (fullName.trim()) {
-                          localStorage.setItem('studyweb_profile_name', fullName.trim());
+              {/* Forms */}
+              {authMode === 'forgot' ? (
+                <div>
+                  {resetEmailSent ? (
+                    <div className="text-center space-y-4 py-2">
+                      <div className="w-14 h-14 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center mx-auto border border-emerald-500/20">
+                        <CheckCircle className="w-8 h-8" />
+                      </div>
+                      <div className="space-y-2">
+                        <h4 className="text-base font-bold text-brand-text">Check Your Email Inbox</h4>
+                        <p className="text-xs text-brand-text-light leading-relaxed">
+                          We sent a password reset link to <span className="font-bold text-brand-primary">{email}</span> through Supabase.
+                        </p>
+                        <p className="text-[11px] text-brand-text-light/80 italic">
+                          Please check your inbox (and spam folder). Click the link in that email to reset your password.
+                        </p>
+                      </div>
+                      <div className="pt-2 space-y-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setAuthLoading(true);
+                            setAuthError('');
+                            try {
+                              if (supabase) {
+                                await supabase.auth.resetPasswordForEmail(email.trim(), {
+                                  redirectTo: `${window.location.origin}/#reset-password`
+                                });
+                              }
+                              (window as any).showToast?.('Reset email resent successfully!', 'success');
+                            } catch (err: any) {
+                              setAuthError(err.message || 'Failed to resend email.');
+                            } finally {
+                              setAuthLoading(false);
+                            }
+                          }}
+                          disabled={authLoading}
+                          className="w-full bg-card-border/40 hover:bg-card-border text-brand-text py-2.5 rounded-xl font-bold text-xs transition-colors cursor-pointer"
+                        >
+                          {authLoading ? 'Resending Link...' : 'Resend Reset Email'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setResetEmailSent(false);
+                            setAuthMode('login');
+                          }}
+                          className="w-full text-xs font-bold text-brand-primary hover:underline cursor-pointer py-1"
+                        >
+                          Return to Log In
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        setAuthError('');
+                        if (!email.trim() || !/\S+@\S+\.\S+/.test(email.trim())) {
+                          setAuthError('Please enter a valid email address.');
+                          return;
                         }
-                        (window as any).showToast?.('Welcome! Your StudyWeb account has been created.', 'success');
-                        window.dispatchEvent(new CustomEvent('studyweb-signup-success'));
-                      } else {
-                        const emailPrefix = email.split('@')[0];
-                        const mockName = emailPrefix ? (emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1)) : 'Scholar';
-                        localStorage.setItem('studyweb_profile_name', mockName);
-                        (window as any).showToast?.('Successfully logged in to StudyWeb!', 'success');
-                        localStorage.setItem('studyweb_is_logged_in', 'true');
-                        window.dispatchEvent(new CustomEvent('studyweb-login-success'));
-                      }
-                      setIsAuthModalOpen(false);
+                        setAuthLoading(true);
+                        try {
+                          if (supabase) {
+                            const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+                              redirectTo: `${window.location.origin}/#reset-password`
+                            });
+                            if (error) throw error;
+                          }
+                          setResetEmailSent(true);
+                          (window as any).showToast?.('Password reset email sent!', 'success');
+                        } catch (err: any) {
+                          console.error('Password reset error:', err);
+                          setAuthError(err.message || 'Failed to send password reset email. Please try again.');
+                        } finally {
+                          setAuthLoading(false);
+                        }
+                      }}
+                      className="space-y-4"
+                    >
+                      {authError && (
+                        <div className="text-red-500 text-xs font-medium bg-red-500/10 border border-red-500/20 p-3 rounded-xl">
+                          <p className="font-semibold">{authError}</p>
+                        </div>
+                      )}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-brand-text flex items-center gap-1.5">
+                          <Mail className="w-3.5 h-3.5 text-brand-text-light" />
+                          Paste Your Email ID
+                        </label>
+                        <div className="relative text-brand-text-light focus-within:text-brand-primary transition-colors duration-200">
+                          <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200" />
+                          <input
+                            type="email"
+                            required
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            placeholder="you@example.com"
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-card-border bg-card-bg/50 dark:bg-brand-bg-dark/50 backdrop-blur-sm text-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={authLoading}
+                        className="w-full bg-brand-primary hover:bg-brand-secondary text-white py-3.5 rounded-xl font-bold text-xs sm:text-sm transition-all shadow-lg shadow-brand-primary/10 hover:shadow-xl hover:shadow-brand-secondary/25 flex items-center justify-center gap-2 group cursor-pointer mt-2 disabled:opacity-70"
+                      >
+                        {authLoading ? 'Sending Reset Link...' : 'Send Password Reset Link'}
+                        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                      </button>
+                    </form>
+                  )}
+                </div>
+              ) : authMode === 'reset-password' ? (
+                <div>
+                  {resetSuccess ? (
+                    <div className="text-center space-y-3 py-4">
+                      <div className="w-14 h-14 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center mx-auto border border-emerald-500/20">
+                        <CheckCircle className="w-8 h-8" />
+                      </div>
+                      <h4 className="text-base font-bold text-brand-text">Password Updated Successfully!</h4>
+                      <p className="text-xs text-brand-text-light">
+                        Your new password is now active. Redirecting you to Log In...
+                      </p>
+                    </div>
+                  ) : (
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        setAuthError('');
+                        if (newPassword.length < 6) {
+                          setAuthError('Password must be at least 6 characters.');
+                          return;
+                        }
+                        if (newPassword !== confirmPassword) {
+                          setAuthError('Passwords do not match.');
+                          return;
+                        }
+                        setAuthLoading(true);
+                        try {
+                          if (supabase) {
+                            const { error } = await supabase.auth.updateUser({ password: newPassword });
+                            if (error) throw error;
+                          }
+                          setResetSuccess(true);
+                          (window as any).showToast?.('Password updated successfully!', 'success');
+                          setTimeout(() => {
+                            setAuthMode('login');
+                            setResetSuccess(false);
+                            setNewPassword('');
+                            setConfirmPassword('');
+                            if (window.location.hash.includes('type=recovery') || window.location.hash.includes('reset-password')) {
+                              window.history.replaceState(null, '', window.location.pathname);
+                            }
+                          }, 2000);
+                        } catch (err: any) {
+                          console.error('Update password error:', err);
+                          setAuthError(err.message || 'Failed to update password. Please try again.');
+                        } finally {
+                          setAuthLoading(false);
+                        }
+                      }}
+                      className="space-y-4"
+                    >
+                      {authError && (
+                        <div className="text-red-500 text-xs font-medium bg-red-500/10 border border-red-500/20 p-3 rounded-xl">
+                          <p className="font-semibold">{authError}</p>
+                        </div>
+                      )}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-brand-text flex items-center gap-1.5">
+                          <KeyRound className="w-3.5 h-3.5 text-brand-text-light" />
+                          New Password
+                        </label>
+                        <div className="relative text-brand-text-light focus-within:text-brand-primary transition-colors duration-200">
+                          <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200" />
+                          <input
+                            type={showNewPassword ? 'text' : 'password'}
+                            required
+                            minLength={6}
+                            value={newPassword}
+                            onChange={(e) => setNewPassword(e.target.value)}
+                            placeholder="Enter new password (at least 6 chars)"
+                            className="w-full pl-10 pr-10 py-3 rounded-xl border border-card-border bg-card-bg/50 dark:bg-brand-bg-dark/50 backdrop-blur-sm text-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowNewPassword(!showNewPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-brand-text-light hover:text-brand-text"
+                          >
+                            {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-brand-text flex items-center gap-1.5">
+                          <KeyRound className="w-3.5 h-3.5 text-brand-text-light" />
+                          Confirm New Password
+                        </label>
+                        <div className="relative text-brand-text-light focus-within:text-brand-primary transition-colors duration-200">
+                          <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200" />
+                          <input
+                            type={showNewPassword ? 'text' : 'password'}
+                            required
+                            minLength={6}
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            placeholder="Re-enter new password"
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-card-border bg-card-bg/50 dark:bg-brand-bg-dark/50 backdrop-blur-sm text-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={authLoading}
+                        className="w-full bg-brand-primary hover:bg-brand-secondary text-white py-3.5 rounded-xl font-bold text-xs sm:text-sm transition-all shadow-lg shadow-brand-primary/10 hover:shadow-xl hover:shadow-brand-secondary/25 flex items-center justify-center gap-2 group cursor-pointer mt-2 disabled:opacity-70"
+                      >
+                        {authLoading ? 'Updating Password...' : 'Update Password'}
+                        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                      </button>
+                    </form>
+                  )}
+                </div>
+              ) : (
+                <form 
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setAuthError('');
+                    
+                    if (password.length < 6) {
+                      setAuthError('Password should be at least 6 characters.');
                       return;
                     }
 
-                    if (authMode === 'signup') {
-                      const { data, error } = await supabase.auth.signUp({
-                        email: email.trim(),
-                        password,
-                        options: {
-                          data: {
-                            full_name: fullName.trim(),
-                            avatar_url: profilePic || ''
+                    setAuthLoading(true);
+                    try {
+                      if (!supabase) {
+                        // Mock auth if no supabase configured
+                        if (authMode === 'signup') {
+                          if (fullName.trim()) {
+                            localStorage.setItem('studyweb_profile_name', fullName.trim());
                           }
+                          (window as any).showToast?.('Welcome! Your StudyWeb account has been created.', 'success');
+                          window.dispatchEvent(new CustomEvent('studyweb-signup-success'));
+                        } else {
+                          const emailPrefix = email.split('@')[0];
+                          const mockName = emailPrefix ? (emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1)) : 'Scholar';
+                          localStorage.setItem('studyweb_profile_name', mockName);
+                          (window as any).showToast?.('Successfully logged in to StudyWeb!', 'success');
+                          localStorage.setItem('studyweb_is_logged_in', 'true');
+                          window.dispatchEvent(new CustomEvent('studyweb-login-success'));
                         }
-                      });
-                      if (error) throw error;
-
-                      // Check if already registered (Supabase sometimes returns an empty identities array for existing users)
-                      if (data?.user?.identities && data.user.identities.length === 0) {
-                        setAuthError('User already registered. Please log in with your password.');
+                        setIsAuthModalOpen(false);
                         return;
                       }
-                      
-                      if (data.session) {
-                        // Email confirmation disabled in Supabase: session created immediately
-                        localStorage.setItem('studyweb_is_logged_in', 'true');
-                        if (fullName.trim()) {
-                          localStorage.setItem('studyweb_profile_name', fullName.trim());
-                        }
-                        if (data.user) {
-                          try {
-                            await supabase.from('profiles').upsert({
-                              id: data.user.id,
-                              email: data.user.email || email.trim(),
+
+                      if (authMode === 'signup') {
+                        const { data, error } = await supabase.auth.signUp({
+                          email: email.trim(),
+                          password,
+                          options: {
+                            data: {
                               full_name: fullName.trim(),
                               avatar_url: profilePic || ''
-                            });
-                          } catch (pErr) {
-                            console.warn('Profile initial record sync notice:', pErr);
+                            }
                           }
+                        });
+                        if (error) throw error;
+
+                        if (data?.user?.identities && data.user.identities.length === 0) {
+                          setAuthError('User already registered. Please log in with your password.');
+                          return;
                         }
+                        
+                        if (data.session) {
+                          localStorage.setItem('studyweb_is_logged_in', 'true');
+                          if (fullName.trim()) {
+                            localStorage.setItem('studyweb_profile_name', fullName.trim());
+                          }
+                          if (data.user) {
+                            try {
+                              await supabase.from('profiles').upsert({
+                                id: data.user.id,
+                                email: data.user.email || email.trim(),
+                                full_name: fullName.trim(),
+                                avatar_url: profilePic || ''
+                              });
+                            } catch (pErr) {
+                              console.warn('Profile initial record sync notice:', pErr);
+                            }
+                          }
 
-                        (window as any).showToast?.('Welcome! Your StudyWeb account has been created.', 'success');
-                        window.dispatchEvent(new CustomEvent('studyweb-signup-success'));
-                        setIsAuthModalOpen(false);
-                      } else if (data.user) {
-                        // Email confirmation enabled: inform user
-                        (window as any).showToast?.('Registration successful! Please check your email inbox to confirm your account.', 'info');
-                        setAuthError('Registration email sent! Please verify your inbox, then log in.');
-                        setAuthMode('login');
-                      }
-                    } else {
-                      const { data, error } = await supabase.auth.signInWithPassword({
-                        email: email.trim(),
-                        password,
-                      });
-                      if (error) throw error;
-
-                      const user = data.user;
-                      let resolvedName = user?.user_metadata?.full_name || user?.user_metadata?.name || '';
-                      if (!resolvedName && user?.email) {
-                        const emailPrefix = user.email.split('@')[0];
-                        resolvedName = emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1);
-                      }
-                      if (!resolvedName) resolvedName = 'Scholar';
-                      localStorage.setItem('studyweb_profile_name', resolvedName);
-                      
-                      localStorage.setItem('studyweb_onboarding_complete', 'true');
-                      localStorage.setItem('studyweb_is_logged_in', 'true');
-                      (window as any).showToast?.('Successfully logged in to StudyWeb!', 'success');
-                      window.dispatchEvent(new CustomEvent('studyweb-login-success'));
-                      setIsAuthModalOpen(false);
-                    }
-                  } catch (err: any) {
-                    console.error('Auth error:', err);
-                    let errMsg = err.message || 'Authentication failed';
-                    if (errMsg === 'Failed to fetch') {
-                      errMsg = 'Network error or adblocker prevented connection to auth server. Please check your connection.';
-                    } else if (errMsg.toLowerCase().includes('invalid login credentials')) {
-                      errMsg = 'Invalid login credentials. Please verify your email and password, or create an account if you are new.';
-                    } else if (errMsg.toLowerCase().includes('user already registered')) {
-                      errMsg = 'User already registered with this email. Please switch to Log In.';
-                    } else if (errMsg.toLowerCase().includes('password should be at least')) {
-                      errMsg = 'Password should be at least 6 characters.';
-                    }
-                    setAuthError(errMsg);
-                  } finally {
-                    setAuthLoading(false);
-                  }
-                }} 
-                className="space-y-4"
-              >
-                {authError && (
-                  <div className="text-red-500 text-xs font-medium bg-red-500/10 border border-red-500/20 p-3 rounded-xl space-y-2">
-                    <p className="font-semibold">{authError}</p>
-                    {authError.toLowerCase().includes('already registered') && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAuthError('');
+                          (window as any).showToast?.('Welcome! Your StudyWeb account has been created.', 'success');
+                          window.dispatchEvent(new CustomEvent('studyweb-signup-success'));
+                          setIsAuthModalOpen(false);
+                        } else if (data.user) {
+                          (window as any).showToast?.('Registration successful! Please check your email inbox to confirm your account.', 'info');
+                          setAuthError('Registration email sent! Please verify your inbox, then log in.');
                           setAuthMode('login');
-                        }}
-                        className="text-xs text-brand-primary underline font-bold hover:opacity-80 block"
-                      >
-                        👉 Click here to switch to Log In
-                      </button>
-                    )}
-                    {authError.toLowerCase().includes('invalid login credentials') && (
+                        }
+                      } else {
+                        const { data, error } = await supabase.auth.signInWithPassword({
+                          email: email.trim(),
+                          password,
+                        });
+                        if (error) throw error;
+
+                        const user = data.user;
+                        let resolvedName = user?.user_metadata?.full_name || user?.user_metadata?.name || '';
+                        if (!resolvedName && user?.email) {
+                          const emailPrefix = user.email.split('@')[0];
+                          resolvedName = emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1);
+                        }
+                        if (!resolvedName) resolvedName = 'Scholar';
+                        localStorage.setItem('studyweb_profile_name', resolvedName);
+                        
+                        localStorage.setItem('studyweb_onboarding_complete', 'true');
+                        localStorage.setItem('studyweb_is_logged_in', 'true');
+                        (window as any).showToast?.('Successfully logged in to StudyWeb!', 'success');
+                        window.dispatchEvent(new CustomEvent('studyweb-login-success'));
+                        setIsAuthModalOpen(false);
+                      }
+                    } catch (err: any) {
+                      console.error('Auth error:', err);
+                      let errMsg = err.message || 'Authentication failed';
+                      if (errMsg === 'Failed to fetch') {
+                        errMsg = 'Network error or adblocker prevented connection to auth server. Please check your connection.';
+                      } else if (errMsg.toLowerCase().includes('invalid login credentials')) {
+                        errMsg = 'Invalid login credentials. Please verify your email and password, or create an account if you are new.';
+                      } else if (errMsg.toLowerCase().includes('user already registered')) {
+                        errMsg = 'User already registered with this email. Please switch to Log In.';
+                      } else if (errMsg.toLowerCase().includes('password should be at least')) {
+                        errMsg = 'Password should be at least 6 characters.';
+                      }
+                      setAuthError(errMsg);
+                    } finally {
+                      setAuthLoading(false);
+                    }
+                  }} 
+                  className="space-y-4"
+                >
+                  {authError && (
+                    <div className="text-red-500 text-xs font-medium bg-red-500/10 border border-red-500/20 p-3 rounded-xl space-y-2">
+                      <p className="font-semibold">{authError}</p>
+                      {authError.toLowerCase().includes('already registered') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAuthError('');
+                            setAuthMode('login');
+                          }}
+                          className="text-xs text-brand-primary underline font-bold hover:opacity-80 block"
+                        >
+                          👉 Click here to switch to Log In
+                        </button>
+                      )}
+                      {authError.toLowerCase().includes('invalid login credentials') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAuthError('');
+                            setAuthMode('signup');
+                          }}
+                          className="text-xs text-brand-primary underline font-bold hover:opacity-80 block"
+                        >
+                          👉 Don't have an account? Click here to Sign Up
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {authMode === 'signup' && (
+                    <>
+                      <div className="space-y-1.5 flex flex-col items-center pb-2">
+                        <div className="relative group cursor-pointer w-20 h-20 rounded-full bg-card-bg/50 dark:bg-brand-bg-dark/50 border border-card-border flex items-center justify-center overflow-hidden mb-1">
+                          {profilePic ? (
+                            <img src={profilePic} alt="Profile preview" className="w-full h-full object-cover" />
+                          ) : (
+                            <User className="w-8 h-8 text-brand-text-light group-hover:text-brand-primary transition-colors duration-200" />
+                          )}
+                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                             <ImagePlus className="w-6 h-6 text-white" />
+                          </div>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleProfilePicChange}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                          />
+                        </div>
+                        <label className="text-[10px] font-bold text-brand-text-light text-center">
+                          Upload Profile Picture (Optional)
+                        </label>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-brand-text flex items-center gap-1.5">
+                          <User className="w-3.5 h-3.5 text-brand-text-light" />
+                          Full Name
+                        </label>
+                        <div className="relative text-brand-text-light focus-within:text-brand-primary transition-colors duration-200">
+                          <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200" />
+                          <input
+                            type="text"
+                            required
+                            value={fullName}
+                            onChange={(e) => setFullName(e.target.value)}
+                            placeholder="John Doe"
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-card-border bg-card-bg/50 dark:bg-brand-bg-dark/50 backdrop-blur-sm text-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-brand-text flex items-center gap-1.5">
+                      <Mail className="w-3.5 h-3.5 text-brand-text-light" />
+                      Email Address
+                    </label>
+                    <div className="relative text-brand-text-light focus-within:text-brand-primary transition-colors duration-200">
+                      <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200" />
+                      <input
+                        type="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="you@example.com"
+                        className="w-full pl-10 pr-4 py-3 rounded-xl border border-card-border bg-card-bg/50 dark:bg-brand-bg-dark/50 backdrop-blur-sm text-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-brand-text flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5 text-brand-text-light" />
+                        Password
+                      </label>
+                      {authMode === 'login' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAuthError('');
+                            setResetEmailSent(false);
+                            setAuthMode('forgot');
+                          }}
+                          className="text-[10px] text-brand-primary hover:underline font-bold cursor-pointer"
+                        >
+                          Forgot Password?
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative text-brand-text-light focus-within:text-brand-primary transition-colors duration-200">
+                      <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200" />
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="•••••••• (at least 6 characters)"
+                        className="w-full pl-10 pr-10 py-3 rounded-xl border border-card-border bg-card-bg/50 dark:bg-brand-bg-dark/50 backdrop-blur-sm text-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
+                      />
                       <button
                         type="button"
-                        onClick={() => {
-                          setAuthError('');
-                          setAuthMode('signup');
-                        }}
-                        className="text-xs text-brand-primary underline font-bold hover:opacity-80 block"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-brand-text-light hover:text-brand-text focus:outline-none"
                       >
-                        👉 Don't have an account? Click here to Sign Up
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
+                    </div>
+                    {password.length > 0 && password.length < 6 && (
+                      <p className="text-[11px] text-amber-500 font-medium pl-1">
+                        Password should be at least 6 characters (currently {password.length})
+                      </p>
                     )}
                   </div>
-                )}
-                {authMode === 'signup' && (
-                  <>
-                    <div className="space-y-1.5 flex flex-col items-center pb-2">
-                      <div className="relative group cursor-pointer w-20 h-20 rounded-full bg-card-bg/50 dark:bg-brand-bg-dark/50 border border-card-border flex items-center justify-center overflow-hidden mb-1">
-                        {profilePic ? (
-                          <img src={profilePic} alt="Profile preview" className="w-full h-full object-cover" />
-                        ) : (
-                          <User className="w-8 h-8 text-brand-text-light group-hover:text-brand-primary transition-colors duration-200" />
-                        )}
-                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                           <ImagePlus className="w-6 h-6 text-white" />
-                        </div>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={handleProfilePicChange}
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                        />
-                      </div>
-                      <label className="text-[10px] font-bold text-brand-text-light text-center">
-                        Upload Profile Picture (Optional)
+
+                  {authMode === 'signup' && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <input type="checkbox" required id="agree-terms" className="rounded border-card-border text-brand-primary focus:ring-brand-primary/20 w-4 h-4 cursor-pointer" />
+                      <label htmlFor="agree-terms" className="text-[10px] text-brand-text-light font-semibold select-none">
+                        I agree to the{' '}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            window.location.hash = '#terms';
+                            window.dispatchEvent(new HashChangeEvent('hashchange'));
+                          }}
+                          className="text-brand-primary hover:underline font-bold cursor-pointer inline"
+                        >
+                          Terms of Service
+                        </button>{' '}
+                        and{' '}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            window.location.hash = '#privacy';
+                            window.dispatchEvent(new HashChangeEvent('hashchange'));
+                          }}
+                          className="text-brand-primary hover:underline font-bold cursor-pointer inline"
+                        >
+                          Privacy Policy
+                        </button>.
                       </label>
                     </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-brand-text flex items-center gap-1.5">
-                        <User className="w-3.5 h-3.5 text-brand-text-light" />
-                        Full Name
-                      </label>
-                      <div className="relative text-brand-text-light focus-within:text-brand-primary transition-colors duration-200">
-                        <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200" />
-                        <input
-                          type="text"
-                          required
-                          value={fullName}
-                          onChange={(e) => setFullName(e.target.value)}
-                          placeholder="John Doe"
-                          className="w-full pl-10 pr-4 py-3 rounded-xl border border-card-border bg-card-bg/50 dark:bg-brand-bg-dark/50 backdrop-blur-sm text-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
-                        />
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-brand-text flex items-center gap-1.5">
-                    <Mail className="w-3.5 h-3.5 text-brand-text-light" />
-                    Email Address
-                  </label>
-                  <div className="relative text-brand-text-light focus-within:text-brand-primary transition-colors duration-200">
-                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200" />
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="you@example.com"
-                      className="w-full pl-10 pr-4 py-3 rounded-xl border border-card-border bg-card-bg/50 dark:bg-brand-bg-dark/50 backdrop-blur-sm text-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center">
-                    <label className="text-xs font-bold text-brand-text flex items-center gap-1.5">
-                      <Lock className="w-3.5 h-3.5 text-brand-text-light" />
-                      Password
-                    </label>
-                    {authMode === 'login' && (
-                      <a href="#contact" onClick={() => setIsAuthModalOpen(false)} className="text-[10px] text-brand-primary hover:underline font-bold">
-                        Forgot Password?
-                      </a>
-                    )}
-                  </div>
-                  <div className="relative text-brand-text-light focus-within:text-brand-primary transition-colors duration-200">
-                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors duration-200" />
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      required
-                      minLength={6}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="•••••••• (at least 6 characters)"
-                      className="w-full pl-10 pr-10 py-3 rounded-xl border border-card-border bg-card-bg/50 dark:bg-brand-bg-dark/50 backdrop-blur-sm text-brand-text text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-brand-text-light hover:text-brand-text focus:outline-none"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  {password.length > 0 && password.length < 6 && (
-                    <p className="text-[11px] text-amber-500 font-medium pl-1">
-                      Password should be at least 6 characters (currently {password.length})
-                    </p>
                   )}
-                </div>
 
-                {authMode === 'signup' && (
-                  <div className="flex items-center gap-2 pt-1">
-                    <input type="checkbox" required id="agree-terms" className="rounded border-card-border text-brand-primary focus:ring-brand-primary/20 w-4 h-4" />
-                    <label htmlFor="agree-terms" className="text-[10px] text-brand-text-light font-semibold">
-                      I agree to the <span className="text-brand-primary">Terms of Service</span> and <span className="text-brand-primary">Privacy Policy</span>.
-                    </label>
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={authLoading}
-                  className="w-full bg-brand-primary hover:bg-brand-secondary text-white py-3.5 rounded-xl font-bold text-xs sm:text-sm transition-all shadow-lg shadow-brand-primary/10 hover:shadow-xl hover:shadow-brand-secondary/25 flex items-center justify-center gap-2 group cursor-pointer mt-2 disabled:opacity-70"
-                >
-                  {authLoading ? 'Please wait...' : (authMode === 'login' ? 'Log In' : 'Create Free Account')}
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </button>
-              </form>
+                  <button
+                    type="submit"
+                    disabled={authLoading}
+                    className="w-full bg-brand-primary hover:bg-brand-secondary text-white py-3.5 rounded-xl font-bold text-xs sm:text-sm transition-all shadow-lg shadow-brand-primary/10 hover:shadow-xl hover:shadow-brand-secondary/25 flex items-center justify-center gap-2 group cursor-pointer mt-2 disabled:opacity-70"
+                  >
+                    {authLoading ? 'Please wait...' : (authMode === 'login' ? 'Log In' : 'Create Free Account')}
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </button>
+                </form>
+              )}
 
               {/* Footer */}
-              <div className="mt-6 pt-6 border-t border-card-border/60 text-center">
-                <span className="text-xs text-brand-text-light">
-                  {authMode === 'login' ? "Don't have an account?" : "Already have an account?"}{' '}
-                </span>
-                <button
-                  onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
-                  className="text-xs font-extrabold text-brand-primary hover:underline cursor-pointer"
-                >
-                  {authMode === 'login' ? 'Sign Up for free' : 'Log In instead'}
-                </button>
-              </div>
+              {(authMode === 'login' || authMode === 'signup') && (
+                <div className="mt-6 pt-6 border-t border-card-border/60 text-center">
+                  <span className="text-xs text-brand-text-light">
+                    {authMode === 'login' ? "Don't have an account?" : "Already have an account?"}{' '}
+                  </span>
+                  <button
+                    onClick={() => {
+                      setAuthError('');
+                      setAuthMode(authMode === 'login' ? 'signup' : 'login');
+                    }}
+                    className="text-xs font-extrabold text-brand-primary hover:underline cursor-pointer"
+                  >
+                    {authMode === 'login' ? 'Sign Up for free' : 'Log In instead'}
+                  </button>
+                </div>
+              )}
             </motion.div>
           </div>
         )}
