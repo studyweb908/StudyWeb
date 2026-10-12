@@ -1,5 +1,5 @@
 // StudyWeb Offline Service Worker
-const CACHE_NAME = 'studyweb-cache-v3';
+const CACHE_NAME = 'studyweb-cache-v4';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',
@@ -8,7 +8,9 @@ const OFFLINE_ASSETS = [
   '/favicon.ico',
   '/favicon-32x32.png',
   '/favicon-16x16.png',
+  '/favicon-48x48.png',
   '/favicon-192x192.png',
+  '/favicon-512x512.png',
   '/apple-touch-icon.png'
 ];
 
