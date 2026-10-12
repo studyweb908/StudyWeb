@@ -413,20 +413,13 @@ export default function AITutorWorkspace() {
       setMessages(prev => [...prev, aiMsg]);
     } catch (err: any) {
       console.warn("Semantic search failed:", err);
-      // Local simulation fallback
-      const mockMsg: Message = {
+      const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: 'ai',
-        text: `Here are the semantic search results for "${queryToSearch}":\n\n(Simulated fallback due to database connection issue)\n\n<cite id="0">Gregor Mendel's law of segregation states that the two alleles for each gene separate during gamete formation.</cite>`,
-        citations: [
-          {
-            sourceName: "AP Biology - Genetics.pdf",
-            quote: `Extracted chunk matching "${queryToSearch}": Gregor Mendel's law of segregation states that the two alleles for each gene separate during gamete formation.`
-          }
-        ],
+        text: `Unable to search workspace documents for "${queryToSearch}" right now. Please try again in a moment.`,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
-      setMessages(prev => [...prev, mockMsg]);
+      setMessages(prev => [...prev, errorMsg]);
     } finally {
       setIsSearching(false);
     }
@@ -463,69 +456,39 @@ export default function AITutorWorkspace() {
         })
       });
 
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Server error");
+      let data: any = null;
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        data = await response.json().catch(() => null);
+      } else {
+        await response.text().catch(() => "");
       }
 
-      const data = await response.json();
-      
+      if (!response.ok || !data) {
+        const errDetail = data?.error || data?.message || "Service unavailable. Please try again.";
+        throw new Error(errDetail);
+      }
+
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: 'ai',
-        text: data.text || "No response received.",
+        text: data.reply || data.text || "No response text received.",
         citations: data.citations,
         source: data.source,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setMessages(prev => [...prev, aiMsg]);
     } catch (error: any) {
-      console.warn("Falling back to local simulation because:", error.message);
+      console.warn("AI Tutor error:", error?.message);
       
-      // Local simulation fallback
-      let aiResponseText = "";
-      let mockCitations: Array<{ sourceName: string; page?: number; quote: string }> = [];
-      
-      if (textToSend.toLowerCase().includes('quantum')) {
-        aiResponseText = "### Quantum Physics Made Simple 🌌\n\nImagine the universe is made of tiny, microscopic Lego blocks. In our normal world, a Lego brick is either red or blue. But in the quantum world, **Lego blocks can be both red and blue at the absolute same time** until you look at them! This is called **Superposition** [1].\n\nHere are the 3 big rules of the quantum playground:\n1. **Superposition**: Things can exist in multiple states or places simultaneously.\n2. **Quantum Entanglement**: Two tiny blocks can become 'best friends' and mirror each other instantly, even if they are on opposite sides of the universe!\n3. **The Observer Effect**: Simply looking at or measuring a quantum block changes its behavior completely.";
-        mockCitations = [
-          { sourceName: "StudyWeb Physics Library Vol 2", page: 45, quote: "Things can exist in multiple states or places simultaneously until they are actively measured." }
-        ];
-      } else if (textToSend.toLowerCase().includes('limit')) {
-        aiResponseText = "### Step-by-Step Math Solution 📐\n\nWe need to find:\n$$\\lim_{x \\to 0} \\frac{\\sin(x)}{x}$$\n\n**Step 1: Direct Substitution**\nSubstitute $x = 0$ into the expression:\n$$\\frac{\\sin(0)}{0} = \\frac{0}{0}$$\nThis is an **indeterminate form** (0/0).\n\n**Step 2: Apply L'Hôpital's Rule**\nSince the limit results in $0/0$, we can take the derivative of the numerator and the denominator separately [1]:\n- Derivative of $\\sin(x)$ is $\\cos(x)$\n- Derivative of $x$ is $1$\n\n**Step 3: Evaluate the New Limit**\n$$\\lim_{x \\to 0} \\frac{\\cos(x)}{1} = \\frac{\\cos(0)}{1} = \\frac{1}{1} = 1$$\n\nTherefore, the limit is **1**.";
-        mockCitations = [
-          { sourceName: "Calculus Guide Book", page: 12, quote: "Since the limit results in 0/0, we apply L'Hopital's rule by evaluating derivative quotients." }
-        ];
-      } else if (textToSend.toLowerCase().includes('cellular') || textToSend.toLowerCase().includes('respiration')) {
-        aiResponseText = "### Cellular Respiration Breakdown 🔋\n\nCellular respiration is how cells turn glucose (sugar) into ATP (usable biological energy). Think of it like a power plant converting raw coal into electricity!\n\nHere are the 3 major stages:\n1. **Glycolysis** (takes place in cytoplasm): Breaks glucose into pyruvate, yielding **2 ATP**.\n2. **Krebs Cycle (Citric Acid Cycle)** (takes place in mitochondria matrix): Extracts electrons, yielding **2 ATP** and releasing CO2.\n3. **Electron Transport Chain (ETC)** (takes place in mitochondria inner membrane): Uses oxygen and high-energy electrons to generate a massive power surge of **28 to 32 ATP** [1].\n\n*Key takeaway:* Mitochondria is truly the powerhouse of the cell because that's where the ETC yields the most ATP!";
-        mockCitations = [
-          { sourceName: "Biology Syllabus Summary", page: 8, quote: "Glycolysis yields 2 ATP in the cytoplasm, Krebs yields 2 ATP in the matrix, and Electron Transport Chain yields 28-32 ATP." }
-        ];
-      } else if (textToSend.toLowerCase().includes('quiz') || textToSend.toLowerCase().includes('revolution')) {
-        aiResponseText = "### French Revolution Mini-Quiz 🇫🇷\n\nHere are 3 custom practice questions to test your comprehension:\n\n**Question 1:** Which social class bore the greatest tax burden prior to the French Revolution?\n- A) The First Estate (Clergy)\n- B) The Second Estate (Nobility)\n- C) The Third Estate (Commoners)\n*Correct Answer: **C**. The Third Estate made up 98% of the population and paid virtually all taxes.*\n\n**Question 2:** What event on July 14, 1789, is celebrated as the start of the Revolution? [1]\n- A) The Execution of Louis XVI\n- B) The Storming of the Bastille\n- C) The Tennis Court Oath\n*Correct Answer: **B**. This represented the collapse of royal tyranny.*\n\nWould you like me to add these questions to your official StudyWeb Quiz tracker?";
-        mockCitations = [
-          { sourceName: "French History Compendium", page: 114, quote: "The storming of the Bastille on July 14, 1789 marked the collapse of absolute royal authority." }
-        ];
-      } else {
-        aiResponseText = `I have received your prompt: "${textToSend}". Under ${deepResearch ? 'Deep Research Mode' : 'Standard Mode'} with ${citationMode ? 'active Citations' : 'no citations'}, here is the AI-generated study outline:
+      const cleanError = error?.message && !error.message.includes("<!doctype") && !error.message.includes("<html")
+        ? error.message
+        : "Server connection issue";
 
-- **Core Concept**: Analyzing key academic questions using natural language.
-- **Synthesized Overview**: By cross-referencing your AP syllabus and past study sessions, this response targets optimal recall.
-- **Recommended next step**: Try generating flashcards or summarizing the attached notes for this topic.
-
-Let me know if you would like me to clarify any specific point or provide an interactive practice quiz!`;
-        if (attachedFiles.length > 0) {
-          mockCitations = [
-            { sourceName: attachedFiles[0].name, page: 1, quote: "Analyzing key academic questions using natural language." }
-          ];
-        }
-      }
- 
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: 'ai',
-        text: aiResponseText,
-        citations: mockCitations.length > 0 ? mockCitations : undefined,
+        text: `⚠️ **AI Tutor Service Notice**\n\nI apologize, but I was unable to generate a response right now (${cleanError}).\n\nPlease check your network connection and try asking your question again.`,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setMessages(prev => [...prev, aiMsg]);
@@ -676,7 +639,7 @@ Let me know if you would like me to clarify any specific point or provide an int
   };
 
   return (
-    <div className="h-[calc(100dvh-175px)] sm:h-[calc(100dvh-135px)] md:h-[calc(100vh-100px)] min-h-[480px] flex flex-row relative bg-white dark:bg-slate-900 rounded-[20px] sm:rounded-[24px] border border-slate-100 dark:border-slate-800/80 overflow-hidden shadow-sm text-left">
+    <div className="h-[calc(100dvh-120px)] sm:h-[calc(100dvh-135px)] md:h-[calc(100vh-100px)] min-h-[420px] max-w-full flex flex-row relative bg-white dark:bg-slate-900 rounded-[16px] sm:rounded-[24px] border border-slate-100 dark:border-slate-800/80 overflow-hidden shadow-sm text-left">
       {/* Left Sidebar: Attached Materials */}
       <div className="w-72 border-r border-slate-100 dark:border-slate-800/60 bg-slate-50/30 dark:bg-slate-950/10 flex flex-col h-full shrink-0 hidden md:flex">
         <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/20 flex items-center justify-between shrink-0">
@@ -759,94 +722,94 @@ Let me know if you would like me to clarify any specific point or provide an int
         </div>
       </div>
 
-      {/* Left Chat Area */}
-      <div className="flex-1 flex flex-col min-w-0 h-full border-r border-slate-100 dark:border-slate-800/60">
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col min-w-0 w-full max-w-full h-full border-r border-slate-100 dark:border-slate-800/60 overflow-hidden">
         {/* Top Controller Bar */}
-        <div className="px-3 sm:px-6 py-2.5 sm:py-4 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-950/20 flex flex-wrap items-center justify-between gap-2.5 sm:gap-4">
-          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-indigo-500/10 dark:bg-indigo-500/20 flex items-center justify-center shrink-0">
-              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600 dark:text-indigo-400" />
+        <div className="px-3 sm:px-6 py-2 sm:py-3.5 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-950/20 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-xl bg-indigo-500/10 dark:bg-indigo-500/20 flex items-center justify-center shrink-0">
+              <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-600 dark:text-indigo-400" />
             </div>
             <div className="min-w-0">
-              <h3 className="font-extrabold text-slate-900 dark:text-white text-xs sm:text-base flex items-center gap-1.5 sm:gap-2 truncate">
-                <span>Advanced AI Tutor</span>
-                <span className="text-[9px] sm:text-[10px] bg-emerald-500/10 text-emerald-600 px-1.5 sm:px-2 py-0.5 rounded-full font-bold shrink-0">
+              <h3 className="font-extrabold text-slate-900 dark:text-white text-xs sm:text-sm flex items-center gap-1.5 truncate">
+                <span>AI Tutor</span>
+                <span className="text-[8.5px] sm:text-[9.5px] bg-emerald-500/10 text-emerald-600 px-1.5 py-0.5 rounded-full font-bold shrink-0">
                   Autonomous
                 </span>
               </h3>
-              <p className="text-[11px] sm:text-xs text-slate-400 font-medium mt-0.5 hidden xs:block truncate">High-accuracy academic reasoning, math solver, and note synthesis</p>
+              <p className="text-[10px] text-slate-400 font-medium hidden sm:block truncate">Academic reasoning & homework solver</p>
             </div>
           </div>
 
           {/* Workspace controls */}
-          <div className="flex items-center flex-wrap gap-2 sm:gap-3.5">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 overflow-x-auto max-w-full scrollbar-none py-0.5">
 
             {/* Focus Timer Button */}
             <button
               onClick={() => setShowFocusTimer(!showFocusTimer)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
+              className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10.5px] sm:text-xs font-bold transition-all border cursor-pointer shrink-0 ${
                 showFocusTimer 
                   ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20' 
                   : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-750'
               }`}
               title="Toggle integrated Pomodoro study timer"
             >
-              <Clock className={`w-3.5 h-3.5 ${timerIsActive ? 'animate-pulse text-rose-500' : 'text-slate-400'}`} />
-              <span>Focus Timer {timerIsActive && `(${formatTimerTime(timerSeconds)})`}</span>
+              <Clock className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${timerIsActive ? 'animate-pulse text-rose-500' : 'text-slate-400'}`} />
+              <span>Timer</span>
             </button>
 
             {/* Deep Research mode */}
             <button
               onClick={() => setDeepResearch(!deepResearch)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
+              className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10.5px] sm:text-xs font-bold transition-all border cursor-pointer shrink-0 ${
                 deepResearch 
                   ? 'bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 border-indigo-200' 
                   : 'bg-white dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
               }`}
               title="Enable extensive deep-search analysis"
             >
-              <div className={`w-2 h-2 rounded-full ${deepResearch ? 'bg-indigo-600 animate-ping' : 'bg-slate-300'}`} />
-              <span>Deep Research</span>
+              <div className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${deepResearch ? 'bg-indigo-600 animate-ping' : 'bg-slate-300'}`} />
+              <span>Deep</span>
             </button>
             
             {/* Semantic Search Toggle */}
             <button
               onClick={() => setShowSemanticSearch(prev => !prev)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
+              className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10.5px] sm:text-xs font-bold transition-all border cursor-pointer shrink-0 ${
                 showSemanticSearch
                   ? 'bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 border-indigo-200' 
                   : 'bg-white dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
               }`}
               title="Semantic Search through workspace documents"
             >
-              <Search className="w-3.5 h-3.5" />
-              <span>Search Docs</span>
+              <Search className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span>Search</span>
             </button>
 
             {/* Citation Mode */}
             <button
               onClick={() => setCitationMode(!citationMode)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
+              className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10.5px] sm:text-xs font-bold transition-all border cursor-pointer shrink-0 ${
                 citationMode 
                   ? 'bg-emerald-600/10 text-emerald-600 dark:text-emerald-400 border-emerald-200' 
                   : 'bg-white dark:bg-slate-800 text-slate-500 border-slate-200'
               }`}
             >
-              <span>Citations Mode</span>
-              {citationMode ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <RefreshCw className="w-3 h-3 text-slate-400" />}
+              <span>Citations</span>
+              {citationMode ? <Check className="w-3 h-3 text-emerald-500" /> : <RefreshCw className="w-2.5 h-2.5 text-slate-400" />}
             </button>
           </div>
         </div>
 
         {/* Main Chat Feed */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6 custom-scrollbar bg-slate-50/30 dark:bg-slate-950/5">
+        <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-3 sm:py-6 space-y-4 sm:space-y-6 custom-scrollbar bg-slate-50/30 dark:bg-slate-950/5">
           {messages.map((msg) => (
             <div 
               key={msg.id}
-              className={`flex gap-4 max-w-3xl ${msg.sender === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}
+              className={`flex gap-2.5 sm:gap-4 max-w-3xl ${msg.sender === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}
             >
               {/* Avatar */}
-              <div className={`w-8.5 h-8.5 rounded-[10px] flex items-center justify-center flex-shrink-0 font-bold text-xs ${
+              <div className={`w-7 h-7 sm:w-8.5 sm:h-8.5 rounded-[8px] sm:rounded-[10px] flex items-center justify-center flex-shrink-0 font-bold text-[10px] sm:text-xs ${
                 msg.sender === 'user' 
                   ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300' 
                   : 'bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900 shadow-md shadow-slate-900/5'
@@ -855,14 +818,14 @@ Let me know if you would like me to clarify any specific point or provide an int
               </div>
 
               {/* Chat bubble body */}
-              <div className={`space-y-1 ${msg.sender === 'user' ? 'text-right' : 'text-left'}`}>
-                <div className={`px-6 py-5 rounded-[20px] text-[15px] leading-[1.65] ${
+              <div className={`space-y-1 ${msg.sender === 'user' ? 'text-right' : 'text-left'} max-w-[85%] sm:max-w-none`}>
+                <div className={`px-3.5 sm:px-6 py-3 sm:py-5 rounded-[16px] sm:rounded-[20px] text-xs sm:text-[15px] leading-[1.6] sm:leading-[1.65] ${
                   msg.sender === 'user'
                     ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 rounded-tr-none shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)]'
                     : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-800/60 rounded-tl-none shadow-[0_2px_8px_-2px_rgba(0,0,0,0.04)]'
                 }`}>
                   {/* Simulated Markdown renderer */}
-                  <div className="space-y-4 whitespace-pre-wrap">
+                  <div className="space-y-3 sm:space-y-4 whitespace-pre-wrap break-words">
                     {msg.text.split(/(?=\n\n###|\n\n```|\n\n- )/g).map((block, idx) => {
                       const paragraph = block.trim();
                       if (!paragraph) return null;
@@ -872,27 +835,27 @@ Let me know if you would like me to clarify any specific point or provide an int
                         const lang = lines[0].replace('```', '').trim();
                         const code = lines.slice(1, -1).join('\n') || lines.slice(1).join('\n').replace('```', '');
                         return (
-                          <div key={idx} className="bg-slate-900 dark:bg-slate-950 rounded-xl overflow-hidden my-3 shadow-sm">
+                          <div key={idx} className="bg-slate-900 dark:bg-slate-950 rounded-xl overflow-hidden my-2 sm:my-3 shadow-sm max-w-full">
                             {lang && (
-                              <div className="flex items-center justify-between px-4 py-2 bg-slate-800 dark:bg-slate-900 border-b border-slate-700 dark:border-slate-800 text-xs font-mono text-slate-400">
+                              <div className="flex items-center justify-between px-3 py-1.5 bg-slate-800 dark:bg-slate-900 border-b border-slate-700 dark:border-slate-800 text-[11px] font-mono text-slate-400">
                                 <span>{lang}</span>
                                 <CopySnippetButton text={code} />
                               </div>
                             )}
-                            <div className="p-4 overflow-x-auto">
-                              <pre className="font-mono text-[13px] text-slate-300 leading-relaxed"><code dangerouslySetInnerHTML={{ __html: code }} /></pre>
+                            <div className="p-3 sm:p-4 overflow-x-auto scrollbar-none max-w-full">
+                              <pre className="font-mono text-xs sm:text-[13px] text-slate-300 leading-relaxed whitespace-pre-wrap break-words"><code>{code}</code></pre>
                             </div>
                           </div>
                         );
                       }
                       
                       if (paragraph.startsWith('###')) {
-                        return <h4 key={idx} className="font-bold text-slate-900 dark:text-white pt-2 text-lg tracking-tight">{paragraph.replace(/^###\s*/, '').trim()}</h4>;
+                        return <h4 key={idx} className="font-bold text-slate-900 dark:text-white pt-1 text-base sm:text-lg tracking-tight">{paragraph.replace(/^###\s*/, '').trim()}</h4>;
                       }
                       
                       if (paragraph.startsWith('-')) {
                         return (
-                          <ul key={idx} className="list-disc pl-5 space-y-2 marker:text-indigo-400">
+                          <ul key={idx} className="list-disc pl-4 sm:pl-5 space-y-1.5 marker:text-indigo-400">
                             {paragraph.split('\n').map((li, liIdx) => {
                               const cleanedLi = li.replace(/^-\s*/, '').trim();
                               if (!cleanedLi) return null;
@@ -903,12 +866,12 @@ Let me know if you would like me to clarify any specific point or provide an int
                       }
                       
                       if (paragraph.startsWith('$')) {
-                        return <div key={idx} className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl font-mono text-[13px] overflow-x-auto text-slate-600 dark:text-slate-400 border border-slate-200/50 dark:border-slate-800/50 my-2">{paragraph.replace(/\$\$/g, '')}</div>;
+                        return <div key={idx} className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl font-mono text-xs sm:text-[13px] overflow-x-auto scrollbar-none text-slate-600 dark:text-slate-400 border border-slate-200/50 dark:border-slate-800/50 my-2">{paragraph.replace(/\$\$/g, '')}</div>;
                       }
                       
                       // Split by normal paragraphs
                       return (
-                        <div key={idx} className="space-y-4">
+                        <div key={idx} className="space-y-3 sm:space-y-4">
                           {paragraph.split('\n\n').map((p, pIdx) => {
                              if (!p.trim()) return null;
                              return <p key={pIdx}>{parseTextWithHighlights(p, msg.id, msg.citations, hoveredCitation, setHoveredCitation, setActiveCitation)}</p>;
@@ -920,7 +883,7 @@ Let me know if you would like me to clarify any specific point or provide an int
 
                   {/* Citations block */}
                   {msg.citations && msg.citations.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-1.5 pt-3 border-t border-slate-100 dark:border-slate-800/80 mt-3">
+                    <div className="flex flex-wrap items-center gap-1.5 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 mt-2.5">
                       <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Citations:</span>
                       {msg.citations.map((cite, idx) => {
                         const citeId = `${msg.id}-${idx}`;
@@ -941,7 +904,7 @@ Let me know if you would like me to clarify any specific point or provide an int
                               className="px-2 py-0.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-bold text-[10px] rounded transition-all cursor-pointer flex items-center gap-1 text-left"
                             >
                               <FileText className="w-2.5 h-2.5 shrink-0 text-indigo-500" />
-                              <span>[{idx + 1}] {cite.sourceName.slice(0, 16)}{cite.sourceName.length > 16 ? '...' : ''}</span>
+                              <span>[{idx + 1}] {cite.sourceName.slice(0, 14)}{cite.sourceName.length > 14 ? '...' : ''}</span>
                             </button>
 
                             <AnimatePresence>
@@ -951,7 +914,7 @@ Let me know if you would like me to clarify any specific point or provide an int
                                   animate={{ opacity: 1, y: 0, scale: 1 }}
                                   exit={{ opacity: 0, y: 6, scale: 0.95 }}
                                   transition={{ duration: 0.15, ease: 'easeOut' }}
-                                  className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-3 bg-slate-900/95 dark:bg-slate-950/95 text-white rounded-xl shadow-xl border border-slate-850 dark:border-slate-800 backdrop-blur-md z-[100] text-[11px] text-left leading-relaxed flex flex-col gap-1.5 cursor-default"
+                                  className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 sm:w-72 p-3 bg-slate-900/95 dark:bg-slate-950/95 text-white rounded-xl shadow-xl border border-slate-850 dark:border-slate-800 backdrop-blur-md z-[100] text-[11px] text-left leading-relaxed flex flex-col gap-1.5 cursor-default"
                                 >
                                   <div className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-1.5 mb-1 shrink-0">
                                     <div className="flex items-center gap-1.5 min-w-0">
@@ -1000,19 +963,19 @@ Let me know if you would like me to clarify any specific point or provide an int
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="flex gap-4 max-w-xl mr-auto"
+                className="flex gap-3 sm:gap-4 max-w-xl mr-auto"
               >
-                <div className="w-8.5 h-8.5 rounded-[10px] bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900 shadow-md shadow-slate-900/5 flex items-center justify-center text-xs font-bold">
+                <div className="w-7 h-7 sm:w-8.5 sm:h-8.5 rounded-[8px] sm:rounded-[10px] bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900 shadow-md shadow-slate-900/5 flex items-center justify-center text-[10px] sm:text-xs font-bold">
                   AI
                 </div>
-                <div className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-800/60 px-6 py-5 rounded-[20px] rounded-tl-none shadow-[0_2px_8px_-2px_rgba(0,0,0,0.04)] text-[15px]">
-                  <div className="flex items-center gap-3">
+                <div className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-800/60 px-4 sm:px-6 py-3 sm:py-5 rounded-[16px] sm:rounded-[20px] rounded-tl-none shadow-[0_2px_8px_-2px_rgba(0,0,0,0.04)] text-xs sm:text-[15px]">
+                  <div className="flex items-center gap-2.5 sm:gap-3">
                     <div className="flex gap-1.5">
                       <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
                       <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
                       <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
                     </div>
-                    <span className="text-[13px] text-slate-500 dark:text-slate-400 font-medium">Thinking...</span>
+                    <span className="text-xs sm:text-[13px] text-slate-500 dark:text-slate-400 font-medium">Thinking...</span>
                   </div>
                 </div>
               </motion.div>
@@ -1024,20 +987,20 @@ Let me know if you would like me to clarify any specific point or provide an int
 
         {/* Suggested Quick Prompts Grid */}
         {messages.length === 1 && (
-          <div className="p-6 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/20">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Try asking your AI Tutor:</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="p-3 sm:p-6 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/20">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 sm:mb-3">Try asking your AI Tutor:</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
               {suggestedPrompts.map((p, idx) => (
                 <button
                   key={idx}
                   onClick={() => handleSend(p.text)}
-                  className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 hover:border-indigo-400 dark:hover:border-indigo-500/60 text-left transition-all hover:-translate-y-0.5 shadow-sm group cursor-pointer"
+                  className="p-2.5 sm:p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 hover:border-indigo-400 dark:hover:border-indigo-500/60 text-left transition-all hover:-translate-y-0.5 shadow-sm group cursor-pointer"
                 >
                   <div className="flex items-center gap-1 text-xs font-bold text-slate-800 dark:text-white">
                     <span>{p.title}</span>
                     <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:translate-x-1 transition-transform" />
                   </div>
-                  <p className="text-[10px] text-slate-400 dark:text-slate-400 mt-1.5 leading-relaxed font-medium line-clamp-2">{p.desc}</p>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-400 mt-1 sm:mt-1.5 leading-relaxed font-medium line-clamp-2">{p.desc}</p>
                 </button>
               ))}
             </div>
@@ -1045,7 +1008,7 @@ Let me know if you would like me to clarify any specific point or provide an int
         )}
 
         {/* Message Input & Attachment Dock */}
-        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 relative">
+        <div className="p-2.5 sm:p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 relative">
           {/* Render attached files summary inside input container */}
           <AnimatePresence>
             {attachedFiles.length > 0 && (
@@ -1053,12 +1016,12 @@ Let me know if you would like me to clarify any specific point or provide an int
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                className="flex flex-wrap gap-2 mb-3 px-1"
+                className="flex flex-wrap gap-1.5 sm:gap-2 mb-2 sm:mb-3 px-1"
               >
                 {attachedFiles.map((file, idx) => (
-                  <div key={idx} className="inline-flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2.5 py-1 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700">
-                    <BookOpen className="w-3.5 h-3.5 text-indigo-500" />
-                    <span>{file.name}</span>
+                  <div key={idx} className="inline-flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg text-[11px] sm:text-xs font-semibold border border-slate-200 dark:border-slate-700">
+                    <BookOpen className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-indigo-500" />
+                    <span className="truncate max-w-[120px] sm:max-w-none">{file.name}</span>
                     <button onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))} className="text-slate-400 hover:text-slate-600 dark:hover:text-white font-bold ml-1 text-[10px]">&times;</button>
                   </div>
                 ))}
@@ -1073,10 +1036,10 @@ Let me know if you would like me to clarify any specific point or provide an int
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 10 }}
-                className="absolute bottom-full left-0 w-full mb-3 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-500/30 rounded-2xl p-3 shadow-lg flex items-center gap-3 z-10"
+                className="absolute bottom-full left-0 w-full mb-2 sm:mb-3 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-500/30 rounded-2xl p-2.5 sm:p-3 shadow-lg flex items-center gap-2 sm:gap-3 z-10"
               >
-                <div className="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-500/10 flex items-center justify-center shrink-0">
-                  <Search className="w-4 h-4 text-indigo-500" />
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-indigo-50 dark:bg-indigo-500/10 flex items-center justify-center shrink-0">
+                  <Search className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-500" />
                 </div>
                 <form 
                   onSubmit={(e) => {
@@ -1088,17 +1051,17 @@ Let me know if you would like me to clarify any specific point or provide an int
                   <input 
                     type="text"
                     autoFocus
-                    placeholder="Semantic search through workspace notes & docs..."
+                    placeholder="Search notes & docs..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-transparent text-sm focus:outline-none text-slate-800 dark:text-white placeholder-slate-400"
+                    className="w-full bg-transparent text-xs sm:text-sm focus:outline-none text-slate-800 dark:text-white placeholder-slate-400"
                   />
-                  <button type="submit" disabled={isSearching || !searchQuery.trim()} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm disabled:opacity-50 flex items-center gap-1 cursor-pointer">
-                    {isSearching ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
-                    <span>{isSearching ? 'Searching...' : 'Search'}</span>
+                  <button type="submit" disabled={isSearching || !searchQuery.trim()} className="px-2.5 py-1 sm:px-3 sm:py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[11px] sm:text-xs font-bold transition-all shadow-sm disabled:opacity-50 flex items-center gap-1 cursor-pointer shrink-0">
+                    {isSearching ? <RefreshCw className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin" /> : <Search className="w-3 h-3 sm:w-3.5 sm:h-3.5" />}
+                    <span>{isSearching ? '...' : 'Search'}</span>
                   </button>
                 </form>
-                <button type="button" onClick={() => setShowSemanticSearch(false)} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl cursor-pointer transition-colors">
+                <button type="button" onClick={() => setShowSemanticSearch(false)} className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl cursor-pointer transition-colors">
                   <X className="w-4 h-4" />
                 </button>
               </motion.div>
@@ -1113,7 +1076,7 @@ Let me know if you would like me to clarify any specific point or provide an int
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
-            className={`relative flex items-center border rounded-2xl overflow-hidden shadow-inner focus-within:ring-2 focus-within:ring-indigo-600/20 transition-all px-3 py-2 ${
+            className={`relative flex items-center border rounded-2xl overflow-hidden shadow-inner focus-within:ring-2 focus-within:ring-indigo-600/20 transition-all px-2 sm:px-3 py-1.5 sm:py-2 max-w-full ${
               isDragging 
                 ? 'border-indigo-500 bg-indigo-50/30 dark:bg-indigo-950/20 ring-2 ring-indigo-500/30' 
                 : 'bg-slate-50 dark:bg-slate-850 border-slate-200 dark:border-slate-750 focus-within:border-indigo-600 dark:focus-within:border-indigo-500'
@@ -1123,30 +1086,30 @@ Let me know if you would like me to clarify any specific point or provide an int
             <button
               type="button"
               onClick={() => docInputRef.current?.click()}
-              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-xl hover:bg-slate-200/50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+              className="p-1.5 sm:p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-xl hover:bg-slate-200/50 dark:hover:bg-slate-800 transition-all cursor-pointer shrink-0"
               title="Attach study documents or PDFs"
             >
-              <FileUp className="w-5 h-5" />
+              <FileUp className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
 
             <button
               type="button"
               onClick={() => imgInputRef.current?.click()}
-              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-xl hover:bg-slate-200/50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+              className="p-1.5 sm:p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-xl hover:bg-slate-200/50 dark:hover:bg-slate-800 transition-all cursor-pointer shrink-0"
               title="Attach an image of a math problem"
             >
-              <ImageIcon className="w-5 h-5" />
+              <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
 
             {/* Core Input Field */}
-            <div className="flex-1 relative flex items-center">
+            <div className="flex-1 relative flex items-center min-w-0">
               <input
                 type="text"
                 required={attachedFiles.length === 0}
-                placeholder={isDragging ? "Drop your files here!" : "Ask anything about your notes, flashcards, or topics..."}
+                placeholder={isDragging ? "Drop files!" : "Ask your AI tutor..."}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                className="w-full px-3 py-2 bg-transparent text-sm text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none pr-12"
+                className="w-full px-2 sm:px-3 py-1.5 bg-transparent text-xs sm:text-sm text-slate-800 dark:text-white placeholder-slate-400 focus:outline-none pr-8 sm:pr-12"
               />
               <AnimatePresence>
                 {isListening && (
@@ -1154,12 +1117,12 @@ Let me know if you would like me to clarify any specific point or provide an int
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.8 }}
-                    className="absolute right-3 flex items-center gap-1 h-4"
+                    className="absolute right-2 flex items-center gap-0.5 h-4"
                   >
                     {[0, 1, 2, 3].map((i) => (
                       <motion.div
                         key={i}
-                        className="w-1 bg-red-500 rounded-full origin-bottom"
+                        className="w-0.5 bg-red-500 rounded-full origin-bottom"
                         animate={{ height: `${waveformLevels[i]}px` }}
                         transition={{ type: "tween", duration: 0.1 }}
                       />
@@ -1173,22 +1136,22 @@ Let me know if you would like me to clarify any specific point or provide an int
             <button
               type="button"
               onClick={startSpeechRecognition}
-              className={`p-2 rounded-xl transition-all hidden xs:block cursor-pointer ${
+              className={`p-1.5 sm:p-2 rounded-xl transition-all hidden xs:block cursor-pointer shrink-0 ${
                 isListening 
                   ? 'text-red-500 bg-red-500/10 animate-pulse' 
                   : 'text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-800'
               }`}
               title={isListening ? "Listening... Click to stop" : "Dictate your question"}
             >
-              <Mic className="w-4.5 h-4.5" />
+              <Mic className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
             </button>
 
             {/* Send Action */}
             <button
               type="submit"
-              className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-all shadow shadow-indigo-600/20 cursor-pointer flex items-center justify-center"
+              className="p-2 sm:p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-all shadow shadow-indigo-600/20 cursor-pointer flex items-center justify-center shrink-0"
             >
-              <Send className="w-4 h-4" />
+              <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
           </form>
 

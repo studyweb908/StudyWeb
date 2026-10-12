@@ -390,10 +390,16 @@ export default function WorkspaceChat({
         })
       });
 
-      const data = await response.json();
+      let data: any = null;
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await response.json().catch(() => null);
+      } else {
+        await response.text().catch(() => '');
+      }
 
-      if (!response.ok || data.error) {
-        throw new Error(data.error || 'Failed to generate response. Please try again.');
+      if (!response.ok || !data || data.error) {
+        throw new Error(data?.error || 'Failed to generate response. Please try again.');
       }
 
       const elapsed = Date.now() - startTime;
@@ -418,17 +424,9 @@ export default function WorkspaceChat({
         await new Promise(r => setTimeout(r, 400 - elapsed));
       }
 
-      // Intelligent resilient study tutor response for offline or static hosting on Vercel
-      const promptLower = userMsg.text.toLowerCase();
-      let fallbackText = '';
-
-      if (promptLower.includes('quiz') || promptLower.includes('test') || promptLower.includes('question')) {
-        fallbackText = `Here is a high-yield concept review question for **${workspace.name}**:\n\n**Question:** What are the key conservation laws or primary governing principles in this unit, and how do they apply when external constraints are applied?\n\n*Draft your answer below, and I'll analyze your reasoning!*`;
-      } else if (promptLower.includes('formula') || promptLower.includes('equation')) {
-        fallbackText = `Key reference equations for **${workspace.name}**:\n\n1. **Primary Governing Relation:** Relates rate of change to applied potential or gradient.\n2. **Conservation Law:** Total energy / momentum remains invariant in closed systems.\n3. **Dimensional Consistency:** Always verify your units to ensure dimensional validity.`;
-      } else {
-        fallbackText = `Here is the core breakdown for your query on **${workspace.name}**:\n\n1. **Core Concept:** Always begin by identifying the independent variables and initial conditions.\n2. **Fundamental Intuition:** The behavior you are observing follows directly from the foundational axioms in your study notes.\n3. **Common Exam Trap:** Watch out for negative sign conventions and boundary assumptions.\n\n*Would you like to try a practice problem on this, or would you like me to break down a specific formula?*`;
-      }
+      const rawMsg = err?.message || "connection issue";
+      const errorMessage = rawMsg.includes("<!doctype") || rawMsg.includes("<html") ? "connection issue" : rawMsg;
+      const fallbackText = `⚠️ **AI Tutor Service Notice**\n\nI apologize, but I was unable to process your request right now (${errorMessage}).\n\nPlease check your network connection and try asking your question again.`;
 
       const aiMsg: Message = {
         id: `msg-ai-${Date.now() + 1}`,
@@ -1011,29 +1009,29 @@ export default function WorkspaceChat({
           />
 
           {/* Clean Input Bar */}
-          <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-750 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all shadow-xs">
+          <div className="flex items-center gap-1.5 sm:gap-2 p-1 sm:p-1.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-750 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all shadow-xs max-w-full">
             
-            {/* 1. ATTACH BUTTON (Visually signals its purpose clearly) */}
+            {/* 1. ATTACH BUTTON */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={isThinking}
-              className="px-2.5 sm:px-3 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-indigo-50/70 dark:hover:bg-slate-750 border border-slate-200/90 dark:border-slate-700 shadow-2xs group"
+              className="px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-indigo-50/70 dark:hover:bg-slate-750 border border-slate-200/90 dark:border-slate-700 shadow-2xs group"
               title="Attach study material (PDF, image, notes, or document)"
               aria-label="Attach study file"
             >
-              <Paperclip className="w-4 h-4 text-slate-500 group-hover:text-indigo-600 dark:text-slate-400 dark:group-hover:text-indigo-400 transition-colors" />
+              <Paperclip className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-500 group-hover:text-indigo-600 dark:text-slate-400 dark:group-hover:text-indigo-400 transition-colors" />
               <span className="text-xs font-bold hidden sm:inline text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-300">
                 Attach
               </span>
             </button>
 
-            {/* 2. VOICE INPUT BUTTON (Visually signals its purpose clearly) */}
+            {/* 2. VOICE INPUT BUTTON */}
             <button
               type="button"
               onClick={toggleListening}
               disabled={isThinking}
-              className={`px-2.5 sm:px-3 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0 border ${
+              className={`px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0 border ${
                 isListening
                   ? 'bg-rose-500 text-white border-rose-600 shadow-md shadow-rose-500/25 animate-pulse'
                   : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-indigo-50/70 dark:hover:bg-slate-750 border-slate-200/90 dark:border-slate-700 shadow-2xs group'
@@ -1056,7 +1054,7 @@ export default function WorkspaceChat({
                 </>
               ) : (
                 <>
-                  <Mic className="w-4 h-4 text-slate-500 group-hover:text-indigo-600 dark:text-slate-400 dark:group-hover:text-indigo-400 transition-colors" />
+                  <Mic className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-500 group-hover:text-indigo-600 dark:text-slate-400 dark:group-hover:text-indigo-400 transition-colors" />
                   <span className="text-xs font-bold hidden sm:inline text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-300">
                     Voice
                   </span>
@@ -1070,14 +1068,14 @@ export default function WorkspaceChat({
               type="text"
               placeholder={
                 attachedDrafts.length > 0 
-                  ? "Add instructions for attached document, or press Send..." 
-                  : "Ask anything about your notes, or type a question..."
+                  ? "Instructions for document..." 
+                  : "Ask your AI tutor..."
               }
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={isThinking}
-              className="flex-1 px-2.5 sm:px-3 py-2 bg-transparent text-sm sm:text-base font-normal text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none"
+              className="flex-1 min-w-0 px-2 sm:px-3 py-1.5 sm:py-2 bg-transparent text-xs sm:text-base font-normal text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none"
             />
 
             {/* Send Button */}
@@ -1085,13 +1083,13 @@ export default function WorkspaceChat({
               type="button"
               onClick={() => handleSend()}
               disabled={(!inputValue.trim() && attachedDrafts.length === 0) || isThinking}
-              className="w-10 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed shadow-md shadow-indigo-600/25 shrink-0 active:scale-95"
+              className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed shadow-md shadow-indigo-600/25 shrink-0 active:scale-95"
               title="Send message"
             >
               {isThinking ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />
               ) : (
-                <Send className="w-4 h-4" />
+                <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               )}
             </button>
           </div>

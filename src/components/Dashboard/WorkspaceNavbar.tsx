@@ -181,8 +181,8 @@ export default function WorkspaceNavbar({
       </div>
 
       {/* Navigation features grid with fine-tuned design */}
-      <div className="p-2 sm:p-3 bg-slate-50/15 dark:bg-slate-950/5 border-t border-slate-100 dark:border-slate-800/40">
-        <div className="grid grid-cols-3 sm:grid-cols-3 lg:grid-cols-6 gap-1.5 sm:gap-2.5 w-full">
+      <div className="p-1.5 sm:p-3 bg-slate-50/15 dark:bg-slate-950/5 border-t border-slate-100 dark:border-slate-800/40">
+        <div className="grid grid-cols-3 sm:grid-cols-3 lg:grid-cols-6 gap-1 sm:gap-2.5 w-full">
           {subFeatures.map((feat) => {
             const Icon = feat.icon;
             const isSelected = activeTab === feat.id;
@@ -196,7 +196,7 @@ export default function WorkspaceNavbar({
                   if (isComingSoon) return;
                   onTabChange(feat.id);
                 }}
-                className={`relative flex flex-col items-start p-2.5 sm:p-4 rounded-xl sm:rounded-2xl transition-all duration-300 border text-left w-full h-full select-none ${
+                className={`relative flex flex-col items-start p-2 sm:p-4 rounded-xl sm:rounded-2xl transition-all duration-300 border text-left w-full h-full select-none ${
                   isComingSoon ? 'opacity-50 grayscale cursor-not-allowed' : 'cursor-pointer active:scale-97'
                 } ${
                   isSelected
