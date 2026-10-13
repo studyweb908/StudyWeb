@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { useMicrophoneWaveform } from '../../hooks/useMicrophoneWaveform';
 import { useTaskContext } from '../../context/TaskContext';
+import { recordUserActivity } from '../../utils/userActivity';
 
 interface Message {
   id: string;
@@ -440,6 +441,12 @@ export default function AITutorWorkspace() {
     setMessages(prev => [...prev, userMsg]);
     setInputValue('');
     setIsThinking(true);
+
+    recordUserActivity({
+      title: 'Asked AI Tutor',
+      detail: (textToSend || 'Study consultation').trim().slice(0, 50),
+      iconType: 'tutor'
+    });
 
     const history = messages.slice(-8).map(m => ({
       role: m.sender === 'ai' ? 'model' : 'user',

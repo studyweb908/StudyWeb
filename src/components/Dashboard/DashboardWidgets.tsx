@@ -758,8 +758,7 @@ export function StorageQuotaWidget({ workspaces = [] }: { workspaces?: Workspace
     return acc + (ws.files || []).reduce((fileAcc, file) => fileAcc + parseSize(file.size || '0 MB'), 0);
   }, 0);
 
-  const baseline = 45.2 * 1024 * 1024; // 45.2 MB base
-  const usedBytes = totalBytes + baseline;
+  const usedBytes = totalBytes; // Real total bytes from user's actual files
   const limitBytes = 1024 * 1024 * 1024; // 1 GB limit
   
   const percentage = Math.min(100, (usedBytes / limitBytes) * 100);

@@ -59,6 +59,7 @@ import { Workspace, INITIAL_WORKSPACES } from './components/Dashboard/WorkspaceT
 import { toValidUuid } from './utils/uuid.ts';
 import { WorkspaceSyncService } from './services/WorkspaceSyncService.ts';
 import { loadStoredWorkspaces, saveStoredWorkspaces, clearGuestWorkspaces } from './utils/workspaceStorage';
+import { recordUserActivity } from './utils/userActivity';
 import WorkspaceSelector from './components/Dashboard/WorkspaceSelector';
 import WorkspaceContainer from './components/Dashboard/WorkspaceContainer';
 import WorkspaceChat from './components/Dashboard/WorkspaceChat';
@@ -146,6 +147,11 @@ export default function App() {
     setWorkspaces(next);
     saveStoredWorkspaces(next, currentUserId);
     setActiveWorkspace(ws);
+    recordUserActivity({
+      title: `Created workspace: ${ws.name}`,
+      detail: ws.subject ? `Subject: ${ws.subject}` : 'New course workspace created',
+      iconType: 'workspace'
+    }, currentUserId);
     // Persist new workspace directly in Supabase with user_id attached
     WorkspaceSyncService.saveWorkspace(ws, currentUserId || undefined);
   };
