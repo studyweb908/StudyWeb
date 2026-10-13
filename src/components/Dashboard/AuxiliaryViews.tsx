@@ -1206,7 +1206,7 @@ export function NotesView() {
 // ==========================================
 // 5. RESOURCES LIBRARY VIEW
 // ==========================================
-export function ResourcesView() {
+export function ResourcesView({ workspaces = [] }: { workspaces?: any[] }) {
   const [previewMaterial, setPreviewMaterial] = useState<{ title: string; type: string } | null>(null);
   const [materials, setMaterials] = useState<{ title: string; type: string; size: string; uploadDate: string }[]>([
     { title: 'AP Chemistry formula quicksheet', type: 'PDF Document', size: '2.1 MB', uploadDate: 'Oct 12, 2023' },
@@ -1217,8 +1217,10 @@ export function ResourcesView() {
 
   useEffect(() => {
     async function fetchSupabaseFiles() {
+      if (!workspaces || workspaces.length === 0) return;
       try {
-        const res = await fetch('/api/workspace-files?limit=10');
+        const wsIds = workspaces.map(w => w.id).join(',');
+        const res = await fetch(`/api/workspace-files?limit=10&workspaceIds=${encodeURIComponent(wsIds)}`);
         if (res.ok) {
           const json = await res.json();
           if (json.files && Array.isArray(json.files) && json.files.length > 0) {
@@ -1239,13 +1241,15 @@ export function ResourcesView() {
     fetchSupabaseFiles();
     
     // Subscribe to real-time inserts if Supabase is connected
-    if (supabase) {
+    if (supabase && workspaces && workspaces.length > 0) {
       try {
+        const userWsIds = new Set(workspaces.map(w => w.id));
         const subscription = supabase
           .channel('workspace_files_aux')
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'workspace_files' }, (payload) => {
+            const newDoc = payload.new;
+            if (!userWsIds.has(newDoc.workspace_id)) return;
             setMaterials(prev => {
-              const newDoc = payload.new;
               const newMaterial = {
                 title: newDoc.name || 'Untitled',
                 type: (newDoc.type || 'PDF Document').toUpperCase(),
@@ -1264,7 +1268,7 @@ export function ResourcesView() {
         };
       } catch {}
     }
-  }, []);
+  }, [workspaces]);
 
   const getFileIcon = (type: string) => {
     if (type.includes('PDF')) return { icon: <FileText className="w-5 h-5" />, color: 'bg-rose-500/10 text-rose-600 dark:text-rose-500' };

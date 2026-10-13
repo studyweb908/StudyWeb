@@ -58,6 +58,7 @@ import {
 import { Workspace, INITIAL_WORKSPACES } from './components/Dashboard/WorkspaceTypes';
 import { toValidUuid } from './utils/uuid.ts';
 import { WorkspaceSyncService } from './services/WorkspaceSyncService.ts';
+import { loadStoredWorkspaces, saveStoredWorkspaces, clearGuestWorkspaces } from './utils/workspaceStorage';
 import WorkspaceSelector from './components/Dashboard/WorkspaceSelector';
 import WorkspaceContainer from './components/Dashboard/WorkspaceContainer';
 import WorkspaceChat from './components/Dashboard/WorkspaceChat';
@@ -112,30 +113,28 @@ export default function App() {
     requireWorkspaceForTask
   } = useTaskContext();
 
-  // Workspaces State
+  // Workspaces State with Strict User Isolation
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => {
     const savedLogin = typeof window !== 'undefined' ? localStorage.getItem('studyweb_is_logged_in') : null;
+    // For unauthenticated guest sessions, safely load guest workspaces only
     if (savedLogin !== 'true') {
-      const local = localStorage.getItem('studyweb_workspaces_v2');
-      if (local) {
-        try {
-          const parsed = JSON.parse(local);
-          if (Array.isArray(parsed)) return parsed;
-        } catch (err) {}
-      }
+      return loadStoredWorkspaces(null);
     }
     return [];
   });
+
   // Workspace context handles persistance, but we still need to manage workspaces array locally.
   const handleUpdateWorkspace = (updated: Workspace) => {
     const next = workspaces.map(w => w.id === updated.id ? updated : w);
     setWorkspaces(next);
-    localStorage.setItem('studyweb_workspaces_v2', JSON.stringify(next));
+    saveStoredWorkspaces(next, currentUserId);
     if (activeWorkspace && activeWorkspace.id === updated.id) {
       setActiveWorkspace(updated);
     }
-    // Synchronize updates directly to Supabase
-    WorkspaceSyncService.saveWorkspace(updated);
+    // Synchronize updates directly to Supabase with user_id attached
+    WorkspaceSyncService.saveWorkspace(updated, currentUserId || undefined);
   };
 
   const handleSelectWorkspace = (ws: Workspace) => {
@@ -145,19 +144,19 @@ export default function App() {
   const handleCreateWorkspace = (ws: Workspace) => {
     const next = [ws, ...workspaces];
     setWorkspaces(next);
-    localStorage.setItem('studyweb_workspaces_v2', JSON.stringify(next));
+    saveStoredWorkspaces(next, currentUserId);
     setActiveWorkspace(ws);
-    // Persist new workspace directly in Supabase
-    WorkspaceSyncService.saveWorkspace(ws);
+    // Persist new workspace directly in Supabase with user_id attached
+    WorkspaceSyncService.saveWorkspace(ws, currentUserId || undefined);
   };
 
   const handleTogglePin = (id: string) => {
     const next = workspaces.map(w => w.id === id ? { ...w, pinned: !w.pinned } : w);
     setWorkspaces(next);
-    localStorage.setItem('studyweb_workspaces_v2', JSON.stringify(next));
+    saveStoredWorkspaces(next, currentUserId);
     const target = next.find(w => w.id === id);
     if (target) {
-      WorkspaceSyncService.saveWorkspace(target);
+      WorkspaceSyncService.saveWorkspace(target, currentUserId || undefined);
     }
     if (activeWorkspace && activeWorkspace.id === id) {
       setActiveWorkspace({ ...activeWorkspace, pinned: !activeWorkspace.pinned });
@@ -167,10 +166,10 @@ export default function App() {
   const handleToggleFavorite = (id: string) => {
     const next = workspaces.map(w => w.id === id ? { ...w, favorite: !w.favorite } : w);
     setWorkspaces(next);
-    localStorage.setItem('studyweb_workspaces_v2', JSON.stringify(next));
+    saveStoredWorkspaces(next, currentUserId);
     const target = next.find(w => w.id === id);
     if (target) {
-      WorkspaceSyncService.saveWorkspace(target);
+      WorkspaceSyncService.saveWorkspace(target, currentUserId || undefined);
     }
     if (activeWorkspace && activeWorkspace.id === id) {
       setActiveWorkspace({ ...activeWorkspace, favorite: !activeWorkspace.favorite });
@@ -180,7 +179,7 @@ export default function App() {
   const handleDeleteWorkspace = (id: string) => {
     const next = workspaces.filter(w => w.id !== id);
     setWorkspaces(next);
-    localStorage.setItem('studyweb_workspaces_v2', JSON.stringify(next));
+    saveStoredWorkspaces(next, currentUserId);
     if (activeWorkspace && activeWorkspace.id === id) {
       setActiveWorkspace(null);
     }
@@ -190,7 +189,7 @@ export default function App() {
 
   const handleReorderWorkspaces = (newWorkspaces: Workspace[]) => {
     setWorkspaces(newWorkspaces);
-    localStorage.setItem('studyweb_workspaces_v2', JSON.stringify(newWorkspaces));
+    saveStoredWorkspaces(newWorkspaces, currentUserId);
   };
 
   // Synchronize with Supabase on mount and on authentication changes
@@ -199,22 +198,40 @@ export default function App() {
       try {
         if (!supabase) return;
         const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          const remoteWorkspaces = await WorkspaceSyncService.fetchWorkspaces();
-          setWorkspaces(remoteWorkspaces || []);
+        const userId = session?.user?.id || null;
+        setCurrentUserId(userId);
+
+        if (userId) {
+          // 1. Claim any guest workspaces that were created in this browser prior to logging in
+          const guestWorkspaces = loadStoredWorkspaces(null);
+          if (guestWorkspaces && guestWorkspaces.length > 0) {
+            await WorkspaceSyncService.claimWorkspacesForUser(guestWorkspaces, userId);
+            clearGuestWorkspaces();
+          }
+
+          // 2. Fetch all workspaces strictly owned by this authenticated user from Supabase
+          const remoteWorkspaces = await WorkspaceSyncService.fetchWorkspaces(userId);
+          if (remoteWorkspaces && remoteWorkspaces.length > 0) {
+            setWorkspaces(remoteWorkspaces);
+            saveStoredWorkspaces(remoteWorkspaces, userId);
+          } else {
+            // Check if there are user-isolated cached workspaces
+            const userCached = loadStoredWorkspaces(userId);
+            setWorkspaces(userCached || []);
+          }
         } else {
-          setWorkspaces([]);
+          // Unauthenticated guest user: strictly load local guest workspaces
+          const guestWs = loadStoredWorkspaces(null);
+          setWorkspaces(guestWs);
         }
       } catch (err) {
-        console.debug('Initial Supabase workspace sync notice:', err);
+        console.debug('Supabase workspace sync notice:', err);
       }
     };
 
     syncFromSupabase();
 
     const handleAuthChange = () => {
-      setWorkspaces([]);
-      setActiveWorkspace(null);
       syncFromSupabase();
       window.dispatchEvent(new Event('studyweb_profile_updated'));
     };
@@ -226,9 +243,11 @@ export default function App() {
           handleAuthChange();
         } else if (event === 'SIGNED_OUT') {
           setIsLoggedIn(false);
+          setCurrentUserId(null);
           setWorkspaces([]);
           setActiveWorkspace(null);
-          localStorage.clear();
+          localStorage.removeItem('studyweb_is_logged_in');
+          localStorage.removeItem('studyweb_profile_name');
           sessionStorage.clear();
           window.dispatchEvent(new Event('studyweb_profile_updated'));
         }
@@ -312,6 +331,7 @@ export default function App() {
 
   const executeLogout = async () => {
     setIsLoggedIn(false);
+    setCurrentUserId(null);
     
     // Clear Supabase Session
     try {
@@ -320,8 +340,9 @@ export default function App() {
       }
     } catch (e) {}
 
-    // Clear all cached storage to prevent cross-user data leakage
-    localStorage.clear();
+    // Clear active session flags
+    localStorage.removeItem('studyweb_is_logged_in');
+    localStorage.removeItem('studyweb_profile_name');
     sessionStorage.clear();
 
     setWorkspaces([]);
@@ -460,7 +481,7 @@ export default function App() {
           <SubjectsView />
         </div>
         <div className={activeTab === 'resources' ? 'block' : 'hidden'}>
-          <ResourcesView />
+          <ResourcesView workspaces={workspaces} />
         </div>
         <div className={activeTab === 'analytics' ? 'block' : 'hidden'}>
           <AnalyticsView />

@@ -1,16 +1,19 @@
 import { supabase } from '../lib/supabase';
 import { Workspace, WorkspaceFile } from '../components/Dashboard/WorkspaceTypes';
-import { toValidUuid, isValidUuid } from '../utils/uuid';
+import { toValidUuid } from '../utils/uuid';
 
 export class WorkspaceSyncService {
   /**
    * Helper to get current Supabase user ID if authenticated
    */
-  private static async getUserId(): Promise<string | null> {
+  public static async getUserId(): Promise<string | null> {
     if (!supabase) return null;
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      return session?.user?.id || null;
+      if (session?.user?.id) return session.user.id;
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.id) return user.id;
+      return null;
     } catch {
       return null;
     }
@@ -18,16 +21,24 @@ export class WorkspaceSyncService {
 
   /**
    * Saves or updates a workspace in the Supabase 'workspaces' table.
+   * Enforces user isolation by attaching user_id.
    * Also synchronizes any files associated with this workspace to 'workspace_files'.
    */
-  public static async saveWorkspace(workspace: Workspace): Promise<boolean> {
+  public static async saveWorkspace(workspace: Workspace, explicitUserId?: string): Promise<boolean> {
     if (!supabase) return false;
 
     const validId = toValidUuid(workspace.id);
-    const userId = await this.getUserId();
+    const userId = explicitUserId || await this.getUserId();
+
+    // If unauthenticated, do NOT push orphan workspace to Supabase.
+    // It remains safely isolated in the user's local guest storage until login.
+    if (!userId) {
+      return true;
+    }
 
     const row: Record<string, any> = {
       id: validId,
+      user_id: userId,
       name: workspace.name?.trim() || 'Untitled Workspace',
       subject: workspace.subject || '',
       description: workspace.description || '',
@@ -43,13 +54,15 @@ export class WorkspaceSyncService {
       last_opened: new Date().toISOString(),
       is_for_sale: Boolean(workspace.isForSale),
       price: workspace.price || null,
+      files: workspace.files || [],
+      flashcards: workspace.flashcards || [],
+      quizzes: workspace.quizzes || [],
+      notes: workspace.notes || [],
+      planner_tasks: workspace.plannerTasks || [],
+      nodes: workspace.nodes || [],
+      links: workspace.links || [],
       updated_at: new Date().toISOString()
     };
-
-    // If user is authenticated, attach their UUID; otherwise null
-    if (userId) {
-      row.user_id = userId;
-    }
 
     try {
       const { error } = await supabase
@@ -161,25 +174,29 @@ export class WorkspaceSyncService {
   }
 
   /**
-   * Loads all workspaces from Supabase along with their uploaded files.
+   * Loads all workspaces strictly belonging to the authenticated user from Supabase.
+   * If unauthenticated, returns empty array to prevent foreign workspace leakage.
    */
-  public static async fetchWorkspaces(): Promise<Workspace[]> {
+  public static async fetchWorkspaces(explicitUserId?: string): Promise<Workspace[]> {
     if (!supabase) return [];
 
     try {
-      const userId = await this.getUserId();
+      const userId = explicitUserId || await this.getUserId();
 
-      // Query workspaces
-      let query = supabase.from('workspaces').select('*').order('created_at', { ascending: false });
-      
-      // If user is logged in, query strictly user's workspaces
-      if (userId) {
-        query = query.eq('user_id', userId);
-      } else {
-        query = query.or('user_id.is.null,visibility.eq.shared');
+      // STRICT USER ISOLATION:
+      // If user is not authenticated, NEVER return remote workspaces from Supabase.
+      // This eliminates cross-user data leakage where other people's workspaces were displayed.
+      if (!userId) {
+        return [];
       }
 
-      const { data: rows, error } = await query;
+      // Query STRICTLY this user's workspaces
+      const { data: rows, error } = await supabase
+        .from('workspaces')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
       if (error || !rows || rows.length === 0) {
         return [];
       }
@@ -218,7 +235,10 @@ export class WorkspaceSyncService {
       }
 
       return rows.map((row: any): Workspace => {
-        const files = fileMap[row.id] || [];
+        const files = (fileMap[row.id] && fileMap[row.id].length > 0)
+          ? fileMap[row.id]
+          : (Array.isArray(row.files) ? row.files : []);
+
         return {
           id: row.id,
           name: row.name || 'Untitled Workspace',
@@ -237,23 +257,23 @@ export class WorkspaceSyncService {
           isForSale: Boolean(row.is_for_sale),
           price: row.price ? Number(row.price) : undefined,
           files,
-          flashcards: [],
-          quizzes: [],
-          notes: [],
-          plannerTasks: [],
-          nodes: [
+          flashcards: Array.isArray(row.flashcards) ? row.flashcards : [],
+          quizzes: Array.isArray(row.quizzes) ? row.quizzes : [],
+          notes: Array.isArray(row.notes) ? row.notes : [],
+          plannerTasks: Array.isArray(row.planner_tasks) ? row.planner_tasks : [],
+          nodes: Array.isArray(row.nodes) && row.nodes.length > 0 ? row.nodes : [
             { id: 'n-root', label: row.name, type: 'topic', color: '#6366F1', x: 250, y: 150 },
-            ...files.map((file, idx) => ({
+            ...files.map((file: any, idx: number) => ({
               id: `n-${file.id}`,
               label: file.name.slice(0, 20) + '...',
               type: 'file' as const,
               color: '#3B82F6',
               x: 100 + (idx % 5) * 80,
               y: 200 + Math.floor(idx / 5) * 80,
-              details: `${file.type.toUpperCase()} file`
+              details: `${file.type?.toUpperCase() || 'DOC'} file`
             }))
           ],
-          links: files.map((file) => ({
+          links: Array.isArray(row.links) && row.links.length > 0 ? row.links : files.map((file: any) => ({
             source: 'n-root',
             target: `n-${file.id}`
           }))
@@ -262,6 +282,23 @@ export class WorkspaceSyncService {
     } catch (err: any) {
       console.warn('Workspace fetch error:', err.message);
       return [];
+    }
+  }
+
+  /**
+   * Claims and migrates any local workspaces (from guest session) to the newly authenticated user.
+   */
+  public static async claimWorkspacesForUser(localWorkspaces: Workspace[], userId: string): Promise<Workspace[]> {
+    if (!supabase || !userId || !localWorkspaces || localWorkspaces.length === 0) return localWorkspaces || [];
+
+    try {
+      for (const ws of localWorkspaces) {
+        await this.saveWorkspace(ws, userId);
+      }
+      return await this.fetchWorkspaces(userId);
+    } catch (err: any) {
+      console.warn('Failed to claim local workspaces for user:', err.message);
+      return localWorkspaces;
     }
   }
 
@@ -280,3 +317,4 @@ export class WorkspaceSyncService {
     }
   }
 }
+

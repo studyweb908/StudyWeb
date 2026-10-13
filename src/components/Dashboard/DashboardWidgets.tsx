@@ -392,6 +392,11 @@ export function RecentStudyMaterials({
             params.append('workspaceId', activeWorkspace.id);
           } else if (workspaces && workspaces.length > 0) {
             params.append('workspaceIds', workspaces.map(w => w.id).join(','));
+          } else {
+            // Strictly prevent querying when user has no workspaces
+            setDbFiles([]);
+            setLoading(false);
+            return;
           }
           params.append('limit', '5');
 
@@ -442,8 +447,12 @@ export function RecentStudyMaterials({
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'workspace_files' }, (payload) => {
              const newDoc = payload.new;
              
-             // Filter based on activeWorkspace
-             if (activeWorkspace && newDoc.workspace_id !== activeWorkspace.id) return;
+             // Strict User Isolation: Check that this file belongs to one of the current user's workspaces
+             const allowedWsIds = new Set([
+               ...(activeWorkspace ? [activeWorkspace.id] : []),
+               ...(workspaces || []).map(w => w.id)
+             ]);
+             if (!allowedWsIds.has(newDoc.workspace_id)) return;
              
              setDbFiles(prev => {
                const newFile = {

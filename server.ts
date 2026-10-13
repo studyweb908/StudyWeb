@@ -75,6 +75,9 @@ async function startServer() {
         query = query.eq('workspace_id', workspaceId);
       } else if (workspaceIds && workspaceIds.length > 0) {
         query = query.in('workspace_id', workspaceIds);
+      } else {
+        // Without an explicit workspace context, strictly return empty array to prevent foreign file leaks
+        return res.json({ files: [] });
       }
 
       const { data, error } = await query;

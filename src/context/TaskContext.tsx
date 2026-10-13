@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Workspace } from '../components/Dashboard/WorkspaceTypes';
+import { loadStoredWorkspaces } from '../utils/workspaceStorage';
 
 interface TaskContextType {
   activeWorkspace: Workspace | null;
@@ -25,16 +26,14 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const storedId = sessionStorage.getItem('studyweb_active_workspace_id');
     if (storedId) {
-      const local = localStorage.getItem('studyweb_workspaces_v2');
-      if (local) {
-        try {
-          const workspaces = JSON.parse(local) as Workspace[];
-          const ws = workspaces.find((w: Workspace) => w.id === storedId);
-          if (ws) {
-            setActiveWorkspaceState(ws);
-          }
-        } catch (e) {}
-      }
+      try {
+        // Search across all stored workspaces (guest, active user, legacy)
+        const workspaces = loadStoredWorkspaces();
+        const ws = workspaces.find((w: Workspace) => w.id === storedId);
+        if (ws) {
+          setActiveWorkspaceState(ws);
+        }
+      } catch (e) {}
     }
   }, []);
 
