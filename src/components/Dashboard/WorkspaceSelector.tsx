@@ -21,7 +21,6 @@ import {
   Palette,
   Check,
   Trash2,
-  FolderPlus,
   Coins,
   GripVertical,
   Video,
@@ -422,54 +421,15 @@ export default function WorkspaceSelector({
     }
   };
 
+  if (workspaces.length === 0) {
+    return null;
+  }
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto px-4 md:px-6 text-left">
 
-      {/* WORKSPACE HEADER BAR */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 p-6 rounded-[20px] flex items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">Your Workspaces</h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">Manage and organize your study spaces</p>
-        </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="px-4 py-2.5 bg-indigo-600 text-white hover:bg-indigo-700 font-extrabold rounded-xl text-xs flex items-center gap-1.5 shadow shadow-indigo-600/10 cursor-pointer transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Create Workspace</span>
-        </button>
-      </div>
-
       {/* WORKSPACE CARDS GRID OR EMPTY STATES */}
-      {workspaces.length === 0 ? (
-        <motion.div 
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="max-w-xl mx-auto text-center py-16 px-6 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-[28px] space-y-6 shadow-sm"
-        >
-          <div className="relative inline-block">
-            <div className="absolute inset-0 bg-indigo-500/10 dark:bg-indigo-500/20 rounded-full animate-ping scale-110" />
-            <div className="w-20 h-20 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/40 rounded-full flex items-center justify-center text-indigo-600 dark:text-indigo-400 mx-auto">
-              <FolderPlus className="w-10 h-10" />
-            </div>
-          </div>
-          
-          <div className="space-y-2">
-            <h3 className="text-xl font-black text-slate-850 dark:text-slate-100 tracking-tight">Create Your First Study Workspace</h3>
-            <p className="text-xs text-slate-550 dark:text-slate-400 font-semibold leading-relaxed max-w-sm mx-auto">
-              Workspaces are safe-havens for your biological, chemical, or historical papers. Add documents, build custom flashcard sets, and chat with your AI Tutor.
-            </p>
-          </div>
-
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-xl shadow-lg hover:-translate-y-0.5 transition-transform cursor-pointer flex items-center gap-2 mx-auto"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Create Workspace</span>
-          </button>
-        </motion.div>
-      ) : filteredWorkspaces.length === 0 ? (
+      {filteredWorkspaces.length === 0 ? (
         <motion.div 
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}

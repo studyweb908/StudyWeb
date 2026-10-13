@@ -344,7 +344,7 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
           </motion.div>
         )}
       </AnimatePresence>
-      {activeTab !== 'overview' && (
+      {activeTab !== 'overview' && activeTab !== 'chat' && (
         /* COMPACT CLINICAL UPPER HEADER FOR SPECIALIZED TOOLS */
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-white border border-slate-150 rounded-[20px] p-6 shadow-sm backdrop-blur-md">
           <div className="flex items-center gap-3 text-left">

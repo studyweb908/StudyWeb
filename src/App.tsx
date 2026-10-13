@@ -35,7 +35,9 @@ import FlashcardsView from './components/Dashboard/FlashcardsView';
 import QuickActions from './components/Dashboard/QuickActions';
 import QuickNoteModal from './components/Dashboard/QuickNoteModal';
 import OnboardingModal from './components/OnboardingModal';
+import WelcomeBackModal from './components/Dashboard/WelcomeBackModal';
 import OfflineNotice from './components/OfflineNotice';
+import { playDopaminePopSound } from './utils/audioEffects';
 import { useThemeMode } from './hooks/useThemeMode';
 import { 
   Sparkles, 
@@ -89,6 +91,13 @@ export default function App() {
   // Authentication & Legal State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showWelcomeBack, setShowWelcomeBack] = useState(false);
+  const [welcomeUserName, setWelcomeUserName] = useState<string>(() => {
+    return localStorage.getItem('studyweb_profile_name') || 'Scholar';
+  });
+  const [welcomeAvatarUrl, setWelcomeAvatarUrl] = useState<string | undefined>(() => {
+    return localStorage.getItem('studyweb_profile_avatar') || localStorage.getItem('studyweb_profile_pic') || undefined;
+  });
   const [legalModalType, setLegalModalType] = useState<'privacy' | 'terms' | null>(null);
 
   useEffect(() => {
@@ -304,6 +313,13 @@ export default function App() {
       setIsLoggedIn(true);
       if (onboardingComplete !== 'true') {
         setShowOnboarding(true);
+      } else {
+        // Previous / returning user visiting StudyWeb: trigger full-screen welcome back celebration
+        const shownInSession = sessionStorage.getItem('studyweb_welcome_shown_session');
+        if (shownInSession !== 'true') {
+          sessionStorage.setItem('studyweb_welcome_shown_session', 'true');
+          setShowWelcomeBack(true);
+        }
       }
     }
 
@@ -314,6 +330,16 @@ export default function App() {
       localStorage.setItem('studyweb_banner_quote_index', String((prevIdx + 1) % 21));
       setActiveTab('dashboard');
       setShowLoginToast(true);
+
+      // Previous user logging in: trigger full-screen high-dopamine welcome back pop-up
+      const storedName = localStorage.getItem('studyweb_profile_name');
+      if (storedName) setWelcomeUserName(storedName);
+      const storedAvatar = localStorage.getItem('studyweb_profile_avatar') || localStorage.getItem('studyweb_profile_pic');
+      if (storedAvatar) setWelcomeAvatarUrl(storedAvatar);
+      
+      setShowWelcomeBack(true);
+      sessionStorage.setItem('studyweb_welcome_shown_session', 'true');
+      playDopaminePopSound();
     };
 
     const handleSignupSuccess = () => {
@@ -325,11 +351,34 @@ export default function App() {
       setShowOnboarding(true);
     };
 
+    const handleTriggerWelcome = () => {
+      const storedName = localStorage.getItem('studyweb_profile_name');
+      if (storedName) setWelcomeUserName(storedName);
+      const storedAvatar = localStorage.getItem('studyweb_profile_avatar') || localStorage.getItem('studyweb_profile_pic');
+      if (storedAvatar) setWelcomeAvatarUrl(storedAvatar);
+      setShowWelcomeBack(true);
+      playDopaminePopSound();
+    };
+
+    const handleProfileUpdate = () => {
+      const storedName = localStorage.getItem('studyweb_profile_name');
+      if (storedName) setWelcomeUserName(storedName);
+      const storedAvatar = localStorage.getItem('studyweb_profile_avatar') || localStorage.getItem('studyweb_profile_pic');
+      if (storedAvatar) setWelcomeAvatarUrl(storedAvatar);
+    };
+
     window.addEventListener('studyweb-login-success', handleLoginSuccess);
     window.addEventListener('studyweb-signup-success', handleSignupSuccess);
+    window.addEventListener('studyweb-trigger-welcome', handleTriggerWelcome);
+    window.addEventListener('studyweb_profile_updated', handleProfileUpdate);
+    window.addEventListener('storage', handleProfileUpdate);
+
     return () => {
       window.removeEventListener('studyweb-login-success', handleLoginSuccess);
       window.removeEventListener('studyweb-signup-success', handleSignupSuccess);
+      window.removeEventListener('studyweb-trigger-welcome', handleTriggerWelcome);
+      window.removeEventListener('studyweb_profile_updated', handleProfileUpdate);
+      window.removeEventListener('storage', handleProfileUpdate);
     };
   }, []);
 
@@ -389,43 +438,16 @@ export default function App() {
 
   // Helper helper to render active workspace tabs
   const renderDashboardContent = () => {
-    // Grounded Fallback message
-    const renderFallback = (title: string, desc: string) => (
-      <div className="max-w-xl mx-auto text-center py-20 px-6 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-[28px] space-y-6">
-        <div className="relative inline-block">
-          <div className="absolute inset-0 bg-indigo-500/10 dark:bg-indigo-500/20 rounded-full animate-ping scale-110" />
-          <div className="w-16 h-16 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/40 rounded-full flex items-center justify-center text-indigo-600 dark:text-indigo-400 mx-auto">
-            <Sparkles className="w-8 h-8" />
-          </div>
-        </div>
-        
-        <div className="space-y-2">
-          <h3 className="text-lg sm:text-xl font-extrabold text-slate-850 dark:text-slate-100 tracking-tight">{title}</h3>
-          <p className="text-xs text-slate-400 font-semibold leading-relaxed max-w-sm mx-auto">
-            {desc}
-          </p>
-        </div>
-
-        <button
-          onClick={() => {
-            requireWorkspaceForTask(activeTab);
-          }}
-          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-lg cursor-pointer transition-transform hover:-translate-y-0.5"
-        >
-          Select or Create a Workspace
-        </button>
-      </div>
-    );
-
     const isWorkspaceTab = ['workspaces', 'ai-tutor', 'notes', 'flashcards', 'quiz-center'].includes(activeTab);
+    const targetWorkspace = activeWorkspace || (activeTab !== 'workspaces' && workspaces.length > 0 ? workspaces[0] : null);
 
     return (
       <div className="w-full h-full relative">
         {/* Workspace Views */}
         <div className={isWorkspaceTab ? 'block' : 'hidden'}>
-          {activeWorkspace ? (
+          {targetWorkspace ? (
             <WorkspaceContainer 
-              workspace={activeWorkspace} 
+              workspace={targetWorkspace} 
               workspaces={workspaces}
               onSwitchWorkspace={setActiveWorkspace}
               onDeleteWorkspace={handleDeleteWorkspace}
@@ -439,38 +461,19 @@ export default function App() {
                 activeTab === 'quiz-center' ? 'quiz' : 'overview'
               }
             />
-          ) : (
+          ) : workspaces.length > 0 ? (
             <div className="w-full">
-              {activeTab === 'workspaces' ? (
-                <WorkspaceSelector 
-                  workspaces={workspaces} 
-                  onSelectWorkspace={handleSelectWorkspace} 
-                  onCreateWorkspace={handleCreateWorkspace}
-                  onTogglePin={handleTogglePin}
-                  onToggleFavorite={handleToggleFavorite}
-                  onDeleteWorkspace={handleDeleteWorkspace}
-                  onReorderWorkspaces={handleReorderWorkspaces}
-                />
-              ) : activeTab === 'ai-tutor' ? (
-                (activeWorkspace || workspaces.length > 0) ? (
-                  <WorkspaceChat 
-                    workspace={activeWorkspace || workspaces[0]}
-                    workspaces={workspaces}
-                    onSelectWorkspace={handleSelectWorkspace}
-                    onUpdateWorkspace={handleUpdateWorkspace}
-                  />
-                ) : (
-                  renderFallback("Select a Workspace", "Your AI Tutor can answer questions using outside knowledge while strictly staying on topic, as well as use your active documents. Please select or create a study workspace to begin chatting.")
-                )
-              ) : activeTab === 'notes' ? (
-                renderFallback("Notebook is Workspace-Grounded", "Write rich-text notes with real-time AI autocompletes linked directly to your materials. Select a study workspace first.")
-              ) : activeTab === 'flashcards' ? (
-                renderFallback("Spaced Repetition is Workspace-Grounded", "Automate card generators from active chapters. Select a study workspace first to study and track Leitner boxes.")
-              ) : activeTab === 'quiz-center' ? (
-                renderFallback("Exam Practice is Workspace-Grounded", "Simulate practice tests with negative markings that identify your core weak sections. Create or select a workspace first.")
-              ) : null}
+              <WorkspaceSelector 
+                workspaces={workspaces} 
+                onSelectWorkspace={handleSelectWorkspace} 
+                onCreateWorkspace={handleCreateWorkspace}
+                onTogglePin={handleTogglePin}
+                onToggleFavorite={handleToggleFavorite}
+                onDeleteWorkspace={handleDeleteWorkspace}
+                onReorderWorkspaces={handleReorderWorkspaces}
+              />
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Other Views */}
@@ -1001,6 +1004,14 @@ export default function App() {
             setShowOnboarding(false);
             setShowLoginToast(true);
           }}
+        />
+
+        {/* Full Screen Welcome Back Pop-up with High Dopamine Animation */}
+        <WelcomeBackModal
+          isOpen={showWelcomeBack}
+          onClose={() => setShowWelcomeBack(false)}
+          userName={welcomeUserName}
+          avatarUrl={welcomeAvatarUrl}
         />
 
         <OfflineNotice />
