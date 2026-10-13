@@ -9,14 +9,23 @@ import { createClient } from "@supabase/supabase-js";
 
 // Load environment variables
 dotenv.config();
+
+// Disable HMR in preview environment to prevent WebSocket connection failures
+if (!process.env.DISABLE_HMR) {
+  process.env.DISABLE_HMR = "true";
+}
+
 if (!process.env.GEMINI_API_KEY) {
   process.env.GEMINI_API_KEY = "AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A";
 }
 
+const DEFAULT_SUPABASE_URL = "https://fzutrlzeyystbaiueker.supabase.co";
+const DEFAULT_SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ6dXRybHpleXlzdGJhaXVla2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzOTg1MDMsImV4cCI6MjA5ODk3NDUwM30.usJ97CqSdQOAhYC8nXGvKg42xiKrjsmlJiGSTIYSLF4";
+
 // Supabase Server-Side Client Helper
 export function getSupabaseServerClient(authHeader?: string) {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY;
   if (!supabaseUrl || !supabaseKey) {
     return null;
   }
@@ -2870,7 +2879,7 @@ Study Style Preference: ${activeStyle}`;
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: "spa",
     });
     app.use(vite.middlewares);
