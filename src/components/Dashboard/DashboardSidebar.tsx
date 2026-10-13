@@ -122,6 +122,9 @@ export default function DashboardSidebar({
               <button
                 key={item.id}
                 onClick={() => {
+                  if (item.id === 'workspaces' && setActiveWorkspace) {
+                    setActiveWorkspace(null);
+                  }
                   setActiveTab(item.id);
                   onClose();
                 }}

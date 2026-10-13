@@ -21,6 +21,7 @@ import { useThemeMode } from '../../hooks/useThemeMode';
 
 const tabLabels: Record<string, string> = {
   'dashboard': 'Home',
+  'workspaces': 'Study Workspaces',
   'ai-tutor': 'Your AI Tutor',
   'pdf-chat': 'PDF Chat',
   'study-session': 'Study Session',

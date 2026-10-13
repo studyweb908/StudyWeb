@@ -421,15 +421,100 @@ export default function WorkspaceSelector({
     }
   };
 
-  if (workspaces.length === 0) {
-    return null;
-  }
-
   return (
     <div className="space-y-6 max-w-7xl mx-auto px-4 md:px-6 text-left">
+      {/* WORKSPACE SECTION HEADER & CREATE ACTION */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800/80">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+              Study Workspaces
+            </h2>
+            <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/70 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800/60">
+              {workspaces.length} {workspaces.length === 1 ? 'space' : 'spaces'}
+            </span>
+          </div>
+          <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-1">
+            Organize course notes, flashcards, practice quizzes, and AI tutoring by subject.
+          </p>
+        </div>
+
+        {/* PRIMARY CREATE WORKSPACE BUTTON */}
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-extrabold text-xs rounded-xl shadow-md shadow-indigo-600/20 transition-all cursor-pointer shrink-0 self-start sm:self-auto"
+        >
+          <Plus className="w-4 h-4 stroke-[2.5]" />
+          <span>Create New Workspace</span>
+        </button>
+      </div>
+
+      {/* SEARCH AND FILTERS (WHEN WORKSPACES EXIST) */}
+      {workspaces.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="relative flex-1 max-w-md">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search workspaces or subjects..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+            <select
+              value={selectedSubject}
+              onChange={(e) => setSelectedSubject(e.target.value)}
+              className="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              {subjects.map((sub) => (
+                <option key={sub} value={sub}>{sub === 'All' ? 'All Subjects' : sub}</option>
+              ))}
+            </select>
+
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="manual">Custom Order</option>
+              <option value="lastOpened">Recently Opened</option>
+              <option value="name">Alphabetical</option>
+              <option value="files">Most Files</option>
+            </select>
+          </div>
+        </div>
+      )}
 
       {/* WORKSPACE CARDS GRID OR EMPTY STATES */}
-      {filteredWorkspaces.length === 0 ? (
+      {workspaces.length === 0 ? (
+        <motion.div 
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-xl mx-auto text-center py-16 px-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[28px] space-y-6 shadow-sm"
+        >
+          <div className="w-16 h-16 bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+            <Folder className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-xl font-extrabold text-slate-900 dark:text-white">Create Your First Study Workspace</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-md mx-auto">
+              Workspaces are safe-havens for your biological, chemical, or historical papers. Generate flashcards, take lecture notes, and get AI assistance tailored to each course.
+            </p>
+          </div>
+          <div>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-indigo-600/20 transition-all cursor-pointer"
+            >
+              <Plus className="w-4 h-4 stroke-[3]" />
+              <span>Create New Workspace</span>
+            </button>
+          </div>
+        </motion.div>
+      ) : filteredWorkspaces.length === 0 ? (
         <motion.div 
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -444,15 +529,23 @@ export default function WorkspaceSelector({
               Try adjusting your search query, selecting another category, or resetting the filters.
             </p>
           </div>
-          <button
-            onClick={() => {
-              setSearchTerm('');
-              setSelectedSubject('All');
-            }}
-            className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-350 hover:bg-slate-200 dark:hover:bg-slate-750 text-xs font-extrabold rounded-lg transition-colors cursor-pointer"
-          >
-            Clear Filters
-          </button>
+          <div className="flex items-center justify-center gap-2 pt-2">
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setSelectedSubject('All');
+              }}
+              className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-350 hover:bg-slate-200 dark:hover:bg-slate-750 text-xs font-extrabold rounded-lg transition-colors cursor-pointer"
+            >
+              Clear Filters
+            </button>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 text-xs font-extrabold rounded-lg transition-colors cursor-pointer"
+            >
+              + Create Workspace
+            </button>
+          </div>
         </motion.div>
       ) : (
         <DndContext
@@ -477,6 +570,23 @@ export default function WorkspaceSelector({
                   getThemeTextClass={getThemeTextClass}
                 />
               ))}
+
+              {/* INLINE CREATE NEW WORKSPACE CARD */}
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(true)}
+                className="group relative flex flex-col items-center justify-center min-h-[220px] rounded-[24px] border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-indigo-500 dark:hover:border-indigo-400 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-indigo-50/20 dark:hover:bg-indigo-950/20 transition-all cursor-pointer p-6 text-center"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-white dark:bg-slate-800 shadow-sm border border-slate-200/80 dark:border-slate-700 flex items-center justify-center text-slate-400 group-hover:text-indigo-600 group-hover:border-indigo-300 dark:group-hover:border-indigo-700 transition-colors mb-3">
+                  <Plus className="w-6 h-6 stroke-[2.5]" />
+                </div>
+                <h4 className="text-sm font-black text-slate-700 dark:text-slate-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                  Create New Workspace
+                </h4>
+                <p className="text-xs text-slate-400 mt-1 max-w-[200px]">
+                  Add a subject, upload course materials, or build flashcards
+                </p>
+              </button>
             </div>
           </SortableContext>
         </DndContext>

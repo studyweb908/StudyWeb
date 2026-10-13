@@ -461,7 +461,7 @@ export default function App() {
                 activeTab === 'quiz-center' ? 'quiz' : 'overview'
               }
             />
-          ) : workspaces.length > 0 ? (
+          ) : (
             <div className="w-full">
               <WorkspaceSelector 
                 workspaces={workspaces} 
@@ -473,7 +473,7 @@ export default function App() {
                 onReorderWorkspaces={handleReorderWorkspaces}
               />
             </div>
-          ) : null}
+          )}
         </div>
 
         {/* Other Views */}
