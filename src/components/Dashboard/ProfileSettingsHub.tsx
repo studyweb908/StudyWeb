@@ -125,40 +125,25 @@ export function ProfileSettingsHub() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('overview');
 
   // Profile Identity State
-  const [fullName, setFullName] = useState<string>(() => localStorage.getItem('studyweb_profile_name') || 'Alex Johnson');
-  const [avatarUrl, setAvatarUrl] = useState<string>(() => 
-    localStorage.getItem('studyweb_profile_avatar') || 
+  const [fullName, setFullName] = useState<string>('');
+  const [avatarUrl, setAvatarUrl] = useState<string>(
     'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=240'
   );
-  const [currentStudy, setCurrentStudy] = useState<string>(() => 
-    localStorage.getItem('studyweb_profile_class_board') || 'Advanced Placement (AP) US Curriculum'
-  );
-  const [schoolName, setSchoolName] = useState<string>(() => 
-    localStorage.getItem('studyweb_profile_school') || 'Milton Academy Honors Division'
-  );
-  const [studentBio, setStudentBio] = useState<string>(() => 
-    localStorage.getItem('studyweb_profile_bio') || 'Pre-Law and History AP Scholar. Focusing on Constitutional jurisprudence, active recall flashcard sets, and US History DBQs.'
-  );
-  const [userEmail, setUserEmail] = useState<string>('scholar@studyweb.io');
+  const [currentStudy, setCurrentStudy] = useState<string>('');
+  const [schoolName, setSchoolName] = useState<string>('');
+  const [className, setClassName] = useState<string>('');
+  const [studentBio, setStudentBio] = useState<string>('');
+  const [subject, setSubject] = useState<string>('');
+  const [targetAim, setTargetAim] = useState<string>('');
+  const [userEmail, setUserEmail] = useState<string>('');
   const [userId, setUserId] = useState<string | null>(null);
 
   // Learning & Cognitive State
-  const [activeMascot, setActiveMascot] = useState<string>(() => 
-    localStorage.getItem('studyweb_profile_mascot') || 'athena'
-  );
-  const [cognitiveStyle, setCognitiveStyle] = useState<string>(() => 
-    localStorage.getItem('studyweb_profile_cognitive_style') || 'visual_spaced'
-  );
-  const [voiceStyle, setVoiceStyle] = useState<string>(() => 
-    localStorage.getItem('studyweb_profile_voice_style') || 'calm'
-  );
-  const [dailyGoalMinutes, setDailyGoalMinutes] = useState<number>(() => {
-    const saved = localStorage.getItem('studyweb_profile_daily_goal');
-    return saved ? parseInt(saved, 10) : 45;
-  });
-  const [examDate, setExamDate] = useState<string>(() => 
-    localStorage.getItem('studyweb_profile_exam_date') || '2026-05-15'
-  );
+  const [activeMascot, setActiveMascot] = useState<string>('athena');
+  const [cognitiveStyle, setCognitiveStyle] = useState<string>('visual_spaced');
+  const [voiceStyle, setVoiceStyle] = useState<string>('calm');
+  const [dailyGoalMinutes, setDailyGoalMinutes] = useState<number>(45);
+  const [examDate, setExamDate] = useState<string>('2026-05-15');
 
   // Sync & Status State
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'local'>('local');
@@ -266,32 +251,46 @@ export function ProfileSettingsHub() {
 
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user && isMounted) {
-          setUserEmail(session.user.email || 'scholar@studyweb.io');
+          setUserEmail(session.user.email || '');
           setUserId(session.user.id);
 
           const { data, error } = await supabase
             .from('profiles')
-            .select('full_name, avatar_url, current_study')
+            .select('*')
             .eq('id', session.user.id)
             .single();
 
           if (!error && data) {
-            if (data.full_name) {
-              setFullName(data.full_name);
-              localStorage.setItem('studyweb_profile_name', data.full_name);
-            }
-            if (data.avatar_url) {
-              setAvatarUrl(data.avatar_url);
-              localStorage.setItem('studyweb_profile_avatar', data.avatar_url);
-            }
-            if (data.current_study) {
-              setCurrentStudy(data.current_study);
-              localStorage.setItem('studyweb_profile_class_board', data.current_study);
-            }
+            const nameVal = data.full_name || data.name || (session.user.email ? session.user.email.split('@')[0] : '');
+            setFullName(nameVal || '');
+            setAvatarUrl(data.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=240');
+            setSchoolName(data.school_name || data.academic_institution || '');
+            setClassName(data.class_name || '');
+            setCurrentStudy(data.curriculum_board || data.current_study || '');
+            setStudentBio(data.scholar_bio || data.bio || '');
+            setSubject(data.subject || '');
+            setTargetAim(data.target_aim || data.primary_goal || '');
+          } else {
+            setFullName(session.user.email ? session.user.email.split('@')[0] : '');
+            setAvatarUrl('https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=240');
+            setSchoolName('');
+            setClassName('');
+            setCurrentStudy('');
+            setStudentBio('');
+            setSubject('');
+            setTargetAim('');
           }
           setSyncStatus('synced');
           setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         } else {
+          setFullName('');
+          setAvatarUrl('https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=240');
+          setSchoolName('');
+          setClassName('');
+          setCurrentStudy('');
+          setStudentBio('');
+          setSubject('');
+          setTargetAim('');
           setSyncStatus('local');
         }
       } catch (err) {
@@ -301,7 +300,11 @@ export function ProfileSettingsHub() {
     }
 
     loadRemoteProfile();
-    return () => { isMounted = false; };
+    window.addEventListener('studyweb_profile_updated', loadRemoteProfile);
+    return () => { 
+      isMounted = false; 
+      window.removeEventListener('studyweb_profile_updated', loadRemoteProfile);
+    };
   }, []);
 
   // Save to Supabase and LocalStorage
@@ -315,7 +318,10 @@ export function ProfileSettingsHub() {
     localStorage.setItem('studyweb_profile_avatar', avatarUrl);
     localStorage.setItem('studyweb_profile_class_board', currentStudy);
     localStorage.setItem('studyweb_profile_school', schoolName);
+    localStorage.setItem('studyweb_profile_class', className);
     localStorage.setItem('studyweb_profile_bio', studentBio);
+    localStorage.setItem('studyweb_profile_subject', subject);
+    localStorage.setItem('studyweb_profile_aim', targetAim);
 
     // 2. Sync to Supabase if authenticated
     try {
@@ -324,9 +330,20 @@ export function ProfileSettingsHub() {
         if (session?.user) {
           const { error } = await supabase.from('profiles').upsert({
             id: session.user.id,
+            email: session.user.email,
             full_name: fullName,
+            name: fullName,
             avatar_url: avatarUrl,
+            school_name: schoolName,
+            academic_institution: schoolName,
+            class_name: className,
+            curriculum_board: currentStudy,
             current_study: currentStudy,
+            scholar_bio: studentBio,
+            bio: studentBio,
+            subject: subject,
+            target_aim: targetAim,
+            primary_goal: targetAim,
             updated_at: new Date().toISOString()
           });
           if (error) throw error;
@@ -340,6 +357,7 @@ export function ProfileSettingsHub() {
     } finally {
       setIsSaving(false);
       triggerToast('✨ Profile details successfully updated and synchronized!');
+      window.dispatchEvent(new Event('studyweb_profile_updated'));
       confetti({
         particleCount: 35,
         spread: 60,
@@ -1114,26 +1132,40 @@ export function ProfileSettingsHub() {
 
                 <div className="space-y-2">
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Academic Institution / School Division
+                    Academic Institution / School
                   </label>
                   <input
                     type="text"
                     value={schoolName}
                     onChange={(e) => setSchoolName(e.target.value)}
-                    placeholder="e.g. Milton Academy Honors Division"
+                    placeholder="e.g. Stanford University / Lincoln High School"
                     className="w-full px-4 py-3 bg-white dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-2xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 transition-all outline-none shadow-xs"
                   />
                 </div>
 
                 <div className="space-y-2">
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Curriculum / Class Board
+                    Class / Grade Level
+                  </label>
+                  <input
+                    type="text"
+                    value={className}
+                    onChange={(e) => setClassName(e.target.value)}
+                    placeholder="e.g. Grade 12 / Sophomore Year"
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-2xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 transition-all outline-none shadow-xs"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Curriculum Board / Program
                   </label>
                   <select
                     value={currentStudy}
                     onChange={(e) => setCurrentStudy(e.target.value)}
                     className="w-full px-4 py-3 bg-white dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-2xl text-xs font-semibold text-slate-900 dark:text-white transition-all outline-none shadow-xs"
                   >
+                    <option value="">Select Curriculum Board...</option>
                     {CURRICULUM_BOARDS.map((board) => (
                       <option key={board} value={board}>{board}</option>
                     ))}
@@ -1141,6 +1173,32 @@ export function ProfileSettingsHub() {
                 </div>
 
                 <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Primary Study Subject
+                  </label>
+                  <input
+                    type="text"
+                    value={subject}
+                    onChange={(e) => setSubject(e.target.value)}
+                    placeholder="e.g. Computer Science, AP Biology, Physics"
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-2xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 transition-all outline-none shadow-xs"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    My Learning Aim & Goal
+                  </label>
+                  <input
+                    type="text"
+                    value={targetAim}
+                    onChange={(e) => setTargetAim(e.target.value)}
+                    placeholder="e.g. Crack JEE / Ace AP Exams / Master Web Development"
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-2xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 transition-all outline-none shadow-xs"
+                  />
+                </div>
+
+                <div className="space-y-2 md:col-span-2">
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                     Primary Academic Email (Supabase Verified)
                   </label>

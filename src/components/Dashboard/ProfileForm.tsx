@@ -39,7 +39,7 @@ export function ProfileForm() {
       if (session?.user) {
         const { data, error } = await supabase
           .from('profiles')
-          .select('full_name, avatar_url, current_study')
+          .select('*')
           .eq('id', session.user.id)
           .single();
 
@@ -49,14 +49,13 @@ export function ProfileForm() {
 
         if (data) {
           setFormData({
-            full_name: data.full_name || '',
+            full_name: data.full_name || data.name || '',
             avatar_url: data.avatar_url || '',
-            current_study: data.current_study || '',
+            current_study: data.current_study || data.curriculum_board || '',
           });
         }
       } else {
-        // If no user session, mock or show error based on requirements. 
-        // We'll just leave it empty if no session.
+        // If no user session, leave empty
       }
     } catch (err: any) {
       console.error('Error fetching profile:', err);
@@ -69,7 +68,6 @@ export function ProfileForm() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
-    // Clear error on type
     if (errors[name as keyof ProfileFormData]) {
       setErrors(prev => ({ ...prev, [name]: undefined }));
     }
@@ -79,7 +77,6 @@ export function ProfileForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validate with Zod
     const result = profileSchema.safeParse(formData);
     if (!result.success) {
       const formattedErrors: any = {};
@@ -102,7 +99,12 @@ export function ProfileForm() {
 
       const updates = {
         id: session.user.id,
-        ...formData,
+        email: session.user.email,
+        full_name: formData.full_name,
+        name: formData.full_name,
+        avatar_url: formData.avatar_url,
+        current_study: formData.current_study,
+        curriculum_board: formData.current_study,
         updated_at: new Date().toISOString(),
       };
 
@@ -110,10 +112,10 @@ export function ProfileForm() {
       localStorage.setItem('studyweb_profile_name', formData.full_name);
       localStorage.setItem('studyweb_profile_avatar', formData.avatar_url);
       localStorage.setItem('studyweb_profile_class_board', formData.current_study);
+      window.dispatchEvent(new Event('studyweb_profile_updated'));
       if (error) throw error;
       
       setSuccess(true);
-      // Optional: hide success message after 3 seconds
       setTimeout(() => setSuccess(false), 3000);
     } catch (error: any) {
       console.error('Error updating profile:', error);

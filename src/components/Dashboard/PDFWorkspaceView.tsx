@@ -700,7 +700,7 @@ ${selectedHighlights}`;
       });
 
       if (!response.ok) {
-        throw new Error("Failed to contact Nvidia NIM AI engine");
+        throw new Error("Failed to contact Gemini AI Tutor engine");
       }
 
       const data = await response.json();
@@ -760,7 +760,7 @@ Student Question:
       });
 
       if (!response.ok) {
-        throw new Error("Failed to contact Llama 3.3 NIM engine");
+        throw new Error("Failed to contact Gemini AI Tutor engine");
       }
 
       const data = await response.json();

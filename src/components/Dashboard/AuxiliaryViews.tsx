@@ -361,8 +361,8 @@ export function NotesView() {
 
       if (response.ok) {
         const data = await response.json();
-        if (data.response) {
-          const generatedHTML = data.response;
+        const generatedHTML = data.reply || data.text || data.response;
+        if (generatedHTML) {
           const separator = `<br/><hr/><br/>`;
           const updatedContent = selectedNote.content + separator + generatedHTML;
           

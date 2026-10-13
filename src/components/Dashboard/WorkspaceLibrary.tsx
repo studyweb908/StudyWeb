@@ -122,7 +122,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
     try {
       const res = await fetch('/api/web-search-sources', {
         method: 'POST',
-        credentials: 'omit',
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: webSearchQuery, mode: searchWebMode })
       });
@@ -211,7 +211,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
           const { token, userId } = await getAuthInfo();
           const response = await fetch('/api/knowledge/upload', {
             method: 'POST',
-            credentials: 'omit',
+            credentials: 'same-origin',
             headers: { 
               'Content-Type': 'application/json',
               ...(token ? { 'Authorization': `Bearer ${token}` } : {})
@@ -680,7 +680,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
       try {
         const analyzeRes = await fetch('/api/analyze-resource', {
           method: 'POST',
-          credentials: 'omit',
+          credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name,
@@ -722,7 +722,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
               const { token, userId } = await getAuthInfo();
               const response = await fetch('/api/knowledge/upload', {
                 method: 'POST',
-                credentials: 'omit',
+                credentials: 'same-origin',
                 headers: {
                   'Content-Type': 'application/json',
                   ...(token ? { 'Authorization': `Bearer ${token}` } : {})

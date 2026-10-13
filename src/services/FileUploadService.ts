@@ -82,7 +82,7 @@ export interface FileUploadResult {
 
 export type FileUploadErrorCode =
   | 'ERR_FILE_VALIDATION'
-  | 'ERR_NVIDIA_104'
+  | 'ERR_CONNECTION_RESET_104'
   | 'ERR_MODEL_EOL_410'
   | 'ERR_MODEL_OVERLOAD_503'
   | 'ERR_SUPABASE_STORAGE'
@@ -120,7 +120,7 @@ export class FileUploadError extends Error {
     this.retryable = options.retryable ?? false;
     this.timestamp = new Date().toISOString();
     this.userMessage = options.userMessage || message;
-    this.is104 = options.is104 ?? (options.code === 'ERR_NVIDIA_104' || options.status === 104);
+    this.is104 = options.is104 ?? (options.code === 'ERR_CONNECTION_RESET_104' || options.status === 104);
   }
 
   /**
@@ -131,7 +131,7 @@ export class FileUploadError extends Error {
   }
 
   /**
-   * Specifically detects NVIDIA NIM / Meta Llama Error 104 (Connection Reset)
+   * Specifically detects Network/Protocol Connection Reset Error 104
    * across various network layers and SDK error representations.
    */
   static is104(err: any): boolean {
@@ -143,7 +143,7 @@ export class FileUploadError extends Error {
       return false;
     }
 
-    if (err instanceof FileUploadError && (err.is104 || err.code === 'ERR_NVIDIA_104' || err.status === 104)) {
+    if (err instanceof FileUploadError && (err.is104 || err.code === 'ERR_CONNECTION_RESET_104' || err.status === 104)) {
       return true;
     }
     if (err.status === 104 || err.statusCode === 104 || err.code === 104 || err.code === '104') {
@@ -165,10 +165,7 @@ export class FileUploadError extends Error {
       msg.includes('error 104') ||
       msg.includes('status 104') ||
       msg.includes('code 104') ||
-      msg.includes('nvidia api return error 104') ||
-      msg.includes('nvidia api return error') ||
       msg.includes('communication instruction failed') ||
-      msg.includes('meta llama') ||
       msg.includes('connection reset') ||
       msg.includes('econnreset') ||
       msg.includes('socket hang up') ||
@@ -218,15 +215,15 @@ export class FileUploadError extends Error {
       });
     }
 
-    // Detect NVIDIA API Error 104 (Protocol/Connection Reset)
+    // Detect Network Protocol / Connection Reset Error 104
     if (FileUploadError.is104(err)) {
-      return new FileUploadError(`NVIDIA API Communication Error 104: ${msg}`, {
-        code: 'ERR_NVIDIA_104',
+      return new FileUploadError(`API Communication Reset Error 104: ${msg}`, {
+        code: 'ERR_CONNECTION_RESET_104',
         status: 104,
         is104: true,
-        technicalDetails: `NVIDIA NIM / Meta Llama connection reset (Error 104) while processing context: ${context || 'file stream'}. Handled with exponential backoff retry mechanism.`,
+        technicalDetails: `Upstream connection reset (Error 104) while processing context: ${context || 'file stream'}. Handled with exponential backoff retry mechanism.`,
         retryable: true,
-        userMessage: 'NVIDIA API connection reset (Error 104) detected. Retrying with exponential backoff...'
+        userMessage: 'Connection reset (Error 104) detected. Retrying automatically...'
       });
     }
 
@@ -516,7 +513,7 @@ export class FileUploadService {
   // ==========================================
   
   /**
-   * Tests if an error corresponds to NVIDIA NIM / Meta Llama 104 connection reset.
+   * Tests if an error corresponds to 104 connection reset.
    */
   public is104Error(err: any): boolean {
     return FileUploadError.is104(err);
@@ -589,7 +586,7 @@ export class FileUploadService {
       if (status >= 400 && status < 500) return false;
     }
 
-    // NVIDIA 104 Connection Reset
+    // Protocol 104 Connection Reset
     if (this.is104Error(err)) return true;
 
     // Low-level network disconnects and timeouts
@@ -739,7 +736,7 @@ export class FileUploadService {
         // Calculate jittered exponential backoff delay for 5xx or network-level errors
         const delayMs = this.calculateBackoffDelay(attempt, config);
         const errorDesc = is104
-          ? 'NVIDIA/Meta Llama 104 Connection Reset (transient socket hang up)'
+          ? 'Transient Connection Reset (Error 104 socket hang up)'
           : `[${parsedError.code || 'HTTP_' + (parsedError.status || 'ERR')}] ${parsedError.message}`;
 
         this.log(
@@ -749,7 +746,7 @@ export class FileUploadService {
         );
 
         const retryNotice = is104
-          ? `⚠️ NVIDIA/Llama API 104 reset detected. Retrying in ${(delayMs / 1000).toFixed(1)}s (Attempt ${attempt + 1} of ${config.maxRetries + 1})...`
+          ? `⚠️ Connection reset detected. Retrying in ${(delayMs / 1000).toFixed(1)}s (Attempt ${attempt + 1} of ${config.maxRetries + 1})...`
           : `⚠️ Transient server/network issue detected. Retrying in ${(delayMs / 1000).toFixed(1)}s (Attempt ${attempt + 1} of ${config.maxRetries + 1})...`;
 
         if (options?.onRetryNotice) {
@@ -897,7 +894,7 @@ export class FileUploadService {
       let statusRes: Response;
       try {
         statusRes = await fetch(`/api/knowledge/status/${documentId}`, {
-          credentials: 'omit',
+          credentials: 'same-origin',
           headers: authHeaders,
           signal
         });
@@ -1066,7 +1063,7 @@ export class FileUploadService {
         const authHeaders = await this.getAuthHeaders();
         const response = await fetch('/api/knowledge/upload-multipart', {
           method: 'POST',
-          credentials: 'omit',
+          credentials: 'same-origin',
           headers: {
             ...authHeaders
           },
@@ -1264,7 +1261,7 @@ export class FileUploadService {
           const authHeaders = await this.getAuthHeaders();
           const response = await fetch('/api/knowledge/upload', {
             method: 'POST',
-            credentials: 'omit',
+            credentials: 'same-origin',
             headers: {
               'Content-Type': 'application/json',
               ...authHeaders

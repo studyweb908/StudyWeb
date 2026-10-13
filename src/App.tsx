@@ -114,28 +114,17 @@ export default function App() {
 
   // Workspaces State
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => {
-    const local = localStorage.getItem('studyweb_workspaces_v2');
-    if (local) {
-      try {
-        const parsed = JSON.parse(local);
-        if (Array.isArray(parsed)) {
-          let hasChanges = false;
-          const normalized = parsed.map((ws: Workspace) => {
-            const validId = toValidUuid(ws.id);
-            if (validId !== ws.id) {
-              hasChanges = true;
-              return { ...ws, id: validId };
-            }
-            return ws;
-          });
-          if (hasChanges) {
-            localStorage.setItem('studyweb_workspaces_v2', JSON.stringify(normalized));
-          }
-          return normalized;
-        }
-      } catch (err) {}
+    const savedLogin = typeof window !== 'undefined' ? localStorage.getItem('studyweb_is_logged_in') : null;
+    if (savedLogin !== 'true') {
+      const local = localStorage.getItem('studyweb_workspaces_v2');
+      if (local) {
+        try {
+          const parsed = JSON.parse(local);
+          if (Array.isArray(parsed)) return parsed;
+        } catch (err) {}
+      }
     }
-    return INITIAL_WORKSPACES;
+    return [];
   });
   // Workspace context handles persistance, but we still need to manage workspaces array locally.
   const handleUpdateWorkspace = (updated: Workspace) => {
@@ -208,53 +197,13 @@ export default function App() {
   useEffect(() => {
     const syncFromSupabase = async () => {
       try {
-        const remoteWorkspaces = await WorkspaceSyncService.fetchWorkspaces();
-        if (remoteWorkspaces && remoteWorkspaces.length > 0) {
-          setWorkspaces((prev) => {
-            const remoteMap = new Map(remoteWorkspaces.map(w => [w.id, w]));
-            const missingRemote: Workspace[] = [];
-
-            prev.forEach(localWs => {
-              if (!remoteMap.has(localWs.id)) {
-                missingRemote.push(localWs);
-              }
-            });
-
-            // Push any local workspaces that are not in Supabase yet
-            if (missingRemote.length > 0) {
-              WorkspaceSyncService.syncLocalWorkspacesToSupabase(missingRemote);
-            }
-
-            const merged = remoteWorkspaces.map(remoteWs => {
-              const localMatch = prev.find(l => l.id === remoteWs.id);
-              if (localMatch) {
-                return {
-                  ...localMatch,
-                  ...remoteWs,
-                  files: [
-                    ...remoteWs.files,
-                    ...(localMatch.files || []).filter(lf => !remoteWs.files.some(rf => rf.id === lf.id))
-                  ]
-                };
-              }
-              return remoteWs;
-            });
-
-            const combined = [...merged, ...missingRemote];
-            localStorage.setItem('studyweb_workspaces_v2', JSON.stringify(combined));
-            return combined;
-          });
+        if (!supabase) return;
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const remoteWorkspaces = await WorkspaceSyncService.fetchWorkspaces();
+          setWorkspaces(remoteWorkspaces || []);
         } else {
-          // If Supabase has no workspaces yet, sync existing local workspaces to Supabase!
-          const local = localStorage.getItem('studyweb_workspaces_v2');
-          if (local) {
-            try {
-              const parsed = JSON.parse(local);
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                WorkspaceSyncService.syncLocalWorkspacesToSupabase(parsed);
-              }
-            } catch {}
-          }
+          setWorkspaces([]);
         }
       } catch (err) {
         console.debug('Initial Supabase workspace sync notice:', err);
@@ -264,8 +213,28 @@ export default function App() {
     syncFromSupabase();
 
     const handleAuthChange = () => {
+      setWorkspaces([]);
+      setActiveWorkspace(null);
       syncFromSupabase();
+      window.dispatchEvent(new Event('studyweb_profile_updated'));
     };
+
+    let authSubscription: any = null;
+    if (supabase) {
+      const { data } = supabase.auth.onAuthStateChange((event) => {
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+          handleAuthChange();
+        } else if (event === 'SIGNED_OUT') {
+          setIsLoggedIn(false);
+          setWorkspaces([]);
+          setActiveWorkspace(null);
+          localStorage.clear();
+          sessionStorage.clear();
+          window.dispatchEvent(new Event('studyweb_profile_updated'));
+        }
+      });
+      authSubscription = data?.subscription;
+    }
 
     window.addEventListener('studyweb-login-success', handleAuthChange);
     window.addEventListener('studyweb-signup-success', handleAuthChange);
@@ -273,6 +242,9 @@ export default function App() {
     return () => {
       window.removeEventListener('studyweb-login-success', handleAuthChange);
       window.removeEventListener('studyweb-signup-success', handleAuthChange);
+      if (authSubscription) {
+        authSubscription.unsubscribe();
+      }
     };
   }, []);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -343,24 +315,20 @@ export default function App() {
     
     // Clear Supabase Session
     try {
-      await supabase.auth.signOut();
+      if (supabase) {
+        await supabase.auth.signOut();
+      }
     } catch (e) {}
 
-    // Clear all local state to ensure no cross-user data leakage
-    localStorage.removeItem('studyweb_is_logged_in');
-    localStorage.removeItem('studyweb_profile_name');
-    localStorage.removeItem('studyweb_profile_avatar');
-    localStorage.removeItem('studyweb_profile_class_board');
-    localStorage.removeItem('studyweb_profile_school');
-    localStorage.removeItem('studyweb_onboarding_draft');
-    localStorage.removeItem('studyweb_onboarding_data');
-    localStorage.removeItem('studyweb_onboarding_complete');
+    // Clear all cached storage to prevent cross-user data leakage
+    localStorage.clear();
+    sessionStorage.clear();
 
-    setActiveTab('dashboard');
+    setWorkspaces([]);
     setActiveWorkspace(null);
-    sessionStorage.removeItem('studyweb_active_task');
-    sessionStorage.removeItem('studyweb_active_workspace_id');
+    setActiveTab('dashboard');
     setShowLogoutConfirm(false);
+    window.dispatchEvent(new Event('studyweb_profile_updated'));
   };
 
   const handleLogout = () => {

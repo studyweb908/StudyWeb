@@ -9,6 +9,9 @@ import { createClient } from "@supabase/supabase-js";
 
 // Load environment variables
 dotenv.config();
+if (!process.env.GEMINI_API_KEY) {
+  process.env.GEMINI_API_KEY = "AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A";
+}
 
 // Supabase Server-Side Client Helper
 export function getSupabaseServerClient(authHeader?: string) {
@@ -24,7 +27,7 @@ export function getSupabaseServerClient(authHeader?: string) {
 // Robust API key helper
 export function getGeminiApiKey(): string | null {
   const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY || process.env.VITE_GEMINI_API_KEY || "AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A";
-  if (!key || key === "MY_GEMINI_API_KEY" || key.trim() === "") return "AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A";
+  if (!key || key.trim() === "" || key === "MY_GEMINI_API_KEY") return "AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A";
   return key.trim();
 }
 
@@ -757,8 +760,54 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
     `💬 *Would you like me to explain any part of this in more detail, or give you a quick quiz?*`;
 }
 
-  // API Route: AI Tutor Query via Gemini API or Nvidia API (Multi-turn + Role Specialization + Model Routing)
+  // Diagnostic Route: Verify real Gemini API connectivity independently
+  app.get("/api/ai-health", async (_req, res) => {
+    const startTime = Date.now();
+    try {
+      const apiKey = getGeminiApiKey();
+      if (!apiKey) {
+        return res.status(503).json({
+          status: "error",
+          error: "GEMINI_API_KEY is not configured",
+          configured: false
+        });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: { "User-Agent": "studyweb-health-check" }
+        }
+      });
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.8-flash",
+        contents: "Reply with the word OK."
+      });
+
+      const text = response.text?.trim() || "";
+      const durationMs = Date.now() - startTime;
+
+      return res.json({
+        status: "ok",
+        model: "gemini-3.8-flash",
+        reply: text,
+        verified: text.length > 0,
+        durationMs
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        status: "error",
+        error: err?.message || String(err),
+        durationMs: Date.now() - startTime
+      });
+    }
+  });
+
+  // API Route: AI Tutor Query via Google Gemini API (Multi-turn + Role Specialization + Model Routing)
   app.post("/api/ai-tutor", async (req, res) => {
+    const correlationId = `tutor-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const routeStartTime = Date.now();
     try {
       const { 
         prompt, 
@@ -773,7 +822,12 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
       } = req.body;
 
       if (!prompt) {
-        res.status(400).json({ error: "Prompt is required." });
+        console.warn(`[AI Tutor][${correlationId}] Rejected: Prompt is required.`);
+        res.status(400).json({ 
+          error: "Prompt is required.",
+          statusCode: 400,
+          correlationId 
+        });
         return;
       }
 
@@ -828,74 +882,75 @@ You are a rapid-fire active recall trainer and flashcard coach:
       const supabase = getSupabaseServerClient(req.headers.authorization);
       if (supabase && workspaceId) {
         try {
-          console.log(`[AI Tutor] Automatically querying Supabase study materials for workspace: ${workspaceId}...`);
-          
-          // 1. Check workspace_files table
-          const { data: fileRows, error: fileErr } = await supabase
-            .from('workspace_files')
-            .select('*')
-            .eq('workspace_id', workspaceId);
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Supabase timeout")), 2000));
+          const fetchPromise = (async () => {
+            const { data: fileRows, error: fileErr } = await supabase
+              .from('workspace_files')
+              .select('*')
+              .eq('workspace_id', workspaceId);
 
-          if (!fileErr && fileRows && fileRows.length > 0) {
-            supabaseDocCount = fileRows.length;
-            fetchedFromSupabase = true;
+            if (!fileErr && fileRows && fileRows.length > 0) {
+              supabaseDocCount = fileRows.length;
+              fetchedFromSupabase = true;
 
-            fileRows.forEach((sf: any) => {
-              const existingIdx = effectiveFiles.findIndex(f => f.id === sf.id || f.name === sf.name);
-              const mappedFile = {
-                id: sf.id,
-                name: sf.name,
-                type: sf.type || 'doc',
-                size: sf.size || 'Analyzed',
-                pages: sf.pages,
-                url: sf.url,
-                summary: sf.summary,
-                highlights: Array.isArray(sf.highlights) ? sf.highlights : (sf.highlights ? [sf.highlights] : []),
-                transcription: sf.transcription || sf.content_text,
-                formulas: Array.isArray(sf.formulas) ? sf.formulas : [],
-                source: 'supabase'
-              };
-
-              if (existingIdx >= 0) {
-                effectiveFiles[existingIdx] = {
-                  ...mappedFile,
-                  ...effectiveFiles[existingIdx],
-                  summary: effectiveFiles[existingIdx].summary || mappedFile.summary,
-                  highlights: (effectiveFiles[existingIdx].highlights && effectiveFiles[existingIdx].highlights.length > 0)
-                    ? effectiveFiles[existingIdx].highlights
-                    : mappedFile.highlights,
-                  url: effectiveFiles[existingIdx].url || mappedFile.url,
+              fileRows.forEach((sf: any) => {
+                const existingIdx = effectiveFiles.findIndex(f => f.id === sf.id || f.name === sf.name);
+                const mappedFile = {
+                  id: sf.id,
+                  name: sf.name,
+                  type: sf.type || 'doc',
+                  size: sf.size || 'Analyzed',
+                  pages: sf.pages,
+                  url: sf.url,
+                  summary: sf.summary,
+                  highlights: Array.isArray(sf.highlights) ? sf.highlights : (sf.highlights ? [sf.highlights] : []),
+                  transcription: sf.transcription || sf.content_text,
+                  formulas: Array.isArray(sf.formulas) ? sf.formulas : [],
                   source: 'supabase'
                 };
-              } else {
-                effectiveFiles.push(mappedFile);
-              }
-            });
-          }
 
-          // 2. Also check workspaces table if workspace_files had 0 rows or for extra notes
-          const { data: wsRow, error: wsErr } = await supabase
-            .from('workspaces')
-            .select('files, notes, name, subject')
-            .eq('id', workspaceId)
-            .single();
-
-          if (!wsErr && wsRow) {
-            if (Array.isArray(wsRow.files) && wsRow.files.length > 0 && supabaseDocCount === 0) {
-              supabaseDocCount = wsRow.files.length;
-              fetchedFromSupabase = true;
-              wsRow.files.forEach((sf: any) => {
-                const existingIdx = effectiveFiles.findIndex(f => f.id === sf.id || f.name === sf.name);
                 if (existingIdx >= 0) {
-                  effectiveFiles[existingIdx] = { ...sf, ...effectiveFiles[existingIdx], source: 'supabase' };
+                  effectiveFiles[existingIdx] = {
+                    ...mappedFile,
+                    ...effectiveFiles[existingIdx],
+                    summary: effectiveFiles[existingIdx].summary || mappedFile.summary,
+                    highlights: (effectiveFiles[existingIdx].highlights && effectiveFiles[existingIdx].highlights.length > 0)
+                      ? effectiveFiles[existingIdx].highlights
+                      : mappedFile.highlights,
+                    url: effectiveFiles[existingIdx].url || mappedFile.url,
+                    source: 'supabase'
+                  };
                 } else {
-                  effectiveFiles.push({ ...sf, source: 'supabase' });
+                  effectiveFiles.push(mappedFile);
                 }
               });
             }
-          }
+
+            const { data: wsRow, error: wsErr } = await supabase
+              .from('workspaces')
+              .select('files, notes, name, subject')
+              .eq('id', workspaceId)
+              .single();
+
+            if (!wsErr && wsRow) {
+              if (Array.isArray(wsRow.files) && wsRow.files.length > 0 && supabaseDocCount === 0) {
+                supabaseDocCount = wsRow.files.length;
+                fetchedFromSupabase = true;
+                wsRow.files.forEach((sf: any) => {
+                  const existingIdx = effectiveFiles.findIndex(f => f.id === sf.id || f.name === sf.name);
+                  if (existingIdx >= 0) {
+                    effectiveFiles[existingIdx] = { ...sf, ...effectiveFiles[existingIdx], source: 'supabase' };
+                  } else {
+                    effectiveFiles.push({ ...sf, source: 'supabase' });
+                  }
+                });
+              }
+            }
+          })();
+
+          await Promise.race([fetchPromise, timeoutPromise]);
         } catch (supaErr: any) {
-          console.warn("[AI Tutor] Notice: Supabase query encountered issue, falling back seamlessly to workspace files:", supaErr?.message || supaErr);
+          console.warn("[AI Tutor] Notice: Supabase query notice, falling back seamlessly to workspace files:", supaErr?.message || supaErr);
         }
       }
 
@@ -1003,15 +1058,15 @@ ${fileOverviewContext}
 - Workspace Materials Context & Retrieved Passages:
 ${groundedSourceContext}`;
 
-      // Candidate Models: standard valid Gemini 2.5 series models
-      const candidateModels: string[] = ["gemini-2.5-flash", "gemini-2.5-flash-lite"];
+      // Candidate Models: standard valid supported Gemini 3 series models
+      const candidateModels: string[] = ["gemini-3.1-flash-lite", "gemini-3.8-flash"];
 
       const isComplexQuery = deepResearch || 
         modelMode === 'pro' || 
         /\b(derive|proof|prove|complex proof|step-by-step calculus|biochemical pathway|algorithm analysis|deep critique)\b/i.test(prompt);
 
-      if (isComplexQuery && !candidateModels.includes("gemini-2.5-pro")) {
-        candidateModels.push("gemini-2.5-pro");
+      if (isComplexQuery && !candidateModels.includes("gemini-3.1-pro-preview")) {
+        candidateModels.push("gemini-3.1-pro-preview");
       }
 
       let responseText = "";
@@ -1019,71 +1074,16 @@ ${groundedSourceContext}`;
       let lastError: any = null;
 
       for (const currentModel of candidateModels) {
+        const modelStartTime = Date.now();
         try {
-          console.log(`[AI Tutor] Trying candidate model: ${currentModel} (persona: ${activePersonaKey}, mode: ${modelMode})`);
-          if (currentModel.startsWith("meta/") || currentModel.startsWith("nvidia/")) {
-            const nvidKey = process.env.NVIDIA_API_KEY;
-            if (!nvidKey || nvidKey.trim() === "") {
-              throw new Error("NVIDIA_API_KEY is not configured on the server.");
-            }
-
-            const invokeUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
-            const headers = {
-              "Authorization": `Bearer ${nvidKey}`,
-              "Content-Type": "application/json",
-              "Accept": "application/json"
-            };
-
-            const nvMessages: any[] = [
-              { role: "system", content: systemInstruction }
-            ];
-
-            if (Array.isArray(history) && history.length > 0) {
-              for (const turn of history.slice(-6)) {
-                const r = (turn.role === 'model' || turn.role === 'ai' || turn.role === 'assistant') ? 'assistant' : 'user';
-                const text = String(turn.content || turn.text || '').trim();
-                if (text) {
-                  nvMessages.push({ role: r, content: text });
-                }
-              }
-            }
-
-            nvMessages.push({ role: "user", content: prompt });
-
-            const payload = {
-              model: currentModel,
-              messages: nvMessages,
-              max_tokens: 1536,
-              temperature: 0.7,
-              top_p: 1.0,
-              stream: false
-            };
-
-            const nvResponse = await fetch(invokeUrl, {
-              method: "POST",
-              headers,
-              body: JSON.stringify(payload)
-            });
-
-            if (!nvResponse.ok) {
-              const errText = await nvResponse.text();
-              throw new Error(`Nvidia API returned error status ${nvResponse.status}: ${errText}`);
-            }
-
-            const data: any = await nvResponse.json();
-            if (data.choices && data.choices[0] && data.choices[0].message) {
-              responseText = data.choices[0].message.content;
-              responseSource = `Nvidia NIM (${currentModel})`;
-              break;
-            } else {
-              throw new Error("Invalid response format received from Nvidia API.");
-            }
-          } else {
-            // Gemini API (@google/genai)
-            const apiKey = getGeminiApiKey();
-            if (!apiKey) {
-              throw new Error("GEMINI_API_KEY is not configured on the server.");
-            }
+          console.log(`[AI Tutor][${correlationId}] Trying candidate model: ${currentModel} (persona: ${activePersonaKey}, mode: ${modelMode})`);
+          // Gemini API (@google/genai)
+          const apiKey = getGeminiApiKey();
+          if (!apiKey) {
+            const noKeyErr = new Error("GEMINI_API_KEY is not configured on the server.");
+            (noKeyErr as any).status = 500;
+            throw noKeyErr;
+          }
 
             const ai = new GoogleGenAI({
               apiKey,
@@ -1172,58 +1172,83 @@ ${groundedSourceContext}`;
               contentsPayload = currentTurnParts.length === 1 ? prompt : currentTurnParts;
             }
 
-            const response = await ai.models.generateContent({
-              model: currentModel,
-              contents: contentsPayload,
-              config: {
-                systemInstruction,
-                temperature: 0.7,
+            let response: any = null;
+            let attempt = 0;
+            while (attempt < 2) {
+              try {
+                attempt++;
+                response = await ai.models.generateContent({
+                  model: currentModel,
+                  contents: contentsPayload,
+                  config: {
+                    systemInstruction,
+                    temperature: 0.7,
+                  }
+                });
+                if (response && response.text) break;
+              } catch (retryErr: any) {
+                const errStatus = retryErr?.status || retryErr?.statusCode || (retryErr?.error && retryErr?.error?.code);
+                const retryMsg = retryErr?.message || retryErr?.error?.message || String(retryErr);
+                console.warn(`[AI Tutor Retry][${correlationId}] Model ${currentModel} attempt ${attempt} returned status: ${errStatus || 'unknown'} | Error: ${retryMsg}`);
+                if ((errStatus === 503 || errStatus === 429) && attempt < 2) {
+                  console.warn(`[AI Tutor Retry][${correlationId}] Retrying ${currentModel} in 300ms...`);
+                  await new Promise(r => setTimeout(r, 300));
+                } else {
+                  throw retryErr;
+                }
               }
-            });
+            }
 
             if (response && response.text) {
               responseText = response.text;
               responseSource = `Gemini (${currentModel})`;
+              console.log(`[AI Tutor Success][${correlationId}] Model ${currentModel} succeeded in ${Date.now() - modelStartTime}ms`);
               break; // Success!
             } else {
               throw new Error("No response text received from Gemini API.");
             }
-          }
         } catch (err: any) {
-          console.warn(`[AI Tutor] Candidate model ${currentModel} failed:`, err?.message || err);
-          console.error(`[AI Tutor] Full error details for ${currentModel}:`, err);
-          lastError = err;
+          const modelDuration = Date.now() - modelStartTime;
+          let statusCode = 500;
+          if (typeof err?.status === 'number' && err.status >= 400 && err.status < 600) {
+            statusCode = err.status;
+          } else if (typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600) {
+            statusCode = err.statusCode;
+          } else if (typeof err?.error?.code === 'number' && err.error.code >= 400 && err.error.code < 600) {
+            statusCode = err.error.code;
+          } else if (err?.message && /\[(\d{3})\b/.test(err.message)) {
+            const match = err.message.match(/\[(\d{3})\b/);
+            if (match) {
+              const parsed = parseInt(match[1], 10);
+              if (parsed >= 400 && parsed < 600) statusCode = parsed;
+            }
+          }
+          const originalErrorMessage = err?.message || err?.error?.message || String(err);
+          console.error(`[AI Tutor Model Failure][${correlationId}] Model: ${currentModel} | Status Code: ${statusCode} | Duration: ${modelDuration}ms | Original Error: ${originalErrorMessage}`);
+          lastError = {
+            model: currentModel,
+            status: statusCode,
+            message: originalErrorMessage,
+            code: err?.code || err?.error?.status || undefined,
+            details: err?.stack || String(err)
+          };
         }
       }
 
-      // If all candidate models failed, provide a grounded synthesis response from retrieved workspace segments
       if (!responseText) {
-        console.warn("[AI Tutor] Gemini candidate models unavailable. Generating grounded study synthesis...");
-        
-        let groundedAnswer = `### 💡 Study Breakdown for "${prompt}"\n\n`;
-        
-        if (effectiveFiles && effectiveFiles.length > 0) {
-          groundedAnswer += `Here is the relevant information extracted directly from your study materials:\n\n`;
-          
-          if (retrievedSegments && retrievedSegments.length > 0) {
-            retrievedSegments.slice(0, 3).forEach((seg) => {
-              groundedAnswer += `• **From "${seg.sourceName}"** (Page ${seg.page}):\n  "${seg.text}"\n\n`;
-            });
-          } else {
-            effectiveFiles.slice(0, 3).forEach((f: any) => {
-              const summaryText = f.summary || (f.highlights && f.highlights[0]) || "Active workspace document.";
-              groundedAnswer += `• **${f.name}**: ${summaryText}\n\n`;
-            });
-          }
-          groundedAnswer += `*Feel free to ask a follow-up question or request a practice quiz on these concepts!*`;
-        } else {
-          groundedAnswer += `Here is a clear explanation based on general academic knowledge:\n\n` +
-            `• **Core Concept:** Understanding "${prompt}" involves analyzing its foundational principles, definitions, and key applications.\n` +
-            `• **Study Tip:** You can attach your class notes or PDF slides to this workspace anytime so I can cite your exact document pages directly!`;
-        }
-
-        responseText = groundedAnswer;
-        responseSource = "StudyWeb Knowledge Engine";
+        const totalDuration = Date.now() - routeStartTime;
+        const finalStatusCode = lastError?.status && Number.isInteger(Number(lastError.status)) && Number(lastError.status) >= 400 && Number(lastError.status) < 600
+          ? Number(lastError.status)
+          : 503;
+        const originalMessage = lastError?.message || "AI Tutor is temporarily unavailable. Please try again in a few seconds.";
+        console.error(`[AI Tutor Failure Summary][${correlationId}] Route: /api/ai-tutor | Status Code: ${finalStatusCode} | Total Duration: ${totalDuration}ms | Candidate Models: ${candidateModels.join(', ')} | Original Error: ${originalMessage}`);
+        return res.status(finalStatusCode).json({
+          error: originalMessage,
+          statusCode: finalStatusCode,
+          model: lastError?.model,
+          correlationId,
+          details: lastError?.details || originalMessage
+        });
       }
 
       if (responseText) {
@@ -1303,10 +1328,26 @@ ${groundedSourceContext}`;
         throw new Error(`Failed to synthesize AI Tutor response. Last error: ${lastError ? lastError.message : 'Unknown'}`);
       }
     } catch (error: any) {
-      console.error("Error in /api/ai-tutor:", error);
-      res.status(500).json({
-        error: error.message || "Failed to generate response. Please try again.",
-        details: error.stack || error.message
+      const totalDuration = Date.now() - routeStartTime;
+      let statusCode = 500;
+      if (typeof error?.status === 'number' && error.status >= 400 && error.status < 600) {
+        statusCode = error.status;
+      } else if (typeof error?.statusCode === 'number' && error.statusCode >= 400 && error.statusCode < 600) {
+        statusCode = error.statusCode;
+      } else if (error?.message && /\[(\d{3})\b/.test(error.message)) {
+        const match = error.message.match(/\[(\d{3})\b/);
+        if (match) {
+          const parsed = parseInt(match[1], 10);
+          if (parsed >= 400 && parsed < 600) statusCode = parsed;
+        }
+      }
+      const originalMessage = error?.message || "Failed to generate response. Please try again.";
+      console.error(`[AI Tutor Exception][${correlationId}] Route: /api/ai-tutor | Status Code: ${statusCode} | Duration: ${totalDuration}ms | Original Error: ${originalMessage}`, error?.stack || error);
+      res.status(statusCode).json({
+        error: originalMessage,
+        statusCode,
+        correlationId,
+        details: error?.stack || originalMessage
       });
     }
   });
@@ -1409,7 +1450,7 @@ You must return a JSON object with the following schema:
 If this is a YouTube video or specific web page, search Google for "${targetName}" or the URL to get the exact real content, key topics, chapter notes, transcription text, and math formulas. Ensure the returned JSON is 100% correct, highly specific, and has zero placeholders.`;
 
       let contents: any = promptContent;
-      let targetModel = "gemini-2.5-flash";
+      let targetModel = "gemini-3.8-flash";
       let config: any = {
         systemInstruction,
         temperature: 0.2
@@ -1711,7 +1752,7 @@ Strictly return a JSON object containing a "questions" array matching the reques
       const prompt = `Generate a practice quiz with ${questionCount} questions of difficulty "${diffLevel}" and type "${qType}" from the following study materials and contextual references:\n\n${contextText}`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-lite",
+        model: "gemini-3.8-flash",
         contents: prompt,
         config: {
           systemInstruction,
@@ -1953,7 +1994,7 @@ For each incorrect answer in the array, you must:
 4. Format your explanation using elegant Markdown (using bold text, lists, or headers where appropriate).`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-lite",
+        model: "gemini-3.8-flash",
         contents: `Explain the following incorrect quiz answers to help the student learn the underlying concepts:\n\n${questionsPrompt}`,
         config: {
           systemInstruction,
@@ -2132,7 +2173,7 @@ For each incorrect answer in the array, you must:
       const apiKey = process.env.GEMINI_API_KEY;
 
       const isDeepMode = mode === 'web';
-      const modelName = isDeepMode ? "gemini-2.5-pro" : "gemini-2.5-flash-lite";
+      const modelName = isDeepMode ? "gemini-3.1-pro-preview" : "gemini-3.8-flash";
 
       const systemInstruction = isDeepMode
         ? `You are a state-of-the-art Deep Academic Research Search Engine modeled on NotebookLM.
@@ -2384,7 +2425,7 @@ Your output MUST be a JSON object matching the following TypeScript schema:
       const promptText = `Analyze our entire workspace resources and construct an integrated NotebookLM concept map (mind map) with central root "${workspaceSubject}":\n\n${contextText}`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-lite",
+        model: "gemini-3.8-flash",
         contents: promptText,
         config: {
           systemInstruction,
@@ -2600,7 +2641,7 @@ You MUST return a JSON object with a "flashcards" array containing your generate
       const prompt = `Generate ${cardCount} high-quality flashcards of difficulty "${diffLevel}" based on the following materials:\n\n${contextText}`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-lite",
+        model: "gemini-3.8-flash",
         contents: prompt,
         config: {
           systemInstruction,
@@ -2766,7 +2807,7 @@ Study Intensity: ${activeIntensity}
 Study Style Preference: ${activeStyle}`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-lite",
+        model: "gemini-3.8-flash",
         contents: prompt,
         config: {
           systemInstruction,

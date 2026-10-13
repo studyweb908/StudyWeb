@@ -172,9 +172,11 @@ export class WorkspaceSyncService {
       // Query workspaces
       let query = supabase.from('workspaces').select('*').order('created_at', { ascending: false });
       
-      // If user is logged in, prioritize user's workspaces and public ones
+      // If user is logged in, query strictly user's workspaces
       if (userId) {
-        query = query.or(`user_id.eq.${userId},user_id.is.null,visibility.eq.shared`);
+        query = query.eq('user_id', userId);
+      } else {
+        query = query.or('user_id.is.null,visibility.eq.shared');
       }
 
       const { data: rows, error } = await query;

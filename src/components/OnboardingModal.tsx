@@ -468,9 +468,11 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                   </div>
                   <button
                     onClick={async () => {
-                      // Save specific fields for standard profile
+                      // Save specific fields locally
                       if (formData.school) localStorage.setItem('studyweb_profile_school', formData.school);
                       if (formData.study) localStorage.setItem('studyweb_profile_class_board', formData.study);
+                      if (formData.finalProblem) localStorage.setItem('studyweb_profile_bio', formData.finalProblem);
+                      if (formData.goal) localStorage.setItem('studyweb_profile_aim', formData.goal);
                       
                       let dailyMins = 60;
                       if (formData.time.includes('Less than 1')) dailyMins = 30;
@@ -480,8 +482,8 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                       if (formData.time.includes('More than 6')) dailyMins = 420;
                       localStorage.setItem('studyweb_profile_daily_goal', dailyMins.toString());
                       
-                      // Save complete onboarding payload locally
                       localStorage.setItem('studyweb_onboarding_data', JSON.stringify(formData));
+                      localStorage.setItem('studyweb_onboarding_complete', 'true');
                       
                       // Save to Supabase if authenticated
                       if (supabase) {
@@ -491,13 +493,17 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                             await supabase.from('profiles').upsert({
                               id: session.user.id,
                               email: session.user.email || '',
+                              school_name: formData.school || '',
+                              academic_institution: formData.school || '',
+                              current_study: formData.study || '',
+                              class_name: formData.study || '',
+                              curriculum_board: formData.study || '',
+                              target_aim: formData.goal || '',
+                              primary_goal: formData.goal || '',
+                              scholar_bio: formData.finalProblem || '',
+                              bio: formData.finalProblem || '',
                               onboarding_data: formData,
-                              age: formData.age,
-                              current_study: formData.study,
-                              school_name: formData.school,
-                              primary_goal: formData.goal,
-                              uses_ai: formData.usesAi === 'Yes' ? true : false,
-                              updated_at: new Date()
+                              updated_at: new Date().toISOString()
                             });
                           }
                         } catch (err) {
@@ -506,6 +512,7 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                       }
                       
                       localStorage.removeItem('studyweb_onboarding_draft');
+                      window.dispatchEvent(new Event('studyweb_profile_updated'));
                       onComplete();
                     }}
                     className="mt-8 bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3.5 rounded-xl font-bold shadow-lg shadow-indigo-600/20 transition-all active:scale-95 flex items-center gap-2"

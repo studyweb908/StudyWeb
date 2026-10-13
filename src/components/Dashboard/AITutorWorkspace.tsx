@@ -44,6 +44,8 @@ interface Message {
     quote: string;
   }>;
   source?: string;
+  isError?: boolean;
+  failedPrompt?: string;
 }
 
 const CopySnippetButton = ({ text }: { text: string }) => {
@@ -381,7 +383,7 @@ export default function AITutorWorkspace() {
     try {
       const response = await fetch("/api/knowledge/search", {
         method: "POST",
-        credentials: "omit",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: queryToSearch,
@@ -439,15 +441,22 @@ export default function AITutorWorkspace() {
     setInputValue('');
     setIsThinking(true);
 
+    const history = messages.slice(-8).map(m => ({
+      role: m.sender === 'ai' ? 'model' : 'user',
+      content: m.text
+    }));
+
     try {
       const response = await fetch("/api/ai-tutor", {
         method: "POST",
-        credentials: "omit",
+        credentials: "same-origin",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
           prompt: textToSend || `Please analyze my attached documents: ${attachedFiles.map(f => f.name).join(', ')}`,
+          history,
+          persona: 'socratic',
           deepResearch,
           citationMode,
           workspaceId: targetWsId,
@@ -488,7 +497,9 @@ export default function AITutorWorkspace() {
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: 'ai',
-        text: `⚠️ **AI Tutor Service Notice**\n\nI apologize, but I was unable to generate a response right now (${cleanError}).\n\nPlease check your network connection and try asking your question again.`,
+        text: `⚠️ **AI Tutor Notice**\n\nI was unable to generate a response right now (${cleanError}).`,
+        isError: true,
+        failedPrompt: textToSend,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setMessages(prev => [...prev, aiMsg]);
@@ -948,6 +959,18 @@ export default function AITutorWorkspace() {
                           </div>
                         );
                       })}
+                    </div>
+                  )}
+
+                  {msg.isError && msg.failedPrompt && (
+                    <div className="pt-2 border-t border-rose-200/50 dark:border-rose-900/50 mt-2 flex items-center gap-2">
+                      <button
+                        onClick={() => handleSend(msg.failedPrompt!)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-rose-100 hover:bg-rose-200 dark:bg-rose-900/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-semibold text-xs transition-colors cursor-pointer"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>Retry question</span>
+                      </button>
                     </div>
                   )}
                 </div>

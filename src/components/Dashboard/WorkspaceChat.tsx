@@ -72,6 +72,8 @@ interface Message {
   attachedFileNames?: string[];
   isError?: boolean;
   failedPrompt?: string;
+  errorCode?: string | number;
+  errorDetails?: string;
 }
 
 interface AttachedDraftFile {
@@ -377,7 +379,7 @@ export default function WorkspaceChat({
     try {
       const response = await fetch('/api/ai-tutor', {
         method: 'POST',
-        credentials: 'omit',
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: userMsg.text,
@@ -395,11 +397,36 @@ export default function WorkspaceChat({
       if (contentType.includes('application/json')) {
         data = await response.json().catch(() => null);
       } else {
-        await response.text().catch(() => '');
+        const text = await response.text().catch(() => '');
+        const isHtml = text.trim().startsWith('<') || text.includes('<html');
+        data = { 
+          error: isHtml 
+            ? 'Server connection issue (non-JSON response received). Please try again.' 
+            : (text || `HTTP ${response.status} ${response.statusText}`),
+          details: isHtml ? 'The server returned an HTML response instead of JSON.' : undefined
+        };
       }
 
       if (!response.ok || !data || data.error) {
-        throw new Error(data?.error || 'Failed to generate response. Please try again.');
+        const statusCode = response.status || data?.statusCode || 500;
+        const originalError = data?.error || data?.message || `Failed to generate response (HTTP ${response.status}).`;
+        const errorDetails = data?.details || (typeof data === 'object' ? JSON.stringify(data) : undefined);
+
+        console.error('[WorkspaceChat] Gemini API request failed:', {
+          status: response.status,
+          statusText: response.statusText,
+          statusCode,
+          error: originalError,
+          model: data?.model,
+          correlationId: data?.correlationId,
+          details: errorDetails
+        });
+
+        const customErr: any = new Error(originalError);
+        customErr.statusCode = statusCode;
+        customErr.details = errorDetails;
+        customErr.model = data?.model;
+        throw customErr;
       }
 
       const elapsed = Date.now() - startTime;
@@ -424,16 +451,30 @@ export default function WorkspaceChat({
         await new Promise(r => setTimeout(r, 400 - elapsed));
       }
 
-      const rawMsg = err?.message || "connection issue";
-      const errorMessage = rawMsg.includes("<!doctype") || rawMsg.includes("<html") ? "connection issue" : rawMsg;
-      const fallbackText = `⚠️ **AI Tutor Service Notice**\n\nI apologize, but I was unable to process your request right now (${errorMessage}).\n\nPlease check your network connection and try asking your question again.`;
+      const statusCode = err?.statusCode || 'Client Error';
+      const rawMsg = err?.message || "Failed to communicate with AI Tutor.";
+      const isHtmlResponse = rawMsg.includes("<!doctype") || rawMsg.includes("<html");
+      const errorMessage = isHtmlResponse 
+        ? "Server connection issue (non-JSON response received). Please try again." 
+        : rawMsg;
+
+      console.error('[WorkspaceChat] AI Tutor error encountered:', {
+        statusCode,
+        message: errorMessage,
+        model: err?.model,
+        details: err?.details
+      });
 
       const aiMsg: Message = {
         id: `msg-ai-${Date.now() + 1}`,
         sender: 'ai',
-        text: fallbackText,
+        text: errorMessage,
+        isError: true,
+        failedPrompt: userMsg.text,
         source: 'StudyWeb AI',
         persona: activePersona,
+        errorCode: statusCode,
+        errorDetails: err?.details,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
 
@@ -830,9 +871,13 @@ export default function WorkspaceChat({
                     <div className="p-3.5 sm:p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 space-y-2.5">
                       <div className="flex items-center gap-2 font-bold text-xs sm:text-sm">
                         <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
-                        <span>Failed to generate response</span>
+                        <span>
+                          {msg.errorCode && msg.errorCode !== 'unknown'
+                            ? `Failed to generate response (${msg.errorCode})`
+                            : 'Failed to generate response'}
+                        </span>
                       </div>
-                      <p className="text-xs text-rose-700 dark:text-rose-300 font-normal">
+                      <p className="text-xs text-rose-700 dark:text-rose-300 font-normal leading-relaxed break-words">
                         {msg.text || "There was a problem contacting the Gemini API. Please try again."}
                       </p>
                       {msg.failedPrompt && (
