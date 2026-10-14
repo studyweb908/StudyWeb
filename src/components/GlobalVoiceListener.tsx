@@ -6,8 +6,6 @@ import {
   Volume2, 
   VolumeX, 
   X, 
-  ChevronUp, 
-  ChevronDown, 
   Loader2, 
   Bot, 
   User, 
@@ -15,13 +13,15 @@ import {
   Moon, 
   Sun, 
   FolderPlus, 
-  HelpCircle,
-  ExternalLink
+  BookOpen,
+  LogOut,
+  HelpCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useMicrophoneWaveform } from '../hooks/useMicrophoneWaveform';
 import { recordUserActivity } from '../utils/userActivity';
 import { Workspace } from './Dashboard/WorkspaceTypes';
+import { voiceResponseEngine, queryGeminiVoice } from '../services/voiceResponseEngine';
 
 interface GlobalVoiceListenerProps {
   setActiveTab: (tab: string) => void;
@@ -56,7 +56,6 @@ export default function GlobalVoiceListener({
   const [isSupported, setIsSupported] = useState(true);
   const [showPanel, setShowPanel] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
 
   const recognitionRef = useRef<any>(null);
   const lastProcessedCommandRef = useRef<string>('');
@@ -64,121 +63,29 @@ export default function GlobalVoiceListener({
   const isSpeakingRef = useRef<boolean>(false);
   const waveformLevels = useMicrophoneWaveform(isListening && !isSpeaking);
 
-  // Initialize Speech Synthesis Voices
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
-
-    const updateVoices = () => {
-      try {
-        const v = window.speechSynthesis.getVoices();
-        if (v && v.length > 0) {
-          setAvailableVoices(v);
-        }
-      } catch (e) {
-        console.warn('SpeechSynthesis voice retrieval error:', e);
-      }
-    };
-
-    updateVoices();
-    window.speechSynthesis.onvoiceschanged = updateVoices;
-    return () => {
-      if (window.speechSynthesis) {
-        window.speechSynthesis.onvoiceschanged = null;
-      }
-    };
-  }, []);
-
-  // Pick the most natural, human-sounding English voice available on the platform
-  const getNaturalVoice = (voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null => {
-    if (!voices || voices.length === 0) return null;
-    
-    // 1. Prioritize natural / neural / online Microsoft & Google voices
-    const naturalVoice = voices.find(v => 
-      v.lang.startsWith('en') && 
-      /natural|neural|online/i.test(v.name)
-    );
-    if (naturalVoice) return naturalVoice;
-
-    // 2. Google US or UK English high-quality voices
-    const googleVoice = voices.find(v => 
-      v.lang.startsWith('en') && 
-      /google.*(us|uk)/i.test(v.name)
-    );
-    if (googleVoice) return googleVoice;
-
-    // 3. Apple premium natural voices (Samantha, Daniel, Karen, Serena, Moira, Alex)
-    const appleVoice = voices.find(v => 
-      v.lang.startsWith('en') && 
-      /samantha|daniel|karen|serena|moira|alex|victoria/i.test(v.name)
-    );
-    if (appleVoice) return appleVoice;
-
-    // 4. Any English voice
-    const enVoice = voices.find(v => v.lang === 'en-US' || v.lang === 'en-GB' || v.lang.startsWith('en'));
-    if (enVoice) return enVoice;
-
-    return voices[0] || null;
-  };
-
-  // Speak response out loud using natural human speech cadence
-  const speakNaturalResponse = (text: string, onFinished?: () => void) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis || isMuted) {
-      onFinished?.();
+  // Play vocal confirmation using the TTS response engine
+  const speakConfirmation = (text: string, onDone?: () => void) => {
+    if (isMuted) {
+      onDone?.();
       return;
     }
 
-    try {
-      window.speechSynthesis.cancel();
-
-      // Clean speech text for natural human pronunciation
-      const cleanSpeech = text
-        .replace(/```[\s\S]*?```/g, '') // remove code blocks
-        .replace(/`([^`]+)`/g, '$1')
-        .replace(/\*\*([^*]+)\*\*/g, '$1')
-        .replace(/\*([^*]+)\*/g, '$1')
-        .replace(/#+\s+/g, '')
-        .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
-        .replace(/[•\-\*]\s+/g, '')
-        .replace(/INR/g, 'Indian Rupees')
-        .replace(/₹/g, 'Indian Rupees ')
-        .replace(/USD/g, 'dollars')
-        .replace(/\$/g, 'dollars ')
-        .replace(/\bAI\b/g, 'A.I.')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      if (!cleanSpeech) {
-        onFinished?.();
-        return;
-      }
-
-      const utterance = new SpeechSynthesisUtterance(cleanSpeech);
-      const voice = getNaturalVoice(availableVoices.length > 0 ? availableVoices : window.speechSynthesis.getVoices());
-      if (voice) {
-        utterance.voice = voice;
-      }
-
-      // Human-like warmth and conversational speed
-      utterance.pitch = 1.0;
-      utterance.rate = 1.02;
-      utterance.volume = 1.0;
-
-      utterance.onstart = () => {
+    voiceResponseEngine.speak(text, {
+      onStart: () => {
         setIsSpeaking(true);
         isSpeakingRef.current = true;
-        // Pause microphone while speaking so it doesn't self-transcribe computer audio
+        // Pause microphone while speaking to avoid capturing computer audio output
         if (recognitionRef.current && isListening) {
           try {
             recognitionRef.current.abort();
           } catch {}
         }
-      };
-
-      utterance.onend = () => {
+      },
+      onEnd: () => {
         setIsSpeaking(false);
         isSpeakingRef.current = false;
-        onFinished?.();
-        // Resume listening if still in active mode
+        onDone?.();
+        // Resume listening if active
         if (isListening && recognitionRef.current) {
           setTimeout(() => {
             if (!isSpeakingRef.current) {
@@ -188,28 +95,17 @@ export default function GlobalVoiceListener({
             }
           }, 350);
         }
-      };
-
-      utterance.onerror = (e) => {
-        console.warn('Speech synthesis playback error:', e);
+      },
+      onError: () => {
         setIsSpeaking(false);
         isSpeakingRef.current = false;
-        onFinished?.();
-      };
-
-      window.speechSynthesis.speak(utterance);
-    } catch (err) {
-      console.warn('Failed to synthesize speech:', err);
-      setIsSpeaking(false);
-      isSpeakingRef.current = false;
-      onFinished?.();
-    }
+        onDone?.();
+      }
+    });
   };
 
   const stopSpeaking = () => {
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
+    voiceResponseEngine.stop();
     setIsSpeaking(false);
     isSpeakingRef.current = false;
   };
@@ -230,7 +126,6 @@ export default function GlobalVoiceListener({
     recognition.lang = 'en-US';
 
     recognition.onresult = (event: any) => {
-      // Ignore microphone capture while the agent is speaking out loud
       if (isSpeakingRef.current) return;
 
       let interim = '';
@@ -260,7 +155,6 @@ export default function GlobalVoiceListener({
     };
 
     recognition.onend = () => {
-      // Auto-restart if still listening and not speaking
       if (isListening && !isSpeakingRef.current) {
         try {
           recognition.start();
@@ -269,7 +163,7 @@ export default function GlobalVoiceListener({
     };
   }, [isListening]);
 
-  // Master Voice Command Interpreter
+  // Handle incoming voice utterances
   const handleVoiceCommand = async (rawCommand: string) => {
     const command = rawCommand.toLowerCase().trim();
     if (!command) return;
@@ -287,7 +181,7 @@ export default function GlobalVoiceListener({
 
     setShowPanel(true);
 
-    // 1. COMMAND: STOP / MUTE SPEAKING
+    // 1. ACTION: MUTE OR STOP SPEAKING
     if (
       command.includes('stop speaking') || 
       command.includes('stop talking') || 
@@ -298,28 +192,28 @@ export default function GlobalVoiceListener({
       command === 'mute'
     ) {
       stopSpeaking();
-      setAgentResponse("Muted speaking voice.");
+      setAgentResponse("Muted vocal speech.");
       return;
     }
 
-    // 2. COMMAND: SETTINGS / PROFILE
-    // "go to the settings", "open settings", "go to settings", "show settings"
+    // 2. ACTION: SETTINGS & PROFILE NAVIGATION
     if (
-      command.includes('setting') || 
-      command.includes('settings') || 
-      command.includes('profile') ||
-      command.includes('preferences')
+      command.includes('go to settings') ||
+      command.includes('open settings') ||
+      command.includes('show settings') ||
+      command.includes('profile settings') ||
+      command === 'settings' ||
+      command === 'preferences'
     ) {
       setActiveTab('profile');
-      const reply = "Opening your settings and profile preferences.";
-      setAgentResponse(reply);
-      speakNaturalResponse(reply);
+      const confirmation = "Opening your settings and profile preferences.";
+      setAgentResponse(confirmation);
+      speakConfirmation(confirmation);
       (window as any).showToast?.('🎙️ Voice Command: Opening Settings', 'success');
       return;
     }
 
-    // 3. COMMAND: LOG OUT
-    // "log out me", "log me out", "logout", "sign out me", "sign me out"
+    // 3. ACTION: LOG OUT
     if (
       command.includes('log out') || 
       command.includes('logout') || 
@@ -327,9 +221,9 @@ export default function GlobalVoiceListener({
       command.includes('sign out') ||
       command.includes('sign me out')
     ) {
-      const reply = "Opening logout confirmation. Let me know if you need anything else!";
-      setAgentResponse(reply);
-      speakNaturalResponse(reply);
+      const confirmation = "Opening your logout confirmation. Let me know if you need anything else!";
+      setAgentResponse(confirmation);
+      speakConfirmation(confirmation);
       (window as any).showToast?.('🎙️ Voice Command: Confirming Logout', 'info');
       if (onLogout) {
         onLogout();
@@ -337,22 +231,22 @@ export default function GlobalVoiceListener({
       return;
     }
 
-    // 4. COMMAND: DARK MODE / LIGHT MODE
-    // "make the dark mode here", "turn on dark mode", "enable dark mode", "switch to dark mode"
+    // 4. ACTION: DARK MODE & LIGHT MODE
     if (
       command.includes('dark mode') || 
       command.includes('dark theme') || 
       command.includes('make it dark') ||
-      command.includes('go dark')
+      command.includes('make the dark mode') ||
+      command.includes('switch to dark mode')
     ) {
       if (onSetDarkMode) {
         onSetDarkMode(true);
       } else if (onToggleTheme && !isDarkMode) {
         onToggleTheme();
       }
-      const reply = "Switched to dark mode for you.";
-      setAgentResponse(reply);
-      speakNaturalResponse(reply);
+      const confirmation = "Switched to dark mode for you.";
+      setAgentResponse(confirmation);
+      speakConfirmation(confirmation);
       (window as any).showToast?.('🌙 Voice Command: Switched to Dark Mode', 'success');
       return;
     }
@@ -361,39 +255,41 @@ export default function GlobalVoiceListener({
       command.includes('light mode') || 
       command.includes('light theme') || 
       command.includes('day mode') ||
-      command.includes('make it light')
+      command.includes('make it light') ||
+      command.includes('switch to light mode')
     ) {
       if (onSetDarkMode) {
         onSetDarkMode(false);
       } else if (onToggleTheme && isDarkMode) {
         onToggleTheme();
       }
-      const reply = "Switched to light mode for you.";
-      setAgentResponse(reply);
-      speakNaturalResponse(reply);
+      const confirmation = "Switched to light mode for you.";
+      setAgentResponse(confirmation);
+      speakConfirmation(confirmation);
       (window as any).showToast?.('☀️ Voice Command: Switched to Light Mode', 'success');
       return;
     }
 
-    // 5. COMMAND: CREATE A WORKSPACE
-    // "create a workspace and name it [this/name]"
-    // "create workspace and name it biology"
-    // "create a workspace named physics"
-    // "create workspace math"
+    if (command === 'toggle theme' || command === 'toggle dark mode' || command === 'switch theme') {
+      onToggleTheme?.();
+      const confirmation = "Theme mode toggled.";
+      setAgentResponse(confirmation);
+      speakConfirmation(confirmation);
+      return;
+    }
+
+    // 5. ACTION: CREATE A WORKSPACE
     const createWorkspaceRegex = /(?:create|make|add)(?:\s+a)?(?:\s+new)?\s+workspace(?:\s+and\s+name\s+it|\s+named|\s+called|\s+with\s+name|\s+name)?\s+(.+)/i;
     const createMatch = command.match(createWorkspaceRegex);
 
     if (createMatch && createMatch[1]) {
       let rawName = createMatch[1].trim();
-      // Remove trailing punctuation
       rawName = rawName.replace(/[.,!?;]+$/, '').trim();
 
-      // If user literally said "and name it this" or "this", assign a friendly default
       let wsName = rawName;
       if (wsName.toLowerCase() === 'this' || wsName.toLowerCase() === 'it' || wsName.toLowerCase() === 'something') {
         wsName = 'Study Workspace';
       } else {
-        // Title-case capitalization
         wsName = wsName
           .split(' ')
           .map(w => w.charAt(0).toUpperCase() + w.slice(1))
@@ -405,229 +301,191 @@ export default function GlobalVoiceListener({
       }
       setActiveTab('workspaces');
 
-      const reply = `I've created the workspace "${wsName}" for you and opened it!`;
-      setAgentResponse(reply);
-      speakNaturalResponse(reply);
+      const confirmation = `I've created the workspace "${wsName}" for you and opened it!`;
+      setAgentResponse(confirmation);
+      speakConfirmation(confirmation);
       (window as any).showToast?.(`📁 Voice Command: Created Workspace "${wsName}"`, 'success');
       return;
     }
 
-    // 6. COMMAND: AI TUTOR QUERY OR QUESTION ASKING
-    // "go to the ai tutor and then ask him what the currency of india is"
-    // "ask ai tutor what is the currency of india"
-    // "what is the currency of india" / "what the currency of india is"
-    const isAiTutorCommand = 
-      command.includes('ai tutor') || 
-      command.includes('tutor') || 
-      command.includes('ask him') || 
-      command.includes('ask her') ||
-      command.includes('ask it') ||
-      command.startsWith('ask ') ||
-      command.includes('currency of india') ||
-      command.startsWith('what is') ||
-      command.startsWith("what's") ||
-      command.startsWith('what the') ||
-      command.startsWith('explain ') ||
-      command.startsWith('how do') ||
-      command.startsWith('who is');
-
-    if (isAiTutorCommand) {
-      // Extract the actual question
-      let question = rawCommand;
-      
-      // Strip voice instruction prefixes
-      question = question
-        .replace(/^(?:please\s+)?(?:can\s+you\s+)?(?:go\s+to\s+(?:the\s+)?ai\s+tutor\s+(?:and\s+(?:then\s+)?)?)?/i, '')
-        .replace(/^(?:ask\s+(?:him|her|it|the\s+tutor|ai\s+tutor|tutor)\s+)/i, '')
-        .replace(/^(?:ask\s+)/i, '')
-        .trim();
-
-      // Normalize common phrasing like "what the currency of india is" -> "What is the currency of India?"
-      if (/^what\s+the\s+currency\s+of\s+india\s+is\??$/i.test(question)) {
-        question = "What is the currency of India?";
-      }
-
-      if (!question || question.toLowerCase() === 'ai tutor' || question.toLowerCase() === 'open ai tutor' || question.toLowerCase() === 'go to ai tutor') {
-        // General navigation to AI tutor without a specific question
-        setActiveTab('ai-tutor');
-        if (workspaces.length > 0 && !activeWorkspace) {
-          setActiveWorkspace(workspaces[0]);
-        }
-        const reply = "Opening your AI Study Tutor. What would you like to learn today?";
-        setAgentResponse(reply);
-        speakNaturalResponse(reply);
-        (window as any).showToast?.('🤖 Voice Command: Opening AI Tutor', 'success');
-        return;
-      }
-
-      // We have a specific question! Navigate to AI Tutor and answer it
-      setActiveTab('ai-tutor');
-      if (workspaces.length > 0 && !activeWorkspace) {
-        setActiveWorkspace(workspaces[0]);
-      } else if (workspaces.length === 0 && onCreateWorkspace) {
-        const defaultWs = onCreateWorkspace('General Studies', 'AI Tutor Session');
-        setActiveWorkspace(defaultWs);
-      }
-
-      setIsThinking(true);
-      setAgentResponse(`Consulting AI Tutor on: "${question}"...`);
-
-      // Immediate fast-path answer for popular benchmark queries like currency of India
-      const isCurrencyOfIndia = /currency\s+of\s+india/i.test(question);
-      let immediateSpokenAnswer = '';
-      let immediateFullAnswer = '';
-
-      if (isCurrencyOfIndia) {
-        immediateSpokenAnswer = "The currency of India is the Indian Rupee, with the symbol ₹ and currency code INR.";
-        immediateFullAnswer = "The currency of India is the **Indian Rupee** (code: **INR**, symbol: **₹**). It is issued and regulated by the Reserve Bank of India (RBI). One rupee is subdivided into 100 paise.";
-      }
-
-      try {
-        if (immediateSpokenAnswer) {
-          setIsThinking(false);
-          setAgentResponse(immediateFullAnswer);
-          speakNaturalResponse(immediateSpokenAnswer);
-
-          // Dispatch event to WorkspaceChat to automatically insert into the study conversation
-          window.dispatchEvent(new CustomEvent('studyweb_ask_ai_tutor', {
-            detail: {
-              question: question,
-              answer: immediateFullAnswer
-            }
-          }));
-
-          recordUserActivity({
-            title: 'Used AI Tutor via Voice',
-            detail: `Asked: "${question}"`,
-            iconType: 'tutor'
-          });
-
-          (window as any).showToast?.('🤖 AI Tutor Answered via Voice', 'success');
-          return;
-        }
-
-        // Concurrently query backend Gemini AI Tutor
-        const response = await fetch('/api/ai-tutor', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: question,
-            history: [],
-            persona: 'plain_english',
-            modelMode: 'auto',
-            workspaceId: activeWorkspace?.id
-          })
-        });
-
-        const data = await response.json();
-        const replyText = data?.reply || data?.text || `The answer to "${question}" is ready in your AI Tutor workspace.`;
-        
-        setIsThinking(false);
-        setAgentResponse(replyText);
-
-        // Extract first 2 concise sentences for human-like conversational speaking
-        const sentences = replyText.replace(/[*#_`]/g, '').split(/[.!?]+\s+/).filter(Boolean);
-        const spokenExcerpt = sentences.slice(0, 2).join('. ') + '.';
-        speakNaturalResponse(spokenExcerpt);
-
-        // Send to WorkspaceChat so it displays nicely in the chat feed
-        window.dispatchEvent(new CustomEvent('studyweb_ask_ai_tutor', {
-          detail: {
-            question: question,
-            answer: replyText
-          }
-        }));
-
-        recordUserActivity({
-          title: 'Used AI Tutor via Voice',
-          detail: `Asked: "${question}"`,
-          iconType: 'tutor'
-        });
-
-        (window as any).showToast?.('🤖 AI Tutor Answered via Voice', 'success');
-      } catch (err) {
-        console.error('Error fetching voice answer from AI Tutor:', err);
-        setIsThinking(false);
-        const fallbackReply = `I've opened the AI Tutor for your question: "${question}".`;
-        setAgentResponse(fallbackReply);
-        speakNaturalResponse(fallbackReply);
-        window.dispatchEvent(new CustomEvent('studyweb_ask_ai_tutor', {
-          detail: { question }
-        }));
-      }
-      return;
-    }
-
-    // 7. OTHER NAVIGATION COMMANDS
-    if (command.includes('dashboard') || command.includes('home') || command.includes('go home')) {
+    // 6. ACTION: OTHER APP NAVIGATION
+    if (command === 'go home' || command === 'home' || command === 'dashboard' || command === 'go to dashboard') {
       setActiveWorkspace(null);
       setActiveTab('dashboard');
-      const reply = "Navigating to your dashboard.";
-      setAgentResponse(reply);
-      speakNaturalResponse(reply);
+      const confirmation = "Taking you to your dashboard.";
+      setAgentResponse(confirmation);
+      speakConfirmation(confirmation);
       (window as any).showToast?.('🎙️ Voice Command: Navigating to Dashboard', 'success');
       return;
     }
 
-    if (command.includes('workspace') || command.includes('workspaces') || command.includes('folders')) {
+    if (command === 'workspaces' || command === 'study workspaces' || command === 'open workspaces' || command === 'folders') {
       setActiveWorkspace(null);
       setActiveTab('workspaces');
-      const reply = "Opening your study workspaces.";
-      setAgentResponse(reply);
-      speakNaturalResponse(reply);
-      (window as any).showToast?.('🎙️ Voice Command: Opening Workspaces', 'success');
+      const confirmation = "Opening your study workspaces.";
+      setAgentResponse(confirmation);
+      speakConfirmation(confirmation);
       return;
     }
 
-    if (command.includes('note') || command.includes('notes')) {
+    if (command === 'notes' || command === 'study notes' || command === 'open notes' || command === 'ai study notes') {
       setActiveTab('notes');
-      const reply = "Opening your study notes.";
-      setAgentResponse(reply);
-      speakNaturalResponse(reply);
-      (window as any).showToast?.('🎙️ Voice Command: Opening Study Notes', 'success');
+      const confirmation = "Opening your study notes.";
+      setAgentResponse(confirmation);
+      speakConfirmation(confirmation);
       return;
     }
 
-    if (command.includes('flashcard') || command.includes('cards')) {
+    if (command === 'flashcards' || command === 'cards' || command === 'open flashcards') {
       setActiveTab('flashcards');
-      const reply = "Opening your flashcards.";
-      setAgentResponse(reply);
-      speakNaturalResponse(reply);
-      (window as any).showToast?.('🎙️ Voice Command: Opening Flashcards', 'success');
+      const confirmation = "Opening your flashcards.";
+      setAgentResponse(confirmation);
+      speakConfirmation(confirmation);
       return;
     }
 
-    if (command.includes('quiz') || command.includes('test')) {
+    if (command === 'quiz' || command === 'quizzes' || command === 'quiz center' || command === 'practice quiz') {
       setActiveTab('quiz-center');
-      const reply = "Opening your Quiz Center.";
-      setAgentResponse(reply);
-      speakNaturalResponse(reply);
-      (window as any).showToast?.('🎙️ Voice Command: Opening Quiz Center', 'success');
+      const confirmation = "Opening your Quiz Center.";
+      setAgentResponse(confirmation);
+      speakConfirmation(confirmation);
       return;
     }
 
-    if (command.includes('planner') || command.includes('schedule') || command.includes('calendar')) {
+    if (command === 'planner' || command === 'study planner' || command === 'schedule' || command === 'calendar') {
       setActiveTab('study-planner');
-      const reply = "Opening your Study Planner.";
-      setAgentResponse(reply);
-      speakNaturalResponse(reply);
-      (window as any).showToast?.('🎙️ Voice Command: Opening Study Planner', 'success');
+      const confirmation = "Opening your Study Planner.";
+      setAgentResponse(confirmation);
+      speakConfirmation(confirmation);
       return;
     }
 
     if (command.includes('focus mode') || command.includes('zen mode')) {
       onToggleFocusMode?.();
-      const reply = "Toggled Focus Mode.";
-      setAgentResponse(reply);
-      speakNaturalResponse(reply);
-      (window as any).showToast?.('🎙️ Voice Command: Toggling Focus Mode', 'success');
+      const confirmation = "Focus mode toggled.";
+      setAgentResponse(confirmation);
+      speakConfirmation(confirmation);
       return;
     }
 
-    // Default Fallback: Prompt user with helpful suggestions
-    const reply = `I heard: "${rawCommand}". Try saying "Go to settings", "Turn on dark mode", "Create workspace Biology", or "Ask AI tutor what is the currency of India".`;
-    setAgentResponse(reply);
-    speakNaturalResponse("I can help you navigate, switch modes, create workspaces, or ask the AI tutor anything.");
+    // 7. GENERAL KNOWLEDGE QUERIES & AI TUTOR QUESTIONS VIA GEMINI API
+    // Checks for questions, queries, explanations, or direct academic queries
+    const isExplicitAiTutorPrompt = 
+      command.includes('ai tutor') || 
+      command.includes('ask tutor') || 
+      command.includes('ask him') || 
+      command.includes('ask her');
+
+    const isQuestionQuery = 
+      isExplicitAiTutorPrompt ||
+      command.startsWith('what is') ||
+      command.startsWith("what's") ||
+      command.startsWith('what are') ||
+      command.startsWith('what the') ||
+      command.startsWith('who is') ||
+      command.startsWith('who was') ||
+      command.startsWith('where is') ||
+      command.startsWith('when did') ||
+      command.startsWith('how do') ||
+      command.startsWith('how does') ||
+      command.startsWith('why is') ||
+      command.startsWith('why do') ||
+      command.startsWith('explain ') ||
+      command.startsWith('tell me about ') ||
+      command.startsWith('calculate ') ||
+      command.startsWith('define ') ||
+      command.includes('currency of') ||
+      command.includes('capital of') ||
+      command.startsWith('ask ');
+
+    if (isQuestionQuery) {
+      let cleanQuery = rawCommand;
+      // Strip voice navigation framing
+      cleanQuery = cleanQuery
+        .replace(/^(?:please\s+)?(?:can\s+you\s+)?(?:go\s+to\s+(?:the\s+)?ai\s+tutor\s+(?:and\s+(?:then\s+)?)?)?/i, '')
+        .replace(/^(?:ask\s+(?:him|her|it|the\s+tutor|ai\s+tutor|tutor)\s+)/i, '')
+        .replace(/^(?:ask\s+)/i, '')
+        .trim();
+
+      // Normalize phrasing e.g. "what the currency of India is"
+      if (/^what\s+the\s+currency\s+of\s+india\s+is\??$/i.test(cleanQuery)) {
+        cleanQuery = "What is the currency of India?";
+      }
+
+      // If user literally just said "open ai tutor" without a query
+      if (!cleanQuery || cleanQuery.toLowerCase() === 'ai tutor' || cleanQuery.toLowerCase() === 'open ai tutor') {
+        setActiveTab('ai-tutor');
+        if (workspaces.length > 0 && !activeWorkspace) {
+          setActiveWorkspace(workspaces[0]);
+        }
+        const confirmation = "Opening your AI Study Tutor. What would you like to learn today?";
+        setAgentResponse(confirmation);
+        speakConfirmation(confirmation);
+        return;
+      }
+
+      // Query Gemini API directly for human-like general knowledge vocal answer
+      setIsThinking(true);
+      setAgentResponse(`Querying Gemini AI on: "${cleanQuery}"...`);
+
+      // If the user asked via AI Tutor framing, navigate to AI Tutor
+      if (isExplicitAiTutorPrompt || command.includes('ai tutor')) {
+        setActiveTab('ai-tutor');
+        if (workspaces.length > 0 && !activeWorkspace) {
+          setActiveWorkspace(workspaces[0]);
+        } else if (workspaces.length === 0 && onCreateWorkspace) {
+          const defaultWs = onCreateWorkspace('General Studies', 'AI Tutor Session');
+          setActiveWorkspace(defaultWs);
+        }
+      }
+
+      try {
+        const geminiResult = await queryGeminiVoice(cleanQuery);
+        setIsThinking(false);
+        setAgentResponse(geminiResult.answer);
+
+        // Vocalize answer with human-like text-to-speech engine
+        speakConfirmation(geminiResult.spokenText);
+
+        // Synchronize with AI Tutor chat interface
+        window.dispatchEvent(new CustomEvent('studyweb_ask_ai_tutor', {
+          detail: {
+            question: cleanQuery,
+            answer: geminiResult.answer
+          }
+        }));
+
+        recordUserActivity({
+          title: 'AI Voice Query',
+          detail: `Asked: "${cleanQuery}"`,
+          iconType: 'tutor'
+        });
+
+        (window as any).showToast?.('💡 Gemini AI Answered via Voice', 'success');
+      } catch (err) {
+        console.error('Gemini voice query execution failed:', err);
+        setIsThinking(false);
+        const fallback = `I have received your question: "${cleanQuery}". Let's explore it in the AI Tutor.`;
+        setAgentResponse(fallback);
+        speakConfirmation(fallback);
+      }
+      return;
+    }
+
+    // Unrecognized utterance fallback: Direct query to Gemini API so ANY general statement gets answered!
+    setIsThinking(true);
+    setAgentResponse(`Thinking about "${rawCommand}"...`);
+    try {
+      const geminiResult = await queryGeminiVoice(rawCommand);
+      setIsThinking(false);
+      setAgentResponse(geminiResult.answer);
+      speakConfirmation(geminiResult.spokenText);
+    } catch {
+      setIsThinking(false);
+      const help = `I heard: "${rawCommand}". Try saying "Go to settings", "Turn on dark mode", "Create workspace Biology", or ask any question like "What is the speed of light?".`;
+      setAgentResponse(help);
+      speakConfirmation("I am your voice assistant. You can give commands or ask me any general knowledge questions.");
+    }
   };
 
   const toggleListening = () => {
@@ -643,13 +501,13 @@ export default function GlobalVoiceListener({
       stopSpeaking();
       setIsListening(false);
       setShowPanel(false);
-      (window as any).showToast?.('🎙️ Voice command listener paused.', 'info');
+      (window as any).showToast?.('🎙️ Voice listener paused.', 'info');
     } else {
       try {
         recognitionRef.current.start();
         setIsListening(true);
         setShowPanel(true);
-        (window as any).showToast?.('🎙️ Voice commands active! Speak any command or question.', 'success');
+        (window as any).showToast?.('🎙️ Voice listener active! Ask any question or command.', 'success');
       } catch (e) {
         console.error('Failed to start speech recognition:', e);
       }
@@ -668,7 +526,7 @@ export default function GlobalVoiceListener({
               initial={{ opacity: 0, y: 15, scale: 0.94 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 15, scale: 0.94 }}
-              className="w-[330px] sm:w-[370px] max-w-[calc(100vw-2rem)] bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-200/80 dark:border-slate-800 p-4 text-slate-800 dark:text-slate-100 flex flex-col gap-3 transition-all"
+              className="w-[330px] sm:w-[380px] max-w-[calc(100vw-2rem)] bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-200/80 dark:border-slate-800 p-4 text-slate-800 dark:text-slate-100 flex flex-col gap-3 transition-all"
             >
               {/* Header */}
               <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800/80">
@@ -681,11 +539,11 @@ export default function GlobalVoiceListener({
                     <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
                       {isSpeaking ? (
                         <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
-                          <Volume2 className="w-3 h-3 animate-bounce" /> Speaking response...
+                          <Volume2 className="w-3 h-3 animate-bounce" /> Speaking vocal answer...
                         </span>
                       ) : isThinking ? (
                         <span className="flex items-center gap-1 text-amber-500 font-semibold">
-                          <Loader2 className="w-3 h-3 animate-spin" /> Thinking...
+                          <Loader2 className="w-3 h-3 animate-spin" /> Querying Gemini API...
                         </span>
                       ) : isListening ? (
                         <span className="flex items-center gap-1 text-rose-500 font-semibold">
@@ -703,10 +561,12 @@ export default function GlobalVoiceListener({
                   <button
                     onClick={() => {
                       if (isSpeaking) stopSpeaking();
-                      setIsMuted(!isMuted);
+                      const nextMute = !isMuted;
+                      setIsMuted(nextMute);
+                      voiceResponseEngine.setMuted(nextMute);
                     }}
-                    title={isMuted ? "Unmute voice response" : "Mute voice response"}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    title={isMuted ? "Unmute vocal responses" : "Mute vocal responses"}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                   >
                     {isMuted ? <VolumeX className="w-3.5 h-3.5 text-rose-500" /> : <Volume2 className="w-3.5 h-3.5" />}
                   </button>
@@ -715,7 +575,7 @@ export default function GlobalVoiceListener({
                   <button
                     onClick={() => setShowPanel(false)}
                     title="Minimize panel"
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -737,7 +597,7 @@ export default function GlobalVoiceListener({
                   </div>
                 ) : (
                   <div className="text-center py-2 text-slate-400 text-xs italic">
-                    Say a command or question (e.g. &ldquo;Go to settings&rdquo;, &ldquo;Ask AI tutor what is the currency of India&rdquo;)
+                    Say any action or question (e.g. &ldquo;Go to settings&rdquo;, &ldquo;What is the speed of light?&rdquo;)
                   </div>
                 )}
 
@@ -749,7 +609,7 @@ export default function GlobalVoiceListener({
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1 mb-0.5">
-                        <p className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 tracking-wider">Voice Agent</p>
+                        <p className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 tracking-wider">Voice Confirmation & Answer</p>
                         {isSpeaking && (
                           <button
                             onClick={stopSpeaking}
@@ -768,12 +628,12 @@ export default function GlobalVoiceListener({
               {/* Real-time Audio Waveform Visualizer */}
               <div className="flex items-center justify-between bg-slate-100 dark:bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-200/60 dark:border-slate-800">
                 <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  {isSpeaking ? "Voice Output Active" : isListening ? "Audio Input Wave" : "Idle"}
+                  {isSpeaking ? "Vocal Engine Speaking" : isListening ? "Microphone Input" : "Idle"}
                 </span>
 
                 <div className="flex items-center gap-1 h-3.5">
                   {isSpeaking ? (
-                    // Equalizer wave animation when voice agent is speaking
+                    // Equalizer wave animation when TTS response engine is speaking
                     [1, 2, 3, 4, 5].map((i) => (
                       <motion.div
                         key={i}
@@ -796,7 +656,7 @@ export default function GlobalVoiceListener({
                 </div>
               </div>
 
-              {/* Quick Action Suggestion Chips */}
+              {/* Quick Action & General Knowledge Chips */}
               <div className="flex flex-wrap gap-1.5 pt-1">
                 <button
                   onClick={() => handleVoiceCommand("go to settings")}
@@ -812,16 +672,22 @@ export default function GlobalVoiceListener({
                   {isDarkMode ? "Light Mode" : "Dark Mode"}
                 </button>
                 <button
-                  onClick={() => handleVoiceCommand("create a workspace and name it Science")}
+                  onClick={() => handleVoiceCommand("create a workspace and name it Physics")}
                   className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 text-[11px] font-medium transition-colors border border-slate-200/50 dark:border-slate-700 flex items-center gap-1 cursor-pointer"
                 >
-                  <FolderPlus className="w-3 h-3" /> New Workspace
+                  <FolderPlus className="w-3 h-3" /> Create Workspace
                 </button>
                 <button
-                  onClick={() => handleVoiceCommand("go to the ai tutor and then ask him what the currency of india is")}
+                  onClick={() => handleVoiceCommand("what is the currency of India?")}
                   className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 text-[11px] font-medium transition-colors border border-slate-200/50 dark:border-slate-700 flex items-center gap-1 cursor-pointer"
                 >
                   <Bot className="w-3 h-3" /> Currency of India?
+                </button>
+                <button
+                  onClick={() => handleVoiceCommand("what is the speed of light?")}
+                  className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 text-[11px] font-medium transition-colors border border-slate-200/50 dark:border-slate-700 flex items-center gap-1 cursor-pointer"
+                >
+                  <Sparkles className="w-3 h-3" /> Speed of Light?
                 </button>
               </div>
             </motion.div>
@@ -853,7 +719,7 @@ export default function GlobalVoiceListener({
                 ? 'bg-gradient-to-r from-rose-500 to-indigo-600 text-white shadow-rose-500/40 ring-4 ring-rose-500/20'
                 : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 hover:border-indigo-500 hover:shadow-lg'
             }`}
-            title={isListening ? "Voice commands active. Click to pause." : "Enable voice agent (e.g. 'Go to settings', 'Dark mode', 'Create workspace', 'Ask AI tutor')"}
+            title={isListening ? "Voice commands active. Click to pause." : "Enable voice agent (e.g. 'Go to settings', 'Dark mode', 'Create workspace', ask any question)"}
           >
             {isListening ? (
               <Mic className="w-5 h-5 animate-pulse" />
