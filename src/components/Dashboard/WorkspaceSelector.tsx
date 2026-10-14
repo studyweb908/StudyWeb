@@ -318,7 +318,7 @@ export default function WorkspaceSelector({
   const [newDescription, setNewDescription] = useState('');
   const [newTheme, setNewTheme] = useState<'indigo' | 'emerald' | 'amber' | 'rose' | 'violet' | 'cyan'>('indigo');
   const [newEmoji, setNewEmoji] = useState('🧬');
-  const [newTemplate, setNewTemplate] = useState<'exam' | 'semester' | 'course' | 'research' | 'notes' | 'custom'>('exam');
+  const [newTemplate] = useState<'exam' | 'semester' | 'course' | 'research' | 'notes' | 'custom'>('course');
   const [newVisibility, setNewVisibility] = useState<'private' | 'shared'>('private');
 
   const subjects = ['All', 'Biology', 'Chemistry', 'Physics', 'History', 'Math', 'Computer Science'];
@@ -604,34 +604,17 @@ export default function WorkspaceSelector({
                   />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Subject Classification</label>
-                    <select
-                      value={newSubject}
-                      onChange={(e) => setNewSubject(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-bold text-slate-750 dark:text-slate-350 focus:outline-none"
-                    >
-                      {subjects.filter(s => s !== 'All').map(sub => (
-                        <option key={sub}>{sub}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Study Template</label>
-                    <select
-                      value={newTemplate}
-                      onChange={(e) => setNewTemplate(e.target.value as any)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-bold text-slate-750 dark:text-slate-350 focus:outline-none"
-                    >
-                      <option value="exam">Practice Exam Cramming</option>
-                      <option value="semester">Semester Course Track</option>
-                      <option value="research">Research Bibliography</option>
-                      <option value="notes">Lecture Notes Summaries</option>
-                      <option value="custom">Blank Canvas Custom</option>
-                    </select>
-                  </div>
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Subject Classification</label>
+                  <select
+                    value={newSubject}
+                    onChange={(e) => setNewSubject(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-bold text-slate-750 dark:text-slate-350 focus:outline-none"
+                  >
+                    {subjects.filter(s => s !== 'All').map(sub => (
+                      <option key={sub}>{sub}</option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Emoji selection line */}
