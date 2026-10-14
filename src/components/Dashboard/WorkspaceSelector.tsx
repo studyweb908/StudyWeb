@@ -287,7 +287,8 @@ export default function WorkspaceSelector({
   const filteredWorkspaces = workspaces
     .filter((ws) => {
       const matchSearch = ws.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          ws.subject.toLowerCase().includes(searchTerm.toLowerCase());
+                          ws.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          (ws.description || '').toLowerCase().includes(searchTerm.toLowerCase());
       const matchSubject = selectedSubject === 'All' || ws.subject === selectedSubject;
       return matchSearch && matchSubject;
     })

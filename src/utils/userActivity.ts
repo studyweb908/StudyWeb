@@ -1,12 +1,14 @@
 import { Workspace } from '../components/Dashboard/WorkspaceTypes';
 
+export type ActivityIconType = 'quiz' | 'upload' | 'tutor' | 'note' | 'workspace' | 'workspace-create' | 'delete';
+
 export interface UserActivityItem {
   id: string;
   title: string;
   detail: string;
   timestamp: number;
   timeAgo: string;
-  iconType: 'quiz' | 'upload' | 'tutor' | 'note' | 'workspace';
+  iconType: ActivityIconType;
 }
 
 function getRelativeTimeAgo(timestamp: number): string {
@@ -45,7 +47,7 @@ export function recordUserActivity(
   activity: {
     title: string;
     detail: string;
-    iconType: 'quiz' | 'upload' | 'tutor' | 'note' | 'workspace';
+    iconType: ActivityIconType;
     timestamp?: number;
   },
   userId?: string | null
@@ -118,57 +120,7 @@ export function getRealUserActivities(
     }
   }
 
-  // 2. Synthesize real activities from actual workspaces
-  if (workspaces && workspaces.length > 0) {
-    workspaces.forEach(ws => {
-      // Real uploaded files
-      if (ws.files && ws.files.length > 0) {
-        ws.files.forEach(file => {
-          activities.push({
-            id: `act-file-${file.id}`,
-            title: `Uploaded ${file.name}`,
-            detail: `Added to ${ws.name} • ${file.size || 'Indexed document'}`,
-            timestamp: parseActivityTime(file.uploadDate),
-            iconType: 'upload'
-          });
-        });
-      }
-
-      // Real notes created
-      if (ws.notes && ws.notes.length > 0) {
-        ws.notes.forEach(note => {
-          activities.push({
-            id: `act-note-${note.id}`,
-            title: `Note: ${note.title || 'Untitled Note'}`,
-            detail: `Saved in ${ws.name}`,
-            timestamp: parseActivityTime(note.updatedAt),
-            iconType: 'note'
-          });
-        });
-      }
-
-      // Real flashcard sets
-      if (ws.flashcards && ws.flashcards.length > 0) {
-        activities.push({
-          id: `act-flashcards-${ws.id}`,
-          title: `Flashcards: ${ws.name}`,
-          detail: `${ws.flashcards.length} active cards ready for review`,
-          timestamp: parseActivityTime(ws.lastOpened),
-          iconType: 'quiz'
-        });
-      }
-
-      // Real workspace creation / update
-      activities.push({
-        id: `act-ws-${ws.id}`,
-        title: `Workspace: ${ws.name}`,
-        detail: ws.subject ? `Subject: ${ws.subject}` : 'Course workspace ready',
-        timestamp: parseActivityTime(ws.lastOpened),
-        iconType: 'workspace'
-      });
-    });
-  }
-
+  // 2. Return strictly recorded real user events (zero dummy/synthetic data)
   // Deduplicate by title & rounded timestamp or id
   const seen = new Set<string>();
   const unique = activities.filter(item => {

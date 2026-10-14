@@ -13,7 +13,9 @@ import {
   Clock,
   ArrowRight,
   Layers,
-  LayoutDashboard
+  LayoutDashboard,
+  FolderPlus,
+  Trash2
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { StorageQuotaWidget } from './DashboardWidgets';
@@ -473,17 +475,6 @@ export default function DashboardHome({
                       </div>
 
                       <div className="mt-4 pt-3 border-t border-slate-200/60 dark:border-slate-800/60">
-                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1.5">
-                          <span>Activity Level</span>
-                          <span>{sub.progress}%</span>
-                        </div>
-                        <div className="w-full h-1.5 bg-slate-200/80 dark:bg-slate-800 rounded-full overflow-hidden mb-3">
-                          <div 
-                            className="h-full bg-indigo-600 rounded-full transition-all duration-500"
-                            style={{ width: `${sub.progress}%` }}
-                          />
-                        </div>
-
                         <button
                           onClick={() => {
                             if (sub.workspaceId && setActiveWorkspace) {
@@ -556,12 +547,22 @@ export default function DashboardHome({
                       className="flex items-start sm:items-center justify-between gap-3 p-3 sm:p-3.5 rounded-xl bg-slate-50/60 dark:bg-slate-850/40 border border-slate-200/60 dark:border-slate-800/60 hover:bg-slate-100/60 dark:hover:bg-slate-800/50 transition-colors"
                     >
                       <div className="flex items-start sm:items-center gap-3 min-w-0">
-                        <div className="w-8 h-8 rounded-lg bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/60 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0 text-slate-700 dark:text-slate-300">
-                          {act.iconType === 'quiz' && <Award className="w-4 h-4 text-amber-500" />}
-                          {act.iconType === 'upload' && <FileUp className="w-4 h-4 text-indigo-500" />}
-                          {act.iconType === 'tutor' && <Bot className="w-4 h-4 text-violet-500" />}
-                          {act.iconType === 'note' && <FileText className="w-4 h-4 text-emerald-500" />}
-                          {act.iconType === 'workspace' && <Folder className="w-4 h-4 text-orange-500" />}
+                        <div className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 mt-0.5 sm:mt-0 ${
+                          act.iconType === 'workspace-create' ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200/80 dark:border-emerald-900/40 text-emerald-600 dark:text-emerald-400' :
+                          act.iconType === 'delete' ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-200/80 dark:border-rose-900/40 text-rose-600 dark:text-rose-400' :
+                          act.iconType === 'upload' ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-200/80 dark:border-indigo-900/40 text-indigo-600 dark:text-indigo-400' :
+                          act.iconType === 'tutor' ? 'bg-violet-50 dark:bg-violet-950/60 border-violet-200/80 dark:border-violet-900/40 text-violet-600 dark:text-violet-400' :
+                          act.iconType === 'quiz' ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-200/80 dark:border-amber-900/40 text-amber-600 dark:text-amber-400' :
+                          act.iconType === 'note' ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200/80 dark:border-emerald-900/40 text-emerald-600 dark:text-emerald-400' :
+                          'bg-blue-50 dark:bg-blue-950/60 border-blue-200/80 dark:border-blue-900/40 text-blue-600 dark:text-blue-400'
+                        }`}>
+                          {act.iconType === 'quiz' && <Award className="w-4 h-4" />}
+                          {act.iconType === 'upload' && <FileUp className="w-4 h-4" />}
+                          {act.iconType === 'tutor' && <Bot className="w-4 h-4" />}
+                          {act.iconType === 'note' && <FileText className="w-4 h-4" />}
+                          {act.iconType === 'workspace-create' && <FolderPlus className="w-4 h-4" />}
+                          {act.iconType === 'delete' && <Trash2 className="w-4 h-4" />}
+                          {act.iconType === 'workspace' && <Folder className="w-4 h-4" />}
                         </div>
 
                         <div className="min-w-0">

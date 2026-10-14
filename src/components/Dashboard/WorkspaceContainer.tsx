@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../../lib/supabase';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
+import { recordUserActivity } from '../../utils/userActivity';
 import { 
   ArrowLeft,
   Settings,
@@ -205,6 +206,12 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
       files: updatedFiles,
       nodes: [...workspace.nodes, newFileNode],
       links: [...workspace.links, newLink]
+    });
+
+    recordUserActivity({
+      title: `Uploaded file: ${newFile.name}`,
+      detail: `Added to workspace ${workspace.name} • ${newFile.size || 'Indexed document'}`,
+      iconType: 'upload'
     });
 
     // Save uploaded file directly to Supabase workspace_files

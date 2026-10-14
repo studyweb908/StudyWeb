@@ -147,8 +147,15 @@ export default function App() {
     WorkspaceSyncService.saveWorkspace(updated, currentUserId || undefined);
   };
 
-  const handleSelectWorkspace = (ws: Workspace) => {
+  const handleSelectWorkspace = (ws: Workspace | null) => {
     setActiveWorkspace(ws);
+    if (ws) {
+      recordUserActivity({
+        title: `Opened & worked in workspace: ${ws.name}`,
+        detail: ws.subject ? `Subject: ${ws.subject}` : 'Active study session',
+        iconType: 'workspace'
+      }, currentUserId);
+    }
   };
 
   const handleCreateWorkspace = (ws: Workspace) => {
@@ -159,7 +166,7 @@ export default function App() {
     recordUserActivity({
       title: `Created workspace: ${ws.name}`,
       detail: ws.subject ? `Subject: ${ws.subject}` : 'New course workspace created',
-      iconType: 'workspace'
+      iconType: 'workspace-create'
     }, currentUserId);
     // Persist new workspace directly in Supabase with user_id attached
     WorkspaceSyncService.saveWorkspace(ws, currentUserId || undefined);
@@ -192,12 +199,18 @@ export default function App() {
   };
 
   const handleDeleteWorkspace = (id: string) => {
+    const target = workspaces.find(w => w.id === id);
     const next = workspaces.filter(w => w.id !== id);
     setWorkspaces(next);
     saveStoredWorkspaces(next, currentUserId);
     if (activeWorkspace && activeWorkspace.id === id) {
       setActiveWorkspace(null);
     }
+    recordUserActivity({
+      title: `Deleted workspace: ${target?.name || 'Workspace'}`,
+      detail: 'Workspace and study items removed',
+      iconType: 'delete'
+    }, currentUserId);
     // Delete workspace and its files from Supabase
     WorkspaceSyncService.deleteWorkspace(id);
   };

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Mic, MicOff, Sparkles, Volume2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useMicrophoneWaveform } from '../hooks/useMicrophoneWaveform';
 
 interface GlobalVoiceListenerProps {
   setActiveTab: (tab: string) => void;
@@ -14,6 +15,7 @@ export default function GlobalVoiceListener({ setActiveTab, setActiveWorkspace, 
   const [isSupported, setIsSupported] = useState(true);
   const recognitionRef = useRef<any>(null);
   const [showIndicator, setShowIndicator] = useState(false);
+  const waveformLevels = useMicrophoneWaveform(isListening);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -130,27 +132,41 @@ export default function GlobalVoiceListener({ setActiveTab, setActiveWorkspace, 
   return (
     <>
       {/* Floating Voice Command Toggle Button in bottom right */}
-      <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2">
+      <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5">
         <AnimatePresence>
-          {showIndicator && lastTranscript && (
+          {(showIndicator && (lastTranscript || isListening)) && (
             <motion.div
               initial={{ opacity: 0, x: 10, scale: 0.9 }}
               animate={{ opacity: 1, x: 0, scale: 1 }}
               exit={{ opacity: 0, x: 10, scale: 0.9 }}
-              className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-3 py-1.5 rounded-xl text-xs font-bold shadow-xl border border-slate-700 dark:border-slate-200 flex items-center gap-2"
+              className="bg-slate-900 dark:bg-slate-900 text-white px-3.5 py-2 rounded-2xl text-xs font-bold shadow-2xl border border-slate-700/80 dark:border-slate-800 flex items-center gap-3 backdrop-blur-md"
             >
-              <Volume2 className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
-              <span className="max-w-[180px] truncate">"{lastTranscript}"</span>
+              {/* Real-time Audio Waveform Visualizer Animation */}
+              <div className="flex items-center gap-0.5 h-4">
+                {waveformLevels.map((lvl, idx) => (
+                  <motion.div
+                    key={idx}
+                    className="w-1 bg-gradient-to-t from-rose-500 to-indigo-400 rounded-full origin-bottom"
+                    animate={{ height: `${Math.max(4, lvl)}px` }}
+                    transition={{ type: "tween", duration: 0.08 }}
+                  />
+                ))}
+              </div>
+
+              <div className="flex flex-col">
+                <span className="text-[10px] text-slate-400 uppercase tracking-wider font-extrabold">Listening...</span>
+                <span className="max-w-[160px] truncate text-slate-200">{lastTranscript || 'Say a command...'}</span>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
 
         <button
           onClick={toggleListening}
-          className={`relative p-3.5 rounded-full shadow-xl transition-all flex items-center justify-center cursor-pointer group ${
+          className={`relative p-3.5 rounded-full shadow-2xl transition-all flex items-center justify-center cursor-pointer group ${
             isListening
-              ? 'bg-gradient-to-r from-rose-500 to-indigo-600 text-white shadow-rose-500/30 ring-4 ring-rose-500/20 animate-pulse'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 hover:border-indigo-500'
+              ? 'bg-gradient-to-r from-rose-500 to-indigo-600 text-white shadow-rose-500/40 ring-4 ring-rose-500/20 animate-pulse'
+              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 hover:border-indigo-500 hover:shadow-lg'
           }`}
           title={isListening ? "Voice commands active. Click to stop." : "Enable voice commands (e.g. 'Go to dashboard', 'Open AI tutor')"}
         >
@@ -161,7 +177,7 @@ export default function GlobalVoiceListener({ setActiveTab, setActiveWorkspace, 
           )}
 
           {isListening && (
-            <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white dark:border-slate-900 animate-ping" />
+            <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-white dark:border-slate-900 animate-ping" />
           )}
         </button>
       </div>
