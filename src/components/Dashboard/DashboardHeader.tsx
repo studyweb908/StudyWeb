@@ -218,13 +218,6 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
       <div className="flex items-center justify-between gap-2 sm:gap-4">
         {/* Hamburger & Logo */}
         <div className="flex items-center gap-2 sm:gap-3 md:pr-4 min-w-0">
-          <button 
-            onClick={onMenuToggle}
-            className={`md:hidden min-w-[38px] min-h-[38px] flex items-center justify-center rounded-xl text-[#69779C] hover:text-[#151D3B] dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0 ${isFocusMode ? 'hidden' : ''}`}
-            aria-label="Toggle navigation menu"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
           <img 
             src="/logo.png" 
             alt="StudyWeb Logo" 

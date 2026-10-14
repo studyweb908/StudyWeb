@@ -32,11 +32,11 @@ import PDFWorkspaceView from './components/Dashboard/PDFWorkspaceView';
 import StudySessionView from './components/Dashboard/StudySessionView';
 import QuizCenterView from './components/Dashboard/QuizCenterView';
 import FlashcardsView from './components/Dashboard/FlashcardsView';
-import QuickActions from './components/Dashboard/QuickActions';
 import QuickNoteModal from './components/Dashboard/QuickNoteModal';
 import OnboardingModal from './components/OnboardingModal';
 import WelcomeBackModal from './components/Dashboard/WelcomeBackModal';
 import OfflineNotice from './components/OfflineNotice';
+import GlobalVoiceListener from './components/GlobalVoiceListener';
 import { playDopaminePopSound } from './utils/audioEffects';
 import { useThemeMode } from './hooks/useThemeMode';
 import { 
@@ -566,8 +566,6 @@ export default function App() {
             </AnimatePresence>
           </main>
 
-          {/* Quick Creator Menu & FAB System */}
-          <QuickActions activeTab={activeTab} setActiveTab={setActiveTab} />
 
           {/* Mobile Bottom Navigation Bar */}
           <nav 
@@ -1015,6 +1013,11 @@ export default function App() {
         />
 
         <OfflineNotice />
+        <GlobalVoiceListener 
+          setActiveTab={setActiveTab} 
+          setActiveWorkspace={setActiveWorkspace} 
+          onToggleFocusMode={() => setIsFocusMode(!isFocusMode)} 
+        />
         <ToastContainer />
         <ResetPasswordModal />
         <LegalModals 

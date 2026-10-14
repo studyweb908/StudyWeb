@@ -151,6 +151,9 @@ export default function OfflineNotice() {
     setQueue([]);
     localStorage.removeItem('studyweb_offline_sync_queue');
 
+    // Explicit confirmation toast improving confidence in data persistence
+    (window as any).showToast?.('✅ Offline data successfully synchronized and persisted to local storage!', 'success');
+
     // Trigger local storage storage event so other tabs refresh if needed
     window.dispatchEvent(new Event('storage'));
 

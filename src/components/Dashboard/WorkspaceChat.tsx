@@ -596,7 +596,7 @@ export default function WorkspaceChat({
   ];
 
   return (
-    <div className="w-full h-[calc(100vh-130px)] min-h-[620px] flex flex-col bg-white dark:bg-slate-950 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm relative font-sans overflow-hidden">
+    <div className="w-full h-[calc(100dvh-130px)] sm:h-[calc(100dvh-140px)] md:h-[calc(100vh-130px)] min-h-[500px] flex flex-col bg-white dark:bg-slate-950 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm relative font-sans overflow-hidden">
       
       {/* ============================================================== */}
       {/* 1. MINIMALIST TOP HEADER                                       */}

@@ -358,13 +358,7 @@ export default function AITutorWorkspace() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isThinking]);
 
-  // Suggested prompts
-  const suggestedPrompts = [
-    { title: "Explain Simply", desc: "Explain Quantum Physics to an 11-year-old.", text: "Can you explain the basic principles of Quantum Physics simply, as if explaining to an 11-year-old?" },
-    { title: "Solve Math", desc: "Solve the limit of (sin x)/x as x approaches 0.", text: "Solve this math problem step-by-step: Evaluate the limit of (sin x)/x as x approaches 0 using L'Hopital's rule." },
-    { title: "Summarize Text", desc: "Extract key takeaways of Cellular Respiration.", text: "Can you extract the 5 absolute key takeaways and major stages of Cellular Respiration?" },
-    { title: "Generate Quiz", desc: "Create a 3-question test on the French Revolution.", text: "Generate a custom 3-question multiple-choice quiz on the main causes of the French Revolution. Include answers and clear explanations." }
-  ];
+
 
   const handleSemanticSearch = async (queryToSearch: string) => {
     if (!queryToSearch.trim()) return;
@@ -657,7 +651,7 @@ export default function AITutorWorkspace() {
   };
 
   return (
-    <div className="h-[calc(100dvh-120px)] sm:h-[calc(100dvh-135px)] md:h-[calc(100vh-100px)] min-h-[420px] max-w-full flex flex-row relative bg-white dark:bg-slate-900 rounded-[16px] sm:rounded-[24px] border border-slate-100 dark:border-slate-800/80 overflow-hidden shadow-sm text-left">
+    <div className="w-full h-[calc(100dvh-130px)] sm:h-[calc(100dvh-140px)] md:h-[calc(100vh-100px)] min-h-[420px] max-w-full flex flex-row relative bg-white dark:bg-slate-900 rounded-[24px] border border-slate-100 dark:border-slate-800/80 overflow-hidden shadow-sm text-left">
       {/* Left Sidebar: Attached Materials */}
       <div className="w-72 border-r border-slate-100 dark:border-slate-800/60 bg-slate-50/30 dark:bg-slate-950/10 flex flex-col h-full shrink-0 hidden md:flex">
         <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/20 flex items-center justify-between shrink-0">
@@ -1015,27 +1009,7 @@ export default function AITutorWorkspace() {
           <div ref={chatEndRef} />
         </div>
 
-        {/* Suggested Quick Prompts Grid */}
-        {messages.length === 1 && (
-          <div className="p-3 sm:p-6 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/20">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 sm:mb-3">Try asking your AI Tutor:</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
-              {suggestedPrompts.map((p, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => handleSend(p.text)}
-                  className="p-2.5 sm:p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 hover:border-indigo-400 dark:hover:border-indigo-500/60 text-left transition-all hover:-translate-y-0.5 shadow-sm group cursor-pointer"
-                >
-                  <div className="flex items-center gap-1 text-xs font-bold text-slate-800 dark:text-white">
-                    <span>{p.title}</span>
-                    <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:translate-x-1 transition-transform" />
-                  </div>
-                  <p className="text-[10px] text-slate-400 dark:text-slate-400 mt-1 sm:mt-1.5 leading-relaxed font-medium line-clamp-2">{p.desc}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+
 
         {/* Message Input & Attachment Dock */}
         <div className="p-2.5 sm:p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 relative">
@@ -1162,19 +1136,7 @@ export default function AITutorWorkspace() {
               </AnimatePresence>
             </div>
 
-            {/* Mic */}
-            <button
-              type="button"
-              onClick={startSpeechRecognition}
-              className={`p-1.5 sm:p-2 rounded-xl transition-all hidden xs:block cursor-pointer shrink-0 ${
-                isListening 
-                  ? 'text-red-500 bg-red-500/10 animate-pulse' 
-                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-800'
-              }`}
-              title={isListening ? "Listening... Click to stop" : "Dictate your question"}
-            >
-              <Mic className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
-            </button>
+
 
             {/* Send Action */}
             <button
