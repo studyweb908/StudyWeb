@@ -121,7 +121,13 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
               <span>Upload Material</span>
             </button>
             <button
-              onClick={() => setShowDeleteConfirm(true)}
+              onClick={() => {
+                if (onDeleteWorkspace) {
+                  onDeleteWorkspace(workspace.id);
+                } else {
+                  setShowDeleteConfirm(true);
+                }
+              }}
               className="px-4 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-950/60 border border-red-200/80 dark:border-red-900/50 text-red-600 dark:text-red-400 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ml-auto sm:ml-0"
             >
               <Trash2 className="w-4 h-4" />
@@ -311,9 +317,9 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
               <div className="w-12 h-12 bg-red-50 dark:bg-red-500/10 rounded-2xl flex items-center justify-center text-red-500 mb-4 border border-red-100 dark:border-red-500/20">
                 <Trash2 className="w-6 h-6" />
               </div>
-              <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">Delete Workspace?</h3>
+              <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">Do you want to delete this workspace?</h3>
               <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed mb-6">
-                Are you sure you want to delete this workspace? This will permanently remove all associated materials, notes, flashcards, and quizzes. This action cannot be undone.
+                If you delete this, it will not be recovered anymore. All associated materials, notes, flashcards, and quizzes will be permanently removed.
               </p>
               <div className="flex justify-end gap-3">
                 <button

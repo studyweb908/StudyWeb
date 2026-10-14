@@ -35,6 +35,7 @@ import FlashcardsView from './components/Dashboard/FlashcardsView';
 import QuickNoteModal from './components/Dashboard/QuickNoteModal';
 import OnboardingModal from './components/OnboardingModal';
 import WelcomeBackModal from './components/Dashboard/WelcomeBackModal';
+import DeleteWorkspaceModal from './components/Dashboard/DeleteWorkspaceModal';
 import OfflineNotice from './components/OfflineNotice';
 import GlobalVoiceListener from './components/GlobalVoiceListener';
 import { playDopaminePopSound } from './utils/audioEffects';
@@ -80,7 +81,7 @@ import {
 } from './components/Dashboard/AuxiliaryViews';
 
 export default function App() {
-  const { toggleTheme } = useThemeMode(); // Initialize real-time theme synchronization service at root level
+  const { toggleTheme, setThemeMode, isDarkApplied } = useThemeMode(); // Initialize real-time theme synchronization service at root level
   const { scrollYProgress } = useScroll();
   const scaleX = useSpring(scrollYProgress, {
     stiffness: 100,
@@ -172,6 +173,44 @@ export default function App() {
     WorkspaceSyncService.saveWorkspace(ws, currentUserId || undefined);
   };
 
+  const handleCreateWorkspaceByName = (name: string, subject?: string) => {
+    const cleanName = name.trim() || 'New Study Workspace';
+    const cleanSubject = subject?.trim() || 'General Studies';
+    const colors: Array<'indigo' | 'emerald' | 'amber' | 'rose' | 'violet' | 'cyan'> = ['indigo', 'emerald', 'amber', 'rose', 'violet', 'cyan'];
+    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+    const emojis = ['📚', '💡', '⚡', '🧠', '🔬', '🌍', '📐', '🎯'];
+    const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+
+    const newWorkspace: Workspace = {
+      id: `ws-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      name: cleanName,
+      subject: cleanSubject,
+      description: `Course and study materials for ${cleanName}`,
+      colorTheme: randomColor,
+      coverImage: 'https://images.unsplash.com/photo-1497633762265-9d179a990aa6?auto=format&fit=crop&q=80&w=800',
+      emoji: randomEmoji,
+      visibility: 'private',
+      template: 'course',
+      pinned: false,
+      favorite: false,
+      files: [],
+      flashcards: [],
+      quizzes: [],
+      notes: [],
+      plannerTasks: [],
+      nodes: [
+        { id: `n-${Date.now()}`, label: cleanName, type: 'topic', color: '#6366F1', x: 250, y: 150 }
+      ],
+      links: [],
+      streak: 1,
+      studyHours: 0,
+      lastOpened: 'Just Now'
+    };
+
+    handleCreateWorkspace(newWorkspace);
+    return newWorkspace;
+  };
+
   const handleTogglePin = (id: string) => {
     const next = workspaces.map(w => w.id === id ? { ...w, pinned: !w.pinned } : w);
     setWorkspaces(next);
@@ -198,8 +237,19 @@ export default function App() {
     }
   };
 
+  const [workspacePendingDelete, setWorkspacePendingDelete] = useState<Workspace | null>(null);
+
   const handleDeleteWorkspace = (id: string) => {
     const target = workspaces.find(w => w.id === id);
+    if (target) {
+      setWorkspacePendingDelete(target);
+    }
+  };
+
+  const handleConfirmDeleteWorkspace = () => {
+    if (!workspacePendingDelete) return;
+    const target = workspacePendingDelete;
+    const id = target.id;
     const next = workspaces.filter(w => w.id !== id);
     setWorkspaces(next);
     saveStoredWorkspaces(next, currentUserId);
@@ -213,6 +263,11 @@ export default function App() {
     }, currentUserId);
     // Delete workspace and its files from Supabase
     WorkspaceSyncService.deleteWorkspace(id);
+    setWorkspacePendingDelete(null);
+  };
+
+  const handleCancelDeleteWorkspace = () => {
+    setWorkspacePendingDelete(null);
   };
 
   const handleReorderWorkspaces = (newWorkspaces: Workspace[]) => {
@@ -1025,11 +1080,26 @@ export default function App() {
           avatarUrl={welcomeAvatarUrl}
         />
 
+        {/* Full Screen Delete Workspace Confirmation Notification */}
+        <DeleteWorkspaceModal
+          isOpen={workspacePendingDelete !== null}
+          workspace={workspacePendingDelete}
+          onConfirm={handleConfirmDeleteWorkspace}
+          onCancel={handleCancelDeleteWorkspace}
+        />
+
         <OfflineNotice />
         <GlobalVoiceListener 
           setActiveTab={setActiveTab} 
-          setActiveWorkspace={setActiveWorkspace} 
-          onToggleFocusMode={() => setIsFocusMode(!isFocusMode)} 
+          setActiveWorkspace={handleSelectWorkspace} 
+          onToggleFocusMode={() => setIsFocusMode(!isFocusMode)}
+          onLogout={handleLogout}
+          onSetDarkMode={(isDark) => setThemeMode(isDark ? 'dark' : 'light')}
+          onToggleTheme={toggleTheme}
+          isDarkMode={isDarkApplied}
+          onCreateWorkspace={handleCreateWorkspaceByName}
+          workspaces={workspaces}
+          activeWorkspace={activeWorkspace}
         />
         <ToastContainer />
         <ResetPasswordModal />

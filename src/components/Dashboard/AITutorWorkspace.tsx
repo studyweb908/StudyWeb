@@ -261,6 +261,15 @@ export default function AITutorWorkspace() {
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Record AI Tutor usage when entering AI Tutor
+  useEffect(() => {
+    recordUserActivity({
+      title: 'Used AI Tutor',
+      detail: 'Personalized AI study session',
+      iconType: 'tutor'
+    });
+  }, []);
+
   // Focus Timer Tick logic - Optimized to avoid drift and interval rebuilding every second
   useEffect(() => {
     let intervalId: any = null;

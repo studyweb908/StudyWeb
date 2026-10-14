@@ -33,9 +33,38 @@ function parseActivityTime(dateStr?: string): number {
   return isNaN(parsed) ? Date.now() : parsed;
 }
 
+export function getActiveUserIdSync(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const rawAuth = localStorage.getItem('studyweb-auth');
+    if (rawAuth) {
+      const parsed = JSON.parse(rawAuth);
+      if (parsed?.user?.id) return parsed.user.id;
+    }
+    // Also check standard Supabase auth token keys
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.includes('auth-token') || key.startsWith('sb-'))) {
+        const item = localStorage.getItem(key);
+        if (item) {
+          try {
+            const p = JSON.parse(item);
+            if (p?.user?.id) return p.user.id;
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+  return null;
+}
+
 export function getUserActivityStorageKey(userId?: string | null): string {
-  if (userId && typeof userId === 'string' && userId.trim()) {
-    return `studyweb_real_activities_${userId.trim()}`;
+  const effectiveUserId = (userId && typeof userId === 'string' && userId.trim()) 
+    ? userId.trim() 
+    : getActiveUserIdSync();
+
+  if (effectiveUserId) {
+    return `studyweb_real_activities_${effectiveUserId}`;
   }
   return 'studyweb_real_activities_guest';
 }
@@ -67,7 +96,7 @@ export function recordUserActivity(
       iconType: activity.iconType
     };
 
-    const updated = [item, ...list].slice(0, 30);
+    const updated = [item, ...list].slice(0, 50);
     localStorage.setItem(key, JSON.stringify(updated));
 
     // Dispatch event to allow real-time widget refresh
@@ -91,40 +120,50 @@ export function getRealUserActivities(
     title: string;
     detail: string;
     timestamp: number;
-    iconType: 'quiz' | 'upload' | 'tutor' | 'note' | 'workspace';
+    iconType: ActivityIconType;
   }[] = [];
 
   // 1. Load explicitly recorded user events
   if (typeof window !== 'undefined') {
     try {
-      const key = getUserActivityStorageKey(userId);
-      const raw = localStorage.getItem(key);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          parsed.forEach(item => {
-            if (item && item.title) {
-              activities.push({
-                id: item.id || `act-saved-${item.timestamp}`,
-                title: item.title,
-                detail: item.detail || '',
-                timestamp: item.timestamp || Date.now(),
-                iconType: item.iconType || 'workspace'
-              });
-            }
-          });
-        }
+      const primaryKey = getUserActivityStorageKey(userId);
+      const keysToLoad = [primaryKey];
+      // If signed in, also incorporate guest entries so no real actions are missed
+      if (primaryKey !== 'studyweb_real_activities_guest') {
+        keysToLoad.push('studyweb_real_activities_guest');
       }
+
+      keysToLoad.forEach(key => {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            parsed.forEach(item => {
+              if (item && item.title) {
+                activities.push({
+                  id: item.id || `act-saved-${item.timestamp}-${Math.random().toString(36).slice(2, 6)}`,
+                  title: item.title,
+                  detail: item.detail || '',
+                  timestamp: item.timestamp || Date.now(),
+                  iconType: item.iconType || 'workspace'
+                });
+              }
+            });
+          }
+        }
+      });
     } catch {
       // Ignore parse failure
     }
   }
 
   // 2. Return strictly recorded real user events (zero dummy/synthetic data)
-  // Deduplicate by title & rounded timestamp or id
+  // Deduplicate by title & detail within a 15-second window or identical IDs
   const seen = new Set<string>();
   const unique = activities.filter(item => {
-    const key = `${item.title}-${item.detail}`;
+    // 15-second window deduplication so repeated interactions over time are preserved
+    const timeBucket = Math.floor(item.timestamp / 15000);
+    const key = `${item.title}-${item.detail}-${timeBucket}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

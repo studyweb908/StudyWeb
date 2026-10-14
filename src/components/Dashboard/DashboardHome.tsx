@@ -21,7 +21,7 @@ import { supabase } from '../../lib/supabase';
 import { StorageQuotaWidget } from './DashboardWidgets';
 import { Workspace } from './WorkspaceTypes';
 import DailyQuoteCard from './DailyQuoteCard';
-import { getRealUserActivities, UserActivityItem } from '../../utils/userActivity';
+import { getRealUserActivities, recordUserActivity, UserActivityItem } from '../../utils/userActivity';
 
 interface DashboardHomeProps {
   setActiveTab: (tab: string) => void;
@@ -167,6 +167,11 @@ export default function DashboardHome({
     if (query) {
       sessionStorage.setItem('studyweb_initial_ai_query', query);
     }
+    recordUserActivity({
+      title: 'Asked AI Tutor',
+      detail: query || 'Started AI Tutor study consultation',
+      iconType: 'tutor'
+    }, currentUserId);
     setActiveTab('ai-tutor');
   };
 

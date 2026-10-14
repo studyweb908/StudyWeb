@@ -183,40 +183,16 @@ function SortableWorkspaceCard({
 
           <div className="flex items-center gap-1.5">
             {onDeleteWorkspace && (
-              confirmDeleteId === ws.id ? (
-                <div className="flex items-center gap-1 animate-fade-in bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900/30 rounded-lg p-1">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteWorkspace(ws.id);
-                      setConfirmDeleteId(null);
-                    }}
-                    className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-[9.5px] font-black cursor-pointer shadow-sm transition-colors"
-                  >
-                    Delete
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setConfirmDeleteId(null);
-                    }}
-                    className="px-2 py-1 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 rounded text-[9.5px] font-black cursor-pointer transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setConfirmDeleteId(ws.id);
-                  }}
-                  className="p-1.5 rounded-lg text-slate-450 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer transition-colors"
-                  title="Delete workspace"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              )
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteWorkspace(ws.id);
+                }}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 dark:hover:text-rose-400 cursor-pointer transition-colors"
+                title="Delete workspace"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
             )}
 
             {/* Favorite Section Button - MAX VISIBILITY */}

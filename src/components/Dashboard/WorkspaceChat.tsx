@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import { useMicrophoneWaveform } from '../../hooks/useMicrophoneWaveform';
+import { recordUserActivity } from '../../utils/userActivity';
 
 export type TutorPersona = 'plain_english' | 'socratic' | 'exam_prep' | 'flashcard';
 
@@ -192,6 +193,15 @@ export default function WorkspaceChat({
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isThinking, attachedDrafts]);
 
+  // Record AI Tutor session entry in real time
+  useEffect(() => {
+    recordUserActivity({
+      title: 'Used AI Tutor',
+      detail: `Study session with AI Tutor in ${workspace.name}`,
+      iconType: 'tutor'
+    });
+  }, [workspace.id]);
+
   // Reset chat thread
   const handleResetChat = () => {
     if (!window.confirm("Start a new conversation?")) return;
@@ -333,6 +343,13 @@ export default function WorkspaceChat({
     setInputValue('');
     setAttachedDrafts([]); // Clear attachment queue
     setIsThinking(true);
+
+    // Record real-time user activity for asking AI Tutor
+    recordUserActivity({
+      title: 'Asked AI Tutor',
+      detail: (textToSend || (draftNames.length > 0 ? `Analyzed document: ${draftNames[0]}` : `Study session in ${workspace.name}`)).trim().slice(0, 50),
+      iconType: 'tutor'
+    });
 
     // Convert attached drafts into WorkspaceFile objects
     const newlyConvertedFiles: WorkspaceFile[] = currentDrafts.map(d => {
@@ -483,6 +500,37 @@ export default function WorkspaceChat({
       setIsThinking(false);
     }
   };
+
+  // Auto-receive voice-directed queries and answers from Global Voice Agent
+  useEffect(() => {
+    const handleVoiceAsk = (e: any) => {
+      const { question, answer } = e.detail || {};
+      if (question && typeof question === 'string') {
+        if (answer && typeof answer === 'string') {
+          const userMsg: Message = {
+            id: `msg-user-${Date.now()}`,
+            sender: 'user',
+            text: question,
+            source: 'Voice Agent',
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          };
+          const aiMsg: Message = {
+            id: `msg-ai-${Date.now() + 1}`,
+            sender: 'ai',
+            text: answer,
+            source: 'Gemini AI Tutor (Voice)',
+            persona: activePersona,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          };
+          setMessages(prev => [...prev, userMsg, aiMsg]);
+        } else {
+          handleSend(question);
+        }
+      }
+    };
+    window.addEventListener('studyweb_ask_ai_tutor', handleVoiceAsk);
+    return () => window.removeEventListener('studyweb_ask_ai_tutor', handleVoiceAsk);
+  }, [handleSend, activePersona]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
