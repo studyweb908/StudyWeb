@@ -6,24 +6,23 @@ import {
   Volume2, 
   VolumeX, 
   X, 
-  Loader2, 
-  Bot, 
-  User, 
-  Settings, 
-  Moon, 
-  Sun, 
-  FolderPlus, 
-  BookOpen,
-  LogOut,
-  HelpCircle
+  Send, 
+  Square,
+  AlertCircle,
+  HelpCircle,
+  ChevronRight,
+  RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useMicrophoneWaveform } from '../hooks/useMicrophoneWaveform';
 import { recordUserActivity } from '../utils/userActivity';
 import { Workspace } from './Dashboard/WorkspaceTypes';
-import { voiceResponseEngine, queryGeminiVoice } from '../services/voiceResponseEngine';
+import { voiceResponseEngine } from '../services/voiceResponseEngine';
+import AuraOrb, { AuraOrbState } from './AuraOrb';
+import { processAuraInput, AuraContext } from '../services/auraIntelligence';
 
 interface GlobalVoiceListenerProps {
+  activeTab?: string;
   setActiveTab: (tab: string) => void;
   setActiveWorkspace: (ws: any) => void;
   onToggleFocusMode?: () => void;
@@ -37,6 +36,7 @@ interface GlobalVoiceListenerProps {
 }
 
 export default function GlobalVoiceListener({ 
+  activeTab = 'dashboard',
   setActiveTab, 
   setActiveWorkspace, 
   onToggleFocusMode,
@@ -48,33 +48,74 @@ export default function GlobalVoiceListener({
   workspaces = [],
   activeWorkspace = null
 }: GlobalVoiceListenerProps) {
+  const [isOpen, setIsOpen] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
-  const [lastTranscript, setLastTranscript] = useState('');
-  const [agentResponse, setAgentResponse] = useState<string>('');
-  const [isSupported, setIsSupported] = useState(true);
-  const [showPanel, setShowPanel] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const [currentTranscript, setCurrentTranscript] = useState('');
+  const [userQuery, setUserQuery] = useState('');
+  const [textInput, setTextInput] = useState('');
+  const [displayResponse, setDisplayResponse] = useState<string>(
+    "👋 Hello! I am **AURA**, your adaptive voice assistant for StudyWeb.\n\nAsk me to navigate, create a study workspace, turn on dark mode, or answer any study question."
+  );
   const [isMuted, setIsMuted] = useState(false);
+  const [isSupported, setIsSupported] = useState(true);
+
+  // Short-term conversational context
+  const conversationContextRef = useRef<AuraContext>({
+    activeTab,
+    activeWorkspace,
+    workspaces,
+    recentQueries: []
+  });
 
   const recognitionRef = useRef<any>(null);
-  const lastProcessedCommandRef = useRef<string>('');
   const lastProcessedTimeRef = useRef<number>(0);
   const isSpeakingRef = useRef<boolean>(false);
+  const textInputRef = useRef<HTMLInputElement>(null);
+
+  // Microphone audio waveform levels
   const waveformLevels = useMicrophoneWaveform(isListening && !isSpeaking);
 
-  // Play vocal confirmation using the TTS response engine
-  const speakConfirmation = (text: string, onDone?: () => void) => {
-    if (isMuted) {
-      onDone?.();
-      return;
-    }
+  // Synchronize context props
+  useEffect(() => {
+    conversationContextRef.current.activeTab = activeTab;
+    conversationContextRef.current.activeWorkspace = activeWorkspace;
+    conversationContextRef.current.workspaces = workspaces;
+  }, [activeTab, activeWorkspace, workspaces]);
 
-    voiceResponseEngine.speak(text, {
+  // Determine current AuraOrb state
+  const orbState: AuraOrbState = hasError
+    ? 'error'
+    : isSpeaking
+    ? 'speaking'
+    : isThinking
+    ? 'thinking'
+    : isListening
+    ? 'listening'
+    : 'idle';
+
+  // Interrupt ongoing speech synthesis immediately
+  const interruptSpeaking = () => {
+    voiceResponseEngine.stop();
+    setIsSpeaking(false);
+    isSpeakingRef.current = false;
+  };
+
+  // Human-like vocal delivery via the TTS engine
+  const speakVocalResponse = (spokenText: string) => {
+    if (isMuted) return;
+
+    interruptSpeaking();
+
+    voiceResponseEngine.speak(spokenText, {
       onStart: () => {
         setIsSpeaking(true);
         isSpeakingRef.current = true;
-        // Pause microphone while speaking to avoid capturing computer audio output
+        // Temporarily pause recognition so microphone doesn't capture computer speaker audio
         if (recognitionRef.current && isListening) {
           try {
             recognitionRef.current.abort();
@@ -84,8 +125,7 @@ export default function GlobalVoiceListener({
       onEnd: () => {
         setIsSpeaking(false);
         isSpeakingRef.current = false;
-        onDone?.();
-        // Resume listening if active
+        // Auto-resume microphone listening if user left it active
         if (isListening && recognitionRef.current) {
           setTimeout(() => {
             if (!isSpeakingRef.current) {
@@ -93,24 +133,17 @@ export default function GlobalVoiceListener({
                 recognitionRef.current.start();
               } catch {}
             }
-          }, 350);
+          }, 300);
         }
       },
       onError: () => {
         setIsSpeaking(false);
         isSpeakingRef.current = false;
-        onDone?.();
       }
     });
   };
 
-  const stopSpeaking = () => {
-    voiceResponseEngine.stop();
-    setIsSpeaking(false);
-    isSpeakingRef.current = false;
-  };
-
-  // Setup Web Speech Recognition
+  // Web Speech Recognition Setup
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -119,378 +152,190 @@ export default function GlobalVoiceListener({
       return;
     }
 
-    const recognition = new SpeechRecognition();
-    recognitionRef.current = recognition;
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    try {
+      const recognition = new SpeechRecognition();
+      recognitionRef.current = recognition;
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
 
-    recognition.onresult = (event: any) => {
-      if (isSpeakingRef.current) return;
+      recognition.onresult = (event: any) => {
+        if (isSpeakingRef.current) return;
 
-      let interim = '';
-      let final = '';
+        let interim = '';
+        let final = '';
 
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          final += event.results[i][0].transcript;
-        } else {
-          interim += event.results[i][0].transcript;
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            final += event.results[i][0].transcript;
+          } else {
+            interim += event.results[i][0].transcript;
+          }
         }
-      }
 
-      const spoken = (final || interim).trim();
-      if (spoken) {
-        setLastTranscript(spoken);
-        if (final && final.trim()) {
-          handleVoiceCommand(final.trim());
+        const spoken = (final || interim).trim();
+        if (spoken) {
+          setCurrentTranscript(spoken);
+          if (final && final.trim()) {
+            handleUserUtterance(final.trim());
+          }
         }
-      }
-    };
+      };
 
-    recognition.onerror = (event: any) => {
-      if (event.error !== 'no-speech' && event.error !== 'aborted') {
-        console.warn("Voice recognition error:", event.error);
-      }
-    };
+      recognition.onerror = (event: any) => {
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          setHasError(true);
+          setErrorMessage("Microphone permission was denied. You can still type your questions or commands below.");
+          setIsListening(false);
+        } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
+          console.warn('[AURA Voice Recognition]:', event.error);
+        }
+      };
 
-    recognition.onend = () => {
-      if (isListening && !isSpeakingRef.current) {
+      recognition.onend = () => {
+        if (isListening && !isSpeakingRef.current) {
+          try {
+            recognition.start();
+          } catch (e) {}
+        }
+      };
+    } catch (err) {
+      console.warn("Failed to initialize SpeechRecognition:", err);
+      setIsSupported(false);
+    }
+
+    return () => {
+      if (recognitionRef.current) {
         try {
-          recognition.start();
-        } catch (e) {}
+          recognitionRef.current.stop();
+        } catch {}
       }
+      interruptSpeaking();
     };
   }, [isListening]);
 
-  // Handle incoming voice utterances
-  const handleVoiceCommand = async (rawCommand: string) => {
-    const command = rawCommand.toLowerCase().trim();
-    if (!command) return;
+  // Master handler for spoken and typed utterances
+  const handleUserUtterance = async (input: string) => {
+    const trimmed = input.trim();
+    if (!trimmed) return;
 
-    // Debounce duplicate utterances within 1.2 seconds
+    // Debounce duplicate queries within 1.2 seconds
     const now = Date.now();
-    if (
-      command === lastProcessedCommandRef.current && 
-      now - lastProcessedTimeRef.current < 1200
-    ) {
-      return;
-    }
-    lastProcessedCommandRef.current = command;
+    if (now - lastProcessedTimeRef.current < 1200) return;
     lastProcessedTimeRef.current = now;
 
-    setShowPanel(true);
+    // Interrupt any ongoing speech immediately
+    interruptSpeaking();
 
-    // 1. ACTION: MUTE OR STOP SPEAKING
-    if (
-      command.includes('stop speaking') || 
-      command.includes('stop talking') || 
-      command.includes('be quiet') || 
-      command.includes('shut up') ||
-      command === 'stop' ||
-      command === 'quiet' ||
-      command === 'mute'
-    ) {
-      stopSpeaking();
-      setAgentResponse("Muted vocal speech.");
-      return;
-    }
+    // Visual updates
+    setIsOpen(true);
+    setUserQuery(trimmed);
+    setCurrentTranscript('');
+    setIsThinking(true);
+    setHasError(false);
+    setErrorMessage(null);
 
-    // 2. ACTION: SETTINGS & PROFILE NAVIGATION
-    if (
-      command.includes('go to settings') ||
-      command.includes('open settings') ||
-      command.includes('show settings') ||
-      command.includes('profile settings') ||
-      command === 'settings' ||
-      command === 'preferences'
-    ) {
-      setActiveTab('profile');
-      const confirmation = "Opening your settings and profile preferences.";
-      setAgentResponse(confirmation);
-      speakConfirmation(confirmation);
-      (window as any).showToast?.('🎙️ Voice Command: Opening Settings', 'success');
-      return;
-    }
+    // Update conversation context history
+    conversationContextRef.current.recentQueries = [
+      trimmed,
+      ...(conversationContextRef.current.recentQueries || []).slice(0, 4)
+    ];
 
-    // 3. ACTION: LOG OUT
-    if (
-      command.includes('log out') || 
-      command.includes('logout') || 
-      command.includes('log me out') ||
-      command.includes('sign out') ||
-      command.includes('sign me out')
-    ) {
-      const confirmation = "Opening your logout confirmation. Let me know if you need anything else!";
-      setAgentResponse(confirmation);
-      speakConfirmation(confirmation);
-      (window as any).showToast?.('🎙️ Voice Command: Confirming Logout', 'info');
-      if (onLogout) {
-        onLogout();
-      }
-      return;
-    }
+    try {
+      // Process input with AURA Intelligence Engine
+      const result = await processAuraInput(trimmed, conversationContextRef.current);
 
-    // 4. ACTION: DARK MODE & LIGHT MODE
-    if (
-      command.includes('dark mode') || 
-      command.includes('dark theme') || 
-      command.includes('make it dark') ||
-      command.includes('make the dark mode') ||
-      command.includes('switch to dark mode')
-    ) {
-      if (onSetDarkMode) {
-        onSetDarkMode(true);
-      } else if (onToggleTheme && !isDarkMode) {
-        onToggleTheme();
-      }
-      const confirmation = "Switched to dark mode for you.";
-      setAgentResponse(confirmation);
-      speakConfirmation(confirmation);
-      (window as any).showToast?.('🌙 Voice Command: Switched to Dark Mode', 'success');
-      return;
-    }
+      setIsThinking(false);
+      setDisplayResponse(result.displayResponse);
 
-    if (
-      command.includes('light mode') || 
-      command.includes('light theme') || 
-      command.includes('day mode') ||
-      command.includes('make it light') ||
-      command.includes('switch to light mode')
-    ) {
-      if (onSetDarkMode) {
-        onSetDarkMode(false);
-      } else if (onToggleTheme && isDarkMode) {
-        onToggleTheme();
-      }
-      const confirmation = "Switched to light mode for you.";
-      setAgentResponse(confirmation);
-      speakConfirmation(confirmation);
-      (window as any).showToast?.('☀️ Voice Command: Switched to Light Mode', 'success');
-      return;
-    }
+      // Execute application action if defined
+      if (result.action) {
+        switch (result.action.type) {
+          case 'NAVIGATE':
+            if (result.action.payload) {
+              if (result.action.payload === 'dashboard' || result.action.payload === 'workspaces') {
+                setActiveWorkspace(null);
+              }
+              setActiveTab(result.action.payload);
+              conversationContextRef.current.lastDestination = result.action.payload;
+            }
+            break;
 
-    if (command === 'toggle theme' || command === 'toggle dark mode' || command === 'switch theme') {
-      onToggleTheme?.();
-      const confirmation = "Theme mode toggled.";
-      setAgentResponse(confirmation);
-      speakConfirmation(confirmation);
-      return;
-    }
+          case 'SELECT_WORKSPACE':
+            if (result.action.payload) {
+              setActiveWorkspace(result.action.payload);
+              setActiveTab('workspaces');
+            }
+            break;
 
-    // 5. ACTION: CREATE A WORKSPACE
-    const createWorkspaceRegex = /(?:create|make|add)(?:\s+a)?(?:\s+new)?\s+workspace(?:\s+and\s+name\s+it|\s+named|\s+called|\s+with\s+name|\s+name)?\s+(.+)/i;
-    const createMatch = command.match(createWorkspaceRegex);
+          case 'CREATE_WORKSPACE':
+            if (onCreateWorkspace && result.action.payload?.name) {
+              const newWs = onCreateWorkspace(result.action.payload.name);
+              setActiveWorkspace(newWs);
+              setActiveTab('workspaces');
+            }
+            break;
 
-    if (createMatch && createMatch[1]) {
-      let rawName = createMatch[1].trim();
-      rawName = rawName.replace(/[.,!?;]+$/, '').trim();
+          case 'SET_DARK_MODE':
+            onSetDarkMode?.(result.action.payload ?? true);
+            break;
 
-      let wsName = rawName;
-      if (wsName.toLowerCase() === 'this' || wsName.toLowerCase() === 'it' || wsName.toLowerCase() === 'something') {
-        wsName = 'Study Workspace';
-      } else {
-        wsName = wsName
-          .split(' ')
-          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(' ');
-      }
+          case 'SET_LIGHT_MODE':
+            onSetDarkMode?.(result.action.payload ?? false);
+            break;
 
-      if (onCreateWorkspace) {
-        onCreateWorkspace(wsName);
-      }
-      setActiveTab('workspaces');
+          case 'TOGGLE_THEME':
+            onToggleTheme?.();
+            break;
 
-      const confirmation = `I've created the workspace "${wsName}" for you and opened it!`;
-      setAgentResponse(confirmation);
-      speakConfirmation(confirmation);
-      (window as any).showToast?.(`📁 Voice Command: Created Workspace "${wsName}"`, 'success');
-      return;
-    }
+          case 'TOGGLE_FOCUS_MODE':
+            onToggleFocusMode?.();
+            break;
 
-    // 6. ACTION: OTHER APP NAVIGATION
-    if (command === 'go home' || command === 'home' || command === 'dashboard' || command === 'go to dashboard') {
-      setActiveWorkspace(null);
-      setActiveTab('dashboard');
-      const confirmation = "Taking you to your dashboard.";
-      setAgentResponse(confirmation);
-      speakConfirmation(confirmation);
-      (window as any).showToast?.('🎙️ Voice Command: Navigating to Dashboard', 'success');
-      return;
-    }
+          case 'CONFIRM_LOGOUT':
+            onLogout?.();
+            break;
 
-    if (command === 'workspaces' || command === 'study workspaces' || command === 'open workspaces' || command === 'folders') {
-      setActiveWorkspace(null);
-      setActiveTab('workspaces');
-      const confirmation = "Opening your study workspaces.";
-      setAgentResponse(confirmation);
-      speakConfirmation(confirmation);
-      return;
-    }
-
-    if (command === 'notes' || command === 'study notes' || command === 'open notes' || command === 'ai study notes') {
-      setActiveTab('notes');
-      const confirmation = "Opening your study notes.";
-      setAgentResponse(confirmation);
-      speakConfirmation(confirmation);
-      return;
-    }
-
-    if (command === 'flashcards' || command === 'cards' || command === 'open flashcards') {
-      setActiveTab('flashcards');
-      const confirmation = "Opening your flashcards.";
-      setAgentResponse(confirmation);
-      speakConfirmation(confirmation);
-      return;
-    }
-
-    if (command === 'quiz' || command === 'quizzes' || command === 'quiz center' || command === 'practice quiz') {
-      setActiveTab('quiz-center');
-      const confirmation = "Opening your Quiz Center.";
-      setAgentResponse(confirmation);
-      speakConfirmation(confirmation);
-      return;
-    }
-
-    if (command === 'planner' || command === 'study planner' || command === 'schedule' || command === 'calendar') {
-      setActiveTab('study-planner');
-      const confirmation = "Opening your Study Planner.";
-      setAgentResponse(confirmation);
-      speakConfirmation(confirmation);
-      return;
-    }
-
-    if (command.includes('focus mode') || command.includes('zen mode')) {
-      onToggleFocusMode?.();
-      const confirmation = "Focus mode toggled.";
-      setAgentResponse(confirmation);
-      speakConfirmation(confirmation);
-      return;
-    }
-
-    // 7. GENERAL KNOWLEDGE QUERIES & AI TUTOR QUESTIONS VIA GEMINI API
-    // Checks for questions, queries, explanations, or direct academic queries
-    const isExplicitAiTutorPrompt = 
-      command.includes('ai tutor') || 
-      command.includes('ask tutor') || 
-      command.includes('ask him') || 
-      command.includes('ask her');
-
-    const isQuestionQuery = 
-      isExplicitAiTutorPrompt ||
-      command.startsWith('what is') ||
-      command.startsWith("what's") ||
-      command.startsWith('what are') ||
-      command.startsWith('what the') ||
-      command.startsWith('who is') ||
-      command.startsWith('who was') ||
-      command.startsWith('where is') ||
-      command.startsWith('when did') ||
-      command.startsWith('how do') ||
-      command.startsWith('how does') ||
-      command.startsWith('why is') ||
-      command.startsWith('why do') ||
-      command.startsWith('explain ') ||
-      command.startsWith('tell me about ') ||
-      command.startsWith('calculate ') ||
-      command.startsWith('define ') ||
-      command.includes('currency of') ||
-      command.includes('capital of') ||
-      command.startsWith('ask ');
-
-    if (isQuestionQuery) {
-      let cleanQuery = rawCommand;
-      // Strip voice navigation framing
-      cleanQuery = cleanQuery
-        .replace(/^(?:please\s+)?(?:can\s+you\s+)?(?:go\s+to\s+(?:the\s+)?ai\s+tutor\s+(?:and\s+(?:then\s+)?)?)?/i, '')
-        .replace(/^(?:ask\s+(?:him|her|it|the\s+tutor|ai\s+tutor|tutor)\s+)/i, '')
-        .replace(/^(?:ask\s+)/i, '')
-        .trim();
-
-      // Normalize phrasing e.g. "what the currency of India is"
-      if (/^what\s+the\s+currency\s+of\s+india\s+is\??$/i.test(cleanQuery)) {
-        cleanQuery = "What is the currency of India?";
-      }
-
-      // If user literally just said "open ai tutor" without a query
-      if (!cleanQuery || cleanQuery.toLowerCase() === 'ai tutor' || cleanQuery.toLowerCase() === 'open ai tutor') {
-        setActiveTab('ai-tutor');
-        if (workspaces.length > 0 && !activeWorkspace) {
-          setActiveWorkspace(workspaces[0]);
-        }
-        const confirmation = "Opening your AI Study Tutor. What would you like to learn today?";
-        setAgentResponse(confirmation);
-        speakConfirmation(confirmation);
-        return;
-      }
-
-      // Query Gemini API directly for human-like general knowledge vocal answer
-      setIsThinking(true);
-      setAgentResponse(`Querying Gemini AI on: "${cleanQuery}"...`);
-
-      // If the user asked via AI Tutor framing, navigate to AI Tutor
-      if (isExplicitAiTutorPrompt || command.includes('ai tutor')) {
-        setActiveTab('ai-tutor');
-        if (workspaces.length > 0 && !activeWorkspace) {
-          setActiveWorkspace(workspaces[0]);
-        } else if (workspaces.length === 0 && onCreateWorkspace) {
-          const defaultWs = onCreateWorkspace('General Studies', 'AI Tutor Session');
-          setActiveWorkspace(defaultWs);
+          default:
+            break;
         }
       }
 
-      try {
-        const geminiResult = await queryGeminiVoice(cleanQuery);
-        setIsThinking(false);
-        setAgentResponse(geminiResult.answer);
-
-        // Vocalize answer with human-like text-to-speech engine
-        speakConfirmation(geminiResult.spokenText);
-
-        // Synchronize with AI Tutor chat interface
+      // If user asked an educational question, synchronize with AI Tutor chat feed
+      if (result.category === 'EDUCATIONAL_QUERY') {
         window.dispatchEvent(new CustomEvent('studyweb_ask_ai_tutor', {
           detail: {
-            question: cleanQuery,
-            answer: geminiResult.answer
+            question: trimmed,
+            answer: result.displayResponse
           }
         }));
 
         recordUserActivity({
-          title: 'AI Voice Query',
-          detail: `Asked: "${cleanQuery}"`,
+          title: 'AURA Voice Query',
+          detail: `Asked: "${trimmed}"`,
           iconType: 'tutor'
         });
-
-        (window as any).showToast?.('💡 Gemini AI Answered via Voice', 'success');
-      } catch (err) {
-        console.error('Gemini voice query execution failed:', err);
-        setIsThinking(false);
-        const fallback = `I have received your question: "${cleanQuery}". Let's explore it in the AI Tutor.`;
-        setAgentResponse(fallback);
-        speakConfirmation(fallback);
       }
-      return;
-    }
 
-    // Unrecognized utterance fallback: Direct query to Gemini API so ANY general statement gets answered!
-    setIsThinking(true);
-    setAgentResponse(`Thinking about "${rawCommand}"...`);
-    try {
-      const geminiResult = await queryGeminiVoice(rawCommand);
+      // Deliver natural spoken vocal response via TTS engine
+      speakVocalResponse(result.spokenResponse);
+
+    } catch (err: any) {
+      console.error("[AURA Execution Error]:", err);
       setIsThinking(false);
-      setAgentResponse(geminiResult.answer);
-      speakConfirmation(geminiResult.spokenText);
-    } catch {
-      setIsThinking(false);
-      const help = `I heard: "${rawCommand}". Try saying "Go to settings", "Turn on dark mode", "Create workspace Biology", or ask any question like "What is the speed of light?".`;
-      setAgentResponse(help);
-      speakConfirmation("I am your voice assistant. You can give commands or ask me any general knowledge questions.");
+      setHasError(true);
+      const errReply = "I encountered a minor issue processing that. You can try again or select from the suggestions below.";
+      setDisplayResponse(`⚠️ **Something went wrong**\n\n${err?.message || "Could not complete the requested voice task."}\n\nPlease try again.`);
+      speakVocalResponse(errReply);
     }
   };
 
+  // Toggle voice listening
   const toggleListening = () => {
     if (!recognitionRef.current) {
-      (window as any).showToast?.('Speech recognition is not supported in this browser.', 'warning');
+      setHasError(true);
+      setErrorMessage("Speech recognition is not supported in this browser. You can type commands below.");
+      setIsOpen(true);
       return;
     }
 
@@ -498,61 +343,140 @@ export default function GlobalVoiceListener({
       try {
         recognitionRef.current.stop();
       } catch (e) {}
-      stopSpeaking();
+      interruptSpeaking();
       setIsListening(false);
-      setShowPanel(false);
-      (window as any).showToast?.('🎙️ Voice listener paused.', 'info');
     } else {
       try {
+        interruptSpeaking();
         recognitionRef.current.start();
         setIsListening(true);
-        setShowPanel(true);
-        (window as any).showToast?.('🎙️ Voice listener active! Ask any question or command.', 'success');
+        setIsOpen(true);
+        setHasError(false);
+        setErrorMessage(null);
       } catch (e) {
-        console.error('Failed to start speech recognition:', e);
+        console.warn("Could not start recognition:", e);
       }
     }
   };
 
-  if (!isSupported) return null;
+  // Text input submit handler
+  const handleTextSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!textInput.trim() || isThinking) return;
+    const msg = textInput.trim();
+    setTextInput('');
+    handleUserUtterance(msg);
+  };
+
+  // Keyboard shortcut listener: ESC to close
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        setIsOpen(false);
+        interruptSpeaking();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
+
+  // Clean Markdown renderer for AURA speech bubble
+  const renderMessageContent = (text: string) => {
+    const lines = text.split('\n');
+    return (
+      <div className="space-y-1.5 text-xs sm:text-sm leading-relaxed text-slate-200">
+        {lines.map((line, idx) => {
+          const trimmed = line.trim();
+          if (!trimmed) return <div key={idx} className="h-1" />;
+
+          // Heading or title
+          if (trimmed.startsWith('# ') || trimmed.startsWith('## ') || trimmed.startsWith('### ')) {
+            const cleanTitle = trimmed.replace(/^#+\s*/, '');
+            return (
+              <h4 key={idx} className="font-bold text-white text-sm tracking-tight pt-0.5">
+                {cleanTitle}
+              </h4>
+            );
+          }
+
+          // Bullet points
+          if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+            const content = trimmed.substring(2);
+            return (
+              <div key={idx} className="flex items-start gap-2 pl-1">
+                <span className="text-cyan-400 mt-1 text-[10px]">●</span>
+                <span className="flex-1 text-slate-300">
+                  {formatInlineText(content)}
+                </span>
+              </div>
+            );
+          }
+
+          return <p key={idx}>{formatInlineText(line)}</p>;
+        })}
+      </div>
+    );
+  };
+
+  const formatInlineText = (text: string) => {
+    const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={i} className="font-semibold text-cyan-300">{part.slice(2, -2)}</strong>;
+      }
+      if (part.startsWith('*') && part.endsWith('*')) {
+        return <em key={i} className="italic text-slate-300">{part.slice(1, -1)}</em>;
+      }
+      return part;
+    });
+  };
 
   return (
     <>
-      {/* Floating Voice Agent Dock in bottom right */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3 pointer-events-auto">
-        <AnimatePresence>
-          {showPanel && (
+      {/* 1. EXPANDED SIRI-INSPIRED AURA FLOATING ASSISTANT PANEL */}
+      <AnimatePresence>
+        {isOpen && (
+          <div className="fixed inset-0 z-50 pointer-events-none flex items-end sm:items-center justify-center p-3 sm:p-6">
+            {/* Backdrop Blur Layer */}
             <motion.div
-              initial={{ opacity: 0, y: 15, scale: 0.94 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 15, scale: 0.94 }}
-              className="w-[330px] sm:w-[380px] max-w-[calc(100vw-2rem)] bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-200/80 dark:border-slate-800 p-4 text-slate-800 dark:text-slate-100 flex flex-col gap-3 transition-all"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                setIsOpen(false);
+                interruptSpeaking();
+              }}
+              className="absolute inset-0 bg-slate-950/60 backdrop-blur-md pointer-events-auto cursor-pointer"
+            />
+
+            {/* Siri Glass Floating Assistant Card */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 20 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="relative w-full max-w-[430px] bg-[#0A0F1D]/90 backdrop-blur-2xl rounded-3xl border border-white/10 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.8)] text-slate-100 p-5 sm:p-6 flex flex-col gap-4 pointer-events-auto overflow-hidden ring-1 ring-cyan-500/20"
             >
-              {/* Header */}
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800/80">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-indigo-500 to-rose-500 flex items-center justify-center text-white shadow-sm shadow-indigo-500/20">
-                    <Sparkles className="w-4 h-4 animate-pulse" />
+              {/* Decorative Subtle Background Aura Gradients */}
+              <div className="absolute -top-24 -left-24 w-48 h-48 rounded-full bg-cyan-500/15 blur-3xl pointer-events-none" />
+              <div className="absolute -bottom-24 -right-24 w-48 h-48 rounded-full bg-purple-500/15 blur-3xl pointer-events-none" />
+
+              {/* Header Bar */}
+              <div className="flex items-center justify-between relative z-10 border-b border-white/5 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-purple-600 p-[1px] shadow-sm shadow-cyan-500/30">
+                    <div className="w-full h-full rounded-[11px] bg-slate-950 flex items-center justify-center">
+                      <Sparkles className="w-4 h-4 text-cyan-400 animate-pulse" />
+                    </div>
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 tracking-tight">StudyWeb Voice Agent</h4>
-                    <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
-                      {isSpeaking ? (
-                        <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
-                          <Volume2 className="w-3 h-3 animate-bounce" /> Speaking vocal answer...
-                        </span>
-                      ) : isThinking ? (
-                        <span className="flex items-center gap-1 text-amber-500 font-semibold">
-                          <Loader2 className="w-3 h-3 animate-spin" /> Querying Gemini API...
-                        </span>
-                      ) : isListening ? (
-                        <span className="flex items-center gap-1 text-rose-500 font-semibold">
-                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" /> Listening live...
-                        </span>
-                      ) : (
-                        <span>Ready</span>
-                      )}
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-black tracking-wider text-white">AURA</h3>
+                      <span className="text-[10px] text-cyan-400 font-bold px-1.5 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 uppercase tracking-widest">
+                        AI Voice
+                      </span>
                     </div>
+                    <p className="text-[10px] text-slate-400 font-medium">Adaptive User Response Assistant</p>
                   </div>
                 </div>
 
@@ -560,178 +484,223 @@ export default function GlobalVoiceListener({
                   {/* Mute/Unmute Speech Output Toggle */}
                   <button
                     onClick={() => {
-                      if (isSpeaking) stopSpeaking();
+                      if (isSpeaking) interruptSpeaking();
                       const nextMute = !isMuted;
                       setIsMuted(nextMute);
                       voiceResponseEngine.setMuted(nextMute);
                     }}
-                    title={isMuted ? "Unmute vocal responses" : "Mute vocal responses"}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                    title={isMuted ? "Unmute voice responses" : "Mute voice responses"}
+                    className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+                    aria-label={isMuted ? "Unmute voice" : "Mute voice"}
                   >
-                    {isMuted ? <VolumeX className="w-3.5 h-3.5 text-rose-500" /> : <Volume2 className="w-3.5 h-3.5" />}
+                    {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4" />}
                   </button>
 
-                  {/* Close / Collapse button */}
+                  {/* Close Assistant */}
                   <button
-                    onClick={() => setShowPanel(false)}
-                    title="Minimize panel"
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                    onClick={() => {
+                      setIsOpen(false);
+                      interruptSpeaking();
+                    }}
+                    title="Close AURA"
+                    className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+                    aria-label="Close AURA"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
               </div>
 
-              {/* Dynamic Transcript & Agent Response Area */}
-              <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1 text-xs">
-                {/* User's spoken speech */}
-                {lastTranscript ? (
-                  <div className="flex items-start gap-2 bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800">
-                    <div className="w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center shrink-0 text-slate-600 dark:text-slate-300 mt-0.5">
-                      <User className="w-3 h-3" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">You said</p>
-                      <p className="text-slate-800 dark:text-slate-200 font-medium leading-relaxed break-words">{lastTranscript}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center py-2 text-slate-400 text-xs italic">
-                    Say any action or question (e.g. &ldquo;Go to settings&rdquo;, &ldquo;What is the speed of light?&rdquo;)
-                  </div>
-                )}
+              {/* Prominent Siri-Inspired Central Animated Orb */}
+              <div className="flex flex-col items-center justify-center py-2 relative z-10">
+                <AuraOrb
+                  state={orbState}
+                  audioLevels={waveformLevels}
+                  size={105}
+                  onClick={() => {
+                    if (isSpeaking) {
+                      interruptSpeaking();
+                    } else {
+                      toggleListening();
+                    }
+                  }}
+                />
 
-                {/* Agent Response */}
-                {agentResponse && (
-                  <div className="flex items-start gap-2 bg-indigo-50/70 dark:bg-indigo-950/40 p-2.5 rounded-xl border border-indigo-100 dark:border-indigo-900/40">
-                    <div className="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center shrink-0 text-white mt-0.5 shadow-xs">
-                      <Bot className="w-3 h-3" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-1 mb-0.5">
-                        <p className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 tracking-wider">Voice Confirmation & Answer</p>
-                        {isSpeaking && (
-                          <button
-                            onClick={stopSpeaking}
-                            className="text-[10px] text-rose-500 hover:underline font-bold flex items-center gap-0.5 cursor-pointer"
-                          >
-                            <VolumeX className="w-2.5 h-2.5" /> Stop voice
-                          </button>
-                        )}
-                      </div>
-                      <p className="text-slate-800 dark:text-slate-200 leading-relaxed font-normal whitespace-pre-line break-words">{agentResponse}</p>
-                    </div>
+                {/* State Label & Audio Reactive Pulse */}
+                <div className="mt-3 text-center">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs font-semibold">
+                    {isSpeaking ? (
+                      <span className="flex items-center gap-1.5 text-cyan-400">
+                        <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                        Speaking response...
+                      </span>
+                    ) : isThinking ? (
+                      <span className="flex items-center gap-1.5 text-amber-400">
+                        <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                        Analyzing with Gemini...
+                      </span>
+                    ) : isListening ? (
+                      <span className="flex items-center gap-1.5 text-cyan-400">
+                        <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                        Listening to you...
+                      </span>
+                    ) : hasError ? (
+                      <span className="flex items-center gap-1.5 text-rose-400">
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        Needs Attention
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">Tap orb or speak command</span>
+                    )}
                   </div>
-                )}
-              </div>
-
-              {/* Real-time Audio Waveform Visualizer */}
-              <div className="flex items-center justify-between bg-slate-100 dark:bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-200/60 dark:border-slate-800">
-                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  {isSpeaking ? "Vocal Engine Speaking" : isListening ? "Microphone Input" : "Idle"}
-                </span>
-
-                <div className="flex items-center gap-1 h-3.5">
-                  {isSpeaking ? (
-                    // Equalizer wave animation when TTS response engine is speaking
-                    [1, 2, 3, 4, 5].map((i) => (
-                      <motion.div
-                        key={i}
-                        className="w-1 bg-gradient-to-t from-emerald-500 to-indigo-500 rounded-full"
-                        animate={{ height: ['4px', `${Math.min(16, 4 + ((i * 4) % 14))}px`, '6px', '14px', '4px'] }}
-                        transition={{ duration: 0.6 + i * 0.1, repeat: Infinity, ease: 'easeInOut' }}
-                      />
-                    ))
-                  ) : (
-                    // Real-time microphone levels when user is speaking
-                    waveformLevels.map((lvl, idx) => (
-                      <motion.div
-                        key={idx}
-                        className="w-1 bg-gradient-to-t from-rose-500 to-indigo-500 rounded-full origin-bottom"
-                        animate={{ height: `${Math.max(3, Math.min(16, lvl))}px` }}
-                        transition={{ type: "tween", duration: 0.08 }}
-                      />
-                    ))
-                  )}
                 </div>
               </div>
 
-              {/* Quick Action & General Knowledge Chips */}
-              <div className="flex flex-wrap gap-1.5 pt-1">
+              {/* Live Transcript & Conversational Dialogue Area */}
+              <div className="space-y-2.5 max-h-[180px] overflow-y-auto pr-1 text-xs relative z-10 custom-scrollbar">
+                {/* User transcript (spoken or typed) */}
+                {(currentTranscript || userQuery) && (
+                  <div className="flex items-start gap-2 bg-white/5 border border-white/5 rounded-2xl p-2.5">
+                    <div className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-slate-300 shrink-0 mt-0.5">
+                      <Mic className="w-3 h-3" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">You</span>
+                      <p className="text-slate-200 font-medium break-words mt-0.5">
+                        {currentTranscript || userQuery}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* AURA Display Response */}
+                <div className="bg-gradient-to-b from-cyan-950/20 to-purple-950/20 border border-white/10 rounded-2xl p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[10px] uppercase font-bold text-cyan-400 tracking-wider flex items-center gap-1">
+                      <Sparkles className="w-3 h-3" /> AURA
+                    </span>
+                    {isSpeaking && (
+                      <button
+                        onClick={interruptSpeaking}
+                        className="text-[10px] text-rose-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Square className="w-2.5 h-2.5 fill-current" /> Stop voice
+                      </button>
+                    )}
+                  </div>
+                  {renderMessageContent(displayResponse)}
+                </div>
+
+                {/* Error Banner if permission or network issue */}
+                {errorMessage && (
+                  <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+                    <p className="flex-1">{errorMessage}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Text Input Fallback */}
+              <form onSubmit={handleTextSubmit} className="relative z-10 flex items-center gap-2">
+                <input
+                  ref={textInputRef}
+                  type="text"
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  placeholder="Type a command or ask a question..."
+                  className="flex-1 px-3.5 py-2.5 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 text-xs focus:outline-none focus:border-cyan-500/60 focus:ring-1 focus:ring-cyan-500/40 transition-all"
+                  aria-label="Type a command or question to AURA"
+                />
+
+                {/* Microphone Toggle Button */}
                 <button
-                  onClick={() => handleVoiceCommand("go to settings")}
-                  className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 text-[11px] font-medium transition-colors border border-slate-200/50 dark:border-slate-700 flex items-center gap-1 cursor-pointer"
+                  type="button"
+                  onClick={toggleListening}
+                  className={`p-2.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-center ${
+                    isListening
+                      ? 'bg-rose-500/20 border-rose-500 text-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.3)] animate-pulse'
+                      : 'bg-white/5 border-white/10 text-slate-400 hover:text-white hover:bg-white/10'
+                  }`}
+                  title={isListening ? "Listening... click to pause" : "Click to speak"}
+                  aria-label={isListening ? "Stop listening" : "Start voice input"}
                 >
-                  <Settings className="w-3 h-3" /> Settings
+                  {isListening ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
                 </button>
+
+                {/* Text Send Button */}
                 <button
-                  onClick={() => handleVoiceCommand(isDarkMode ? "turn on light mode" : "make the dark mode here")}
-                  className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 text-[11px] font-medium transition-colors border border-slate-200/50 dark:border-slate-700 flex items-center gap-1 cursor-pointer"
+                  type="submit"
+                  disabled={!textInput.trim() || isThinking}
+                  className="p-2.5 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold disabled:opacity-30 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-cyan-500/25 transition-all cursor-pointer"
+                  title="Send text to AURA"
+                  aria-label="Send message"
                 >
-                  {isDarkMode ? <Sun className="w-3 h-3" /> : <Moon className="w-3 h-3" />} 
-                  {isDarkMode ? "Light Mode" : "Dark Mode"}
+                  <Send className="w-4 h-4" />
                 </button>
-                <button
-                  onClick={() => handleVoiceCommand("create a workspace and name it Physics")}
-                  className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 text-[11px] font-medium transition-colors border border-slate-200/50 dark:border-slate-700 flex items-center gap-1 cursor-pointer"
-                >
-                  <FolderPlus className="w-3 h-3" /> Create Workspace
-                </button>
-                <button
-                  onClick={() => handleVoiceCommand("what is the currency of India?")}
-                  className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 text-[11px] font-medium transition-colors border border-slate-200/50 dark:border-slate-700 flex items-center gap-1 cursor-pointer"
-                >
-                  <Bot className="w-3 h-3" /> Currency of India?
-                </button>
-                <button
-                  onClick={() => handleVoiceCommand("what is the speed of light?")}
-                  className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 text-[11px] font-medium transition-colors border border-slate-200/50 dark:border-slate-700 flex items-center gap-1 cursor-pointer"
-                >
-                  <Sparkles className="w-3 h-3" /> Speed of Light?
-                </button>
+              </form>
+
+              {/* Interactive Quick Suggestion Chips */}
+              <div className="flex flex-wrap gap-1.5 pt-0.5 relative z-10 border-t border-white/5">
+                {[
+                  "Take me to workspaces",
+                  "Open AI Tutor",
+                  "Turn on dark mode",
+                  "What is photosynthesis?",
+                  "Tell me what I can do here"
+                ].map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => handleUserUtterance(chip)}
+                    className="px-2.5 py-1 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-[11px] text-slate-300 hover:text-white transition-colors cursor-pointer"
+                  >
+                    {chip}
+                  </button>
+                ))}
               </div>
             </motion.div>
-          )}
-        </AnimatePresence>
+          </div>
+        )}
+      </AnimatePresence>
 
-        {/* Floating Voice Command Primary Toggle Button */}
-        <div className="flex items-center gap-2">
-          {!showPanel && (lastTranscript || isSpeaking) && (
-            <motion.button
-              initial={{ opacity: 0, x: 10 }}
-              animate={{ opacity: 1, x: 0 }}
-              onClick={() => setShowPanel(true)}
-              className="bg-slate-900/90 text-white px-3.5 py-2 rounded-2xl text-xs font-semibold shadow-xl border border-slate-700/80 flex items-center gap-2 backdrop-blur-md cursor-pointer hover:bg-slate-800"
-            >
-              {isSpeaking ? (
-                <Volume2 className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-              ) : (
-                <Mic className="w-3.5 h-3.5 text-rose-400 animate-bounce" />
-              )}
-              <span className="max-w-[170px] truncate">{agentResponse || lastTranscript || 'Voice Agent active'}</span>
-            </motion.button>
-          )}
-
-          <button
-            onClick={toggleListening}
-            className={`relative p-3.5 rounded-full shadow-2xl transition-all flex items-center justify-center cursor-pointer group ${
-              isListening
-                ? 'bg-gradient-to-r from-rose-500 to-indigo-600 text-white shadow-rose-500/40 ring-4 ring-rose-500/20'
-                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-800 hover:border-indigo-500 hover:shadow-lg'
-            }`}
-            title={isListening ? "Voice commands active. Click to pause." : "Enable voice agent (e.g. 'Go to settings', 'Dark mode', 'Create workspace', ask any question)"}
-          >
-            {isListening ? (
-              <Mic className="w-5 h-5 animate-pulse" />
+      {/* 2. FLOATING AURA LAUNCHER BUTTON IN BOTTOM-RIGHT CORNER */}
+      <div className="fixed bottom-6 right-6 z-40 pointer-events-auto flex items-center gap-2.5">
+        <button
+          onClick={() => {
+            if (isOpen) {
+              setIsOpen(false);
+              interruptSpeaking();
+            } else {
+              setIsOpen(true);
+              if (!isListening) {
+                toggleListening();
+              }
+            }
+          }}
+          className={`relative p-3.5 rounded-full shadow-2xl transition-all flex items-center justify-center cursor-pointer group ${
+            isOpen || isListening
+              ? 'bg-gradient-to-tr from-cyan-500 via-blue-600 to-purple-600 text-white shadow-cyan-500/40 ring-4 ring-cyan-500/20'
+              : 'bg-[#0A0F1D] text-slate-200 border border-white/10 hover:border-cyan-500 hover:shadow-lg hover:shadow-cyan-500/20'
+          }`}
+          title={isOpen ? "AURA active. Click to minimize." : "Open AURA (Adaptive User Response Assistant)"}
+          aria-label="Open AURA voice assistant"
+        >
+          {/* Subtle Rotating Gradient Ring */}
+          <div className="w-5 h-5 flex items-center justify-center">
+            {isSpeaking ? (
+              <Volume2 className="w-5 h-5 text-cyan-300 animate-pulse" />
+            ) : isListening ? (
+              <Mic className="w-5 h-5 text-white animate-bounce" />
             ) : (
-              <MicOff className="w-5 h-5 text-slate-400 group-hover:text-indigo-600 transition-colors" />
+              <Sparkles className="w-5 h-5 text-cyan-400 group-hover:scale-110 transition-transform" />
             )}
+          </div>
 
-            {isListening && (
-              <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-white dark:border-slate-900 animate-ping" />
-            )}
-          </button>
-        </div>
+          {/* Active Ping Beacon */}
+          {(isListening || isSpeaking) && (
+            <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-cyan-400 rounded-full border-2 border-[#0A0F1D] animate-ping" />
+          )}
+        </button>
       </div>
     </>
   );

@@ -1090,6 +1090,7 @@ export default function App() {
 
         <OfflineNotice />
         <GlobalVoiceListener 
+          activeTab={activeTab}
           setActiveTab={setActiveTab} 
           setActiveWorkspace={handleSelectWorkspace} 
           onToggleFocusMode={() => setIsFocusMode(!isFocusMode)}
