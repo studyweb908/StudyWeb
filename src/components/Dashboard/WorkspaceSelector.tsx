@@ -24,7 +24,9 @@ import {
   Coins,
   GripVertical,
   Video,
-  Music
+  Music,
+  Edit3,
+  Camera
 } from 'lucide-react';
 import { 
   DndContext, 
@@ -45,11 +47,13 @@ import {
 import { generateUuid } from '../../utils/uuid.ts';
 import { CSS } from '@dnd-kit/utilities';
 import { Workspace } from './WorkspaceTypes';
+import EditWorkspaceModal from './EditWorkspaceModal';
 
 interface WorkspaceSelectorProps {
   workspaces: Workspace[];
   onSelectWorkspace: (workspace: Workspace) => void;
   onCreateWorkspace: (workspace: Workspace) => void;
+  onUpdateWorkspace?: (workspace: Workspace) => void;
   onTogglePin: (id: string) => void;
   onToggleFavorite: (id: string) => void;
   onDeleteWorkspace?: (id: string) => void;
@@ -62,6 +66,7 @@ interface SortableWorkspaceCardProps {
   onSelectWorkspace: (workspace: Workspace) => void;
   onToggleFavorite: (id: string) => void;
   onDeleteWorkspace?: (id: string) => void;
+  onEditWorkspace?: (workspace: Workspace, initialTab?: 'general' | 'logo' | 'banner') => void;
   confirmDeleteId: string | null;
   setConfirmDeleteId: (id: string | null) => void;
   getThemeTextClass: (theme: string) => string;
@@ -72,6 +77,7 @@ function SortableWorkspaceCard({
   onSelectWorkspace,
   onToggleFavorite,
   onDeleteWorkspace,
+  onEditWorkspace,
   confirmDeleteId,
   setConfirmDeleteId,
   getThemeTextClass
@@ -110,20 +116,49 @@ function SortableWorkspaceCard({
           onClick={() => onSelectWorkspace(ws)}
           className="cursor-pointer flex-1 flex flex-col"
         >
-          {/* Visual Cover Header (White-Greyish Background Only) */}
-          <div className="h-24 bg-gradient-to-r from-slate-50 to-slate-100/90 dark:from-slate-850 dark:to-slate-800/90 border-b border-slate-150 dark:border-slate-800 relative overflow-hidden">
-            {/* Pattern Overlay */}
-            <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808005_1px,transparent_1px),linear-gradient(to_bottom,#80808005_1px,transparent_1px)] bg-[size:10px_16px] pointer-events-none opacity-40" />
+          {/* Visual Cover Header with Background Banner Image */}
+          <div className="h-28 bg-slate-900 border-b border-slate-150 dark:border-slate-800 relative overflow-hidden group/cardheader">
+            <img
+              src={ws.coverImage || 'https://images.unsplash.com/photo-1517842645767-c639042777db?q=80&w=600&auto=format&fit=crop'}
+              alt="Workspace Banner"
+              className="w-full h-full object-cover opacity-65 dark:opacity-50 transition-transform duration-500 group-hover/cardheader:scale-105"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/25 to-black/30 pointer-events-none" />
             
-            {/* Logo Display - MAX VISIBILITY */}
-            <div className="absolute bottom-2.5 left-4 w-12 h-12 bg-white dark:bg-slate-900 rounded-[14px] border-2 border-indigo-100 dark:border-slate-700 flex items-center justify-center text-2xl shadow-md transition-transform hover:scale-105 z-10">
-              {ws.emoji || '🧬'}
+            {/* Logo Display - MAX VISIBILITY & EDIT TRIGGER */}
+            <div 
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditWorkspace?.(ws, 'logo');
+              }}
+              className="absolute bottom-2.5 left-4 w-12 h-12 bg-white dark:bg-slate-900 rounded-[14px] border-2 border-white/80 dark:border-slate-700 flex items-center justify-center text-2xl shadow-md transition-transform hover:scale-110 z-10 overflow-hidden cursor-pointer"
+              title="Click to customize logo"
+            >
+              {ws.emoji && (ws.emoji.startsWith('data:') || ws.emoji.startsWith('http')) ? (
+                <img src={ws.emoji} alt="Logo" className="w-full h-full object-cover" />
+              ) : (
+                <span className="leading-none">{ws.emoji || '🧬'}</span>
+              )}
             </div>
 
+            {/* Quick Edit Workspace Button beside the banner */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditWorkspace?.(ws, 'general');
+              }}
+              className="absolute bottom-2.5 right-3 px-2 py-1 bg-white/90 dark:bg-slate-800/90 hover:bg-white dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 rounded-lg shadow-sm border border-white/40 dark:border-slate-600/50 transition-all cursor-pointer z-10 flex items-center gap-1 text-[11px] font-bold backdrop-blur-sm"
+              title="Edit workspace name, logo, or banner"
+            >
+              <Edit3 className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+              <span>Edit</span>
+            </button>
+
             {/* Pin status badge */}
-            <div className="absolute top-3 left-3 flex items-center gap-1.5">
+            <div className="absolute top-3 left-3 flex items-center gap-1.5 z-10">
               {ws.pinned && (
-                <span className="p-1.5 bg-amber-500/10 text-amber-500 rounded-lg border border-amber-500/20 backdrop-blur-sm">
+                <span className="p-1.5 bg-amber-500/20 text-amber-400 rounded-lg border border-amber-500/30 backdrop-blur-md">
                   <Pin className="w-3.5 h-3.5 fill-current" />
                 </span>
               )}
@@ -134,7 +169,7 @@ function SortableWorkspaceCard({
               {...attributes} 
               {...listeners}
               onClick={(e) => e.stopPropagation()} 
-              className="absolute top-3 right-3 p-1.5 bg-white/85 dark:bg-slate-800/90 hover:bg-white dark:hover:bg-slate-750 text-slate-450 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg border border-slate-200/50 dark:border-slate-700/50 shadow-sm transition-all cursor-grab active:cursor-grabbing z-20 touch-none"
+              className="absolute top-3 right-3 p-1.5 bg-black/40 hover:bg-black/60 text-white rounded-lg border border-white/20 shadow-sm transition-all cursor-grab active:cursor-grabbing z-20 touch-none backdrop-blur-md"
               title="Drag to reorder workspace"
             >
               <GripVertical className="w-3.5 h-3.5" />
@@ -231,6 +266,7 @@ export default function WorkspaceSelector({
   workspaces, 
   onSelectWorkspace, 
   onCreateWorkspace,
+  onUpdateWorkspace,
   onTogglePin,
   onToggleFavorite,
   onDeleteWorkspace,
@@ -241,6 +277,8 @@ export default function WorkspaceSelector({
   const [sortBy, setSortBy] = useState<'manual' | 'lastOpened' | 'name' | 'files'>('manual');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [editingWorkspace, setEditingWorkspace] = useState<Workspace | null>(null);
+  const [editTab, setEditTab] = useState<'general' | 'logo' | 'banner'>('general');
 
   React.useEffect(() => {
     const handleOpenModal = () => setShowCreateModal(true);
@@ -542,6 +580,10 @@ export default function WorkspaceSelector({
                   onSelectWorkspace={onSelectWorkspace}
                   onToggleFavorite={onToggleFavorite}
                   onDeleteWorkspace={onDeleteWorkspace}
+                  onEditWorkspace={(workspace, tab) => {
+                    setEditingWorkspace(workspace);
+                    setEditTab(tab || 'general');
+                  }}
                   confirmDeleteId={confirmDeleteId}
                   setConfirmDeleteId={setConfirmDeleteId}
                   getThemeTextClass={getThemeTextClass}
@@ -694,6 +736,28 @@ export default function WorkspaceSelector({
           </div>
         )}
       </AnimatePresence>
+
+      {/* Edit Workspace Modal */}
+      {editingWorkspace && (
+        <EditWorkspaceModal
+          isOpen={Boolean(editingWorkspace)}
+          onClose={() => setEditingWorkspace(null)}
+          workspace={editingWorkspace}
+          initialTab={editTab}
+          onSave={(updated) => {
+            onUpdateWorkspace?.(updated);
+            setEditingWorkspace(null);
+            window.dispatchEvent(
+              new CustomEvent('studyweb-toast', {
+                detail: {
+                  message: 'Workspace updated successfully.',
+                  type: 'success'
+                }
+              })
+            );
+          }}
+        />
+      )}
     </div>
   );
 }

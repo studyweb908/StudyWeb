@@ -1,8 +1,40 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Image as ImageIcon, Sparkles, Flame, Clock, FileText, Layers, Award, Network, BookOpen, TrendingUp, ChevronRight, ChevronDown, AlertCircle, ThumbsUp, Zap, Calendar, Video, Music, Globe, Sigma, Quote, Terminal, RefreshCw, X, Trash2, Check, ExternalLink } from 'lucide-react';
+import { 
+  Image as ImageIcon, 
+  Sparkles, 
+  Flame, 
+  Clock, 
+  FileText, 
+  Layers, 
+  Award, 
+  Network, 
+  BookOpen, 
+  TrendingUp, 
+  ChevronRight, 
+  ChevronDown, 
+  AlertCircle, 
+  ThumbsUp, 
+  Zap, 
+  Calendar, 
+  Video, 
+  Music, 
+  Globe, 
+  Sigma, 
+  Quote, 
+  Terminal, 
+  RefreshCw, 
+  X, 
+  Trash2, 
+  Check, 
+  ExternalLink,
+  Edit3,
+  Camera,
+  Palette
+} from 'lucide-react';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import QuickPreviewModal from './QuickPreviewModal';
+import EditWorkspaceModal from './EditWorkspaceModal';
 
 interface WorkspaceOverviewProps {
   workspace: Workspace;
@@ -13,9 +45,20 @@ interface WorkspaceOverviewProps {
   onStartStudySession?: () => void;
   onRemoveFile?: (fileId: string) => void;
   onBack: () => void;
+  onUpdateWorkspace?: (workspace: Workspace) => void;
 }
 
-export default function WorkspaceOverview({ workspace, workspaces = [], onSwitchWorkspace, onDeleteWorkspace, setActiveWorkspaceTab, onStartStudySession, onRemoveFile, onBack }: WorkspaceOverviewProps) {
+export default function WorkspaceOverview({ 
+  workspace, 
+  workspaces = [], 
+  onSwitchWorkspace, 
+  onDeleteWorkspace, 
+  setActiveWorkspaceTab, 
+  onStartStudySession, 
+  onRemoveFile, 
+  onBack,
+  onUpdateWorkspace
+}: WorkspaceOverviewProps) {
   // Compute numbers
   const files = workspace.files || [];
   const flashcards = workspace.flashcards || [];
@@ -32,6 +75,8 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
   const [previewFile, setPreviewFile] = useState<WorkspaceFile | null>(null);
   const [fileToRemove, setFileToRemove] = useState<WorkspaceFile | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editInitialTab, setEditInitialTab] = useState<'general' | 'logo' | 'banner'>('general');
 
   const themeColors = {
     emerald: {
@@ -79,66 +124,157 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
   };
 
   const currentTheme = themeColors[workspace.colorTheme] || themeColors.indigo;
+  const isCustomLogo = workspace.emoji && (workspace.emoji.startsWith('data:') || workspace.emoji.startsWith('http'));
 
   return (
     <div className="space-y-6 text-left">
-      {/* ================= WORKSPACE HERO HEADER ================= */}
-      <div className="relative rounded-[24px] overflow-hidden bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-6 md:p-8 shadow-sm hover:shadow-md transition-shadow">
-        {/* Background Visual Highlight overlay */}
-        <div className="absolute inset-0 bg-gradient-to-tr opacity-[0.08] dark:opacity-25" style={{
-          backgroundImage: workspace.colorTheme === 'emerald' ? 'radial-gradient(circle at 80% 20%, #10B981 0%, transparent 50%)' :
-                          workspace.colorTheme === 'indigo' ? 'radial-gradient(circle at 80% 20%, #6366F1 0%, transparent 50%)' :
-                          workspace.colorTheme === 'rose' ? 'radial-gradient(circle at 80% 20%, #F43F5E 0%, transparent 50%)' :
-                          workspace.colorTheme === 'amber' ? 'radial-gradient(circle at 80% 20%, #F59E0B 0%, transparent 50%)' :
-                          workspace.colorTheme === 'violet' ? 'radial-gradient(circle at 80% 20%, #8B5CF6 0%, transparent 50%)' :
-                          'radial-gradient(circle at 80% 20%, #06B6D4 0%, transparent 50%)'
-        }} />
-        <div className="absolute top-0 right-0 p-8 text-7xl select-none opacity-10 dark:opacity-40 hidden sm:block">
-          {workspace.emoji}
-        </div>
+      {/* ================= WORKSPACE HERO HEADER WITH BANNER BESIDE IT ================= */}
+      <div className="relative rounded-[24px] overflow-hidden bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-6 md:p-8 shadow-xs hover:shadow-md transition-all">
+        {/* Subtle Ambient Background Highlight */}
+        <div className="absolute inset-0 bg-gradient-to-r from-slate-50/50 via-white to-transparent dark:from-slate-850/40 dark:via-slate-900 pointer-events-none" />
 
-        <div className="relative z-20 flex flex-col justify-between h-full gap-5">
-          <div className="space-y-3 max-w-2xl relative">
-            <h1 className="text-3xl md:text-4xl font-extrabold text-slate-800 dark:text-white tracking-tight leading-tight flex items-center gap-3">
-              <span>{workspace.emoji}</span>
-              <span>{workspace.name}</span>
-            </h1>
+        {/* Decorative corner glow */}
+        <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-500/5 dark:bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        {/* Selected Element: Unified White Horizontal Layout Container */}
+        <div className="relative z-10 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-6">
+          {/* Left Column: Workspace Identity & Actions */}
+          <div className="flex-1 space-y-4">
+            <div className="flex items-center gap-4">
+              {/* Interactive Workspace Logo */}
+              <button
+                type="button"
+                onClick={() => {
+                  setEditInitialTab('logo');
+                  setShowEditModal(true);
+                }}
+                className="relative group/logo w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-slate-200/80 dark:border-slate-700 shadow-sm flex items-center justify-center overflow-hidden shrink-0 transition-transform hover:scale-105 active:scale-95 cursor-pointer text-left"
+                title="Click to customize logo"
+              >
+                {isCustomLogo ? (
+                  <img src={workspace.emoji} alt="Logo" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-3xl sm:text-4xl select-none leading-none">{workspace.emoji || '🧬'}</span>
+                )}
+                <div className="absolute inset-0 bg-black/45 opacity-0 group-hover/logo:opacity-100 flex items-center justify-center transition-opacity text-white text-[10px] font-bold">
+                  Edit
+                </div>
+              </button>
+
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200/70 dark:border-indigo-800">
+                    {workspace.subject || 'General'}
+                  </span>
+                  <span className="text-slate-300 dark:text-slate-700 text-xs">•</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditInitialTab('general');
+                      setShowEditModal(true);
+                    }}
+                    className="text-xs font-bold text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>Customize</span>
+                  </button>
+                </div>
+
+                <h1 
+                  onClick={() => {
+                    setEditInitialTab('general');
+                    setShowEditModal(true);
+                  }}
+                  className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight leading-tight cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                  title="Click to edit name"
+                >
+                  {workspace.name}
+                </h1>
+              </div>
+            </div>
+
+            {workspace.description && (
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium line-clamp-2 max-w-xl leading-relaxed">
+                {workspace.description}
+              </p>
+            )}
+
+            {/* Quick Action Navigation Buttons */}
+            <div className="flex flex-wrap items-center gap-2.5 pt-2">
+              <button
+                onClick={onBack}
+                className="px-3.5 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer"
+              >
+                <Layers className="w-4 h-4" />
+                <span>All Workspaces</span>
+              </button>
+              <button
+                onClick={() => setActiveWorkspaceTab('library')}
+                className="px-3.5 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer"
+              >
+                <FileText className="w-4 h-4" />
+                <span>Upload Material</span>
+              </button>
+              <button
+                onClick={() => setActiveWorkspaceTab('chat')}
+                className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-xs shadow-indigo-600/20"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>AI Tutor</span>
+              </button>
+              <button
+                onClick={() => {
+                  if (onDeleteWorkspace) {
+                    onDeleteWorkspace(workspace.id);
+                  } else {
+                    setShowDeleteConfirm(true);
+                  }
+                }}
+                className="px-3.5 py-2 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-950/60 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/50 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ml-auto sm:ml-0"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Delete</span>
+              </button>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 pt-2">
-            <button
-              onClick={onBack}
-              className="px-4 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 border border-indigo-200/80 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer"
-            >
-              <Layers className="w-4 h-4" />
-              <span>Switch Workspace</span>
-            </button>
-            <button
-              onClick={() => setActiveWorkspaceTab('library')}
-              className="px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100/80 dark:bg-slate-800/60 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-750 text-slate-700 dark:text-slate-200 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer"
-            >
-              <FileText className="w-4 h-4" />
-              <span>Upload Material</span>
-            </button>
-            <button
-              onClick={() => {
-                if (onDeleteWorkspace) {
-                  onDeleteWorkspace(workspace.id);
-                } else {
-                  setShowDeleteConfirm(true);
-                }
-              }}
-              className="px-4 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-950/60 border border-red-200/80 dark:border-red-900/50 text-red-600 dark:text-red-400 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ml-auto sm:ml-0"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>Delete Workspace</span>
-            </button>
+          {/* Right Column: Banner Beside It */}
+          <div 
+            onClick={() => {
+              setEditInitialTab('banner');
+              setShowEditModal(true);
+            }}
+            className="w-full lg:w-72 h-36 sm:h-40 rounded-2xl overflow-hidden relative shadow-sm border border-slate-200/80 dark:border-slate-750 group/bannercard shrink-0 cursor-pointer bg-slate-100 dark:bg-slate-800 transition-all hover:shadow-md"
+            title="Click to change workspace banner"
+          >
+            <img 
+              src={workspace.coverImage || 'https://images.unsplash.com/photo-1507842217343-583bb7270b66?auto=format&fit=crop&q=80&w=800'}
+              alt="Workspace Banner"
+              className="w-full h-full object-cover group-hover/bannercard:scale-105 transition-transform duration-500"
+            />
+            {/* Ambient Dark Gradient for bottom label & hover button */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent flex flex-col justify-between p-3" />
+
+            <div className="absolute top-2.5 right-2.5">
+              <span className="px-2 py-1 rounded-lg bg-black/60 hover:bg-black/80 text-white backdrop-blur-md text-[10px] font-bold border border-white/20 flex items-center gap-1 opacity-80 group-hover/bannercard:opacity-100 transition-opacity">
+                <Camera className="w-3 h-3" />
+                <span>Change Banner</span>
+              </span>
+            </div>
+
+            <div className="absolute bottom-2.5 left-3 right-3 flex items-center justify-between text-white pointer-events-none">
+              <span className="text-[11px] font-bold drop-shadow-sm flex items-center gap-1">
+                <ImageIcon className="w-3.5 h-3.5" />
+                <span>Cover Banner</span>
+              </span>
+              <span className="text-[10px] opacity-75">Click to edit</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ================= STATS GRID ================= */}
-      <div className="grid grid-cols-2 gap-4">
+      {/* ================= STATS ================= */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {/* Stat 1 */}
         <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-6 rounded-2xl flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
@@ -147,17 +283,6 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Resources</p>
             <p className="text-lg font-black text-slate-800 dark:text-slate-100">{fileCount}</p>
-          </div>
-        </div>
-
-        {/* Stat 2 */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-6 rounded-2xl flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
-            <Layers className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Flashcards</p>
-            <p className="text-lg font-black text-slate-800 dark:text-slate-100">{cardCount}</p>
           </div>
         </div>
       </div>
@@ -343,6 +468,27 @@ export default function WorkspaceOverview({ workspace, workspaces = [], onSwitch
           </div>
         )}
       </AnimatePresence>
+
+      {/* Edit Workspace Modal */}
+      <EditWorkspaceModal
+        isOpen={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        workspace={workspace}
+        initialTab={editInitialTab}
+        onSave={(updated) => {
+          if (onUpdateWorkspace) {
+            onUpdateWorkspace(updated);
+          }
+          window.dispatchEvent(
+            new CustomEvent('studyweb-toast', {
+              detail: {
+                message: 'Workspace customized successfully.',
+                type: 'success'
+              }
+            })
+          );
+        }}
+      />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import { knowledgeRouter } from "./src/knowledge-engine/api.js";
+import { studyMaterialRouter } from "./src/services/studyMaterialPipeline.js";
 import { createClient } from "@supabase/supabase-js";
 
 // Load environment variables
@@ -15,7 +16,7 @@ if (!process.env.DISABLE_HMR) {
   process.env.DISABLE_HMR = "true";
 }
 
-if (!process.env.GEMINI_API_KEY) {
+if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === "MY_GEMINI_API_KEY" || process.env.GEMINI_API_KEY.trim() === "") {
   process.env.GEMINI_API_KEY = "AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A";
 }
 
@@ -52,6 +53,7 @@ async function startServer() {
 
   // Mount Knowledge Engine Module
   app.use("/api/knowledge", knowledgeRouter);
+  app.use("/api/study-materials", studyMaterialRouter);
 
   // API Route: Safe server-side workspace files proxy to avoid client CORS / fetch issues
   app.get("/api/workspace-files", async (req, res) => {
@@ -1493,7 +1495,7 @@ ${groundedSourceContext}`;
       }
 
       // Use Gemini to generate custom high-quality study materials based on this specific resource!
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = getGeminiApiKey();
       
       const systemInstruction = `You are an elite academic resource indexing and analysis model.
 Analyze the following academic resource:
@@ -1527,7 +1529,7 @@ You must return a JSON object with the following schema:
   "formulas": ["...", "..."]
 }`;
 
-      if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
+      if (!apiKey) {
         console.warn("GEMINI_API_KEY not configured. Using high-quality local generation fallback for resource analysis.");
         const fallbackResult = generateLocalResourceAnalysis(targetName, type, size, url);
         res.json(fallbackResult);
@@ -1627,11 +1629,20 @@ Return a valid JSON object matching the requested schema.`
         }
       }
 
-      const response = await ai.models.generateContent({
-        model: targetModel,
-        contents: contents,
-        config: config
-      });
+      let response: any = null;
+      const candidateModels = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"];
+      for (const m of candidateModels) {
+        try {
+          response = await ai.models.generateContent({
+            model: m,
+            contents: contents,
+            config: config
+          });
+          if (response && response.text) break;
+        } catch (modelErr: any) {
+          console.warn(`[Analyze Resource] Model ${m} warning:`, modelErr?.status || modelErr?.message);
+        }
+      }
 
       if (response && response.text) {
         let textContent = response.text.trim();

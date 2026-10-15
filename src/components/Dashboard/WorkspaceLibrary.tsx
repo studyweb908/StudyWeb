@@ -5,6 +5,7 @@ import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import { supabase } from '../../lib/supabase';
 import { fileUploadService, FileUploadService, FileUploadError } from '../../services/FileUploadService';
 import { toValidUuid } from '../../utils/uuid';
+import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import QuickPreviewModal from './QuickPreviewModal';
 
 interface WorkspaceLibraryProps {
@@ -206,133 +207,58 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
     libraryProgressRef.current = progress;
 
     try {
-      const { jobId, documentId } = await fileUploadService.executeWithRetry(
-        async (attempt) => {
-          const { token, userId } = await getAuthInfo();
-          const response = await fetch('/api/knowledge/upload', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 
-              'Content-Type': 'application/json',
-              ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-            },
-            body: JSON.stringify({
-              workspaceId: workspace.id,
-              userId: userId,
-              name: title,
-              type: 'doc',
-              size: 'Pasted Document',
-              content: driveCopyText
-            })
-          });
-
-          if (!response.ok) {
-            const txt = await response.text();
-            throw new Error("Document analysis failed: " + txt);
-          }
-          const contentType = response.headers.get('content-type') || '';
-          if (!contentType.includes('application/json')) {
-            const txt = await response.text();
-            throw new Error("Invalid response from server (expected JSON, received HTML/text): " + txt.substring(0, 100));
-          }
-          return await response.json();
+      const { token, userId } = await getAuthInfo();
+      const processRes = await fetch('/api/study-materials/process', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
         },
-        {
-          context: `Pasted Document Analysis for "${title}"`,
-          onRetryNotice: (notice) => {
-            setUploadStep(notice);
-          }
-        }
-      );
+        body: JSON.stringify({
+          workspaceId: toValidUuid(workspace.id),
+          userId: userId || undefined,
+          name: title,
+          type: 'doc',
+          size: `${Math.ceil(driveCopyText.length / 1024)} KB`,
+          content: driveCopyText
+        })
+      });
 
-      let isCompleted = false;
-      let finalFileData = null;
-      let finalNotes: any[] = [];
-      let pollRetries = 0;
-      while (!isCompleted) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        try {
-          const { token } = await getAuthInfo();
-          const statusRes = await fetch(`/api/knowledge/status/${documentId}`, {
-            credentials: 'same-origin',
-            headers: { ...(token ? { 'Authorization': `Bearer ${token}` } : {}) }
-          });
-          if (statusRes.ok) {
-            const statusData = await statusRes.json();
-            if (statusData.status === 'completed') {
-              isCompleted = true;
-              finalFileData = statusData.document;
-              finalNotes = statusData.notes || [];
-            } else if (statusData.status === 'failed') {
-              const is104 = fileUploadService.is104Error(statusData.message);
-              if (is104 && pollRetries < 3) {
-                pollRetries++;
-                const delayMs = fileUploadService.calculateBackoffDelay(pollRetries, {
-                  initialDelayMs: 1000,
-                  backoffFactor: 2,
-                  maxDelayMs: 8000,
-                  jitter: true
-                });
-                setUploadStep(`⚠️ 104 reset in background worker. Retrying in ${(delayMs / 1000).toFixed(1)}s...`);
-                await new Promise(r => setTimeout(r, delayMs));
-                continue;
-              }
-              throw new Error(statusData.message || 'Job failed');
-            }
-          }
-        } catch (pollErr: any) {
-          if (fileUploadService.is104Error(pollErr) && pollRetries < 3) {
-            pollRetries++;
-            const delayMs = fileUploadService.calculateBackoffDelay(pollRetries, {
-              initialDelayMs: 1000,
-              backoffFactor: 2,
-              maxDelayMs: 8000,
-              jitter: true
-            });
-            setUploadStep(`⚠️ 104 connection reset detected. Retrying in ${(delayMs / 1000).toFixed(1)}s...`);
-            await new Promise(r => setTimeout(r, delayMs));
-            continue;
-          }
-          throw pollErr;
-        }
+      let materialResult: any = null;
+      if (processRes.ok) {
+        const resData = await processRes.json();
+        materialResult = resData.material;
       }
 
-      const fileData = finalFileData || {
-        id: documentId,
-        name: title,
-        type: 'doc',
-        size: 'Pasted Document',
-        uploadDate: new Date().toISOString().split('T')[0],
-        status: 'indexed',
-        tags: ['Indexed', 'Document', 'Notes', 'Generated'],
-        summary: 'Indexed by Knowledge Engine'
+      const fileData = {
+        id: materialResult?.id || `file-${Date.now()}`,
+        name: materialResult?.name || title,
+        type: 'doc' as const,
+        size: materialResult?.size || 'Pasted Document',
+        uploadDate: materialResult?.uploadDate || new Date().toISOString().split('T')[0],
+        status: 'indexed' as const,
+        summary: materialResult?.summary || (driveCopyText.trim().slice(0, 180) + '...'),
+        highlights: materialResult?.highlights && materialResult.highlights.length > 0 
+          ? materialResult.highlights 
+          : [`Pasted study content added for "${title}".`],
+        tags: materialResult?.tags && materialResult.tags.length > 0 
+          ? materialResult.tags 
+          : ['Document', 'Notes', 'Pasted'],
+        transcription: materialResult?.transcription,
+        formulas: materialResult?.formulas,
+        extractedDiagrams: materialResult?.extractedDiagrams
       };
 
       clearInterval(progress);
       libraryProgressRef.current = null;
-      
       setUploadPercent(100);
+      
       setTimeout(async () => {
-        if (supabase) {
-          try {
-            await supabase.from('workspace_files').insert({
-              id: toValidUuid(fileData.id),
-              workspace_id: toValidUuid(workspace.id),
-              name: fileData.name,
-              type: fileData.type,
-              size: fileData.size,
-              status: fileData.status,
-              summary: fileData.summary
-            });
-          } catch {
-            // Non-fatal: Local state already has file
-          }
-        }
-        // 🔥 Dopamine hit: Dispatch a powerful success toast event!
         window.dispatchEvent(
           new CustomEvent('studyweb-toast', {
             detail: {
-              message: `🎉 Boom! "${title}" was parsed, analyzed, and synthesized into your workspace! 🧠🔥`,
+              message: `🎉 Boom! "${fileData.name}" was parsed, analyzed, and synthesized into your workspace! 🧠🔥`,
               type: 'success'
             }
           })
@@ -340,22 +266,6 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
 
         onAddFile(fileData);
         setPreviewFile(fileData);
-        if (finalNotes.length > 0 && onUpdateWorkspace) {
-          const updatedNotes = [
-            ...finalNotes.map(n => ({
-              id: n.id,
-              title: n.title,
-              content: n.content,
-              updatedAt: new Date().toISOString(),
-              tags: ['Generated Summary']
-            })),
-            ...(workspace.notes || []).filter(existing => !finalNotes.some(f => f.id === existing.id))
-          ];
-          onUpdateWorkspace({
-            ...workspace,
-            notes: updatedNotes
-          });
-        }
         setIsUploading(false);
         setDriveCopyText('');
         setDriveCopyTitle('');
@@ -658,7 +568,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
 
       if (file) {
         fileMimeType = file.type || 'application/pdf';
-        if (file.size < 1024 * 1024) {
+        if (file.size < 15 * 1024 * 1024) {
           try {
             const reader = new FileReader();
             const promise = new Promise<string>((resolve, reject) => {
@@ -668,103 +578,39 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
             reader.readAsDataURL(file);
             dataUrl = await promise;
             fileBase64 = dataUrl.split(',')[1] || '';
-            if (fileBase64.length > 100000) {
-              fileBase64 = fileBase64.substring(0, 100000);
-            }
           } catch {}
         }
       }
 
-      // Analyze resource directly with Gemini 3.8 Flash
-      let analysisResult: any = null;
+      // Process resource through Study Material AI Pipeline and Supabase persistence
+      let materialResult: any = null;
       try {
-        const analyzeRes = await fetch('/api/analyze-resource', {
+        const { token, userId } = await getAuthInfo();
+        const processRes = await fetch('/api/study-materials/process', {
           method: 'POST',
           credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
           body: JSON.stringify({
+            workspaceId: toValidUuid(workspace.id),
+            userId: userId || undefined,
             name,
             type,
             size,
             url: (url && !url.startsWith('data:')) ? url : (dataUrl && dataUrl.length < 2000 ? dataUrl : ''),
-            fileBase64: fileBase64.length > 100000 ? fileBase64.substring(0, 100000) : fileBase64,
-            fileMimeType
+            fileBase64: fileBase64 || undefined,
+            fileMimeType: fileMimeType || undefined
           })
         });
-        if (analyzeRes.ok) {
-          analysisResult = await analyzeRes.json();
+
+        if (processRes.ok) {
+          const resData = await processRes.json();
+          materialResult = resData.material;
         }
-      } catch (analyzeErr) {
-        console.warn("Direct resource analysis warning:", analyzeErr);
-      }
-
-      // Knowledge Engine Backend upload
-      let documentId = `file-${Date.now()}`;
-      try {
-        if (file) {
-          const uploadResult = await fileUploadService.uploadAndProcess(file, {
-            workspaceId: workspace.id,
-            useMultipart: true
-          });
-          if (uploadResult?.documentId) {
-            documentId = uploadResult.documentId;
-          }
-          if (uploadResult?.summary) {
-            analysisResult = {
-              summary: uploadResult.summary,
-              highlights: uploadResult.highlights,
-              tags: uploadResult.tags
-            };
-          }
-        } else {
-          const uploadResult = await fileUploadService.executeWithRetry(
-            async (attempt) => {
-              const { token, userId } = await getAuthInfo();
-              const response = await fetch('/api/knowledge/upload', {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: {
-                  'Content-Type': 'application/json',
-                  ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-                },
-                body: JSON.stringify({
-                  workspaceId: toValidUuid(workspace.id),
-                  userId: toValidUuid(userId),
-                  name,
-                  type,
-                  size,
-                  url: (url && !url.startsWith('data:')) ? url : (dataUrl && dataUrl.length < 2000 ? dataUrl : ''),
-                  fileBase64: fileBase64.length > 100000 ? fileBase64.substring(0, 100000) : fileBase64,
-                  fileMimeType
-                })
-              });
-
-              if (!response.ok) {
-                const txt = await response.text();
-                throw new Error('Analysis failed: ' + txt);
-              }
-
-              const contentType = response.headers.get('content-type') || '';
-              if (!contentType.includes('application/json')) {
-                const txt = await response.text();
-                throw new Error('Invalid response from server: ' + txt.substring(0, 100));
-              }
-
-              return await response.json();
-            },
-            {
-              context: `Upload Analysis for "${name || url}"`,
-              onRetryNotice: (notice) => {
-                setUploadStep(notice);
-              }
-            }
-          );
-          if (uploadResult?.documentId) {
-            documentId = uploadResult.documentId;
-          }
-        }
-      } catch (kErr) {
-        console.warn("Knowledge backend upload warning, continuing with verified analysis:", kErr);
+      } catch (pipelineErr) {
+        console.warn("Pipeline processing warning:", pipelineErr);
       }
 
       const generatedTags2 = ['Indexed'];
@@ -775,22 +621,23 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
       if ((name || url || '').toLowerCase().includes('math')) generatedTags2.push('Mathematics');
 
       const fileData = {
-        id: documentId,
-        name: name || url,
+        id: materialResult?.id || `file-${Date.now()}`,
+        name: materialResult?.name || name || url,
         type,
-        size,
-        uploadDate: new Date().toISOString().split('T')[0],
+        size: materialResult?.size || size,
+        uploadDate: materialResult?.uploadDate || new Date().toISOString().split('T')[0],
         status: 'indexed' as const,
-        url: dataUrl || url,
+        url: dataUrl || materialResult?.url || url,
         fileBase64: fileBase64 || undefined,
         fileMimeType: fileMimeType || undefined,
-        summary: analysisResult?.summary || `${name || 'Material'} uploaded and indexed into your workspace.`,
-        highlights: (analysisResult?.highlights && analysisResult.highlights.length > 0) ? analysisResult.highlights : [
+        summary: materialResult?.summary || `${name || 'Material'} uploaded and indexed into your workspace.`,
+        highlights: (materialResult?.highlights && materialResult.highlights.length > 0) ? materialResult.highlights : [
           `Uploaded ${name || 'material'} ready for study questions.`
         ],
-        tags: analysisResult?.tags || generatedTags2,
-        transcription: analysisResult?.transcription,
-        formulas: analysisResult?.formulas
+        tags: (materialResult?.tags && materialResult.tags.length > 0) ? materialResult.tags : generatedTags2,
+        transcription: materialResult?.transcription,
+        formulas: materialResult?.formulas,
+        extractedDiagrams: materialResult?.extractedDiagrams
       };
 
       clearInterval(progressInterval);
@@ -805,7 +652,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
         window.dispatchEvent(
           new CustomEvent('studyweb-toast', {
             detail: {
-              message: `🎉 Incredible! "${name || url}" was analyzed at lightning speed and indexed into your study notes! 🧠⚡`,
+              message: `🎉 Incredible! "${fileData.name}" was analyzed at lightning speed and indexed into your study notes! 🧠⚡`,
               type: 'success'
             }
           })
@@ -814,7 +661,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
         onAddFile(fileData);
         setPreviewFile(fileData);
         setIsUploading(false);
-      }, 800);
+      }, 600);
 
     } catch (err: any) {
       const parsedError = FileUploadError.fromError(err, `Upload of ${name || url}`);
@@ -883,7 +730,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
       setUploadPercent(0);
       
       // Start a smooth completion sequence
-      const finishInterval = setInterval(() => {
+      const finishInterval = setInterval(async () => {
         currentProgress += Math.max(2, (100 - currentProgress) / 8);
         if (currentProgress >= 98) {
           currentProgress = 100;
@@ -892,40 +739,27 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
           setUploadStep(steps[steps.length - 1]);
           clearInterval(finishInterval);
           
-          setTimeout(async () => {
-             // Simulate Supabase Upload Database Insert
-             if (supabase) {
-               try {
-                 await supabase.from('workspace_files').insert({
-                   id: toValidUuid(fileData.id),
-                   workspace_id: toValidUuid(workspace.id),
-                   name: fileData.name,
-                   type: fileData.type,
-                   size: fileData.size,
-                   status: fileData.status,
-                   summary: fileData.summary
-                 });
-               } catch {
-                 // Non-fatal fallback
-               }
-             }
-             
-             onAddFile(fileData);
-             setPreviewFile(fileData);
-             clearInterval(timerInterval);
-             progressIntervalRef.current = null;
-             timerIntervalRef.current = null;
-             setIsUploading(false);
-             
-             window.dispatchEvent(
-               new CustomEvent('studyweb-toast', {
-                 detail: {
-                   message: `🎉 Boom! "${name || url}" was uploaded to Supabase and added to your workspace!`,
-                   type: 'success'
-                 }
-               })
-             );
-          }, 800);
+          try {
+            await WorkspaceSyncService.saveWorkspaceFile(workspace.id, fileData);
+          } catch {
+            // Non-fatal fallback
+          }
+         
+          onAddFile(fileData);
+          setPreviewFile(fileData);
+          clearInterval(timerInterval);
+          progressIntervalRef.current = null;
+          timerIntervalRef.current = null;
+          setIsUploading(false);
+         
+          window.dispatchEvent(
+            new CustomEvent('studyweb-toast', {
+              detail: {
+                message: `🎉 Boom! "${name || url}" was uploaded to Supabase and added to your workspace!`,
+                type: 'success'
+              }
+            })
+          );
         } else {
           setUploadPercent(Math.floor(currentProgress));
           const stepCount = steps.length;

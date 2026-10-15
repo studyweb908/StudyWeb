@@ -769,21 +769,28 @@ export class FileUploadService {
   public async uploadToSupabaseStorage(
     file: File,
     workspaceId: string,
-    options?: { pathPrefix?: string; onProgress?: (percent: number) => void; retryConfig?: Partial<RetryConfig> }
+    options?: {
+      userId?: string;
+      materialId?: string;
+      pathPrefix?: string;
+      onProgress?: (percent: number) => void;
+      retryConfig?: Partial<RetryConfig>;
+    }
   ): Promise<{ path: string; publicUrl: string; signedUrl?: string }> {
     this.log('info', `Uploading file "${file.name}" to Supabase Storage bucket 'workspace_files'...`);
 
+    const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const uId = options?.userId || 'guest';
+    const matId = options?.materialId || `mat-${Date.now()}`;
+    const storagePath = `${uId}/${workspaceId}/${matId}/${cleanFileName}`;
+
     if (!supabase) {
       this.log('warn', 'Supabase client is not configured; using local memory storage URL.');
-      const simulatedPath = `${workspaceId}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
       return {
-        path: simulatedPath,
+        path: storagePath,
         publicUrl: URL.createObjectURL(file)
       };
     }
-
-    const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const storagePath = `${workspaceId}/${Date.now()}_${cleanFileName}`;
 
     try {
       return await this.executeWithRetry(

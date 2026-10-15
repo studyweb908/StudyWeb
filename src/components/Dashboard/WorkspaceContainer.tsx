@@ -364,8 +364,12 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
             </button>
             
             <div className="flex items-center gap-2.5 min-w-0 relative">
-              <div className="w-10 h-10 bg-slate-50 rounded-xl border border-slate-150 flex items-center justify-center text-xl shadow-inner shrink-0">
-                {workspace.emoji || '🧬'}
+              <div className="w-10 h-10 bg-slate-50 rounded-xl border border-slate-150 flex items-center justify-center text-xl shadow-inner shrink-0 overflow-hidden">
+                {workspace.emoji && (workspace.emoji.startsWith('data:') || workspace.emoji.startsWith('http')) ? (
+                  <img src={workspace.emoji} alt="Logo" className="w-full h-full object-cover" />
+                ) : (
+                  workspace.emoji || '🧬'
+                )}
               </div>
               <div className="min-w-0">
                 <h1 className="text-sm sm:text-base font-black text-slate-900 leading-tight truncate">
@@ -440,6 +444,7 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
             setActiveWorkspaceTab={setActiveTab}
             onRemoveFile={handleRemoveFile}
             onBack={onBack}
+            onUpdateWorkspace={onUpdateWorkspace}
           />
         </div>
 

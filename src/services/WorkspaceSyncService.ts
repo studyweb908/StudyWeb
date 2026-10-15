@@ -91,25 +91,59 @@ export class WorkspaceSyncService {
   /**
    * Saves or updates an uploaded file in the Supabase 'workspace_files' table.
    */
-  public static async saveWorkspaceFile(workspaceId: string, file: WorkspaceFile): Promise<boolean> {
+  public static async saveWorkspaceFile(workspaceId: string, file: WorkspaceFile, explicitUserId?: string): Promise<boolean> {
     if (!supabase) return false;
 
     const validFileId = toValidUuid(file.id);
     const validWsId = toValidUuid(workspaceId);
+    const userId = explicitUserId || await this.getUserId();
 
-    const fileRow = {
+    const fileRow: Record<string, any> = {
       id: validFileId,
       workspace_id: validWsId,
       name: file.name || 'Untitled Document',
       type: file.type || 'doc',
       size: file.size || '1 KB',
-      upload_date: file.uploadDate || new Date().toISOString().split('T')[0],
-      status: file.status || 'indexed',
-      url: file.url || '',
+      url: file.url || null,
+      storage_path: file.storagePath || null,
       summary: file.summary || '',
-      highlights: file.highlights || [],
-      tags: file.tags || ['Document']
+      transcription: file.transcription || null,
+      tags: Array.isArray(file.tags) && file.tags.length > 0 ? file.tags : ['Document'],
+      highlights: Array.isArray(file.highlights) ? file.highlights : [],
+      formulas: Array.isArray(file.formulas) ? file.formulas : [],
+      extracted_diagrams: Array.isArray(file.extractedDiagrams) ? file.extractedDiagrams : (file.extractedDiagrams ? [JSON.stringify(file.extractedDiagrams)] : []),
+      pages: typeof file.pages === 'number' ? file.pages : null,
+      status: file.status || 'indexed',
+      content_text: file.contentText || null,
+      upload_date: file.uploadDate ? new Date(file.uploadDate).toISOString() : new Date().toISOString(),
+      updated_at: new Date().toISOString()
     };
+
+    if (userId) {
+      fileRow.user_id = userId;
+    }
+
+    // Ensure parent workspace row exists in Supabase so workspace_files_workspace_id_fkey succeeds
+    try {
+      const { data: wsRow } = await supabase
+        .from('workspaces')
+        .select('id')
+        .eq('id', validWsId)
+        .maybeSingle();
+
+      if (!wsRow) {
+        await supabase
+          .from('workspaces')
+          .upsert({
+            id: validWsId,
+            user_id: userId || null,
+            name: file.name ? `Workspace: ${file.name}` : 'Workspace',
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'id', ignoreDuplicates: true });
+      }
+    } catch {
+      // Non-fatal workspace check
+    }
 
     try {
       const { error } = await supabase
@@ -218,15 +252,21 @@ export class WorkspaceSyncService {
             }
             fileMap[f.workspace_id].push({
               id: f.id,
-              name: f.name,
+              name: f.name || 'Untitled Document',
               type: f.type || 'doc',
               size: f.size || '1 KB',
-              uploadDate: f.upload_date || new Date(f.created_at).toLocaleDateString(),
-              status: f.status || 'indexed',
-              url: f.url,
-              summary: f.summary,
+              uploadDate: f.upload_date || f.created_at || new Date().toISOString(),
+              status: (f.status as any) || 'indexed',
+              url: f.url || undefined,
+              storagePath: f.storage_path || undefined,
+              summary: f.summary || '',
               highlights: Array.isArray(f.highlights) ? f.highlights : [],
-              tags: Array.isArray(f.tags) ? f.tags : ['Indexed']
+              tags: Array.isArray(f.tags) && f.tags.length > 0 ? f.tags : ['Document'],
+              transcription: f.transcription || undefined,
+              formulas: Array.isArray(f.formulas) ? f.formulas : [],
+              extractedDiagrams: f.extracted_diagrams || undefined,
+              contentText: f.content_text || undefined,
+              pages: typeof f.pages === 'number' ? f.pages : undefined
             });
           });
         }
@@ -235,9 +275,16 @@ export class WorkspaceSyncService {
       }
 
       return rows.map((row: any): Workspace => {
-        const files = (fileMap[row.id] && fileMap[row.id].length > 0)
-          ? fileMap[row.id]
-          : (Array.isArray(row.files) ? row.files : []);
+        const remoteTableFiles = fileMap[row.id] || [];
+        const jsonbFiles = Array.isArray(row.files) ? row.files : [];
+        const fileMapById = new Map<string, WorkspaceFile>();
+        jsonbFiles.forEach((f: any) => {
+          if (f && f.id) fileMapById.set(f.id, f);
+        });
+        remoteTableFiles.forEach((f: any) => {
+          if (f && f.id) fileMapById.set(f.id, f);
+        });
+        const files = Array.from(fileMapById.values());
 
         return {
           id: row.id,
@@ -305,15 +352,41 @@ export class WorkspaceSyncService {
   /**
    * Automatically pushes any local workspaces that are not in Supabase yet.
    */
-  public static async syncLocalWorkspacesToSupabase(localWorkspaces: Workspace[]): Promise<void> {
-    if (!supabase || !localWorkspaces || localWorkspaces.length === 0) return;
-
+  /**
+   * Fetches all files for a specific workspace directly from Supabase workspace_files table.
+   */
+  public static async fetchWorkspaceFiles(workspaceId: string): Promise<WorkspaceFile[]> {
+    if (!supabase) return [];
     try {
-      for (const ws of localWorkspaces) {
-        await this.saveWorkspace(ws);
-      }
-    } catch (err: any) {
-      console.warn('Sync local workspaces notice:', err.message);
+      const validWsId = toValidUuid(workspaceId);
+      const { data: rows, error } = await supabase
+        .from('workspace_files')
+        .select('*')
+        .eq('workspace_id', validWsId)
+        .order('created_at', { ascending: false });
+
+      if (error || !rows) return [];
+
+      return rows.map((f: any): WorkspaceFile => ({
+        id: f.id,
+        name: f.name || 'Untitled Document',
+        type: f.type || 'doc',
+        size: f.size || '1 KB',
+        uploadDate: f.upload_date || f.created_at || new Date().toISOString(),
+        status: (f.status as any) || 'indexed',
+        url: f.url || undefined,
+        storagePath: f.storage_path || undefined,
+        summary: f.summary || '',
+        highlights: Array.isArray(f.highlights) ? f.highlights : [],
+        tags: Array.isArray(f.tags) && f.tags.length > 0 ? f.tags : ['Document'],
+        transcription: f.transcription || undefined,
+        formulas: Array.isArray(f.formulas) ? f.formulas : [],
+        extractedDiagrams: f.extracted_diagrams || undefined,
+        contentText: f.content_text || undefined,
+        pages: typeof f.pages === 'number' ? f.pages : undefined
+      }));
+    } catch {
+      return [];
     }
   }
 }

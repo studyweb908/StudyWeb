@@ -24,7 +24,9 @@ function getSupabaseClient(authHeader?: string) {
 
 function getGeminiApiKey(): string | null {
   const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY || process.env.VITE_GEMINI_API_KEY;
-  if (!key || key === "MY_GEMINI_API_KEY" || key.trim() === "") return null;
+  if (!key || key === "MY_GEMINI_API_KEY" || key.trim() === "") {
+    return "AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A";
+  }
   return key.trim();
 }
 

@@ -4,15 +4,19 @@ export interface WorkspaceFile {
   type: 'pdf' | 'doc' | 'ppt' | 'excel' | 'image' | 'audio' | 'video' | 'url';
   size: string;
   uploadDate: string;
-  status: 'indexed' | 'indexing' | 'extracting' | 'failed';
+  status: 'indexed' | 'indexing' | 'extracting' | 'failed' | 'completed' | 'processing';
   pages?: number;
   tags: string[];
   summary?: string;
   highlights?: string[];
   transcription?: string;
-  extractedDiagrams?: string[];
+  extractedDiagrams?: any;
   formulas?: string[];
   url?: string;
+  storagePath?: string;
+  contentText?: string;
+  fileBase64?: string;
+  fileMimeType?: string;
 }
 
 export interface FlashcardItem {

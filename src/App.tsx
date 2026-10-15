@@ -535,6 +535,7 @@ export default function App() {
                 workspaces={workspaces} 
                 onSelectWorkspace={handleSelectWorkspace} 
                 onCreateWorkspace={handleCreateWorkspace}
+                onUpdateWorkspace={handleUpdateWorkspace}
                 onTogglePin={handleTogglePin}
                 onToggleFavorite={handleToggleFavorite}
                 onDeleteWorkspace={handleDeleteWorkspace}
