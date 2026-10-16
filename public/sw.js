@@ -1,5 +1,5 @@
 // StudyWeb Offline Service Worker
-const CACHE_NAME = 'studyweb-cache-v4';
+const CACHE_NAME = 'studyweb-cache-v5';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',
@@ -42,22 +42,45 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event - Network First with Cache Fallback strategy
+// Fetch Event - Network First with Cache Fallback strategy (GET requests only, ignoring APIs)
 self.addEventListener('fetch', (event) => {
+  // CRITICAL: NEVER intercept non-GET requests (e.g. POST, PUT, DELETE)
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
+  // CRITICAL: NEVER intercept /api/ endpoints or backend services
+  try {
+    const requestUrl = new URL(event.request.url);
+    if (requestUrl.pathname.startsWith('/api/') || requestUrl.pathname.startsWith('/auth/')) {
+      return;
+    }
+  } catch {
+    // If URL parsing fails, skip interception
+    return;
+  }
+
   // Only handle local requests and HTTP/HTTPS (ignore chrome-extension, etc.)
   if (!event.request.url.startsWith(self.location.origin) || !event.request.url.startsWith('http')) {
     return;
   }
 
-  // Handle caching
+  // Handle caching for static assets
   event.respondWith(
     fetch(event.request)
       .then((networkResponse) => {
-        // If valid response, clone it and put it in cache
-        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+        // If valid response, clone it and put it in cache (GET requests only)
+        if (
+          networkResponse && 
+          networkResponse.status === 200 && 
+          networkResponse.type === 'basic' && 
+          event.request.method === 'GET'
+        ) {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseToCache);
+          }).catch(() => {
+            // Non-fatal cache failure
           });
         }
         return networkResponse;

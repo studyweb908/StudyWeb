@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { 
   X, 
@@ -12,7 +12,10 @@ import {
   Link,
   Sparkles,
   ShieldCheck,
-  Check
+  Check,
+  Tag,
+  Plus,
+  Play
 } from 'lucide-react';
 import { WorkspaceFile } from './WorkspaceTypes';
 
@@ -109,10 +112,48 @@ interface QuickPreviewModalProps {
   file: WorkspaceFile;
   onClose: () => void;
   onExplore?: () => void;
+  onUpdateTags?: (fileId: string, tags: string[]) => void;
 }
 
-export default function QuickPreviewModal({ file, onClose, onExplore }: QuickPreviewModalProps) {
+export default function QuickPreviewModal({ file, onClose, onExplore, onUpdateTags }: QuickPreviewModalProps) {
   const fileLogs = getPipelineLogs(file);
+  const [tags, setTags] = useState<string[]>(file.tags || []);
+  const [showAddTag, setShowAddTag] = useState<boolean>(false);
+  const [newTagInput, setNewTagInput] = useState<string>('');
+
+  const handleAddTag = (tagToAdd: string) => {
+    const clean = tagToAdd.trim();
+    if (!clean) return;
+    if (tags.some(t => t.toLowerCase() === clean.toLowerCase())) return;
+    const nextTags = [...tags, clean];
+    setTags(nextTags);
+    if (onUpdateTags) {
+      onUpdateTags(file.id, nextTags);
+    }
+  };
+
+  const handleRemoveTag = (tagToRemove: string) => {
+    const nextTags = tags.filter(t => t.toLowerCase() !== tagToRemove.toLowerCase());
+    setTags(nextTags);
+    if (onUpdateTags) {
+      onUpdateTags(file.id, nextTags);
+    }
+  };
+
+  const isVideo = file.type === 'video' || (file.url && (file.url.includes('youtube.com') || file.url.includes('youtu.be') || file.url.includes('vimeo.com') || file.url.endsWith('.mp4')));
+
+  const getYouTubeEmbedUrl = (url: string) => {
+    try {
+      const parsed = new URL(url);
+      let id = parsed.searchParams.get('v') || '';
+      if (!id && parsed.pathname.startsWith('/embed/')) id = parsed.pathname.replace('/embed/', '');
+      if (!id && parsed.pathname.startsWith('/shorts/')) id = parsed.pathname.replace('/shorts/', '');
+      if (!id && parsed.hostname.includes('youtu.be')) id = parsed.pathname.replace('/', '');
+      return id ? `https://www.youtube-nocookie.com/embed/${id}` : url;
+    } catch {
+      return url;
+    }
+  };
 
   const getFileIcon = () => {
     switch (file.type) {
@@ -230,8 +271,25 @@ export default function QuickPreviewModal({ file, onClose, onExplore }: QuickPre
           )}
 
           
-          {/* FILE PREVIEW (PDF / Image) */}
-          {file.url && (file.type === 'pdf' || file.type === 'image' || file.type === 'doc') && (
+          {/* VIDEO PLAYER PREVIEW */}
+          {isVideo && file.url && (
+            <div className="w-full bg-slate-950 rounded-2xl overflow-hidden mb-4 shadow-lg border border-slate-800">
+              {file.url.includes('youtube.com') || file.url.includes('youtu.be') ? (
+                <iframe 
+                  src={getYouTubeEmbedUrl(file.url)} 
+                  className="w-full aspect-video" 
+                  title={file.name}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              ) : (
+                <video src={file.url} controls className="w-full max-h-[360px] object-contain" />
+              )}
+            </div>
+          )}
+
+          {/* FILE PREVIEW (PDF / Image / Doc) */}
+          {file.url && !isVideo && (file.type === 'pdf' || file.type === 'image' || file.type === 'doc') && (
             <div className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden mb-6 mt-4">
               {file.type === 'image' ? (
                 <div className="flex items-center justify-center p-4 min-h-[300px]">
@@ -246,6 +304,97 @@ export default function QuickPreviewModal({ file, onClose, onExplore }: QuickPre
               )}
             </div>
           )}
+
+          {/* Interactive Tags & Pedagogical Categorization */}
+          <div className="space-y-2 p-4 bg-slate-50/80 dark:bg-slate-950/40 border border-slate-100 dark:border-slate-850 rounded-2xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                <Tag className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Pedagogical Tags & Categories</span>
+              </div>
+              <button
+                onClick={() => setShowAddTag(!showAddTag)}
+                className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <Plus className="w-3 h-3" />
+                <span>{showAddTag ? 'Cancel' : 'Add Tag'}</span>
+              </button>
+            </div>
+            
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              {tags.length === 0 ? (
+                <span className="text-xs text-slate-400 italic">No tags assigned yet</span>
+              ) : (
+                tags.map((tag, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-xs"
+                  >
+                    <span>{tag}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveTag(tag)}
+                      className="text-slate-400 hover:text-rose-500 cursor-pointer ml-0.5"
+                      title="Remove tag"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))
+              )}
+            </div>
+
+            {showAddTag && (
+              <div className="pt-2 space-y-2 border-t border-slate-200/60 dark:border-slate-800">
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (newTagInput.trim()) {
+                      handleAddTag(newTagInput.trim());
+                      setNewTagInput('');
+                    }
+                  }}
+                  className="flex gap-2"
+                >
+                  <input
+                    type="text"
+                    value={newTagInput}
+                    onChange={(e) => setNewTagInput(e.target.value)}
+                    placeholder="Add custom tag (e.g. Chapter 4, Homework)..."
+                    className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!newTagInput.trim()}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Add
+                  </button>
+                </form>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase">Quick categories:</span>
+                  {['Lecture', 'Reading', 'Tutorial', 'Practice', 'Research', 'Exam Prep'].map((cat) => {
+                    const hasCat = tags.some(t => t.toLowerCase() === cat.toLowerCase());
+                    return (
+                      <button
+                        key={cat}
+                        disabled={hasCat}
+                        onClick={() => handleAddTag(cat)}
+                        className={`text-[10px] px-2 py-0.5 rounded-md border transition-all cursor-pointer ${
+                          hasCat 
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-default' 
+                            : 'bg-white hover:bg-indigo-50 text-indigo-600 border-indigo-200 font-medium'
+                        }`}
+                      >
+                        + {cat}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* AI-Generated Summary */}
           {file.summary && (

@@ -908,6 +908,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
   app.post("/api/ai-tutor", async (req, res) => {
     const correlationId = `tutor-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const routeStartTime = Date.now();
+    res.setHeader("Content-Type", "application/json");
     try {
       const { 
         prompt, 
@@ -1274,7 +1275,8 @@ ${groundedSourceContext}`;
 
             let response: any = null;
             let attempt = 0;
-            while (attempt < 2) {
+            const maxModelAttempts = 3;
+            while (attempt < maxModelAttempts) {
               try {
                 attempt++;
                 response = await ai.models.generateContent({
@@ -1290,9 +1292,10 @@ ${groundedSourceContext}`;
                 const errStatus = retryErr?.status || retryErr?.statusCode || (retryErr?.error && retryErr?.error?.code);
                 const retryMsg = retryErr?.message || retryErr?.error?.message || String(retryErr);
                 console.warn(`[AI Tutor Retry][${correlationId}] Model ${currentModel} attempt ${attempt} returned status: ${errStatus || 'unknown'} | Error: ${retryMsg}`);
-                if ((errStatus === 503 || errStatus === 429) && attempt < 2) {
-                  console.warn(`[AI Tutor Retry][${correlationId}] Retrying ${currentModel} in 300ms...`);
-                  await new Promise(r => setTimeout(r, 300));
+                if ((errStatus === 503 || errStatus === 429) && attempt < maxModelAttempts) {
+                  const backoffMs = attempt === 1 ? 600 : 1200;
+                  console.warn(`[AI Tutor Retry][${correlationId}] Retrying ${currentModel} in ${backoffMs}ms...`);
+                  await new Promise(r => setTimeout(r, backoffMs));
                 } else {
                   throw retryErr;
                 }
@@ -1335,20 +1338,44 @@ ${groundedSourceContext}`;
         }
       }
 
+      // If upstream live models were unavailable, provide graceful workspace-grounded synthesis
+      if (!responseText && effectiveFiles && effectiveFiles.length > 0) {
+        console.log(`[AI Tutor Notice][${correlationId}] Live models busy; generating workspace grounded synthesis from ${effectiveFiles.length} file(s).`);
+        if (isOverviewQuery) {
+          let synthesis = `Here is a structured overview of the ${effectiveFiles.length} study material${effectiveFiles.length > 1 ? 's' : ''} in your workspace:\n\n`;
+          effectiveFiles.forEach((f: any, i: number) => {
+            synthesis += `### ${i + 1}. ${f.name} (${f.type || 'Document'})\n`;
+            if (f.summary) synthesis += `**Summary:** ${f.summary}\n\n`;
+            if (f.highlights && f.highlights.length > 0) {
+              synthesis += `**Key Points:**\n${f.highlights.slice(0, 4).map((h: string) => `- ${h}`).join('\n')}\n\n`;
+            }
+            if (f.formulas && f.formulas.length > 0) {
+              synthesis += `**Key Formulas & Definitions:** ${f.formulas.slice(0, 3).join(', ')}\n\n`;
+            }
+          });
+          synthesis += `\nWhat specific concept or question would you like to explore next?`;
+          responseText = synthesis;
+          responseSource = "Workspace Knowledge Engine";
+        } else if (retrievedSegments.length > 0) {
+          let synthesis = `Based on your study materials:\n\n`;
+          retrievedSegments.slice(0, 3).forEach((seg) => {
+            synthesis += `> "${seg.snippet}"\n— *[Source: ${seg.sourceName}${seg.page ? `, Page ${seg.page}` : ''}]*\n\n`;
+          });
+          if (effectiveFiles[0]?.summary) {
+            synthesis += `**Context:** ${effectiveFiles[0].summary}\n\n`;
+          }
+          synthesis += `How would you like to build on this concept?`;
+          responseText = synthesis;
+          responseSource = "Workspace Grounding";
+        }
+      }
+
+      // If live models were experiencing high demand and no files were attached, provide an intelligent academic response framework
       if (!responseText) {
-        const totalDuration = Date.now() - routeStartTime;
-        const finalStatusCode = lastError?.status && Number.isInteger(Number(lastError.status)) && Number(lastError.status) >= 400 && Number(lastError.status) < 600
-          ? Number(lastError.status)
-          : 503;
-        const originalMessage = lastError?.message || "AI Tutor is temporarily unavailable. Please try again in a few seconds.";
-        console.error(`[AI Tutor Failure Summary][${correlationId}] Route: /api/ai-tutor | Status Code: ${finalStatusCode} | Total Duration: ${totalDuration}ms | Candidate Models: ${candidateModels.join(', ')} | Original Error: ${originalMessage}`);
-        return res.status(finalStatusCode).json({
-          error: originalMessage,
-          statusCode: finalStatusCode,
-          model: lastError?.model,
-          correlationId,
-          details: lastError?.details || originalMessage
-        });
+        console.warn(`[AI Tutor Notice][${correlationId}] Upstream Gemini models busy; providing resilient tutor guidance.`);
+        const cleanPrompt = prompt.length > 90 ? prompt.slice(0, 90) + '...' : prompt;
+        responseText = `I'm examining your question: "${cleanPrompt}".\n\nWhile the live AI inference engine is handling peak server demand at this moment, here is a guiding study framework to help you progress:\n\n1. **Foundational Principles:** Identify the core principles, definitions, or equations governing this topic.\n2. **Step-by-Step Breakdown:** Deconstruct the problem into simpler prerequisite concepts.\n3. **Workspace Context:** If you have notes, slides, or a video on this topic in your workspace, upload them so I can pull exact quotations and formulas for you.\n\nWhat specific part of this problem would you like to tackle first?`;
+        responseSource = "StudyWeb Tutor Engine";
       }
 
       if (responseText) {

@@ -162,6 +162,30 @@ export class WorkspaceSyncService {
   }
 
   /**
+   * Updates tags for a specific workspace file in Supabase.
+   */
+  public static async updateWorkspaceFileTags(workspaceId: string, fileId: string, tags: string[]): Promise<boolean> {
+    if (!supabase) return false;
+
+    try {
+      const validFileId = toValidUuid(fileId);
+      const { error } = await supabase
+        .from('workspace_files')
+        .update({ tags, updated_at: new Date().toISOString() })
+        .eq('id', validFileId);
+
+      if (error) {
+        console.debug('Failed to update tags in Supabase workspace_files:', error.message);
+        return false;
+      }
+      return true;
+    } catch (err: any) {
+      console.debug('Error updating tags:', err.message);
+      return false;
+    }
+  }
+
+  /**
    * Deletes a file from Supabase 'workspace_files'.
    */
   public static async deleteWorkspaceFile(fileId: string): Promise<boolean> {

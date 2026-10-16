@@ -938,45 +938,7 @@ export default function GlobalVoiceListener({
         )}
       </AnimatePresence>
 
-      {/* 2. FLOATING AURA LAUNCHER BUTTON IN BOTTOM-RIGHT CORNER */}
-      <div className="fixed bottom-6 right-6 z-40 pointer-events-auto flex items-center gap-2.5">
-        <button
-          onClick={() => {
-            if (isOpen) {
-              setIsOpen(false);
-              interruptSpeaking();
-            } else {
-              setIsOpen(true);
-              if (!isListening) {
-                toggleListening();
-              }
-            }
-          }}
-          className={`relative p-3.5 rounded-full shadow-2xl transition-all flex items-center justify-center cursor-pointer group ${
-            isOpen || isListening
-              ? 'bg-gradient-to-tr from-cyan-500 via-blue-600 to-purple-600 text-white shadow-cyan-500/40 ring-4 ring-cyan-500/20'
-              : 'bg-[#0A0F1D] text-slate-200 border border-white/10 hover:border-cyan-500 hover:shadow-lg hover:shadow-cyan-500/20'
-          }`}
-          title={isOpen ? "AURA active. Click to minimize." : "Open AURA (Adaptive User Response Assistant)"}
-          aria-label="Open AURA voice assistant"
-        >
-          {/* Subtle Rotating Gradient Ring */}
-          <div className="w-5 h-5 flex items-center justify-center">
-            {isSpeaking ? (
-              <Volume2 className="w-5 h-5 text-cyan-300 animate-pulse" />
-            ) : isListening ? (
-              <Mic className="w-5 h-5 text-white animate-bounce" />
-            ) : (
-              <Sparkles className="w-5 h-5 text-cyan-400 group-hover:scale-110 transition-transform" />
-            )}
-          </div>
-
-          {/* Active Ping Beacon */}
-          {(isListening || isSpeaking) && (
-            <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-cyan-400 rounded-full border-2 border-[#0A0F1D] animate-ping" />
-          )}
-        </button>
-      </div>
+      {/* 2. FLOATING AURA LAUNCHER BUTTON IN BOTTOM-RIGHT CORNER - REMOVED */}
     </>
   );
 }

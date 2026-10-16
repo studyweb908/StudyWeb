@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Image as ImageIcon, Globe, Sparkles, ArrowRight, Upload, Link, Video, HardDrive, Clipboard, X, Loader2, Clock, Check, ChevronDown, Search, Trash2, FileText, Music, Lightbulb, BookOpen, HelpCircle, Info, Eye, ExternalLink, Calendar } from 'lucide-react';
+import { Image as ImageIcon, Globe, Sparkles, ArrowRight, Upload, Link, Video, HardDrive, Clipboard, X, Loader2, Clock, Check, ChevronDown, Search, Trash2, FileText, Music, Lightbulb, BookOpen, HelpCircle, Info, Eye, ExternalLink, Calendar, Tag, SlidersHorizontal, Plus } from 'lucide-react';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import { supabase } from '../../lib/supabase';
 import { fileUploadService, FileUploadService, FileUploadError } from '../../services/FileUploadService';
@@ -59,6 +59,140 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
   // Custom Deletion Confirmation States
   const [fileToRemove, setFileToRemove] = useState<WorkspaceFile | null>(null);
   const [isClearingAll, setIsClearingAll] = useState(false);
+
+  // Search & Filtering States
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedMediaType, setSelectedMediaType] = useState<'all' | 'documents' | 'videos' | 'urls'>('all');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [editingTagsFile, setEditingTagsFile] = useState<WorkspaceFile | null>(null);
+  const [customTagInput, setCustomTagInput] = useState('');
+
+  // Media Classification Helpers
+  const isVideoFile = (f: WorkspaceFile) => {
+    const t = (f.type || '').toLowerCase();
+    const u = (f.url || '').toLowerCase();
+    const n = (f.name || '').toLowerCase();
+    return t === 'video' || t === 'mp4' || u.includes('youtube.com') || u.includes('youtu.be') || u.includes('vimeo.com') || u.includes('loom.com') || n.endsWith('.mp4') || n.endsWith('.mov') || n.endsWith('.webm') || n.endsWith('.mkv');
+  };
+
+  const isUrlFile = (f: WorkspaceFile) => {
+    const t = (f.type || '').toLowerCase();
+    return (t === 'url' || t === 'link' || t === 'web') && !isVideoFile(f);
+  };
+
+  const isDocFile = (f: WorkspaceFile) => {
+    return !isVideoFile(f) && !isUrlFile(f);
+  };
+
+  const allCount = (workspace.files || []).length;
+  const docCount = (workspace.files || []).filter(isDocFile).length;
+  const videoCount = (workspace.files || []).filter(isVideoFile).length;
+  const urlCount = (workspace.files || []).filter(isUrlFile).length;
+
+  // Dynamic Tags calculation
+  const availableTags = React.useMemo(() => {
+    const defaultCategories = ['Lecture', 'Reading', 'Tutorial', 'Practice', 'Research', 'Exam Prep'];
+    const discoveredTags = new Set<string>();
+    (workspace.files || []).forEach(f => {
+      (f.tags || []).forEach(t => {
+        if (t && typeof t === 'string' && t.trim()) {
+          discoveredTags.add(t.trim());
+        }
+      });
+    });
+    return Array.from(new Set([...defaultCategories, ...Array.from(discoveredTags)]));
+  }, [workspace.files]);
+
+  const toggleTagFilter = (tag: string) => {
+    setSelectedTags(prev => 
+      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+    );
+  };
+
+  const clearAllFilters = () => {
+    setSearchQuery('');
+    setSelectedMediaType('all');
+    setSelectedTags([]);
+  };
+
+  // Filtered files calculation
+  const filteredFiles = React.useMemo(() => {
+    let list = [...(workspace.files || [])].sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime());
+
+    // 1. Media Type Filter
+    if (selectedMediaType === 'documents') {
+      list = list.filter(isDocFile);
+    } else if (selectedMediaType === 'videos') {
+      list = list.filter(isVideoFile);
+    } else if (selectedMediaType === 'urls') {
+      list = list.filter(isUrlFile);
+    }
+
+    // 2. Multi-select Tag Filter
+    if (selectedTags.length > 0) {
+      list = list.filter(f => {
+        const fileTags = (f.tags || []).map(t => t.toLowerCase());
+        return selectedTags.some(st => fileTags.includes(st.toLowerCase()));
+      });
+    }
+
+    // 3. Search Query Filter across title, summary, highlights, transcription, content text, tags, url
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      list = list.filter(f => {
+        const nameMatch = (f.name || '').toLowerCase().includes(q);
+        const summaryMatch = (f.summary || '').toLowerCase().includes(q);
+        const highlightsMatch = (f.highlights || []).some((h: string) => typeof h === 'string' && h.toLowerCase().includes(q));
+        const tagsMatch = (f.tags || []).some((t: string) => typeof t === 'string' && t.toLowerCase().includes(q));
+        const transcriptMatch = (f.transcription || '').toLowerCase().includes(q);
+        const contentMatch = (f.contentText || '').toLowerCase().includes(q);
+        const urlMatch = (f.url || '').toLowerCase().includes(q);
+        return nameMatch || summaryMatch || highlightsMatch || tagsMatch || transcriptMatch || contentMatch || urlMatch;
+      });
+    }
+
+    return list;
+  }, [workspace.files, selectedMediaType, selectedTags, searchQuery]);
+
+  // Tag Management Handlers
+  const handleAddTagToFile = async (fileId: string, newTag: string) => {
+    const clean = newTag.trim();
+    if (!clean) return;
+    const target = (workspace.files || []).find(f => f.id === fileId);
+    if (!target) return;
+    const currentTags = target.tags || [];
+    if (currentTags.some(t => t.toLowerCase() === clean.toLowerCase())) return;
+
+    const updatedTags = [...currentTags, clean];
+    const updatedFiles = (workspace.files || []).map(f => 
+      f.id === fileId ? { ...f, tags: updatedTags } : f
+    );
+
+    if (onUpdateWorkspace) {
+      onUpdateWorkspace({ ...workspace, files: updatedFiles });
+    }
+    if (editingTagsFile && editingTagsFile.id === fileId) {
+      setEditingTagsFile({ ...editingTagsFile, tags: updatedTags });
+    }
+    await WorkspaceSyncService.updateWorkspaceFileTags(workspace.id, fileId, updatedTags);
+  };
+
+  const handleRemoveTagFromFile = async (fileId: string, tagToRemove: string) => {
+    const target = (workspace.files || []).find(f => f.id === fileId);
+    if (!target) return;
+    const updatedTags = (target.tags || []).filter(t => t.toLowerCase() !== tagToRemove.toLowerCase());
+    const updatedFiles = (workspace.files || []).map(f => 
+      f.id === fileId ? { ...f, tags: updatedTags } : f
+    );
+
+    if (onUpdateWorkspace) {
+      onUpdateWorkspace({ ...workspace, files: updatedFiles });
+    }
+    if (editingTagsFile && editingTagsFile.id === fileId) {
+      setEditingTagsFile({ ...editingTagsFile, tags: updatedTags });
+    }
+    await WorkspaceSyncService.updateWorkspaceFileTags(workspace.id, fileId, updatedTags);
+  };
 
   // URL/YouTube state
   const [showUrlInput, setShowUrlInput] = useState(false);
@@ -1046,16 +1180,131 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
       </AnimatePresence>
 
 
-      {/* UPLOADED FILES LIST */}
+      {/* UPLOADED FILES LIST & SEARCH/FILTER SECTION */}
       <div className="bg-white text-slate-850 rounded-[32px] p-6 md:p-8 border border-slate-200 shadow-xl relative overflow-hidden flex flex-col">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg sm:text-xl font-bold text-slate-800 tracking-tight">
-            Uploaded Materials
-          </h3>
-          <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full">
-            {workspace.files?.length || 0} Files
-          </span>
+        {/* Header & Counters */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+          <div>
+            <h3 className="text-lg sm:text-xl font-bold text-slate-800 tracking-tight">
+              Uploaded Materials
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Filter and search through indexed notes, lectures, and web readings.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full border border-indigo-100/60">
+              {filteredFiles.length} of {workspace.files?.length || 0} Materials
+            </span>
+            {workspace.files && workspace.files.length > 0 && (
+              <button
+                onClick={() => setIsClearingAll(true)}
+                className="text-xs font-semibold text-rose-500 hover:text-rose-600 hover:bg-rose-50 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+              >
+                Clear All
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Filter Controls: Search Bar + Media Type Tabs + Tag Chips */}
+        {workspace.files && workspace.files.length > 0 && (
+          <div className="space-y-3.5 mb-6 pb-4 border-b border-slate-100">
+            {/* Search Input */}
+            <div className="relative w-full">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search materials by title, concepts, notes, or tags..."
+                className="w-full pl-10 pr-9 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 rounded cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Media Type Segmented Control */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+              <div className="inline-flex p-1 bg-slate-100/80 rounded-xl text-xs font-semibold text-slate-600">
+                <button
+                  onClick={() => setSelectedMediaType('all')}
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${selectedMediaType === 'all' ? 'bg-white text-slate-900 shadow-sm font-bold' : 'hover:text-slate-900'}`}
+                >
+                  <span>All</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-slate-200/60 text-slate-600">{allCount}</span>
+                </button>
+                <button
+                  onClick={() => setSelectedMediaType('documents')}
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${selectedMediaType === 'documents' ? 'bg-white text-slate-900 shadow-sm font-bold' : 'hover:text-slate-900'}`}
+                >
+                  <FileText className="w-3.5 h-3.5 text-blue-500" />
+                  <span>Documents</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-slate-200/60 text-slate-600">{docCount}</span>
+                </button>
+                <button
+                  onClick={() => setSelectedMediaType('videos')}
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${selectedMediaType === 'videos' ? 'bg-white text-slate-900 shadow-sm font-bold' : 'hover:text-slate-900'}`}
+                >
+                  <Video className="w-3.5 h-3.5 text-purple-500" />
+                  <span>Videos</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-slate-200/60 text-slate-600">{videoCount}</span>
+                </button>
+                <button
+                  onClick={() => setSelectedMediaType('urls')}
+                  className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${selectedMediaType === 'urls' ? 'bg-white text-slate-900 shadow-sm font-bold' : 'hover:text-slate-900'}`}
+                >
+                  <Globe className="w-3.5 h-3.5 text-teal-500" />
+                  <span>Websites</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-slate-200/60 text-slate-600">{urlCount}</span>
+                </button>
+              </div>
+
+              {(selectedTags.length > 0 || selectedMediaType !== 'all' || searchQuery.trim()) && (
+                <button
+                  onClick={clearAllFilters}
+                  className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                  <span>Clear Filters</span>
+                </button>
+              )}
+            </div>
+
+            {/* Pedagogical Tag Filter Chips (Multi-Select) */}
+            {availableTags.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1 flex items-center gap-1">
+                  <Tag className="w-3 h-3" />
+                  <span>Filter by tag:</span>
+                </span>
+                {availableTags.map((tag) => {
+                  const isSelected = selectedTags.some(st => st.toLowerCase() === tag.toLowerCase());
+                  return (
+                    <button
+                      key={tag}
+                      onClick={() => toggleTagFilter(tag)}
+                      className={`text-xs px-2.5 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                        isSelected 
+                          ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-sm'
+                          : 'bg-white text-slate-600 hover:bg-slate-50 border-slate-200 hover:border-slate-300 font-medium'
+                      }`}
+                    >
+                      <span>{tag}</span>
+                      {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         
         {(!workspace.files || workspace.files.length === 0) ? (
           <div className="text-center py-12 flex flex-col items-center justify-center bg-slate-50/50 rounded-3xl border border-slate-100/50">
@@ -1065,16 +1314,28 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
             <h4 className="text-slate-800 font-bold mb-1">No Study Materials Yet</h4>
             <p className="text-slate-500 text-sm max-w-sm">Upload files, paste text, or link websites above to start building your AI knowledge base.</p>
           </div>
+        ) : filteredFiles.length === 0 ? (
+          <div className="text-center py-12 flex flex-col items-center justify-center bg-slate-50/70 rounded-2xl border border-dashed border-slate-200 p-6">
+            <Search className="w-8 h-8 text-slate-300 mb-2" />
+            <h4 className="text-sm font-bold text-slate-700">No matching materials found</h4>
+            <p className="text-xs text-slate-400 mt-1 max-w-sm">No materials in this workspace match your current search and filter combination.</p>
+            <button
+              onClick={clearAllFilters}
+              className="mt-3 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg cursor-pointer transition-all"
+            >
+              Reset All Filters
+            </button>
+          </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {[...workspace.files].sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime()).map((file) => {
+            {filteredFiles.map((file) => {
               const t = (file.type || '').toLowerCase();
               let Icon = FileText;
               let bg = 'bg-slate-50 text-slate-500';
               if (t.includes('pdf')) { Icon = FileText; bg = 'bg-rose-50 text-rose-500 border-rose-100'; }
-              else if (t.includes('video') || t.includes('mp4')) { Icon = Video; bg = 'bg-purple-50 text-purple-500 border-purple-100'; }
+              else if (isVideoFile(file)) { Icon = Video; bg = 'bg-purple-50 text-purple-500 border-purple-100'; }
               else if (t.includes('audio') || t.includes('mp3')) { Icon = Music; bg = 'bg-amber-50 text-amber-500 border-amber-100'; }
-              else if (t.includes('url') || t.includes('link') || t.includes('web')) { Icon = Globe; bg = 'bg-blue-50 text-blue-500 border-blue-100'; }
+              else if (isUrlFile(file)) { Icon = Globe; bg = 'bg-teal-50 text-teal-600 border-teal-100'; }
               else if (t.includes('image') || t.includes('jpg') || t.includes('png')) { Icon = ImageIcon; bg = 'bg-emerald-50 text-emerald-500 border-emerald-100'; }
               else if (t.includes('doc') || t.includes('word') || t.includes('text')) { Icon = FileText; bg = 'bg-blue-50 text-blue-500 border-blue-100'; }
               else if (t.includes('epub') || t.includes('book')) { Icon = BookOpen; bg = 'bg-amber-50 text-amber-500 border-amber-100'; }
@@ -1100,19 +1361,42 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
                         <span className="text-[10px] font-semibold text-slate-400">{file.size}</span>
                         <span className="w-1 h-1 rounded-full bg-slate-300" />
                         <span className="text-[10px] font-semibold text-slate-400">{file.uploadDate}</span>
-                        
-                        {file.tags && file.tags.length > 0 && (
-                          <>
-                            <span className="w-1 h-1 rounded-full bg-slate-300 ml-1" />
-                            <div className="flex items-center gap-1.5 ml-1">
-                              {file.tags.map((tag, idx) => (
-                                <span key={idx} className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                          </>
-                        )}
+                      </div>
+                      
+                      {/* Tags & Edit Tag Trigger */}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                        {(file.tags && file.tags.length > 0) && file.tags.map((tag, idx) => {
+                          const isTagActive = selectedTags.some(st => st.toLowerCase() === tag.toLowerCase());
+                          return (
+                            <button
+                              key={idx}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleTagFilter(tag);
+                              }}
+                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded transition-all cursor-pointer flex items-center gap-0.5 ${
+                                isTagActive 
+                                  ? 'bg-indigo-600 text-white shadow-xs' 
+                                  : 'text-indigo-600 bg-indigo-50 hover:bg-indigo-100'
+                              }`}
+                              title={`Filter by tag: ${tag}`}
+                            >
+                              <span>{tag}</span>
+                            </button>
+                          );
+                        })}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingTagsFile(file);
+                            setCustomTagInput('');
+                          }}
+                          className="text-[9px] font-semibold text-slate-400 hover:text-indigo-600 px-1.5 py-0.5 rounded hover:bg-slate-100 transition-colors flex items-center gap-0.5 cursor-pointer"
+                          title="Manage tags for this material"
+                        >
+                          <Tag className="w-2.5 h-2.5" />
+                          <span>+ Tag</span>
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1122,6 +1406,7 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
                       setFileToRemove(file);
                     }}
                     className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                    title="Remove file"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -1252,10 +1537,159 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
           </div>
         )}
 
+        {/* Tag Management Modal */}
+        {editingTagsFile && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setEditingTagsFile(null)}
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+            
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 15 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 15 }}
+              className="relative w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl border border-slate-100 overflow-hidden text-left z-10 space-y-4"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                    <Tag className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-800 tracking-tight">
+                      Edit Material Tags
+                    </h3>
+                    <p className="text-xs text-slate-500 line-clamp-1 max-w-[260px]">
+                      {editingTagsFile.name}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setEditingTagsFile(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Current Tags */}
+              <div className="space-y-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  Assigned Tags
+                </span>
+                <div className="flex flex-wrap gap-1.5 min-h-[36px] p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                  {(!editingTagsFile.tags || editingTagsFile.tags.length === 0) ? (
+                    <span className="text-xs text-slate-400 italic">No tags assigned yet</span>
+                  ) : (
+                    editingTagsFile.tags.map((t, idx) => (
+                      <span
+                        key={idx}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 shadow-xs"
+                      >
+                        <span>{t}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveTagFromFile(editingTagsFile.id, t)}
+                          className="text-slate-400 hover:text-rose-500 cursor-pointer"
+                          title="Remove tag"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Add Custom Tag Form */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (customTagInput.trim()) {
+                    handleAddTagToFile(editingTagsFile.id, customTagInput.trim());
+                    setCustomTagInput('');
+                  }
+                }}
+                className="flex gap-2"
+              >
+                <input
+                  type="text"
+                  value={customTagInput}
+                  onChange={(e) => setCustomTagInput(e.target.value)}
+                  placeholder="Type a new tag name..."
+                  className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500"
+                />
+                <button
+                  type="submit"
+                  disabled={!customTagInput.trim()}
+                  className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Tag</span>
+                </button>
+              </form>
+
+              {/* Suggested Pedagogical Tags */}
+              <div className="space-y-1.5 pt-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Quick Pedagogical Categories:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {['Lecture', 'Reading', 'Tutorial', 'Practice', 'Research', 'Exam Prep'].map((cat) => {
+                    const alreadyHas = (editingTagsFile.tags || []).some(t => t.toLowerCase() === cat.toLowerCase());
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        disabled={alreadyHas}
+                        onClick={() => handleAddTagToFile(editingTagsFile.id, cat)}
+                        className={`text-[11px] px-2 py-0.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                          alreadyHas 
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-default' 
+                            : 'bg-white hover:bg-indigo-50 text-indigo-600 border-indigo-200 font-semibold'
+                        }`}
+                      >
+                        <Plus className="w-2.5 h-2.5" />
+                        <span>{cat}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-end pt-3 border-t border-slate-100">
+                <button
+                  onClick={() => setEditingTagsFile(null)}
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold cursor-pointer transition-all"
+                >
+                  Done
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {previewFile && (
           <QuickPreviewModal 
             file={previewFile} 
             onClose={() => setPreviewFile(null)} 
+            onUpdateTags={async (fileId, newTags) => {
+              const updatedFiles = (workspace.files || []).map(f => 
+                f.id === fileId ? { ...f, tags: newTags } : f
+              );
+              if (onUpdateWorkspace) {
+                onUpdateWorkspace({ ...workspace, files: updatedFiles });
+              }
+              if (previewFile.id === fileId) {
+                setPreviewFile({ ...previewFile, tags: newTags });
+              }
+              await WorkspaceSyncService.updateWorkspaceFileTags(workspace.id, fileId, newTags);
+            }}
           />
         )}
         

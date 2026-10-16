@@ -394,39 +394,50 @@ export default function WorkspaceChat({
     }));
 
     try {
-      const response = await fetch('/api/ai-tutor', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: userMsg.text,
-          history,
-          persona: activePersona,
-          modelMode: 'auto',
-          workspaceId: workspace.id,
-          attachedFiles: effectiveFiles,
-          citationMode: true
-        })
-      });
-
+      let response: Response | null = null;
       let data: any = null;
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        data = await response.json().catch(() => null);
-      } else {
-        const text = await response.text().catch(() => '');
-        const isHtml = text.trim().startsWith('<') || text.includes('<html');
-        data = { 
-          error: isHtml 
-            ? 'Server connection issue (non-JSON response received). Please try again.' 
-            : (text || `HTTP ${response.status} ${response.statusText}`),
-          details: isHtml ? 'The server returned an HTML response instead of JSON.' : undefined
-        };
+      const maxAttempts = 2;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        response = await fetch('/api/ai-tutor', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: userMsg.text,
+            history,
+            persona: activePersona,
+            modelMode: 'auto',
+            workspaceId: workspace.id,
+            attachedFiles: effectiveFiles,
+            citationMode: true
+          })
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          data = await response.json().catch(() => null);
+          if (data) break;
+        }
+
+        // If non-JSON received on first attempt, wait briefly and retry
+        if (attempt < maxAttempts) {
+          await new Promise(r => setTimeout(r, 600));
+        } else {
+          const text = await response.text().catch(() => '');
+          const isHtml = text.trim().startsWith('<') || text.includes('<html');
+          data = { 
+            error: isHtml 
+              ? 'AI Tutor connection temporarily unavailable. Please try your message again.' 
+              : (text || `HTTP ${response.status} ${response.statusText}`),
+            details: isHtml ? 'The server returned an HTML response instead of JSON.' : undefined
+          };
+        }
       }
 
-      if (!response.ok || !data || data.error) {
-        const statusCode = response.status || data?.statusCode || 500;
-        const originalError = data?.error || data?.message || `Failed to generate response (HTTP ${response.status}).`;
+      if (!response || !response.ok || !data || data.error) {
+        const statusCode = response?.status || data?.statusCode || 500;
+        const originalError = data?.error || data?.message || `Failed to generate response (HTTP ${response?.status || 500}).`;
         const errorDetails = data?.details || (typeof data === 'object' ? JSON.stringify(data) : undefined);
 
         console.error('[WorkspaceChat] Gemini API request failed:', {

@@ -249,7 +249,7 @@ You must return a valid JSON object strictly matching this schema:
   "title": "Clear descriptive title of the material",
   "summary": "A rich 3-4 sentence academic summary explaining exactly what this resource covers",
   "detailedNotes": "Detailed structured study notes formatted with Markdown headings, key bullet points, and explanatory text",
-  "tags": ["3 to 5 specific subject/topic tags"],
+  "tags": ["3 to 5 tags. You MUST include at least one pedagogical classification tag from ['Lecture', 'Reading', 'Tutorial', 'Practice', 'Research', 'Reference'], followed by specific subject/topic tags (e.g. ['Lecture', 'Calculus', 'Derivatives'])"],
   "mainTopics": [
     { "topic": "Topic Name", "subtopics": ["Subtopic A", "Subtopic B"] }
   ],
@@ -296,15 +296,20 @@ Extract complete study notes, flashcards, practice questions, and definitions as
       }
     ];
   } else if (isYouTube) {
-    // For YouTube videos, include googleSearch grounding
     config = {
       systemInstruction,
-      temperature: 0.2,
-      tools: [{ googleSearch: {} }]
+      responseMimeType: 'application/json',
+      temperature: 0.2
     };
-    contents = `Search for YouTube video "${name}" by "${youtubeAuthor || ''}" (URL: ${sourceUrl || ''}). 
-Retrieve the video's real curriculum, key concepts, transcripts, chapters, and math/science equations.
-Synthesize the complete structured JSON response matching the required format.`;
+    contents = `Analyze and extract complete study materials from this video:
+Video Title: "${name}"
+Author / Creator: "${youtubeAuthor || 'Online Educational Creator'}"
+Video URL: ${sourceUrl || ''}
+${sourceText ? `Video Description / Context:\n${sourceText.slice(0, 10000)}` : ''}
+
+Determine what is taught in this video and extract the full structured study package.
+Include pedagogical tags such as 'Lecture' or 'Tutorial' as appropriate.
+Produce the complete structured JSON response matching the required format.`;
   } else {
     const textSnippet = sourceText ? sourceText.substring(0, 30000) : '';
     contents = `Analyze this educational resource:
@@ -314,11 +319,11 @@ Source URL: ${sourceUrl || 'N/A'}
 Content/Text:
 ${textSnippet || name}
 
-Produce the complete structured JSON study package matching the required schema.`;
+Produce the complete structured JSON study package matching the required schema. Ensure tags include pedagogical classifications like 'Reading' or 'Reference'.`;
   }
 
   // Model selection with graceful fallback on 503 high demand
-  const modelCandidates = ['gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-3.8-flash'];
+  const modelCandidates = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
   let lastError: any = null;
 
   for (const model of modelCandidates) {
@@ -374,7 +379,8 @@ export function generateReliableStudyFallback(
   const lowerName = (targetName + ' ' + (sourceText || '')).toLowerCase();
 
   let subject = 'General Academics';
-  let tags = ['Study Material', 'Revision'];
+  const pedagogicalTag = type === 'video' ? 'Lecture' : (type === 'url' ? 'Reading' : 'Reading');
+  let tags = [pedagogicalTag, 'Study Material'];
   let formulas: string[] = [];
 
   if (lowerName.includes('bio') || lowerName.includes('cell') || lowerName.includes('mitosis') || lowerName.includes('dna') || lowerName.includes('atp')) {
