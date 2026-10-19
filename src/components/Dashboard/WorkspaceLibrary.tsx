@@ -563,20 +563,8 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
     if (!pastedUrl.trim()) return;
 
     const url = pastedUrl.trim();
-    let name = url;
-    
-    try {
-      const parsed = new URL(url);
-      name = parsed.hostname + parsed.pathname;
-      if (name.length > 40) {
-        name = name.substring(0, 37) + '...';
-      }
-    } catch {
-      // use as is
-    }
-
-    const type = (url.includes('youtube.com') || url.includes('youtu.be')) ? 'video' : 'url';
-    analyzeAndAddResource(name, type, 'Web Link', url);
+    const type = (url.includes('youtube.com') || url.includes('youtu.be')) ? 'video' : (url.toLowerCase().endsWith('.pdf') ? 'pdf' : 'url');
+    analyzeAndAddResource(url, type, 'Web Link', url);
     setPastedUrl('');
     setShowUrlInput(false);
   };
