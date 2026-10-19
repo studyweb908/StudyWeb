@@ -208,13 +208,7 @@ export default function WorkspaceOverview({
                 <Layers className="w-4 h-4" />
                 <span>All Workspaces</span>
               </button>
-              <button
-                onClick={() => setActiveWorkspaceTab('library')}
-                className="px-3.5 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer"
-              >
-                <FileText className="w-4 h-4" />
-                <span>Upload Material</span>
-              </button>
+
               <button
                 onClick={() => setActiveWorkspaceTab('chat')}
                 className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-xs shadow-indigo-600/20"

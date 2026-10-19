@@ -904,6 +904,57 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
     }
   });
 
+  // API Route: Voice Transcription via Gemini Audio Understanding
+  app.post("/api/voice-transcribe", async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    try {
+      const { audioBase64, mimeType = "audio/webm" } = req.body;
+      if (!audioBase64 || typeof audioBase64 !== "string") {
+        res.status(400).json({ error: "audioBase64 is required" });
+        return;
+      }
+
+      const apiKey = getGeminiApiKey();
+      if (!apiKey) {
+        res.status(500).json({ error: "Gemini API key is not configured" });
+        return;
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          }
+        }
+      });
+
+      const cleanBase64 = audioBase64.replace(/^data:[^;]+;base64,/, "").replace(/[\r\n\s]/g, "");
+      const cleanMime = mimeType.split(";")[0] || "audio/webm";
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.1-flash-lite",
+        contents: [
+          {
+            inlineData: {
+              mimeType: cleanMime,
+              data: cleanBase64
+            }
+          },
+          {
+            text: "Transcribe the spoken audio into clear, accurate English text. Output ONLY the transcribed text. Do not add quotes, introductory phrases, or explanations."
+          }
+        ]
+      });
+
+      const transcript = (response?.text || "").trim();
+      res.json({ text: transcript });
+    } catch (err: any) {
+      console.error("[Voice Transcribe Error]:", err?.message || err);
+      res.status(500).json({ error: err?.message || "Failed to transcribe audio" });
+    }
+  });
+
   // API Route: AI Tutor Query via Google Gemini API (Multi-turn + Role Specialization + Model Routing)
   app.post("/api/ai-tutor", async (req, res) => {
     const correlationId = `tutor-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
@@ -1198,9 +1249,16 @@ ${groundedSourceContext}`;
             const currentTurnParts: any[] = [{ text: prompt }];
 
             if (effectiveFiles && effectiveFiles.length > 0) {
-              for (const file of effectiveFiles.slice(0, 3)) {
+              // Prioritize newly uploaded files that have inline base64 media or text transcriptions
+              const sortedFiles = [...effectiveFiles].sort((a, b) => {
+                const aHasMedia = (a.fileBase64 || (typeof a.url === "string" && a.url.startsWith("data:"))) ? 2 : (a.transcription ? 1 : 0);
+                const bHasMedia = (b.fileBase64 || (typeof b.url === "string" && b.url.startsWith("data:"))) ? 2 : (b.transcription ? 1 : 0);
+                return bHasMedia - aHasMedia;
+              });
+
+              for (const file of sortedFiles.slice(0, 3)) {
                 let rawBase64 = "";
-                let mimeType = file.fileMimeType || "application/pdf";
+                let mimeType = file.fileMimeType || (file.type === "image" ? "image/png" : "application/pdf");
 
                 if (file.url && typeof file.url === "string" && file.url.startsWith("data:")) {
                   const match = file.url.match(/^data:([^;]+);base64,(.+)$/);
@@ -1232,6 +1290,10 @@ ${groundedSourceContext}`;
                       }
                     });
                   }
+                } else if (file.transcription && typeof file.transcription === 'string' && file.transcription.trim()) {
+                  currentTurnParts.push({
+                    text: `[ATTACHED STUDY DOCUMENT: "${file.name}"]\n${file.transcription.slice(0, 8000)}`
+                  });
                 }
               }
             }

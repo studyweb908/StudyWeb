@@ -952,7 +952,6 @@ export default function WorkspaceLibrary({ workspace, onAddFile, onRemoveFile, o
                 className={`px-4 py-2 hover:bg-slate-50 border rounded-lg text-[13px] font-semibold flex items-center gap-2 cursor-pointer shadow-sm transition-all ${showUrlInput ? 'text-indigo-600 border-indigo-200 bg-indigo-50/50' : 'text-slate-700 border-slate-200 bg-white'}`}
               >
                 <Link className="w-4 h-4 text-slate-500" />
-                <span className="w-4 h-3 bg-red-600 rounded-sm flex items-center justify-center text-[6px] text-white shrink-0">▶</span>
                 <span>Websites</span>
               </button>
 

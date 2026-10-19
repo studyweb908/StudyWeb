@@ -1605,26 +1605,6 @@ Student Question:
                         </>
                       )}
                     </button>
-
-                    {onUpdateWorkspace && workspace && (
-                      <button
-                        onClick={() => handleAddToNotes(idx, log.text)}
-                        className="inline-flex items-center gap-1 hover:text-indigo-600 dark:hover:text-indigo-400 font-bold transition-all px-2.5 py-1 rounded bg-slate-50 dark:bg-slate-900/40 border border-slate-150 dark:border-slate-700/40 cursor-pointer active:scale-95 ml-auto"
-                        title="Add response to study notes"
-                      >
-                        {addedNoteMsgIdx === idx ? (
-                          <>
-                            <Check className="w-3 h-3 text-emerald-500" />
-                            <span className="text-emerald-500 font-extrabold">Saved to Notes!</span>
-                          </>
-                        ) : (
-                          <>
-                            <FileText className="w-3 h-3 text-slate-400 hover:text-slate-600" />
-                            <span>Add to Notes</span>
-                          </>
-                        )}
-                      </button>
-                    )}
                   </div>
                 )}
               </div>

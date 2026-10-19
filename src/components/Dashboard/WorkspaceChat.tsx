@@ -10,10 +10,8 @@ import {
   Copy, 
   CheckCircle2, 
   Loader2, 
-  Pin, 
   ChevronDown, 
   BookOpen, 
-  ArrowRight, 
   GraduationCap,
   FileText,
   AlertTriangle
@@ -83,6 +81,9 @@ interface AttachedDraftFile {
   size: string;
   type: string;
   content?: string;
+  dataUrl?: string;
+  base64?: string;
+  mimeType?: string;
   fileObj: File;
 }
 
@@ -104,7 +105,6 @@ export default function WorkspaceChat({
   const [inputValue, setInputValue] = useState('');
   const [isThinking, setIsThinking] = useState(false);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
-  const [addedNoteMsgId, setAddedNoteMsgId] = useState<string | null>(null);
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const [showPersonaMenu, setShowPersonaMenu] = useState(false);
   const [showFilesList, setShowFilesList] = useState(false);
@@ -124,10 +124,31 @@ export default function WorkspaceChat({
 
   // Voice dictation state
   const [isListening, setIsListening] = useState(false);
+  const [isTranscribingVoice, setIsTranscribingVoice] = useState(false);
+  const [waveformLevels, setWaveformLevels] = useState<number[]>([8, 14, 10]);
   const recognitionRef = useRef<any>(null);
-  const waveformLevels = useMicrophoneWaveform(isListening);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const lastFinalTranscriptRef = useRef<string>('');
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Animated soundwave pulses while listening
+  useEffect(() => {
+    let interval: any = null;
+    if (isListening) {
+      interval = setInterval(() => {
+        setWaveformLevels([
+          Math.floor(Math.random() * 14) + 6,
+          Math.floor(Math.random() * 20) + 8,
+          Math.floor(Math.random() * 16) + 6,
+        ]);
+      }, 140);
+    } else {
+      setWaveformLevels([8, 14, 10]);
+    }
+    return () => clearInterval(interval);
+  }, [isListening]);
 
   // Clean files list for grounding
   const activeFiles = useMemo(() => {
@@ -218,7 +239,7 @@ export default function WorkspaceChat({
     }]);
   };
 
-  // File Attachment Handlers
+  // File Attachment Handlers with deep binary & text reading
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -227,13 +248,39 @@ export default function WorkspaceChat({
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       let content: string | undefined = undefined;
+      let dataUrl: string | undefined = undefined;
+      let base64: string | undefined = undefined;
 
-      // Read text content for common textual formats
-      if (file.type.startsWith('text/') || file.name.endsWith('.md') || file.name.endsWith('.txt')) {
+      // 1. Read as Data URL (base64) so Gemini can natively inspect PDF, images, audio, etc.
+      try {
+        dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        });
+        if (dataUrl && dataUrl.includes(';base64,')) {
+          base64 = dataUrl.split(';base64,')[1];
+        }
+      } catch (err) {
+        console.warn('Could not read file as dataUrl:', err);
+      }
+
+      // 2. Read text content for common textual formats
+      if (
+        file.type.startsWith('text/') || 
+        file.name.endsWith('.md') || 
+        file.name.endsWith('.txt') || 
+        file.name.endsWith('.json') || 
+        file.name.endsWith('.csv') ||
+        file.name.endsWith('.tex')
+      ) {
         try {
           content = await file.text();
         } catch {}
       }
+
+      const mimeType = file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
 
       newDrafts.push({
         id: `draft-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 4)}`,
@@ -241,6 +288,9 @@ export default function WorkspaceChat({
         size: `${Math.max(1, Math.round(file.size / 1024))} KB`,
         type: file.type || 'document',
         content,
+        dataUrl,
+        base64,
+        mimeType,
         fileObj: file
       });
     }
@@ -253,40 +303,150 @@ export default function WorkspaceChat({
     setAttachedDrafts(prev => prev.filter(f => f.id !== id));
   };
 
-  // Voice input handler
-  const toggleListening = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Voice input is not supported in this browser. Please use Google Chrome or Edge.");
-      return;
-    }
-
+  // Voice input handler: converts voice to text AND immediately sends it to AI Study Tutor
+  const toggleListening = async () => {
+    // If currently listening, stop and send what was captured
     if (isListening) {
-      if (recognitionRef.current) recognitionRef.current.stop();
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch {}
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        try { mediaRecorderRef.current.stop(); } catch {}
+      }
       setIsListening(false);
+      
+      const speechToSend = (lastFinalTranscriptRef.current || inputValue).trim();
+      if (speechToSend) {
+        handleSend(speechToSend);
+        lastFinalTranscriptRef.current = '';
+      }
       return;
     }
 
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.lang = 'en-US';
+    lastFinalTranscriptRef.current = '';
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-      recognition.onstart = () => setIsListening(true);
-      recognition.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        if (transcript) {
-          setInputValue(prev => prev ? `${prev} ${transcript}` : transcript);
-        }
-      };
-      recognition.onerror = () => setIsListening(false);
-      recognition.onend = () => setIsListening(false);
+    let speechRecognitionStarted = false;
 
-      recognitionRef.current = recognition;
-      recognition.start();
-    } catch {
-      setIsListening(false);
+    if (SpeechRecognition) {
+      try {
+        const recognition = new SpeechRecognition();
+        recognitionRef.current = recognition;
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = () => {
+          setIsListening(true);
+        };
+
+        recognition.onresult = (event: any) => {
+          let interim = '';
+          let final = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              final += event.results[i][0].transcript;
+            } else {
+              interim += event.results[i][0].transcript;
+            }
+          }
+          const spoken = (final || interim).trim();
+          if (spoken) {
+            setInputValue(spoken);
+          }
+          if (final.trim()) {
+            lastFinalTranscriptRef.current = final.trim();
+          }
+        };
+
+        recognition.onerror = (err: any) => {
+          console.warn('[SpeechRecognition] notice:', err?.error || err);
+          setIsListening(false);
+        };
+
+        recognition.onend = () => {
+          setIsListening(false);
+          const speechToSend = (lastFinalTranscriptRef.current || inputRef.current?.value || inputValue).trim();
+          if (speechToSend) {
+            handleSend(speechToSend);
+            lastFinalTranscriptRef.current = '';
+          }
+        };
+
+        recognition.start();
+        speechRecognitionStarted = true;
+      } catch (e) {
+        console.warn('SpeechRecognition failed to start, falling back to MediaRecorder:', e);
+      }
+    }
+
+    // MediaRecorder fallback if Web Speech is unavailable
+    if (!speechRecognitionStarted) {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        alert("Voice input is not supported in this browser. Please use Chrome or grant microphone permission.");
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+        audioChunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            audioChunksRef.current.push(e.data);
+          }
+        };
+
+        mediaRecorder.onstart = () => {
+          setIsListening(true);
+        };
+
+        mediaRecorder.onstop = async () => {
+          setIsListening(false);
+          stream.getTracks().forEach(track => track.stop());
+
+          if (audioChunksRef.current.length > 0) {
+            setIsTranscribingVoice(true);
+            try {
+              const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' });
+              const reader = new FileReader();
+              reader.readAsDataURL(audioBlob);
+              reader.onloadend = async () => {
+                const base64Data = reader.result as string;
+                try {
+                  const resp = await fetch('/api/voice-transcribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      audioBase64: base64Data,
+                      mimeType: audioBlob.type
+                    })
+                  });
+                  const json = await resp.json();
+                  if (json.text && json.text.trim()) {
+                    setInputValue(json.text.trim());
+                    handleSend(json.text.trim());
+                  }
+                } catch (apiErr) {
+                  console.error('Transcription API error:', apiErr);
+                } finally {
+                  setIsTranscribingVoice(false);
+                }
+              };
+            } catch (err) {
+              console.error('Audio processing error:', err);
+              setIsTranscribingVoice(false);
+            }
+          }
+        };
+
+        mediaRecorder.start();
+      } catch (mediaErr) {
+        console.error('Microphone access denied:', mediaErr);
+        alert('Could not access microphone. Please grant microphone permission in your browser.');
+      }
     }
   };
 
@@ -297,31 +457,6 @@ export default function WorkspaceChat({
     setTimeout(() => setCopiedMsgId(null), 2000);
   };
 
-  // Save answer to notes
-  const handleSaveToNotes = (id: string, text: string) => {
-    if (!onUpdateWorkspace) return;
-
-    const firstLine = text.split('\n')[0].replace(/^[#*\s-]+/, '').slice(0, 45);
-    const cleanTitle = firstLine ? `AI Tutor: ${firstLine}` : `AI Tutor Note - ${new Date().toLocaleDateString()}`;
-    const cleanContent = `<h3>AI Study Tutor Note</h3>\n<p>${text.replace(/\n/g, '<br />')}</p>\n\n<p><em>Saved from AI Tutor in ${workspace.name}.</em></p>`;
-    
-    const newNote = {
-      id: `ai-note-${Date.now()}`,
-      title: cleanTitle,
-      content: cleanContent,
-      updatedAt: new Date().toLocaleDateString(),
-      tags: ['AI Tutor', workspace.subject || 'Notes']
-    };
-
-    onUpdateWorkspace({
-      ...workspace,
-      notes: [newNote, ...(workspace.notes || [])]
-    });
-
-    setAddedNoteMsgId(id);
-    setTimeout(() => setAddedNoteMsgId(null), 2000);
-  };
-
   // Send message
   const handleSend = async (customPrompt?: string) => {
     const textToSend = (customPrompt || inputValue).trim();
@@ -330,11 +465,15 @@ export default function WorkspaceChat({
     const currentDrafts = [...attachedDrafts];
     const draftNames = currentDrafts.map(d => d.name);
 
-    // Build user message
+    // Build user message with explicit description if prompt is empty
+    const userMsgText = textToSend || (draftNames.length > 0
+      ? `Please analyze my uploaded document (${draftNames.join(', ')}). Tell me what it is about, what key concepts are covered inside it, and explain it clearly.`
+      : '');
+
     const userMsg: Message = {
       id: `msg-user-${Date.now()}`,
       sender: 'user',
-      text: textToSend || `Please analyze the attached document: ${draftNames.join(', ')}`,
+      text: userMsgText,
       attachedFileNames: draftNames.length > 0 ? draftNames : undefined,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
@@ -347,11 +486,11 @@ export default function WorkspaceChat({
     // Record real-time user activity for asking AI Tutor
     recordUserActivity({
       title: 'Asked AI Tutor',
-      detail: (textToSend || (draftNames.length > 0 ? `Analyzed document: ${draftNames[0]}` : `Study session in ${workspace.name}`)).trim().slice(0, 50),
+      detail: (userMsgText || `Study session in ${workspace.name}`).trim().slice(0, 50),
       iconType: 'tutor'
     });
 
-    // Convert attached drafts into WorkspaceFile objects
+    // Convert attached drafts into WorkspaceFile objects with base64 url and transcription
     const newlyConvertedFiles: WorkspaceFile[] = currentDrafts.map(d => {
       const lower = d.name.toLowerCase();
       const fileType: WorkspaceFile['type'] = lower.endsWith('.pdf') 
@@ -374,11 +513,14 @@ export default function WorkspaceChat({
         tags: ['Attachment', 'Chat Upload'],
         summary: d.content ? d.content.slice(0, 400) : `Uploaded study file: ${d.name}`,
         transcription: d.content,
+        url: d.dataUrl,
+        fileBase64: d.base64,
+        fileMimeType: d.mimeType,
         highlights: [d.content ? d.content.slice(0, 200) : `Study document: ${d.name}`]
       };
     });
 
-    // Optionally save newly attached files into workspace
+    // Save newly attached files into workspace
     if (onUpdateWorkspace && newlyConvertedFiles.length > 0) {
       onUpdateWorkspace({
         ...workspace,
@@ -386,7 +528,8 @@ export default function WorkspaceChat({
       });
     }
 
-    const effectiveFiles = [...activeFiles, ...newlyConvertedFiles];
+    // Place newly attached files at the FRONT of effectiveFiles so Gemini inspects them first!
+    const effectiveFiles = [...newlyConvertedFiles, ...activeFiles];
     const startTime = Date.now();
     const history = messages.slice(-8).map(m => ({
       role: m.sender === 'ai' ? 'model' : 'user',
@@ -630,30 +773,6 @@ export default function WorkspaceChat({
     );
   };
 
-  // Easy starter prompts
-  const starterCards = [
-    {
-      icon: '💡',
-      title: 'Explain in simple words',
-      prompt: 'Explain the most important concepts from my notes in very simple everyday language.'
-    },
-    {
-      icon: '🎯',
-      title: 'Test me with a quiz question',
-      prompt: 'Ask me one practice question to test my understanding, and wait for my answer.'
-    },
-    {
-      icon: '🔑',
-      title: 'Top 3 key takeaways',
-      prompt: 'What are the top 3 key takeaways I must know for an exam?'
-    },
-    {
-      icon: '🌍',
-      title: 'Give me a real-life example',
-      prompt: 'Give me a fun, relatable real-world example that illustrates the main concept.'
-    }
-  ];
-
   return (
     <div className="w-full h-[calc(100dvh-130px)] sm:h-[calc(100dvh-140px)] md:h-[calc(100vh-130px)] min-h-[500px] flex flex-col bg-white dark:bg-slate-950 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm relative font-sans overflow-hidden">
       
@@ -830,43 +949,6 @@ export default function WorkspaceChat({
       <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 space-y-6">
         <div className="max-w-3xl mx-auto space-y-6">
           
-          {/* Welcome Card & Starter Suggestions if conversation is fresh */}
-          {messages.length <= 1 && (
-            <div className="p-6 sm:p-8 rounded-3xl bg-slate-50/80 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800/80 text-center space-y-5 my-4">
-              <div className="w-14 h-14 rounded-2xl bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-3xl mx-auto shadow-inner">
-                {TUTOR_PERSONAS[activePersona].icon}
-              </div>
-
-              <div className="space-y-1.5 max-w-lg mx-auto">
-                <h3 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white">
-                  How can I help you study today?
-                </h3>
-                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
-                  I can explain concepts, give you practice quizzes, or break down difficult topics from your notes into simple terms.
-                </p>
-              </div>
-
-              {/* 4 Easy Starter Buttons */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-xl mx-auto pt-2 text-left">
-                {starterCards.map((card, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleSend(card.prompt)}
-                    disabled={isThinking}
-                    className="p-3.5 rounded-2xl bg-white dark:bg-slate-850 hover:bg-indigo-50/80 dark:hover:bg-indigo-950/40 border border-slate-200/80 dark:border-slate-750 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all flex items-center justify-between group cursor-pointer shadow-xs disabled:opacity-50"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="text-xl shrink-0">{card.icon}</span>
-                      <span className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-                        {card.title}
-                      </span>
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all shrink-0" />
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Conversation Stream */}
           {messages.map((msg) => (
@@ -973,7 +1055,7 @@ export default function WorkspaceChat({
                   )}
                 </div>
 
-                {/* AI Bubble Actions: Copy & Save to Notes */}
+                {/* AI Bubble Actions: Copy */}
                 {msg.sender === 'ai' && (
                   <div className="flex items-center gap-3 pl-2 text-xs text-slate-400">
                     <button
@@ -990,26 +1072,6 @@ export default function WorkspaceChat({
                         <>
                           <Copy className="w-3.5 h-3.5" />
                           <span>Copy</span>
-                        </>
-                      )}
-                    </button>
-
-                    <span>·</span>
-
-                    <button
-                      onClick={() => handleSaveToNotes(msg.id, msg.text)}
-                      className="hover:text-indigo-600 flex items-center gap-1 cursor-pointer transition-colors"
-                      title="Save answer into your Workspace notes"
-                    >
-                      {addedNoteMsgId === msg.id ? (
-                        <>
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                          <span className="text-emerald-500 font-semibold">Saved to Notes</span>
-                        </>
-                      ) : (
-                        <>
-                          <Pin className="w-3.5 h-3.5" />
-                          <span>Save to Notes</span>
                         </>
                       )}
                     </button>
@@ -1077,31 +1139,6 @@ export default function WorkspaceChat({
             </div>
           )}
 
-          {/* Quick suggestion chips above input */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none text-xs">
-            <span className="text-[11px] font-bold text-slate-400 shrink-0">Suggestions:</span>
-            {[
-              "💡 Explain simply",
-              "🎯 Quiz me",
-              "🔑 Top takeaways",
-              "⚡ Quick flashcard"
-            ].map((chip, idx) => (
-              <button
-                key={idx}
-                onClick={() => {
-                  if (chip.includes("Explain")) handleSend("Explain the core ideas from my notes in simple everyday language.");
-                  else if (chip.includes("Quiz")) handleSend("Ask me a practice quiz question from my notes with multiple choices, and wait for my response.");
-                  else if (chip.includes("takeaways")) handleSend("What are the 3 most important takeaways from my study materials?");
-                  else handleSend("Give me a quick active recall flashcard question to test my memory.");
-                }}
-                disabled={isThinking}
-                className="px-3 py-1 rounded-full bg-slate-100 hover:bg-indigo-50 dark:bg-slate-850 dark:hover:bg-indigo-950/60 text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 text-xs font-semibold shrink-0 cursor-pointer transition-colors border border-slate-200/60 dark:border-slate-800"
-              >
-                {chip}
-              </button>
-            ))}
-          </div>
-
           {/* Hidden Native File Input */}
           <input
             ref={fileInputRef}
@@ -1134,16 +1171,29 @@ export default function WorkspaceChat({
             <button
               type="button"
               onClick={toggleListening}
-              disabled={isThinking}
+              disabled={isThinking || isTranscribingVoice}
               className={`px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0 border ${
                 isListening
                   ? 'bg-rose-500 text-white border-rose-600 shadow-md shadow-rose-500/25 animate-pulse'
+                  : isTranscribingVoice
+                  ? 'bg-indigo-600 text-white border-indigo-700 shadow-md'
                   : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-indigo-50/70 dark:hover:bg-slate-750 border-slate-200/90 dark:border-slate-700 shadow-2xs group'
               }`}
-              title={isListening ? "Listening... click to stop" : "Voice Input: Speak your question"}
+              title={
+                isTranscribingVoice
+                  ? "Transcribing voice with AI..."
+                  : isListening
+                  ? "Listening... Speak your question, then click to stop and send"
+                  : "Voice Input: Speak your question"
+              }
               aria-label="Voice Input"
             >
-              {isListening ? (
+              {isTranscribingVoice ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                  <span className="text-xs font-bold text-white hidden sm:inline">Converting...</span>
+                </>
+              ) : isListening ? (
                 <>
                   <div className="flex items-center gap-0.5">
                     {[0, 1, 2].map((i) => (

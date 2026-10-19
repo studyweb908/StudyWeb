@@ -220,8 +220,16 @@ export default function AITutorWorkspace() {
   const [showSemanticSearch, setShowSemanticSearch] = useState(false);
   const [deepResearch, setDeepResearch] = useState(false);
   const [citationMode, setCitationMode] = useState(true);
-  const [attachedFiles, setAttachedFiles] = useState<{ name: string; type: string; size?: string }[]>([]);
   const [showMobileDocs, setShowMobileDocs] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState<{
+    name: string;
+    type: string;
+    size?: string;
+    url?: string;
+    fileBase64?: string;
+    fileMimeType?: string;
+    transcription?: string;
+  }[]>([]);
   const [selectedModel, setSelectedModel] = useState('auto');
   const [activeCitation, setActiveCitation] = useState<{
     sourceName: string;
@@ -542,36 +550,65 @@ export default function AITutorWorkspace() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, fileCategory: 'document' | 'image') => {
+  const processUploadedFile = async (file: File) => {
+    let typeLabel = 'Document';
+    if (file.type.startsWith('image/')) {
+      typeLabel = 'Image File';
+    } else if (file.type.includes('pdf')) {
+      typeLabel = 'PDF Document';
+    } else if (file.type.includes('word') || file.name.endsWith('.docx') || file.name.endsWith('.doc')) {
+      typeLabel = 'Word Document';
+    } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv')) {
+      typeLabel = 'Spreadsheet';
+    } else if (file.name.endsWith('.pptx') || file.name.endsWith('.ppt')) {
+      typeLabel = 'Presentation';
+    }
+
+    let dataUrl: string | undefined = undefined;
+    let fileBase64: string | undefined = undefined;
+    try {
+      dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      if (dataUrl && dataUrl.includes(';base64,')) {
+        fileBase64 = dataUrl.split(';base64,')[1];
+      }
+    } catch {}
+
+    let transcription: string | undefined = undefined;
+    if (file.type.startsWith('text/') || file.name.endsWith('.md') || file.name.endsWith('.txt') || file.name.endsWith('.json') || file.name.endsWith('.csv')) {
+      try {
+        transcription = await file.text();
+      } catch {}
+    }
+
+    const mimeType = file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+
+    return {
+      name: file.name,
+      type: typeLabel,
+      size: formatFileSize(file.size),
+      url: dataUrl,
+      fileBase64,
+      fileMimeType: mimeType,
+      transcription
+    };
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, fileCategory: 'document' | 'image') => {
     if (!e.target.files) return;
     const filesArray = Array.from(e.target.files) as File[];
     
-    filesArray.forEach(file => {
-      let typeLabel = 'Document';
-      if (file.type.startsWith('image/')) {
-        typeLabel = 'Image File';
-      } else if (file.type.includes('pdf')) {
-        typeLabel = 'PDF Document';
-      } else if (file.type.includes('word') || file.name.endsWith('.docx') || file.name.endsWith('.doc')) {
-        typeLabel = 'Word Document';
-      } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv')) {
-        typeLabel = 'Spreadsheet';
-      } else if (file.name.endsWith('.pptx') || file.name.endsWith('.ppt')) {
-        typeLabel = 'Presentation';
-      }
-
-      const newFile = {
-        name: file.name,
-        type: typeLabel,
-        size: formatFileSize(file.size)
-      };
+    for (const file of filesArray) {
+      const processed = await processUploadedFile(file);
       setAttachedFiles(prev => {
-        if (prev.some(f => f.name === file.name)) {
-          return prev;
-        }
-        return [...prev, newFile];
+        if (prev.some(f => f.name === file.name)) return prev;
+        return [...prev, processed];
       });
-    });
+    }
 
     e.target.value = '';
   };
@@ -586,34 +623,19 @@ export default function AITutorWorkspace() {
     setIsDragging(false);
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
     if (!e.dataTransfer.files) return;
     const filesArray = Array.from(e.dataTransfer.files) as File[];
     
-    filesArray.forEach(file => {
-      let typeLabel = 'Document';
-      if (file.type.startsWith('image/')) {
-        typeLabel = 'Image File';
-      } else if (file.type.includes('pdf')) {
-        typeLabel = 'PDF Document';
-      } else if (file.type.includes('word') || file.name.endsWith('.docx') || file.name.endsWith('.doc')) {
-        typeLabel = 'Word Document';
-      }
-
-      const newFile = {
-        name: file.name,
-        type: typeLabel,
-        size: formatFileSize(file.size)
-      };
+    for (const file of filesArray) {
+      const processed = await processUploadedFile(file);
       setAttachedFiles(prev => {
-        if (prev.some(f => f.name === file.name)) {
-          return prev;
-        }
-        return [...prev, newFile];
+        if (prev.some(f => f.name === file.name)) return prev;
+        return [...prev, processed];
       });
-    });
+    }
   };
 
   const startSpeechRecognition = () => {
@@ -622,11 +644,14 @@ export default function AITutorWorkspace() {
         recognitionRef.current.stop();
       }
       setIsListening(false);
+      if (inputValue.trim()) {
+        handleSend(inputValue.trim());
+      }
       return;
     }
 
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      (window as any).showToast?.("Speech recognition is not supported in this browser. Please try another browser or make sure microphone permission is granted.", "warning");
+      (window as any).showToast?.("Speech recognition is not supported in this browser. Please try Chrome or Edge.", "warning");
       return;
     }
 
@@ -634,26 +659,42 @@ export default function AITutorWorkspace() {
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
     recognition.continuous = false;
-    recognition.interimResults = false;
+    recognition.interimResults = true;
     recognition.lang = 'en-US';
 
     recognition.onstart = () => {
       setIsListening(true);
     };
 
+    let latestTranscript = '';
     recognition.onresult = (event: any) => {
-      const speechToText = event.results[0][0].transcript;
-      setInputValue(prev => prev + (prev ? ' ' : '') + speechToText);
+      let interim = '';
+      let final = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          final += event.results[i][0].transcript;
+        } else {
+          interim += event.results[i][0].transcript;
+        }
+      }
+      const spoken = (final || interim).trim();
+      if (spoken) {
+        setInputValue(spoken);
+        latestTranscript = spoken;
+      }
     };
 
     recognition.onerror = (err: any) => {
-      console.error("Speech recognition error:", err.error || err);
-      (window as any).showToast?.(`Microphone error: ${err.error || "Unknown error"}. Make sure microphone permissions are granted.`, "error");
+      console.warn("Speech recognition error:", err.error || err);
       setIsListening(false);
     };
 
     recognition.onend = () => {
       setIsListening(false);
+      const text = latestTranscript || inputValue.trim();
+      if (text) {
+        handleSend(text);
+      }
     };
 
     recognition.start();
@@ -1112,6 +1153,19 @@ export default function AITutorWorkspace() {
               title="Attach an image of a math problem"
             >
               <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={startSpeechRecognition}
+              className={`p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer shrink-0 ${
+                isListening
+                  ? 'bg-rose-500 text-white shadow-md shadow-rose-500/25 animate-pulse'
+                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-800'
+              }`}
+              title={isListening ? "Listening... click to stop and send" : "Voice input: speak your question"}
+            >
+              <Mic className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
 
             {/* Core Input Field */}
