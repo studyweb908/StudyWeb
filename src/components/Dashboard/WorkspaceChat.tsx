@@ -12,7 +12,6 @@ import {
   Loader2, 
   ChevronDown, 
   BookOpen, 
-  GraduationCap,
   FileText,
   AlertTriangle
 } from 'lucide-react';
@@ -128,6 +127,7 @@ export default function WorkspaceChat({
   const [waveformLevels, setWaveformLevels] = useState<number[]>([8, 14, 10]);
   const recognitionRef = useRef<any>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const lastFinalTranscriptRef = useRef<string>('');
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -303,9 +303,9 @@ export default function WorkspaceChat({
     setAttachedDrafts(prev => prev.filter(f => f.id !== id));
   };
 
-  // Voice input handler: converts voice to text AND immediately sends it to AI Study Tutor
+  // Voice input handler: dual-engine real-time streaming recognition + Gemini AI audio transcription
   const toggleListening = async () => {
-    // If currently listening, stop and send what was captured
+    // If currently listening, stop both engines
     if (isListening) {
       if (recognitionRef.current) {
         try { recognitionRef.current.stop(); } catch {}
@@ -314,20 +314,109 @@ export default function WorkspaceChat({
         try { mediaRecorderRef.current.stop(); } catch {}
       }
       setIsListening(false);
-      
-      const speechToSend = (lastFinalTranscriptRef.current || inputValue).trim();
-      if (speechToSend) {
-        handleSend(speechToSend);
-        lastFinalTranscriptRef.current = '';
-      }
       return;
     }
 
     lastFinalTranscriptRef.current = '';
+    audioChunksRef.current = [];
+
+    // 1. Request microphone access
+    let stream: MediaStream | null = null;
+    try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioStreamRef.current = stream;
+      }
+    } catch (mediaErr) {
+      console.warn('Microphone permission not granted:', mediaErr);
+      alert('Microphone access is required for voice input. Please enable microphone permissions in your browser.');
+      return;
+    }
+
+    if (!stream) {
+      alert('Microphone access is required for voice input. Please enable microphone permissions in your browser.');
+      return;
+    }
+
+    // 2. Start MediaRecorder on the microphone stream (buffering audio chunks)
+    try {
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : MediaRecorder.isTypeSupported('audio/mp4')
+        ? 'audio/mp4'
+        : '';
+
+      const mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        setIsListening(false);
+        if (audioStreamRef.current) {
+          audioStreamRef.current.getTracks().forEach(track => track.stop());
+          audioStreamRef.current = null;
+        }
+
+        // Check if Web Speech API already transcribed speech
+        const speechCaptured = (lastFinalTranscriptRef.current || inputRef.current?.value || inputValue).trim();
+        if (speechCaptured) {
+          handleSend(speechCaptured);
+          lastFinalTranscriptRef.current = '';
+          return;
+        }
+
+        // Otherwise transcribe audio chunks via Gemini voice-transcribe service
+        if (audioChunksRef.current.length > 0) {
+          setIsTranscribingVoice(true);
+          try {
+            const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' });
+            const reader = new FileReader();
+            reader.readAsDataURL(audioBlob);
+            reader.onloadend = async () => {
+              const base64Data = reader.result as string;
+              try {
+                const resp = await fetch('/api/voice-transcribe', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    audioBase64: base64Data,
+                    mimeType: audioBlob.type
+                  })
+                });
+                const json = await resp.json();
+                if (json.text && json.text.trim()) {
+                  setInputValue(json.text.trim());
+                  handleSend(json.text.trim());
+                }
+              } catch (apiErr) {
+                console.error('Transcription API error:', apiErr);
+              } finally {
+                setIsTranscribingVoice(false);
+              }
+            };
+          } catch (err) {
+            console.error('Audio processing error:', err);
+            setIsTranscribingVoice(false);
+          }
+        }
+      };
+
+      mediaRecorder.start(250); // Collect audio slices continuously
+      setIsListening(true);
+    } catch (recErr) {
+      console.warn('Could not initialize MediaRecorder:', recErr);
+    }
+
+    // 3. Concurrently start Web Speech Recognition for live text streaming into input
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    let speechRecognitionStarted = false;
-
     if (SpeechRecognition) {
       try {
         const recognition = new SpeechRecognition();
@@ -335,10 +424,6 @@ export default function WorkspaceChat({
         recognition.continuous = false;
         recognition.interimResults = true;
         recognition.lang = 'en-US';
-
-        recognition.onstart = () => {
-          setIsListening(true);
-        };
 
         recognition.onresult = (event: any) => {
           let interim = '';
@@ -361,91 +446,19 @@ export default function WorkspaceChat({
 
         recognition.onerror = (err: any) => {
           console.warn('[SpeechRecognition] notice:', err?.error || err);
-          setIsListening(false);
+          // Don't stop listening; MediaRecorder is recording and will transcribe
         };
 
         recognition.onend = () => {
-          setIsListening(false);
-          const speechToSend = (lastFinalTranscriptRef.current || inputRef.current?.value || inputValue).trim();
-          if (speechToSend) {
-            handleSend(speechToSend);
-            lastFinalTranscriptRef.current = '';
+          // If recognition ended due to silence, stop media recorder to trigger final transcribe & send
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+            try { mediaRecorderRef.current.stop(); } catch {}
           }
         };
 
         recognition.start();
-        speechRecognitionStarted = true;
       } catch (e) {
-        console.warn('SpeechRecognition failed to start, falling back to MediaRecorder:', e);
-      }
-    }
-
-    // MediaRecorder fallback if Web Speech is unavailable
-    if (!speechRecognitionStarted) {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        alert("Voice input is not supported in this browser. Please use Chrome or grant microphone permission.");
-        return;
-      }
-
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mediaRecorder = new MediaRecorder(stream);
-        mediaRecorderRef.current = mediaRecorder;
-        audioChunksRef.current = [];
-
-        mediaRecorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) {
-            audioChunksRef.current.push(e.data);
-          }
-        };
-
-        mediaRecorder.onstart = () => {
-          setIsListening(true);
-        };
-
-        mediaRecorder.onstop = async () => {
-          setIsListening(false);
-          stream.getTracks().forEach(track => track.stop());
-
-          if (audioChunksRef.current.length > 0) {
-            setIsTranscribingVoice(true);
-            try {
-              const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' });
-              const reader = new FileReader();
-              reader.readAsDataURL(audioBlob);
-              reader.onloadend = async () => {
-                const base64Data = reader.result as string;
-                try {
-                  const resp = await fetch('/api/voice-transcribe', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      audioBase64: base64Data,
-                      mimeType: audioBlob.type
-                    })
-                  });
-                  const json = await resp.json();
-                  if (json.text && json.text.trim()) {
-                    setInputValue(json.text.trim());
-                    handleSend(json.text.trim());
-                  }
-                } catch (apiErr) {
-                  console.error('Transcription API error:', apiErr);
-                } finally {
-                  setIsTranscribingVoice(false);
-                }
-              };
-            } catch (err) {
-              console.error('Audio processing error:', err);
-              setIsTranscribingVoice(false);
-            }
-          }
-        };
-
-        mediaRecorder.start();
-      } catch (mediaErr) {
-        console.error('Microphone access denied:', mediaErr);
-        alert('Could not access microphone. Please grant microphone permission in your browser.');
+        console.warn('SpeechRecognition failed to start, using MediaRecorder transcription:', e);
       }
     }
   };
@@ -783,8 +796,8 @@ export default function WorkspaceChat({
         
         {/* Left: Tutor Branding & Workspace indicator */}
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center text-lg shadow-sm shadow-indigo-600/20 shrink-0">
-            <GraduationCap className="w-5 h-5" />
+          <div className="w-10 h-10 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex items-center justify-center p-1.5 shadow-sm shrink-0 overflow-hidden">
+            <img src="/logo.png" alt="StudyWeb Logo" className="w-full h-full object-contain dark:invert" />
           </div>
 
           <div className="min-w-0">
@@ -958,8 +971,8 @@ export default function WorkspaceChat({
             >
               {/* AI Avatar */}
               {msg.sender === 'ai' && (
-                <div className="w-9 h-9 rounded-2xl bg-indigo-600 text-white flex items-center justify-center text-sm shadow-sm shrink-0 mt-0.5">
-                  <GraduationCap className="w-4 h-4" />
+                <div className="w-9 h-9 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex items-center justify-center p-1.5 shadow-xs shrink-0 mt-0.5 overflow-hidden">
+                  <img src="/logo.png" alt="AI Tutor" className="w-full h-full object-contain dark:invert" />
                 </div>
               )}
 

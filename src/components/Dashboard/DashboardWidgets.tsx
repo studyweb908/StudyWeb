@@ -3,6 +3,7 @@ import { Layout, Grid, ChevronLeft, ChevronRight, Sparkles, Brain, Bot, CheckSqu
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../../lib/supabase';
 import QuickPreviewModal from './QuickPreviewModal';
+import { StorageQuotaSkeleton } from './DashboardSkeletons';
 
 // -----------------------------------------
 // 1. Interactive Mini Calendar
@@ -741,7 +742,11 @@ export function RecentStudyMaterials({
 // -----------------------------------------
 // Storage Quota Widget
 // -----------------------------------------
-export function StorageQuotaWidget({ workspaces = [] }: { workspaces?: Workspace[] }) {
+export function StorageQuotaWidget({ workspaces = [], isLoading = false }: { workspaces?: Workspace[]; isLoading?: boolean }) {
+  if (isLoading) {
+    return <StorageQuotaSkeleton />;
+  }
+
   const parseSize = (sizeStr: string) => {
     if (!sizeStr) return 0;
     const match = sizeStr.match(/([\d\.]+)\s*(MB|KB|GB|Bytes)/i);

@@ -63,6 +63,7 @@ import { NoteItem, SubjectMetric } from './types';
 import { useThemeMode } from '../../hooks/useThemeMode';
 import AutoSavingToast from '../AutoSavingToast';
 import { ProfileSettingsHub } from './ProfileSettingsHub';
+import { ResourceCardSkeleton } from './DashboardSkeletons';
 
 // ==========================================
 // 1. STUDY PLANNER VIEW
@@ -1206,21 +1207,36 @@ export function NotesView() {
 // ==========================================
 // 5. RESOURCES LIBRARY VIEW
 // ==========================================
-export function ResourcesView({ workspaces = [] }: { workspaces?: any[] }) {
+export function ResourcesView({ workspaces = [], isLoading: externalLoading }: { workspaces?: any[]; isLoading?: boolean }) {
   const [previewMaterial, setPreviewMaterial] = useState<{ title: string; type: string } | null>(null);
-  const [materials, setMaterials] = useState<{ title: string; type: string; size: string; uploadDate: string }[]>([
-    { title: 'AP Chemistry formula quicksheet', type: 'PDF Document', size: '2.1 MB', uploadDate: 'Oct 12, 2023' },
-    { title: 'Biology Chapter 4 Study guide', type: 'EPUB Ebook', size: '4.8 MB', uploadDate: 'Oct 15, 2023' },
-    { title: 'Calculus previous year solved exams', type: 'PDF Document', size: '8.4 MB', uploadDate: 'Oct 20, 2023' },
-    { title: 'Physics rotational kinematics cheat sheet', type: 'Markdown Text', size: '45 KB', uploadDate: 'Oct 22, 2023' },
-  ]);
+  const [materials, setMaterials] = useState<{ title: string; type: string; size: string; uploadDate: string }[]>([]);
+  const [internalLoading, setInternalLoading] = useState(true);
+
+  const isLoading = externalLoading !== undefined ? externalLoading : internalLoading;
 
   useEffect(() => {
     async function fetchSupabaseFiles() {
-      if (!workspaces || workspaces.length === 0) return;
+      // Gather local workspace files first to show real user content immediately if available
+      const localFiles = (workspaces || []).flatMap(w => (w.files || []).map((f: any) => ({
+        title: f.name || 'Untitled',
+        type: (f.type || 'PDF Document').toUpperCase(),
+        size: f.size || 'Unknown Size',
+        uploadDate: f.uploadDate ? new Date(f.uploadDate).toLocaleDateString() : 'Recent'
+      })));
+
+      if (localFiles.length > 0) {
+        setMaterials(localFiles);
+        setInternalLoading(false);
+      }
+
+      if (!workspaces || workspaces.length === 0) {
+        setInternalLoading(false);
+        return;
+      }
+
       try {
         const wsIds = workspaces.map(w => w.id).join(',');
-        const res = await fetch(`/api/workspace-files?limit=10&workspaceIds=${encodeURIComponent(wsIds)}`);
+        const res = await fetch(`/api/workspace-files?limit=20&workspaceIds=${encodeURIComponent(wsIds)}`);
         if (res.ok) {
           const json = await res.json();
           if (json.files && Array.isArray(json.files) && json.files.length > 0) {
@@ -1231,10 +1247,15 @@ export function ResourcesView({ workspaces = [] }: { workspaces?: any[] }) {
               uploadDate: new Date(d.created_at || Date.now()).toLocaleDateString()
             }));
             setMaterials(serverMaterials);
+          } else if (localFiles.length === 0) {
+            setMaterials([]);
           }
         }
       } catch {
-        // Silent fallback to default mock/local materials
+        // Safe fallback to user's real local workspace files (no fake/mock data)
+        setMaterials(localFiles);
+      } finally {
+        setInternalLoading(false);
       }
     }
     
@@ -1273,7 +1294,7 @@ export function ResourcesView({ workspaces = [] }: { workspaces?: any[] }) {
   const getFileIcon = (type: string) => {
     if (type.includes('PDF')) return { icon: <FileText className="w-5 h-5" />, color: 'bg-rose-500/10 text-rose-600 dark:text-rose-500' };
     if (type.includes('EPUB')) return { icon: <BookOpen className="w-5 h-5" />, color: 'bg-amber-500/10 text-amber-600 dark:text-amber-500' };
-    if (type.includes('Markdown')) return { icon: <FileCode className="w-5 h-5" />, color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500' };
+    if (type.includes('Markdown') || type.includes('TXT')) return { icon: <FileCode className="w-5 h-5" />, color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500' };
     return { icon: <File className="w-5 h-5" />, color: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-500' };
   };
 
@@ -1287,38 +1308,58 @@ export function ResourcesView({ workspaces = [] }: { workspaces?: any[] }) {
         <p className="text-xs text-slate-400 font-semibold mt-0.5">Curated textbooks, past papers, and previous year answers</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {materials.map((mat, idx) => {
-          const { icon, color } = getFileIcon(mat.type);
-          return (
-            <div 
-              key={idx} 
-              onClick={() => setPreviewMaterial(mat)}
-              className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 hover:border-indigo-200 transition-all bg-slate-50/50 dark:bg-slate-800/20 flex items-center justify-between cursor-pointer group"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <span className={`p-2 rounded-lg flex-shrink-0 ${color}`}>
-                  {icon}
-                </span>
-                <div className="min-w-0">
-                  <p className="font-bold text-slate-800 dark:text-white truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{mat.title}</p>
-                  <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">{mat.type} • {mat.size} • {mat.uploadDate}</p>
-                </div>
-              </div>
-
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  (window as any).showToast?.('📥 Material download started successfully.', 'success')
-                }}
-                className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition-colors"
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[1, 2, 3, 4].map(i => (
+            <ResourceCardSkeleton key={i} />
+          ))}
+        </div>
+      ) : materials.length === 0 ? (
+        <div className="py-12 px-6 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl bg-slate-50/50 dark:bg-slate-900/50 space-y-3">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto shadow-xs">
+            <Library className="w-6 h-6" />
+          </div>
+          <div className="max-w-md mx-auto">
+            <h4 className="text-base font-bold text-slate-900 dark:text-white">No reference documents yet</h4>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+              Upload course textbooks, lecture slides, or study guides into your workspaces to build your reference library.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {materials.map((mat, idx) => {
+            const { icon, color } = getFileIcon(mat.type);
+            return (
+              <div 
+                key={idx} 
+                onClick={() => setPreviewMaterial(mat)}
+                className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 hover:border-indigo-200 transition-all bg-slate-50/50 dark:bg-slate-800/20 flex items-center justify-between cursor-pointer group"
               >
-                <Download className="w-4.5 h-4.5" />
-              </button>
-            </div>
-          );
-        })}
-      </div>
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className={`p-2 rounded-lg flex-shrink-0 ${color}`}>
+                    {icon}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-bold text-slate-800 dark:text-white truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{mat.title}</p>
+                    <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">{mat.type} • {mat.size} • {mat.uploadDate}</p>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    (window as any).showToast?.('📥 Material download started successfully.', 'success')
+                  }}
+                  className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition-colors"
+                >
+                  <Download className="w-4.5 h-4.5" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <AnimatePresence>
         {previewMaterial && (

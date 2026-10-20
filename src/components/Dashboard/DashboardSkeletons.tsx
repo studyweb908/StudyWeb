@@ -139,3 +139,71 @@ export const StorageQuotaSkeleton = () => (
     <div className="w-3/4 h-3 bg-slate-100 dark:bg-slate-800 rounded-md mt-6" />
   </div>
 );
+
+export const WorkspaceCardSkeleton = () => (
+  <div className="bg-white dark:bg-slate-900 border-2 border-slate-200/80 dark:border-slate-800 rounded-[24px] overflow-hidden shadow-xs h-72 flex flex-col justify-between animate-pulse">
+    <div>
+      <div className="h-28 bg-slate-100 dark:bg-slate-800 relative">
+        <div className="absolute -bottom-3 left-4 w-12 h-12 rounded-xl bg-slate-200 dark:bg-slate-700 border-2 border-white dark:border-slate-850" />
+      </div>
+      <div className="pt-6 px-4 space-y-2.5">
+        <div className="w-16 h-3.5 bg-slate-100 dark:bg-slate-800 rounded-md" />
+        <div className="w-3/4 h-5 bg-slate-100 dark:bg-slate-800 rounded-md" />
+        <div className="w-full h-3 bg-slate-100/70 dark:bg-slate-800/60 rounded-md" />
+        <div className="w-2/3 h-3 bg-slate-100/70 dark:bg-slate-800/60 rounded-md" />
+      </div>
+    </div>
+    <div className="p-4 border-t border-slate-100 dark:border-slate-800/80 flex justify-between items-center">
+      <div className="w-20 h-4 bg-slate-100 dark:bg-slate-800 rounded-md" />
+      <div className="w-6 h-6 bg-slate-100 dark:bg-slate-800 rounded-lg" />
+    </div>
+  </div>
+);
+
+export const HomeWorkspaceSkeleton = () => (
+  <div className="p-4 sm:p-5 rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-850/40 animate-pulse flex flex-col justify-between min-h-[240px]">
+    <div>
+      <div className="w-full h-24 rounded-lg bg-slate-200/70 dark:bg-slate-800 mb-3.5" />
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="w-6 h-6 rounded-md bg-slate-200/70 dark:bg-slate-800" />
+        <div className="w-20 h-3 bg-slate-200/70 dark:bg-slate-800 rounded" />
+      </div>
+      <div className="w-3/4 h-4 bg-slate-200/70 dark:bg-slate-800 rounded mb-2" />
+      <div className="w-full h-3 bg-slate-100 dark:bg-slate-800/60 rounded mb-1" />
+      <div className="w-2/3 h-3 bg-slate-100 dark:bg-slate-800/60 rounded" />
+    </div>
+    <div className="pt-3 border-t border-slate-200/60 dark:border-slate-800/60">
+      <div className="w-full h-8 bg-slate-200/70 dark:bg-slate-800 rounded-lg" />
+    </div>
+  </div>
+);
+
+export const RecentActivitySkeleton = () => (
+  <div className="space-y-3 animate-pulse">
+    {[1, 2, 3].map(i => (
+      <div key={i} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-50/60 dark:bg-slate-850/40 border border-slate-200/60 dark:border-slate-800/60">
+        <div className="flex items-center gap-3 flex-1">
+          <div className="w-8 h-8 rounded-lg bg-slate-200/70 dark:bg-slate-800 shrink-0" />
+          <div className="space-y-1.5 flex-1">
+            <div className="w-1/2 h-3.5 bg-slate-200/70 dark:bg-slate-800 rounded" />
+            <div className="w-3/4 h-2.5 bg-slate-100 dark:bg-slate-800/60 rounded" />
+          </div>
+        </div>
+        <div className="w-14 h-3 bg-slate-200/70 dark:bg-slate-800 rounded shrink-0" />
+      </div>
+    ))}
+  </div>
+);
+
+export const ResourceCardSkeleton = () => (
+  <div className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20 animate-pulse flex items-center justify-between">
+    <div className="flex items-center gap-3 flex-1">
+      <div className="w-9 h-9 rounded-lg bg-slate-200/70 dark:bg-slate-800 shrink-0" />
+      <div className="space-y-1.5 flex-1">
+        <div className="w-2/3 h-4 bg-slate-200/70 dark:bg-slate-800 rounded" />
+        <div className="w-1/3 h-2.5 bg-slate-100 dark:bg-slate-800/60 rounded" />
+      </div>
+    </div>
+    <div className="w-6 h-6 rounded-md bg-slate-200/70 dark:bg-slate-800 shrink-0 ml-2" />
+  </div>
+);

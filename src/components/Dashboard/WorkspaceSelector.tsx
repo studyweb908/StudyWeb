@@ -48,9 +48,11 @@ import { generateUuid } from '../../utils/uuid.ts';
 import { CSS } from '@dnd-kit/utilities';
 import { Workspace } from './WorkspaceTypes';
 import EditWorkspaceModal from './EditWorkspaceModal';
+import { WorkspaceCardSkeleton } from './DashboardSkeletons';
 
 interface WorkspaceSelectorProps {
   workspaces: Workspace[];
+  isLoading?: boolean;
   onSelectWorkspace: (workspace: Workspace) => void;
   onCreateWorkspace: (workspace: Workspace) => void;
   onUpdateWorkspace?: (workspace: Workspace) => void;
@@ -264,6 +266,7 @@ function SortableWorkspaceCard({
 
 export default function WorkspaceSelector({ 
   workspaces, 
+  isLoading = false,
   onSelectWorkspace, 
   onCreateWorkspace,
   onUpdateWorkspace,
@@ -504,7 +507,13 @@ export default function WorkspaceSelector({
       )}
 
       {/* WORKSPACE CARDS GRID OR EMPTY STATES */}
-      {workspaces.length === 0 ? (
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <WorkspaceCardSkeleton key={i} />
+          ))}
+        </div>
+      ) : workspaces.length === 0 ? (
         <motion.div 
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}

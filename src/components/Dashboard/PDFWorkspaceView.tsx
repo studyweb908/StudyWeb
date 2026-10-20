@@ -216,87 +216,53 @@ export default function PDFWorkspaceView({ workspace, onUpdateWorkspace }: PDFWo
     blue: 'Questions/Revision'
   });
 
-  // Pre-populate with beautiful, detailed sample files to look realistic and attractive instantly
-  const [documents, setDocuments] = useState<PDFDocument[]>([
-    {
-      id: 'ap-bio-genetics',
-      name: 'AP Biology - Genetics & Heredity.pdf',
-      size: '6.4 MB',
-      pages: 18,
-      highlights: [
-        "Gregor Mendel's law of segregation states that the two alleles for each gene separate during gamete formation.",
-        "Dihybrid crosses yield a phenotypic ratio of 9:3:3:1, representing the principle of independent assortment.",
-        "Incomplete dominance results in a blended phenotype, as seen in pink snapdragons produced from red and white parents."
-      ],
-      highlightColors: {
-        "Gregor Mendel's law of segregation states that the two alleles for each gene separate during gamete formation.": 'green',
-        "Dihybrid crosses yield a phenotypic ratio of 9:3:3:1, representing the principle of independent assortment.": 'yellow',
-        "Incomplete dominance results in a blended phenotype, as seen in pink snapdragons produced from red and white parents.": 'pink'
-      }
-    },
-    {
-      id: 'ap-chem-thermo',
-      name: 'AP Chemistry - Thermodynamics.pdf',
-      size: '4.2 MB',
-      pages: 12,
-      highlights: [
-        "Gibbs Free Energy equation: ΔG = ΔH - TΔS determines the thermodynamic spontaneity of any chemical reaction.",
-        "A chemical reaction is spontaneous when ΔG is negative, which is heavily favored by exothermic conditions (-ΔH).",
-        "The third law of thermodynamics states that the entropy of a perfect crystal at absolute zero is exactly equal to zero."
-      ],
-      highlightColors: {
-        "Gibbs Free Energy equation: ΔG = ΔH - TΔS determines the thermodynamic spontaneity of any chemical reaction.": 'green',
-        "A chemical reaction is spontaneous when ΔG is negative, which is heavily favored by exothermic conditions (-ΔH).": 'yellow',
-        "The third law of thermodynamics states that the entropy of a perfect crystal at absolute zero is exactly equal to zero.": 'blue'
-      }
+  // Initialize strictly with real workspace documents (zero fake/mock data)
+  const [documents, setDocuments] = useState<PDFDocument[]>(() => {
+    if (workspace?.files && workspace.files.length > 0) {
+      return workspace.files.map(f => ({
+        id: f.id,
+        name: f.name,
+        size: f.size || 'Unknown Size',
+        pages: f.pages || 1,
+        highlights: f.highlights || [],
+        highlightColors: {},
+        tags: f.tags || []
+      }));
     }
-  ]);
-  const [selectedDocIds, setSelectedDocIds] = useState<string[]>(['ap-bio-genetics', 'ap-chem-thermo']);
+    return [];
+  });
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>(() => {
+    if (workspace?.files && workspace.files.length > 0) {
+      return [workspace.files[0].id];
+    }
+    return [];
+  });
 
   React.useEffect(() => {
     if (workspace && workspace.files) {
-      setDocuments(prev => {
-        let newDocs = [...prev];
-        let hasNew = false;
-        let hasChanges = false;
-        workspace.files.forEach(f => {
-          const existingIdx = newDocs.findIndex(d => d.id === f.id);
-          if (existingIdx === -1) {
-            hasNew = true;
-            hasChanges = true;
-            newDocs.unshift({
-              id: f.id,
-              name: f.name,
-              size: f.size || 'Unknown Size',
-              pages: Math.floor(Math.random() * 20) + 1,
-              highlights: [],
-              highlightColors: {},
-              tags: f.tags || []
-            });
-          } else {
-             // Sync tags if they were updated from outside
-             if (JSON.stringify(newDocs[existingIdx].tags) !== JSON.stringify(f.tags)) {
-                newDocs[existingIdx] = { ...newDocs[existingIdx], tags: f.tags || [] };
-                hasChanges = true;
-             }
-          }
-        });
-        
-        // If we found new documents, auto-select the latest one
-        if (hasNew && workspace.files.length > 0) {
-          const latestId = workspace.files[workspace.files.length - 1].id;
-          setViewingDocId(latestId);
-          setSelectedDocIds(prevIds => prevIds.includes(latestId) ? prevIds : [...prevIds, latestId]);
-        }
-        
-        return hasChanges ? newDocs : prev;
-      });
+      const realDocs: PDFDocument[] = workspace.files.map(f => ({
+        id: f.id,
+        name: f.name,
+        size: f.size || 'Unknown Size',
+        pages: f.pages || 1,
+        highlights: f.highlights || [],
+        highlightColors: {},
+        tags: f.tags || []
+      }));
+      setDocuments(realDocs);
+      if (realDocs.length > 0) {
+        setSelectedDocIds(prev => prev.length > 0 ? prev : [realDocs[0].id]);
+        setViewingDocId(prev => prev || realDocs[0].id);
+      }
+    } else {
+      setDocuments([]);
+      setSelectedDocIds([]);
     }
   }, [workspace]);
   const [aiChatLogs, setAiChatLogs] = useState<Array<{ sender: 'user' | 'ai'; text: string }>>([
     { 
       sender: 'ai', 
-      text: "Hello Alex! I have fully indexed your active documents: **AP Biology - Genetics** and **AP Chemistry - Thermodynamics**.\n\nI can help you analyze complex formulas, summarize chapters, or create instant quiz flashcards based on your highlighted passages. Ask me anything or click one of the synthesis cards below!" 
+      text: "Hello! I am your AI Study Tutor. Ask me anything about your uploaded materials, and I will explain concepts, highlight key formulas, or generate flashcards."
     }
   ]);
   const [chatInput, setChatInput] = useState('');
@@ -1508,8 +1474,8 @@ Student Question:
         {/* Header indicator */}
         <div className="px-5 py-4 border-b border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-slate-900 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-indigo-500/10 dark:bg-indigo-500/20 flex items-center justify-center shadow-inner">
-              <Sparkles className="w-4.5 h-4.5 text-indigo-600 dark:text-indigo-400" />
+            <div className="w-9 h-9 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex items-center justify-center p-1.5 shadow-xs overflow-hidden">
+              <img src="/logo.png" alt="StudyWeb Logo" className="w-full h-full object-contain dark:invert" />
             </div>
             <div>
               <span className="font-black text-slate-800 dark:text-white text-sm tracking-tight">Notebook Chat Companion</span>
@@ -1542,12 +1508,12 @@ Student Question:
               key={idx} 
               className={`flex gap-3 max-w-[90%] ${log.sender === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}
             >
-              <div className={`w-8.5 h-8.5 rounded-xl flex items-center justify-center flex-shrink-0 font-extrabold text-[10px] shadow-sm transition-transform hover:scale-105 ${
+              <div className={`w-8.5 h-8.5 rounded-xl flex items-center justify-center flex-shrink-0 font-extrabold text-[10px] shadow-sm transition-transform hover:scale-105 overflow-hidden ${
                 log.sender === 'user' 
                   ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' 
-                  : 'bg-gradient-to-tr from-indigo-600 to-indigo-700 text-white shadow-indigo-600/25'
+                  : 'bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-800 p-1 shadow-xs'
               }`}>
-                {log.sender === 'user' ? 'YOU' : 'AI'}
+                {log.sender === 'user' ? 'YOU' : <img src="/logo.png" alt="AI Tutor" className="w-full h-full object-contain dark:invert" />}
               </div>
               
               <div className={`px-4 py-3 rounded-2xl text-xs leading-relaxed shadow-sm relative group max-w-[calc(100%-40px)] border ${

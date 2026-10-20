@@ -22,12 +22,14 @@ import { StorageQuotaWidget } from './DashboardWidgets';
 import { Workspace } from './WorkspaceTypes';
 import DailyQuoteCard from './DailyQuoteCard';
 import { getRealUserActivities, recordUserActivity, UserActivityItem } from '../../utils/userActivity';
+import { HomeWorkspaceSkeleton, RecentActivitySkeleton } from './DashboardSkeletons';
 
 interface DashboardHomeProps {
   setActiveTab: (tab: string) => void;
   setActiveWorkspace?: (workspace: Workspace | null) => void;
   workspaces?: Workspace[];
   activeWorkspace?: Workspace | null;
+  isLoading?: boolean;
 }
 
 interface SubjectCardItem {
@@ -67,7 +69,8 @@ export default function DashboardHome({
   setActiveTab, 
   setActiveWorkspace, 
   workspaces = [], 
-  activeWorkspace 
+  activeWorkspace,
+  isLoading = false
 }: DashboardHomeProps) {
   // 1. User Display Identity & ID
   const [displayName, setDisplayName] = useState<string>(() => {
@@ -385,7 +388,12 @@ export default function DashboardHome({
                 </button>
               </div>
 
-              {continueLearningSubjects.length === 0 ? (
+              {isLoading ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <HomeWorkspaceSkeleton />
+                  <HomeWorkspaceSkeleton />
+                </div>
+              ) : continueLearningSubjects.length === 0 ? (
                 <div className="py-10 px-6 text-center space-y-3 bg-slate-50/60 dark:bg-slate-850/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
                   <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto shadow-xs">
                     <Folder className="w-6 h-6" />
@@ -516,7 +524,9 @@ export default function DashboardHome({
                 </div>
               </div>
 
-              {realActivities.length === 0 ? (
+              {isLoading ? (
+                <RecentActivitySkeleton />
+              ) : realActivities.length === 0 ? (
                 <div className="py-10 px-6 text-center space-y-3 bg-slate-50/60 dark:bg-slate-850/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
                   <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto shadow-xs">
                     <Clock className="w-6 h-6" />
@@ -606,8 +616,8 @@ export default function DashboardHome({
           <motion.div variants={itemVariants} className="w-full">
             <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-6 shadow-sm">
               <div className="flex items-center gap-2 mb-1">
-                <div className="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-                  <Bot className="w-4 h-4" />
+                <div className="w-7 h-7 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0 p-1 overflow-hidden shadow-xs">
+                  <img src="/logo.png" alt="StudyWeb Logo" className="w-full h-full object-contain dark:invert" />
                 </div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">AI Tutor</h3>
               </div>
@@ -664,7 +674,7 @@ export default function DashboardHome({
 
           {/* 4C. REAL KNOWLEDGE STORAGE USAGE */}
           <motion.div variants={itemVariants} className="w-full">
-            <StorageQuotaWidget workspaces={workspaces} />
+            <StorageQuotaWidget workspaces={workspaces} isLoading={isLoading} />
           </motion.div>
 
         </div>

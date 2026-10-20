@@ -126,6 +126,7 @@ export default function App() {
 
   // Workspaces State with Strict User Isolation
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState<boolean>(true);
 
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => {
     const savedLogin = typeof window !== 'undefined' ? localStorage.getItem('studyweb_is_logged_in') : null;
@@ -278,6 +279,7 @@ export default function App() {
   // Synchronize with Supabase on mount and on authentication changes
   useEffect(() => {
     const syncFromSupabase = async () => {
+      setIsLoadingWorkspaces(true);
       try {
         if (!supabase) return;
         const { data: { session } } = await supabase.auth.getSession();
@@ -309,6 +311,8 @@ export default function App() {
         }
       } catch (err) {
         console.debug('Supabase workspace sync notice:', err);
+      } finally {
+        setIsLoadingWorkspaces(false);
       }
     };
 
@@ -533,6 +537,7 @@ export default function App() {
             <div className="w-full">
               <WorkspaceSelector 
                 workspaces={workspaces} 
+                isLoading={isLoadingWorkspaces}
                 onSelectWorkspace={handleSelectWorkspace} 
                 onCreateWorkspace={handleCreateWorkspace}
                 onUpdateWorkspace={handleUpdateWorkspace}
@@ -547,7 +552,13 @@ export default function App() {
 
         {/* Other Views */}
         <div className={activeTab === 'dashboard' || !activeTab ? 'block' : 'hidden'}>
-          <DashboardHome setActiveTab={setActiveTab} setActiveWorkspace={setActiveWorkspace} workspaces={workspaces} activeWorkspace={activeWorkspace} />
+          <DashboardHome 
+            setActiveTab={setActiveTab} 
+            setActiveWorkspace={setActiveWorkspace} 
+            workspaces={workspaces} 
+            activeWorkspace={activeWorkspace} 
+            isLoading={isLoadingWorkspaces}
+          />
         </div>
         <div className={activeTab === 'study-session' ? 'block' : 'hidden'}>
           <StudySessionView />
@@ -559,7 +570,7 @@ export default function App() {
           <SubjectsView />
         </div>
         <div className={activeTab === 'resources' ? 'block' : 'hidden'}>
-          <ResourcesView workspaces={workspaces} />
+          <ResourcesView workspaces={workspaces} isLoading={isLoadingWorkspaces} />
         </div>
         <div className={activeTab === 'analytics' ? 'block' : 'hidden'}>
           <AnalyticsView />

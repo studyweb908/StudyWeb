@@ -250,10 +250,13 @@ export default function AITutorWorkspace() {
   const [timerMode, setTimerMode] = useState<'focus' | 'shortBreak' | 'longBreak'>('focus');
   const [completedCycles, setCompletedCycles] = useState(0);
   const [sessionGoalInput, setSessionGoalInput] = useState('');
-  const [sessionGoals, setSessionGoals] = useState<{ id: string; text: string; done: boolean }[]>([
-    { id: '1', text: 'Analyze Biology Chapter 3 with AI', done: false },
-    { id: '2', text: 'Solve sample AP practice quiz questions', done: false }
-  ]);
+  const [sessionGoals, setSessionGoals] = useState<{ id: string; text: string; done: boolean }[]>(() => {
+    try {
+      const saved = localStorage.getItem('studyweb_session_goals');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
   const [timerSoundMuted, setTimerSoundMuted] = useState(true);
   const [focusAmbiance, setFocusAmbiance] = useState('Deep Focus Lo-Fi');
 
@@ -530,7 +533,12 @@ export default function AITutorWorkspace() {
   const docInputRef = useRef<HTMLInputElement>(null);
   const imgInputRef = useRef<HTMLInputElement>(null);
   const [isListening, setIsListening] = useState(false);
+  const [isTranscribingVoice, setIsTranscribingVoice] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const lastFinalTranscriptRef = useRef<string>('');
   const waveformLevels = useMicrophoneWaveform(isListening);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -638,66 +646,158 @@ export default function AITutorWorkspace() {
     }
   };
 
-  const startSpeechRecognition = () => {
+  const startSpeechRecognition = async () => {
     if (isListening) {
       if (recognitionRef.current) {
-        recognitionRef.current.stop();
+        try { recognitionRef.current.stop(); } catch {}
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        try { mediaRecorderRef.current.stop(); } catch {}
       }
       setIsListening(false);
-      if (inputValue.trim()) {
-        handleSend(inputValue.trim());
+      return;
+    }
+
+    lastFinalTranscriptRef.current = '';
+    audioChunksRef.current = [];
+
+    // 1. Request microphone stream
+    let stream: MediaStream | null = null;
+    try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioStreamRef.current = stream;
       }
+    } catch (mediaErr) {
+      console.warn("Microphone access prompt error:", mediaErr);
+      (window as any).showToast?.("Microphone permission required for voice input.", "warning");
       return;
     }
 
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      (window as any).showToast?.("Speech recognition is not supported in this browser. Please try Chrome or Edge.", "warning");
+    if (!stream) {
+      (window as any).showToast?.("Microphone access is required for voice input.", "warning");
       return;
     }
 
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-    recognitionRef.current = recognition;
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    // 2. Start MediaRecorder for audio capture
+    try {
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : MediaRecorder.isTypeSupported('audio/mp4')
+        ? 'audio/mp4'
+        : '';
 
-    recognition.onstart = () => {
-      setIsListening(true);
-    };
+      const mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
 
-    let latestTranscript = '';
-    recognition.onresult = (event: any) => {
-      let interim = '';
-      let final = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          final += event.results[i][0].transcript;
-        } else {
-          interim += event.results[i][0].transcript;
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
         }
-      }
-      const spoken = (final || interim).trim();
-      if (spoken) {
-        setInputValue(spoken);
-        latestTranscript = spoken;
-      }
-    };
+      };
 
-    recognition.onerror = (err: any) => {
-      console.warn("Speech recognition error:", err.error || err);
-      setIsListening(false);
-    };
+      mediaRecorder.onstop = async () => {
+        setIsListening(false);
+        if (audioStreamRef.current) {
+          audioStreamRef.current.getTracks().forEach(t => t.stop());
+          audioStreamRef.current = null;
+        }
 
-    recognition.onend = () => {
-      setIsListening(false);
-      const text = latestTranscript || inputValue.trim();
-      if (text) {
-        handleSend(text);
+        const speechCaptured = (lastFinalTranscriptRef.current || inputValue).trim();
+        if (speechCaptured) {
+          handleSend(speechCaptured);
+          lastFinalTranscriptRef.current = '';
+          return;
+        }
+
+        if (audioChunksRef.current.length > 0) {
+          setIsTranscribingVoice(true);
+          try {
+            const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType || 'audio/webm' });
+            const reader = new FileReader();
+            reader.readAsDataURL(audioBlob);
+            reader.onloadend = async () => {
+              const base64Data = reader.result as string;
+              try {
+                const resp = await fetch('/api/voice-transcribe', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    audioBase64: base64Data,
+                    mimeType: audioBlob.type
+                  })
+                });
+                const json = await resp.json();
+                if (json.text && json.text.trim()) {
+                  setInputValue(json.text.trim());
+                  handleSend(json.text.trim());
+                }
+              } catch (apiErr) {
+                console.error("Transcription API error:", apiErr);
+              } finally {
+                setIsTranscribingVoice(false);
+              }
+            };
+          } catch (err) {
+            console.error("Audio processing error:", err);
+            setIsTranscribingVoice(false);
+          }
+        }
+      };
+
+      mediaRecorder.start(250);
+      setIsListening(true);
+    } catch (recErr) {
+      console.warn("Could not start MediaRecorder:", recErr);
+    }
+
+    // 3. Web Speech Recognition for live real-time speech preview
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      try {
+        const recognition = new SpeechRecognition();
+        recognitionRef.current = recognition;
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onresult = (event: any) => {
+          let interim = '';
+          let final = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              final += event.results[i][0].transcript;
+            } else {
+              interim += event.results[i][0].transcript;
+            }
+          }
+          const spoken = (final || interim).trim();
+          if (spoken) {
+            setInputValue(spoken);
+          }
+          if (final.trim()) {
+            lastFinalTranscriptRef.current = final.trim();
+          }
+        };
+
+        recognition.onerror = (err: any) => {
+          console.warn("Speech recognition notice:", err?.error || err);
+        };
+
+        recognition.onend = () => {
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+            try { mediaRecorderRef.current.stop(); } catch {}
+          }
+        };
+
+        recognition.start();
+      } catch (e) {
+        console.warn("Speech recognition failed to initialize:", e);
       }
-    };
-
-    recognition.start();
+    }
   };
 
   return (
@@ -789,8 +889,8 @@ export default function AITutorWorkspace() {
         {/* Top Controller Bar */}
         <div className="px-3 sm:px-6 py-2 sm:py-3.5 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-950/20 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-xl bg-indigo-500/10 dark:bg-indigo-500/20 flex items-center justify-center shrink-0">
-              <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-600 dark:text-indigo-400" />
+            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex items-center justify-center p-1 sm:p-1.5 shrink-0 overflow-hidden shadow-xs">
+              <img src="/logo.png" alt="StudyWeb Logo" className="w-full h-full object-contain dark:invert" />
             </div>
             <div className="min-w-0">
               <h3 className="font-extrabold text-slate-900 dark:text-white text-xs sm:text-sm flex items-center gap-1.5 truncate">
@@ -871,12 +971,14 @@ export default function AITutorWorkspace() {
               className={`flex gap-2.5 sm:gap-4 max-w-3xl ${msg.sender === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}
             >
               {/* Avatar */}
-              <div className={`w-7 h-7 sm:w-8.5 sm:h-8.5 rounded-[8px] sm:rounded-[10px] flex items-center justify-center flex-shrink-0 font-bold text-[10px] sm:text-xs ${
+              <div className={`w-7 h-7 sm:w-8.5 sm:h-8.5 rounded-[8px] sm:rounded-[10px] flex items-center justify-center flex-shrink-0 font-bold text-[10px] sm:text-xs overflow-hidden ${
                 msg.sender === 'user' 
                   ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300' 
-                  : 'bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900 shadow-md shadow-slate-900/5'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-1 shadow-xs'
               }`}>
-                {msg.sender === 'user' ? 'ME' : 'AI'}
+                {msg.sender === 'user' ? 'ME' : (
+                  <img src="/logo.png" alt="AI Tutor" className="w-full h-full object-contain dark:invert" />
+                )}
               </div>
 
               {/* Chat bubble body */}
