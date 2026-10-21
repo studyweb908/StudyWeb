@@ -58,16 +58,16 @@ export default function DashboardSidebar({
     { id: 'dashboard', label: 'Home', icon: <LayoutDashboard className="w-4 h-4" />, colorClass: 'text-blue-600 dark:text-blue-400', bgClass: 'bg-blue-50 dark:bg-blue-950' },
     { id: 'workspaces', label: 'Workspaces', icon: <Folder className="w-4 h-4" />, colorClass: 'text-orange-600 dark:text-orange-400', bgClass: 'bg-orange-50 dark:bg-orange-950' },
     { id: 'ai-tutor', label: 'Your AI Tutor', icon: <Sparkles className="w-4 h-4" />, highlight: true, colorClass: 'text-indigo-600 dark:text-indigo-400', bgClass: 'bg-indigo-50 dark:bg-indigo-950' },
-    { id: 'flashcards', label: 'Flashcards', icon: <Layers className="w-4 h-4" />, colorClass: 'text-emerald-600 dark:text-emerald-400', bgClass: 'bg-emerald-50 dark:bg-emerald-950' },
-    { id: 'quiz-center', label: 'Practice Quizzes', icon: <Award className="w-4 h-4" />, colorClass: 'text-yellow-600 dark:text-yellow-400', bgClass: 'bg-yellow-50 dark:bg-yellow-950' },
-    { id: 'study-session', label: 'Study Session', icon: <Clock className="w-4 h-4" />, colorClass: 'text-amber-600 dark:text-amber-400', bgClass: 'bg-amber-50 dark:bg-amber-950' },
-    { id: 'study-planner', label: 'Study Planner', icon: <Calendar className="w-4 h-4" />, colorClass: 'text-sky-600 dark:text-sky-400', bgClass: 'bg-sky-50 dark:bg-sky-950' },
-    { id: 'subjects', label: 'Subjects', icon: <BookOpen className="w-4 h-4" />, colorClass: 'text-rose-600 dark:text-rose-400', bgClass: 'bg-rose-50 dark:bg-rose-950' },
-    { id: 'resources', label: 'Resources', icon: <Library className="w-4 h-4" />, colorClass: 'text-pink-600 dark:text-pink-400', bgClass: 'bg-pink-50 dark:bg-pink-950' },
-    { id: 'analytics', label: 'Analytics', icon: <BarChart2 className="w-4 h-4" />, colorClass: 'text-purple-600 dark:text-purple-400', bgClass: 'bg-purple-50 dark:bg-purple-950' },
-    { id: 'achievements', label: 'Achievements', icon: <Trophy className="w-4 h-4" />, colorClass: 'text-orange-600 dark:text-orange-400', bgClass: 'bg-orange-50 dark:bg-orange-950' },
-    { id: 'leaderboard', label: 'Leaderboard', icon: <ListOrdered className="w-4 h-4" />, colorClass: 'text-cyan-600 dark:text-cyan-400', bgClass: 'bg-cyan-50 dark:bg-cyan-950' },
-    { id: 'parent-dashboard', label: 'Parent Link', icon: <Users className="w-4 h-4" />, colorClass: 'text-cyan-700 dark:text-cyan-300', bgClass: 'bg-cyan-50 dark:bg-cyan-950' },
+    { id: 'flashcards', label: 'Flashcards', icon: <Layers className="w-4 h-4" />, colorClass: 'text-emerald-600 dark:text-emerald-400', bgClass: 'bg-emerald-50 dark:bg-emerald-950', comingSoon: true },
+    { id: 'quiz-center', label: 'Practice', icon: <Award className="w-4 h-4" />, colorClass: 'text-yellow-600 dark:text-yellow-400', bgClass: 'bg-yellow-50 dark:bg-yellow-950', comingSoon: true },
+    { id: 'study-session', label: 'Study Session', icon: <Clock className="w-4 h-4" />, colorClass: 'text-amber-600 dark:text-amber-400', bgClass: 'bg-amber-50 dark:bg-amber-950', comingSoon: true },
+    { id: 'study-planner', label: 'Study Planner', icon: <Calendar className="w-4 h-4" />, colorClass: 'text-sky-600 dark:text-sky-400', bgClass: 'bg-sky-50 dark:bg-sky-950', comingSoon: true },
+    { id: 'subjects', label: 'Study Subject', icon: <BookOpen className="w-4 h-4" />, colorClass: 'text-rose-600 dark:text-rose-400', bgClass: 'bg-rose-50 dark:bg-rose-950', comingSoon: true },
+    { id: 'resources', label: 'Resources', icon: <Library className="w-4 h-4" />, colorClass: 'text-pink-600 dark:text-pink-400', bgClass: 'bg-pink-50 dark:bg-pink-950', comingSoon: true },
+    { id: 'analytics', label: 'Analytics', icon: <BarChart2 className="w-4 h-4" />, colorClass: 'text-purple-600 dark:text-purple-400', bgClass: 'bg-purple-50 dark:bg-purple-950', comingSoon: true },
+    { id: 'achievements', label: 'Achievements', icon: <Trophy className="w-4 h-4" />, colorClass: 'text-orange-600 dark:text-orange-400', bgClass: 'bg-orange-50 dark:bg-orange-950', comingSoon: true },
+    { id: 'leaderboard', label: 'Leaderboard', icon: <ListOrdered className="w-4 h-4" />, colorClass: 'text-cyan-600 dark:text-cyan-400', bgClass: 'bg-cyan-50 dark:bg-cyan-950', comingSoon: true },
+    { id: 'parent-dashboard', label: 'Parent Link', icon: <Users className="w-4 h-4" />, colorClass: 'text-cyan-700 dark:text-cyan-300', bgClass: 'bg-cyan-50 dark:bg-cyan-950', comingSoon: true },
   ];
 
   const renderSidebarContent = (layoutIdPrefix: string, forceExpanded = false) => {
@@ -116,7 +116,7 @@ export default function DashboardSidebar({
 
         {/* Nav Items (Scrollable) */}
         <div className="flex-1 overflow-y-auto px-3 py-4 space-y-1 custom-scrollbar">
-          {menuItems.map((item) => {
+          {menuItems.filter(i => !i.comingSoon).map((item) => {
             const isActive = activeTab === item.id;
             return (
               <button
@@ -163,6 +163,39 @@ export default function DashboardSidebar({
                       : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/80 dark:border-indigo-800'
                   }`}>
                     AI
+                  </span>
+                )}
+              </button>
+            );
+          })}
+
+          {menuItems.some(i => i.comingSoon) && !isCollapsedState && (
+            <div className="pt-4 pb-1">
+              <span className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Coming Soon</span>
+            </div>
+          )}
+
+          {menuItems.filter(i => i.comingSoon).map((item) => {
+            return (
+              <button
+                key={item.id}
+                disabled={true}
+                onClick={(e) => {
+                  e.preventDefault();
+                }}
+                className={`w-full flex items-center ${isCollapsedState ? 'justify-center px-0' : 'justify-between px-3.5'} py-2 rounded-xl text-sm font-medium transition-all relative isolate group opacity-55 grayscale cursor-not-allowed text-slate-500 dark:text-slate-400 select-none`}
+                title={isCollapsedState ? `${item.label} (Coming Soon)` : `${item.label} — Coming Soon`}
+              >
+                <div className="flex items-center gap-3 relative z-10 min-w-0">
+                  <span className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500">
+                    {item.icon}
+                  </span>
+                  <span className={`tracking-tight text-[12.5px] truncate ${isCollapsedState ? 'hidden' : 'block'}`}>{item.label}</span>
+                </div>
+
+                {!isCollapsedState && (
+                  <span className="text-[9px] font-semibold tracking-wider text-slate-400 dark:text-slate-500 uppercase shrink-0 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+                    Coming Soon
                   </span>
                 )}
               </button>
