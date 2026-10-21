@@ -49,4 +49,6 @@ export interface PDFDocument {
   highlights: string[];
   highlightColors?: Record<string, 'yellow' | 'pink' | 'green' | 'blue'>;
   tags?: string[];
+  contentText?: string;
+  summary?: string;
 }

@@ -28,7 +28,8 @@ import {
   Wand2,
   Search,
   Tag,
-  Folder
+  Folder,
+  Eye
 } from 'lucide-react';
 import { PDFDocument } from './types';
 import AutoSavingToast from '../AutoSavingToast';
@@ -73,12 +74,27 @@ const DOCUMENT_PAGES: Record<string, { page: number; paragraphs: string[] }[]> =
   ]
 };
 
-const getDocPages = (docId: string, docName: string, highlights: string[] = []) => {
+const getDocPages = (docId: string, docName: string, highlights: string[] = [], contentText?: string) => {
   const customPages = DOCUMENT_PAGES[docId];
   if (customPages) return customPages;
 
+  if (contentText && contentText.trim().length > 0) {
+    const rawParagraphs = contentText
+      .split(/\n+/)
+      .map(p => p.trim())
+      .filter(p => p.length > 0);
+    if (rawParagraphs.length > 0) {
+      const page1Paragraphs = rawParagraphs.slice(0, 4);
+      const page2Paragraphs = rawParagraphs.slice(4, 8);
+      return [
+        { page: 1, paragraphs: page1Paragraphs },
+        ...(page2Paragraphs.length > 0 ? [{ page: 2, paragraphs: page2Paragraphs }] : [])
+      ];
+    }
+  }
+
   // Otherwise, let's generate on the fly
-  const cleanName = docName.replace('.pdf', '');
+  const cleanName = docName.replace(/\.pdf$/i, '');
   return [
     {
       page: 1,
@@ -98,6 +114,18 @@ const getDocPages = (docId: string, docName: string, highlights: string[] = []) 
       ]
     }
   ];
+};
+
+const getDocPreviewSnippet = (doc: PDFDocument) => {
+  const pages = getDocPages(doc.id, doc.name, doc.highlights, doc.contentText);
+  const firstPageParagraphs = pages[0]?.paragraphs || [];
+  const previewLines = doc.summary
+    ? [doc.summary, ...firstPageParagraphs.slice(0, 2)]
+    : firstPageParagraphs.slice(0, 3);
+  return {
+    lines: previewLines,
+    firstHighlight: doc.highlights?.[0] || null
+  };
 };
 
 const COLOR_MAP = {
@@ -226,7 +254,9 @@ export default function PDFWorkspaceView({ workspace, onUpdateWorkspace }: PDFWo
         pages: f.pages || 1,
         highlights: f.highlights || [],
         highlightColors: {},
-        tags: f.tags || []
+        tags: f.tags || [],
+        contentText: f.contentText,
+        summary: f.summary
       }));
     }
     return [];
@@ -238,6 +268,13 @@ export default function PDFWorkspaceView({ workspace, onUpdateWorkspace }: PDFWo
     return [];
   });
 
+  // Lightweight hover preview state for PDF files in the sidebar
+  const [hoveredDocPreview, setHoveredDocPreview] = useState<{
+    doc: PDFDocument;
+    top: number;
+    left: number;
+  } | null>(null);
+
   React.useEffect(() => {
     if (workspace && workspace.files) {
       const realDocs: PDFDocument[] = workspace.files.map(f => ({
@@ -247,7 +284,9 @@ export default function PDFWorkspaceView({ workspace, onUpdateWorkspace }: PDFWo
         pages: f.pages || 1,
         highlights: f.highlights || [],
         highlightColors: {},
-        tags: f.tags || []
+        tags: f.tags || [],
+        contentText: f.contentText,
+        summary: f.summary
       }));
       setDocuments(realDocs);
       if (realDocs.length > 0) {
@@ -402,7 +441,7 @@ export default function PDFWorkspaceView({ workspace, onUpdateWorkspace }: PDFWo
   };
 
   const activeViewingDoc = documents.find(d => d.id === viewingDocId) || documents[0];
-  const docPages = activeViewingDoc ? getDocPages(activeViewingDoc.id, activeViewingDoc.name, activeViewingDoc.highlights) : [];
+  const docPages = activeViewingDoc ? getDocPages(activeViewingDoc.id, activeViewingDoc.name, activeViewingDoc.highlights, activeViewingDoc.contentText) : [];
   const totalPages = docPages.length;
   const clampedPage = Math.min(Math.max(1, activePage), totalPages || 1);
   const activePageData = docPages[clampedPage - 1];
@@ -829,7 +868,10 @@ Student Question:
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
             </p>
 
-            <div className="space-y-2.5 max-h-[220px] lg:max-h-[260px] overflow-y-auto custom-scrollbar pr-1">
+            <div
+              className="space-y-2.5 max-h-[220px] lg:max-h-[260px] overflow-y-auto custom-scrollbar pr-1"
+              onScroll={() => setHoveredDocPreview(null)}
+            >
               {documents.length === 0 && (
                 <div className="text-center py-8 text-slate-400 font-medium">
                   No study guides uploaded. Click the container above to add AP source files.
@@ -838,10 +880,37 @@ Student Question:
               {documents.map((doc) => {
                 const isSelected = selectedDocIds.includes(doc.id);
                 const isViewing = viewingDocId === doc.id;
+                const previewSnippet = getDocPreviewSnippet(doc);
+                const firstLineText = previewSnippet.lines[0] || '';
+
+                const showPreviewForElement = (el: HTMLElement) => {
+                  const rect = el.getBoundingClientRect();
+                  const viewportWidth = window.innerWidth;
+                  const viewportHeight = window.innerHeight;
+                  const cardWidth = 320;
+                  const cardHeight = 230;
+
+                  // Place to the right of the card on desktop if room, otherwise clamp inside viewport
+                  let left = rect.right + 12;
+                  if (left + cardWidth > viewportWidth - 16) {
+                    left = Math.max(16, Math.min(rect.left, viewportWidth - cardWidth - 16));
+                  }
+                  let top = rect.top - 8;
+                  if (top + cardHeight > viewportHeight - 16) {
+                    top = Math.max(16, viewportHeight - cardHeight - 16);
+                  }
+                  setHoveredDocPreview({ doc, top, left });
+                };
+
                 return (
                   <div
                     key={doc.id}
+                    onMouseEnter={(e) => showPreviewForElement(e.currentTarget)}
+                    onMouseLeave={() => setHoveredDocPreview(prev => (prev?.doc.id === doc.id ? null : prev))}
+                    onFocus={(e) => showPreviewForElement(e.currentTarget)}
+                    onBlur={() => setHoveredDocPreview(prev => (prev?.doc.id === doc.id ? null : prev))}
                     onClick={() => {
+                      setHoveredDocPreview(null);
                       setViewingDocId(doc.id);
                       setActivePage(1);
                       setCenterTab('view');
@@ -850,16 +919,19 @@ Student Question:
                     className={`p-3.5 rounded-2xl border cursor-pointer transition-all duration-350 relative group ${
                       isViewing 
                         ? 'bg-gradient-to-br from-indigo-500/10 to-violet-500/10 dark:from-indigo-500/15 dark:to-violet-500/15 border-indigo-500 dark:border-indigo-500 ring-2 ring-indigo-500/10 dark:ring-indigo-500/20 text-indigo-900 dark:text-indigo-400 shadow-md' 
-                        : 'bg-white dark:bg-slate-900 border-slate-200/60 dark:border-slate-850 text-slate-600 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-800'
+                        : 'bg-white dark:bg-slate-900 border-slate-200/60 dark:border-slate-850 text-slate-600 dark:text-slate-300 hover:border-indigo-300 dark:hover:border-indigo-800/70 hover:shadow-sm'
                     }`}
                   >
                     <div className="flex items-start gap-3">
-                      <span className={`p-2 rounded-xl transition-colors shrink-0 ${isViewing ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}`}>
+                      <span className={`p-2 rounded-xl transition-colors shrink-0 relative ${isViewing ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 group-hover:bg-indigo-50 dark:group-hover:bg-indigo-950/50 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'}`}>
                         <FileText className="w-4 h-4" />
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className={`truncate font-extrabold text-xs tracking-tight ${isViewing ? 'text-slate-900 dark:text-white font-black' : 'text-slate-800 dark:text-slate-200'}`}>{doc.name}</p>
-                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <p className={`truncate font-extrabold text-xs tracking-tight ${isViewing ? 'text-slate-900 dark:text-white font-black' : 'text-slate-800 dark:text-slate-200'}`}>{doc.name}</p>
+                          <Eye className="w-3 h-3 text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" title="Hover for quick page & text preview" />
+                        </div>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
                           <span className="text-[9px] text-slate-400 font-semibold">{doc.pages} Pages</span>
                           <span className="text-[8px] text-slate-300 dark:text-slate-700 font-bold">•</span>
                           <span className="text-[9px] text-slate-400 font-semibold">{doc.size}</span>
@@ -872,6 +944,11 @@ Student Question:
                             </>
                           )}
                         </div>
+                        {firstLineText && (
+                          <p className="mt-1.5 text-[10px] leading-snug text-slate-400 dark:text-slate-500 line-clamp-1 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors italic">
+                            "{firstLineText}"
+                          </p>
+                        )}
                       </div>
                       
                       <div className="flex items-center gap-1.5 shrink-0 self-center">
@@ -1908,6 +1985,104 @@ Student Question:
             </motion.div>
           </div>
         )}
+      </AnimatePresence>
+
+      {/* Lightweight PDF Hover Preview Popover */}
+      <AnimatePresence>
+        {hoveredDocPreview && (() => {
+          const previewDoc = hoveredDocPreview.doc;
+          const snippet = getDocPreviewSnippet(previewDoc);
+          return (
+            <motion.div
+              key={previewDoc.id}
+              initial={{ opacity: 0, scale: 0.96, x: -6 }}
+              animate={{ opacity: 1, scale: 1, x: 0 }}
+              exit={{ opacity: 0, scale: 0.96, x: -6 }}
+              transition={{ duration: 0.14, ease: 'easeOut' }}
+              style={{
+                top: `${hoveredDocPreview.top}px`,
+                left: `${hoveredDocPreview.left}px`,
+              }}
+              className="fixed z-[70] w-80 pointer-events-none bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/90 dark:border-slate-700/80 rounded-2xl shadow-2xl p-3.5 text-left"
+            >
+              {/* Top Row: Miniature Page Thumbnail + Title & Metadata */}
+              <div className="flex items-start gap-3">
+                {/* Miniature Document Page Sheet Thumbnail */}
+                <div className="w-12 h-16 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs p-1.5 flex flex-col justify-between shrink-0 relative overflow-hidden">
+                  {/* Binder Holes */}
+                  <div className="absolute left-0.5 top-1.5 bottom-1.5 flex flex-col justify-around opacity-40">
+                    <span className="w-1 h-1 rounded-full bg-slate-400" />
+                    <span className="w-1 h-1 rounded-full bg-slate-400" />
+                    <span className="w-1 h-1 rounded-full bg-slate-400" />
+                  </div>
+                  <div className="pl-1.5 space-y-1">
+                    {/* Miniature Title Bar */}
+                    <div className="h-1.5 w-8 rounded-full bg-indigo-500/80" />
+                    {/* Miniature Text Lines */}
+                    <div className="h-1 w-full rounded-full bg-slate-300 dark:bg-slate-600" />
+                    <div className="h-1 w-5/6 rounded-full bg-slate-200 dark:bg-slate-700" />
+                    <div className="h-1 w-full rounded-full bg-amber-300/80 dark:bg-amber-500/50" />
+                    <div className="h-1 w-4/5 rounded-full bg-slate-200 dark:bg-slate-700" />
+                    <div className="h-1 w-full rounded-full bg-emerald-300/80 dark:bg-emerald-500/50" />
+                    <div className="h-1 w-2/3 rounded-full bg-slate-200 dark:bg-slate-700" />
+                  </div>
+                  <div className="pl-1.5 flex items-center justify-between">
+                    <span className="text-[7px] font-black uppercase text-indigo-600 dark:text-indigo-400">PDF</span>
+                    <span className="text-[7px] font-bold text-slate-400">P.1</span>
+                  </div>
+                </div>
+
+                {/* Document Title & Quick Stats */}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800/50">
+                      Quick Preview
+                    </span>
+                    <span className="text-[9px] font-bold text-slate-400">
+                      {previewDoc.pages} {previewDoc.pages === 1 ? 'Page' : 'Pages'} • {previewDoc.size}
+                    </span>
+                  </div>
+                  <p className="font-extrabold text-xs text-slate-900 dark:text-white truncate mt-1">
+                    {previewDoc.name}
+                  </p>
+                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                    <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                      <Highlighter className="w-2.5 h-2.5" />
+                      {previewDoc.highlights?.length || 0} {previewDoc.highlights?.length === 1 ? 'highlight' : 'highlights'}
+                    </span>
+                    {previewDoc.tags && previewDoc.tags.slice(0, 2).map((t, i) => (
+                      <span key={i} className="text-[8.5px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+                        #{t}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* First Few Lines of Text Excerpt */}
+              <div className="mt-2.5 p-2.5 rounded-xl bg-slate-50/90 dark:bg-slate-950/70 border border-slate-200/70 dark:border-slate-800 space-y-1.5">
+                <div className="flex items-center justify-between text-[9px] font-extrabold uppercase tracking-wider text-slate-400">
+                  <span>Opening Lines • Page 1</span>
+                  <BookOpen className="w-3 h-3 text-indigo-500" />
+                </div>
+                <div className="space-y-1 text-[10.5px] leading-relaxed text-slate-600 dark:text-slate-300 font-medium">
+                  {snippet.lines.slice(0, 2).map((line, idx) => (
+                    <p key={idx} className="line-clamp-2">
+                      {line}
+                    </p>
+                  ))}
+                </div>
+              </div>
+
+              {/* Key Highlight Preview if available */}
+              {snippet.firstHighlight && (
+                <div className="mt-2 px-2.5 py-1.5 rounded-lg bg-amber-50/80 dark:bg-amber-950/30 border-l-2 border-amber-400 text-[10px] text-amber-900 dark:text-amber-200 line-clamp-1 italic">
+                  "{snippet.firstHighlight}"
+                </div>
+              )}
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
 
       <AutoSavingToast isSaving={isSaving} />
