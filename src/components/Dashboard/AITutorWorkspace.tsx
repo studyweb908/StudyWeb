@@ -889,8 +889,8 @@ export default function AITutorWorkspace() {
         {/* Top Controller Bar */}
         <div className="px-3 sm:px-6 py-2 sm:py-3.5 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-950/20 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex items-center justify-center p-1 sm:p-1.5 shrink-0 overflow-hidden shadow-xs">
-              <img src="/logo.png" alt="StudyWeb Logo" className="w-full h-full object-contain dark:invert" />
+            <div className="w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center shrink-0">
+              <img src="/logo-inner.png" alt="StudyWeb Logo" className="w-full h-full object-contain select-none" />
             </div>
             <div className="min-w-0">
               <h3 className="font-extrabold text-slate-900 dark:text-white text-xs sm:text-sm flex items-center gap-1.5 truncate">
@@ -971,13 +971,13 @@ export default function AITutorWorkspace() {
               className={`flex gap-2.5 sm:gap-4 max-w-3xl ${msg.sender === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}
             >
               {/* Avatar */}
-              <div className={`w-7 h-7 sm:w-8.5 sm:h-8.5 rounded-[8px] sm:rounded-[10px] flex items-center justify-center flex-shrink-0 font-bold text-[10px] sm:text-xs overflow-hidden ${
-                msg.sender === 'user' 
-                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300' 
-                  : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-1 shadow-xs'
-              }`}>
-                {msg.sender === 'user' ? 'ME' : (
-                  <img src="/logo.png" alt="AI Tutor" className="w-full h-full object-contain dark:invert" />
+              <div className="w-7 h-7 sm:w-8.5 sm:h-8.5 flex items-center justify-center flex-shrink-0">
+                {msg.sender === 'user' ? (
+                  <div className="w-full h-full rounded-[8px] sm:rounded-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center font-bold text-[10px] sm:text-xs">
+                    ME
+                  </div>
+                ) : (
+                  <img src="/logo-inner.png" alt="AI Tutor" className="w-full h-full object-contain select-none" />
                 )}
               </div>
 
@@ -1141,8 +1141,8 @@ export default function AITutorWorkspace() {
                 exit={{ opacity: 0, y: -10 }}
                 className="flex gap-3 sm:gap-4 max-w-xl mr-auto"
               >
-                <div className="w-7 h-7 sm:w-8.5 sm:h-8.5 rounded-[8px] sm:rounded-[10px] bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900 shadow-md shadow-slate-900/5 flex items-center justify-center text-[10px] sm:text-xs font-bold">
-                  AI
+                <div className="w-7 h-7 sm:w-8.5 sm:h-8.5 flex items-center justify-center flex-shrink-0">
+                  <img src="/logo-inner.png" alt="AI Tutor" className="w-full h-full object-contain animate-pulse select-none" />
                 </div>
                 <div className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-800/60 px-4 sm:px-6 py-3 sm:py-5 rounded-[16px] sm:rounded-[20px] rounded-tl-none shadow-[0_2px_8px_-2px_rgba(0,0,0,0.04)] text-xs sm:text-[15px]">
                   <div className="flex items-center gap-2.5 sm:gap-3">

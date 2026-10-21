@@ -1,18 +1,20 @@
 {
+  "id": "/",
   "short_name": "StudyWeb",
   "name": "StudyWeb – AI-Powered Learning Platform",
-  "description": "The AI-powered learning platform that transforms confusion into clarity with notes, quizzes, flashcards, and smart study plans.",
+  "description": "Transform confusion into clarity with AI study notes, flashcards, quizzes, and socratic tutoring.",
   "icons": [
     {
-      "src": "/favicon-32x32.png",
-      "type": "image/png",
-      "sizes": "32x32"
-    },
-    {
-      "src": "/favicon-192x192.png",
+      "src": "/pwa-192x192.png",
       "type": "image/png",
       "sizes": "192x192",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-192x192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "maskable"
     },
     {
       "src": "/apple-touch-icon.png",
@@ -20,15 +22,22 @@
       "sizes": "180x180"
     },
     {
-      "src": "/favicon-512x512.png",
+      "src": "/pwa-512x512.png",
       "type": "image/png",
       "sizes": "512x512",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
     }
   ],
-  "start_url": "https://studywebai.vercel.app/",
-  "background_color": "#0F172A",
-  "theme_color": "#4338CA",
+  "start_url": "/",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "display": "standalone",
+  "orientation": "portrait",
   "scope": "/"
 }

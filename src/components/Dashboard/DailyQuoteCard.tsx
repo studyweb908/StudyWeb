@@ -8,8 +8,17 @@ import {
   Compass, 
   Calendar, 
   Award, 
-  Lightbulb
+  Lightbulb,
+  RotateCw,
+  Loader2
 } from 'lucide-react';
+import { 
+  fetchFreshInternetQuote, 
+  getStoredDailyQuote, 
+  saveStoredDailyQuote, 
+  RICH_ACADEMIC_QUOTES, 
+  AcademicQuote 
+} from '../../services/dailyQuoteEngine';
 
 export interface DailyQuoteItem {
   id: string;
@@ -171,25 +180,43 @@ export interface DailyQuoteCardProps {
 export const DailyQuoteCard: React.FC<DailyQuoteCardProps> = ({ 
   className = ""
 }) => {
-  // Compute deterministic quote based on day-of-year
   const today = useMemo(() => new Date(), []);
-  const dayNumber = useMemo(() => {
+  const [activeQuote, setActiveQuote] = useState<DailyQuoteItem | AcademicQuote>(() => {
+    const cached = getStoredDailyQuote();
+    if (cached) return cached;
     const start = new Date(today.getFullYear(), 0, 0);
-    const diff = today.getTime() - start.getTime();
-    const oneDay = 1000 * 60 * 60 * 24;
-    return Math.floor(diff / oneDay);
-  }, [today]);
-
-  const defaultIndex = useMemo(() => {
-    return Math.abs(dayNumber) % CURATED_DAILY_QUOTES.length;
-  }, [dayNumber]);
-
-  // Local state
-  const [currentIndex] = useState<number>(defaultIndex);
+    const dayNumber = Math.floor((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    return RICH_ACADEMIC_QUOTES[Math.abs(dayNumber) % RICH_ACADEMIC_QUOTES.length] || CURATED_DAILY_QUOTES[0];
+  });
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
   const [showBioModal, setShowBioModal] = useState<boolean>(false);
 
-  const activeQuote = CURATED_DAILY_QUOTES[currentIndex] || CURATED_DAILY_QUOTES[0];
+  // Auto-fetch fresh quote from the internet if none cached for today
+  useEffect(() => {
+    const cached = getStoredDailyQuote();
+    if (!cached) {
+      fetchFreshInternetQuote().then(q => {
+        if (q) {
+          setActiveQuote(q);
+          saveStoredDailyQuote(q);
+        }
+      });
+    }
+  }, []);
+
+  const handleRefreshQuote = async () => {
+    setIsRefreshing(true);
+    try {
+      const fresh = await fetchFreshInternetQuote();
+      if (fresh) {
+        setActiveQuote(fresh);
+        saveStoredDailyQuote(fresh);
+      }
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 400);
+    }
+  };
 
   // Close modal on escape key
   useEffect(() => {
@@ -252,8 +279,19 @@ export const DailyQuoteCard: React.FC<DailyQuoteCardProps> = ({
             {dateFormatted}
           </span>
 
-          {/* Actions: 1-Click Copy */}
-          <div className="flex items-center gap-1">
+          {/* Actions: Refresh & Copy */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleRefreshQuote}
+              disabled={isRefreshing}
+              title="Get another quote from internet"
+              aria-label="Fetch new daily study quote"
+              className="p-1.5 px-2 rounded-lg transition-all duration-200 cursor-pointer flex items-center gap-1 text-xs font-semibold hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-950/50 dark:hover:text-indigo-400 text-slate-500 border border-slate-200/60 dark:border-slate-700/60 active:scale-95 disabled:opacity-50"
+            >
+              <RotateCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-indigo-600' : ''}`} />
+              <span className="text-[11px] font-medium hidden xs:inline">New Quote</span>
+            </button>
+
             <button
               onClick={handleCopy}
               title="Copy Quote"

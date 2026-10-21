@@ -131,7 +131,7 @@ export default function WorkspaceChat({
   const audioChunksRef = useRef<Blob[]>([]);
   const lastFinalTranscriptRef = useRef<string>('');
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Animated soundwave pulses while listening
   useEffect(() => {
@@ -699,10 +699,13 @@ export default function WorkspaceChat({
     return () => window.removeEventListener('studyweb_ask_ai_tutor', handleVoiceAsk);
   }, [handleSend, activePersona]);
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+      if (inputRef.current) {
+        inputRef.current.style.height = 'auto';
+      }
     }
   };
 
@@ -787,37 +790,38 @@ export default function WorkspaceChat({
   };
 
   return (
-    <div className="w-full h-[calc(100dvh-130px)] sm:h-[calc(100dvh-140px)] md:h-[calc(100vh-130px)] min-h-[500px] flex flex-col bg-white dark:bg-slate-950 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm relative font-sans overflow-hidden">
+    <div className="w-full h-full md:h-[calc(100vh-130px)] md:min-h-[500px] flex flex-col bg-white dark:bg-slate-950 md:rounded-2xl md:border md:border-slate-200/90 dark:md:border-slate-800 md:shadow-sm relative font-sans overflow-hidden">
       
       {/* ============================================================== */}
       {/* 1. MINIMALIST TOP HEADER                                       */}
       {/* ============================================================== */}
-      <header className="px-4 sm:px-6 py-3 border-b border-slate-200/80 dark:border-slate-800/80 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm flex items-center justify-between gap-3 shrink-0 z-20">
+      <header className="px-2.5 sm:px-6 py-2 sm:py-3 border-b border-slate-200/80 dark:border-slate-800/80 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md flex items-center justify-between gap-1.5 sm:gap-2 shrink-0 z-20">
         
         {/* Left: Tutor Branding & Workspace indicator */}
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex items-center justify-center p-1.5 shadow-sm shrink-0 overflow-hidden">
-            <img src="/logo.png" alt="StudyWeb Logo" className="w-full h-full object-contain dark:invert" />
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="w-7 h-7 sm:w-8.5 sm:h-8.5 flex items-center justify-center shrink-0">
+            <img src="/logo-inner.png" alt="StudyWeb Logo" className="w-full h-full object-contain select-none" />
           </div>
 
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="font-extrabold text-slate-900 dark:text-white text-base leading-tight truncate">
-                AI Study Tutor
+            <div className="flex items-center gap-1.5">
+              <h2 className="font-extrabold text-slate-900 dark:text-white text-sm sm:text-base leading-tight truncate">
+                <span className="hidden xs:inline">AI Study Tutor</span>
+                <span className="xs:hidden">AI Tutor</span>
               </h2>
               <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" title="Online & ready" />
             </div>
 
-            <div className="flex items-center gap-2 mt-0.5">
+            <div className="flex items-center gap-1.5 mt-0.5">
               {/* Workspace Switcher or Name */}
               {workspaces && workspaces.length > 1 && onSelectWorkspace ? (
                 <div className="relative">
                   <button
                     onClick={() => setShowWorkspaceMenu(prev => !prev)}
-                    className="text-xs font-semibold text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-300 flex items-center gap-1 cursor-pointer transition-colors truncate max-w-[160px] sm:max-w-xs"
+                    className="text-[11px] sm:text-xs font-semibold text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-300 flex items-center gap-1 cursor-pointer transition-colors truncate max-w-[100px] xs:max-w-[140px] sm:max-w-xs"
                   >
-                    <span>{workspace.name}</span>
-                    <ChevronDown className="w-3 h-3 text-slate-400" />
+                    <span className="truncate">{workspace.name}</span>
+                    <ChevronDown className="w-2.5 h-2.5 text-slate-400 shrink-0" />
                   </button>
 
                   {showWorkspaceMenu && (
@@ -848,7 +852,7 @@ export default function WorkspaceChat({
                   )}
                 </div>
               ) : (
-                <span className="text-xs font-medium text-slate-500 dark:text-slate-400 truncate max-w-[180px] sm:max-w-xs">
+                <span className="text-[11px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 truncate max-w-[100px] xs:max-w-[140px] sm:max-w-xs">
                   {workspace.name}
                 </span>
               )}
@@ -857,10 +861,10 @@ export default function WorkspaceChat({
               {(workspace.files || []).length > 0 && (
                 <button
                   onClick={() => setShowFilesList(prev => !prev)}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-950/50 cursor-pointer transition-colors"
+                  className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-semibold px-1.5 sm:px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-950/50 cursor-pointer transition-colors shrink-0"
                   title="Click to see loaded documents"
                 >
-                  <BookOpen className="w-3 h-3 text-indigo-500" />
+                  <BookOpen className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-indigo-500" />
                   <span>{workspace.files.length} doc{workspace.files.length === 1 ? '' : 's'}</span>
                 </button>
               )}
@@ -869,18 +873,18 @@ export default function WorkspaceChat({
         </div>
 
         {/* Right: Tutor Style Toggle & New Chat Button */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           
           {/* Persona Style Dropdown / Toggle */}
           <div className="relative">
             <button
               onClick={() => setShowPersonaMenu(prev => !prev)}
-              className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors border border-slate-200/80 dark:border-slate-700/80"
-              title="Change teaching style"
+              className="px-2 sm:px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1 sm:gap-1.5 cursor-pointer transition-colors border border-slate-200/80 dark:border-slate-750/80 active:scale-95"
+              title={`Tutor Persona: ${TUTOR_PERSONAS[activePersona].name}`}
             >
               <span>{TUTOR_PERSONAS[activePersona].icon}</span>
-              <span className="hidden sm:inline">{TUTOR_PERSONAS[activePersona].name}</span>
-              <ChevronDown className="w-3 h-3 text-slate-400 ml-0.5" />
+              <span className="hidden xs:inline">{TUTOR_PERSONAS[activePersona].name}</span>
+              <ChevronDown className="w-2.5 h-2.5 text-slate-400" />
             </button>
 
             {showPersonaMenu && (
@@ -924,10 +928,10 @@ export default function WorkspaceChat({
           {/* New Chat Button */}
           <button
             onClick={handleResetChat}
-            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer border border-slate-200/80 dark:border-slate-700/80"
+            className="p-1.5 sm:p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer border border-slate-200/80 dark:border-slate-750/80 active:scale-95"
             title="Start new conversation"
           >
-            <RotateCcw className="w-4 h-4" />
+            <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
         </div>
       </header>
@@ -959,25 +963,25 @@ export default function WorkspaceChat({
       {/* ============================================================== */}
       {/* 2. FULL-WIDTH CONVERSATION AREA                                */}
       {/* ============================================================== */}
-      <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 space-y-6">
-        <div className="max-w-3xl mx-auto space-y-6">
+      <div className="flex-1 overflow-y-auto px-3 sm:px-6 md:px-8 py-3.5 sm:py-6 space-y-4 sm:space-y-6 custom-scrollbar">
+        <div className="max-w-3xl mx-auto space-y-4 sm:space-y-6">
           
 
           {/* Conversation Stream */}
           {messages.map((msg) => (
             <div
               key={msg.id}
-              className={`flex gap-3.5 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+              className={`flex gap-2.5 sm:gap-3.5 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               {/* AI Avatar */}
               {msg.sender === 'ai' && (
-                <div className="w-9 h-9 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex items-center justify-center p-1.5 shadow-xs shrink-0 mt-0.5 overflow-hidden">
-                  <img src="/logo.png" alt="AI Tutor" className="w-full h-full object-contain dark:invert" />
+                <div className="w-7 h-7 sm:w-8.5 sm:h-8.5 flex items-center justify-center shrink-0 mt-0.5">
+                  <img src="/logo-inner.png" alt="AI Tutor" className="w-full h-full object-contain select-none" />
                 </div>
               )}
 
               {/* Message Bubble Container */}
-              <div className={`space-y-1.5 max-w-2xl ${msg.sender === 'user' ? 'text-right' : 'text-left'}`}>
+              <div className={`space-y-1.5 max-w-[88%] sm:max-w-2xl ${msg.sender === 'user' ? 'text-right' : 'text-left'}`}>
                 
                 {/* Bubble */}
                 <div className={`p-4 sm:p-5 rounded-3xl ${
@@ -1103,13 +1107,13 @@ export default function WorkspaceChat({
 
           {/* Thinking Indicator */}
           {isThinking && (
-            <div className="flex gap-3.5 items-center">
-              <div className="w-9 h-9 rounded-2xl bg-indigo-600 text-white flex items-center justify-center text-sm shadow-sm shrink-0">
-                <Loader2 className="w-4 h-4 animate-spin" />
+            <div className="flex gap-2.5 sm:gap-3.5 items-center">
+              <div className="w-7 h-7 sm:w-8.5 sm:h-8.5 flex items-center justify-center shrink-0">
+                <img src="/logo-inner.png" alt="AI Tutor" className="w-full h-full object-contain animate-pulse select-none" />
               </div>
-              <div className="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-xs font-semibold text-slate-500 flex items-center gap-2 shadow-xs">
-                <Sparkles className="w-4 h-4 text-indigo-500 animate-pulse" />
-                <span>Thinking of a simple explanation...</span>
+              <div className="px-3.5 py-2.5 sm:p-4 rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-xs sm:text-sm font-semibold text-slate-500 flex items-center gap-2 shadow-xs">
+                <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-500 animate-pulse shrink-0" />
+                <span>Thinking...</span>
               </div>
             </div>
           )}
@@ -1121,12 +1125,35 @@ export default function WorkspaceChat({
       {/* ============================================================== */}
       {/* 3. MINIMALIST FULL-WIDTH CHAT INPUT DOCK                       */}
       {/* ============================================================== */}
-      <footer className="p-4 sm:p-5 border-t border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm shrink-0">
-        <div className="max-w-3xl mx-auto space-y-2.5">
+      <footer className="p-2 sm:p-4 border-t border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md shrink-0">
+        <div className="max-w-3xl mx-auto space-y-2">
           
+          {/* Quick Prompt Suggestions when chat is fresh */}
+          {messages.length <= 1 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+              <span className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider pl-1 shrink-0">Try:</span>
+              {[
+                { label: "⚡ Explain concept simply", prompt: "Can you explain the main concept from this study material in simple, intuitive terms?" },
+                { label: "📝 Quiz me on key terms", prompt: "Create a 3-question quick quiz on key concepts from this topic to test my recall." },
+                { label: "💡 Step-by-step solver", prompt: "Help me solve a difficult study problem step-by-step with clear reasoning." },
+                { label: "🔍 High-yield summary", prompt: "Give me a high-yield study bullet-point summary of the core concepts." }
+              ].map((item, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => handleSend(item.prompt)}
+                  disabled={isThinking}
+                  className="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-indigo-50 dark:bg-slate-850 dark:hover:bg-indigo-950/50 text-slate-600 hover:text-indigo-600 dark:text-slate-300 dark:hover:text-indigo-400 border border-slate-200/60 dark:border-slate-800 font-medium whitespace-nowrap cursor-pointer transition-colors active:scale-95 text-[11px] sm:text-xs shrink-0"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Attached Files Queue (Visual chips indicating attached documents) */}
           {attachedDrafts.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2 p-2.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/70 dark:border-indigo-800/60 animate-in fade-in slide-in-from-bottom-1">
+            <div className="flex flex-wrap items-center gap-2 p-2 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/70 dark:border-indigo-800/60 animate-in fade-in slide-in-from-bottom-1">
               <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1 pl-1 shrink-0">
                 <Paperclip className="w-3.5 h-3.5" />
                 Attached ({attachedDrafts.length}):
@@ -1137,7 +1164,7 @@ export default function WorkspaceChat({
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white dark:bg-slate-850 border border-indigo-200 dark:border-indigo-800/80 text-xs font-semibold text-slate-800 dark:text-slate-200 shadow-2xs"
                 >
                   <FileText className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                  <span className="truncate max-w-[140px] sm:max-w-[200px]">{draft.name}</span>
+                  <span className="truncate max-w-[130px] sm:max-w-[200px]">{draft.name}</span>
                   <span className="text-[10px] text-slate-400 font-normal">({draft.size})</span>
                   <button
                     type="button"
@@ -1163,18 +1190,18 @@ export default function WorkspaceChat({
           />
 
           {/* Clean Input Bar */}
-          <div className="flex items-center gap-1.5 sm:gap-2 p-1 sm:p-1.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-750 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all shadow-xs max-w-full">
+          <div className="flex items-end gap-1 sm:gap-2 p-1 sm:p-1.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-750 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all shadow-xs max-w-full">
             
             {/* 1. ATTACH BUTTON */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={isThinking}
-              className="px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-indigo-50/70 dark:hover:bg-slate-750 border border-slate-200/90 dark:border-slate-700 shadow-2xs group"
+              className="h-9 w-9 sm:h-10 sm:w-auto sm:px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shrink-0 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-indigo-50/70 dark:hover:bg-slate-750 border border-slate-200/90 dark:border-slate-700 shadow-2xs group mb-0.5"
               title="Attach study material (PDF, image, notes, or document)"
               aria-label="Attach study file"
             >
-              <Paperclip className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-500 group-hover:text-indigo-600 dark:text-slate-400 dark:group-hover:text-indigo-400 transition-colors" />
+              <Paperclip className="w-4 h-4 text-slate-500 group-hover:text-indigo-600 dark:text-slate-400 dark:group-hover:text-indigo-400 transition-colors" />
               <span className="text-xs font-bold hidden sm:inline text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-300">
                 Attach
               </span>
@@ -1185,7 +1212,7 @@ export default function WorkspaceChat({
               type="button"
               onClick={toggleListening}
               disabled={isThinking || isTranscribingVoice}
-              className={`px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shrink-0 border ${
+              className={`h-9 w-9 sm:h-10 sm:w-auto sm:px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shrink-0 border mb-0.5 ${
                 isListening
                   ? 'bg-rose-500 text-white border-rose-600 shadow-md shadow-rose-500/25 animate-pulse'
                   : isTranscribingVoice
@@ -1217,11 +1244,11 @@ export default function WorkspaceChat({
                       />
                     ))}
                   </div>
-                  <span className="text-xs font-bold text-white">Listening</span>
+                  <span className="text-xs font-bold text-white hidden sm:inline ml-1">Listening</span>
                 </>
               ) : (
                 <>
-                  <Mic className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-500 group-hover:text-indigo-600 dark:text-slate-400 dark:group-hover:text-indigo-400 transition-colors" />
+                  <Mic className="w-4 h-4 text-slate-500 group-hover:text-indigo-600 dark:text-slate-400 dark:group-hover:text-indigo-400 transition-colors" />
                   <span className="text-xs font-bold hidden sm:inline text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-300">
                     Voice
                   </span>
@@ -1229,34 +1256,41 @@ export default function WorkspaceChat({
               )}
             </button>
 
-            {/* Input Box */}
-            <input
+            {/* 3. Textarea Input Box (Auto-resizing) */}
+            <textarea
               ref={inputRef}
-              type="text"
+              rows={1}
               placeholder={
                 attachedDrafts.length > 0 
                   ? "Instructions for document..." 
-                  : "Ask your AI tutor..."
+                  : "Ask your AI tutor anything..."
               }
               value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
+              onChange={(e) => {
+                setInputValue(e.target.value);
+                e.target.style.height = 'auto';
+                e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+              }}
               onKeyDown={handleKeyDown}
               disabled={isThinking}
-              className="flex-1 min-w-0 px-2 sm:px-3 py-1.5 sm:py-2 bg-transparent text-xs sm:text-base font-normal text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none"
+              className="flex-1 min-w-0 px-2 sm:px-3 py-2 bg-transparent text-[15px] sm:text-base font-normal text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none resize-none leading-relaxed max-h-[120px] custom-scrollbar mb-0.5"
             />
 
-            {/* Send Button */}
+            {/* 4. Send Button */}
             <button
               type="button"
-              onClick={() => handleSend()}
+              onClick={() => {
+                handleSend();
+                if (inputRef.current) inputRef.current.style.height = 'auto';
+              }}
               disabled={(!inputValue.trim() && attachedDrafts.length === 0) || isThinking}
-              className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed shadow-md shadow-indigo-600/25 shrink-0 active:scale-95"
+              className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed shadow-md shadow-indigo-600/25 shrink-0 active:scale-95 mb-0.5"
               title="Send message"
             >
               {isThinking ? (
-                <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />
+                <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
-                <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <Send className="w-4 h-4" />
               )}
             </button>
           </div>

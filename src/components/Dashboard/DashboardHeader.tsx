@@ -217,11 +217,19 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
       )}
       <div className="flex items-center justify-between gap-2 sm:gap-4">
         {/* Hamburger & Logo */}
-        <div className="flex items-center gap-2 sm:gap-3 md:pr-4 min-w-0">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 md:pr-4 min-w-0">
+          <button
+            onClick={onMenuToggle}
+            className="md:hidden p-1.5 -ml-1 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+            aria-label="Open navigation sidebar"
+            title="Open menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
           <img 
-            src="/logo.png" 
+            src="/logo-inner.png" 
             alt="StudyWeb Logo" 
-            className="md:hidden h-7 sm:h-8 w-auto object-contain dark:invert shrink-0" 
+            className="md:hidden h-7 sm:h-8 w-auto object-contain select-none shrink-0" 
           />
           <span className="md:hidden text-xs font-extrabold text-slate-900 dark:text-white truncate max-w-[95px] xs:max-w-[140px] sm:max-w-[200px]">
             {tabLabels[activeTab] || 'Home'}

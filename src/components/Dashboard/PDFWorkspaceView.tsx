@@ -1474,8 +1474,8 @@ Student Question:
         {/* Header indicator */}
         <div className="px-5 py-4 border-b border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-slate-900 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex items-center justify-center p-1.5 shadow-xs overflow-hidden">
-              <img src="/logo.png" alt="StudyWeb Logo" className="w-full h-full object-contain dark:invert" />
+            <div className="w-8.5 h-8.5 sm:w-9 sm:h-9 flex items-center justify-center shrink-0">
+              <img src="/favicon.png" alt="StudyWeb Logo" className="w-full h-full object-contain dark:invert select-none" />
             </div>
             <div>
               <span className="font-black text-slate-800 dark:text-white text-sm tracking-tight">Notebook Chat Companion</span>
@@ -1508,12 +1508,14 @@ Student Question:
               key={idx} 
               className={`flex gap-3 max-w-[90%] ${log.sender === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}
             >
-              <div className={`w-8.5 h-8.5 rounded-xl flex items-center justify-center flex-shrink-0 font-extrabold text-[10px] shadow-sm transition-transform hover:scale-105 overflow-hidden ${
-                log.sender === 'user' 
-                  ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' 
-                  : 'bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-800 p-1 shadow-xs'
-              }`}>
-                {log.sender === 'user' ? 'YOU' : <img src="/logo.png" alt="AI Tutor" className="w-full h-full object-contain dark:invert" />}
+              <div className="w-8 h-8 sm:w-8.5 sm:h-8.5 flex items-center justify-center flex-shrink-0">
+                {log.sender === 'user' ? (
+                  <div className="w-full h-full rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 flex items-center justify-center font-extrabold text-[10px]">
+                    YOU
+                  </div>
+                ) : (
+                  <img src="/logo-inner.png" alt="AI Tutor" className="w-full h-full object-contain select-none" />
+                )}
               </div>
               
               <div className={`px-4 py-3 rounded-2xl text-xs leading-relaxed shadow-sm relative group max-w-[calc(100%-40px)] border ${

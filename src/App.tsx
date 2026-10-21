@@ -21,6 +21,7 @@ import Footer from './components/Footer';
 import SEOManager from './components/SEOManager';
 import LegalModals from './components/LegalModals';
 import ResetPasswordModal from './components/ResetPasswordModal';
+import CursorMotionCanvas from './components/CursorMotionCanvas';
 import { supabase } from './lib/supabase';
 
 // Authenticated Dashboard Components
@@ -511,12 +512,35 @@ export default function App() {
   // Helper helper to render active workspace tabs
   const renderDashboardContent = () => {
     const isWorkspaceTab = ['workspaces', 'ai-tutor', 'notes', 'flashcards', 'quiz-center'].includes(activeTab);
-    const targetWorkspace = activeWorkspace || (activeTab !== 'workspaces' && workspaces.length > 0 ? workspaces[0] : null);
+    const fallbackGeneralWorkspace: Workspace = {
+      id: 'general-study',
+      name: 'General Study',
+      subject: 'All Subjects',
+      description: 'Your open AI study assistant for any topic, homework, or concept.',
+      coverImage: '',
+      colorTheme: 'indigo',
+      emoji: '🎓',
+      visibility: 'private',
+      template: 'notes',
+      pinned: false,
+      favorite: false,
+      files: [],
+      nodes: [],
+      links: [],
+      flashcards: [],
+      quizzes: [],
+      notes: [],
+      plannerTasks: [],
+      streak: 1,
+      studyHours: 0,
+      lastOpened: new Date().toISOString()
+    };
+    const targetWorkspace = activeWorkspace || (activeTab === 'ai-tutor' ? (workspaces.length > 0 ? workspaces[0] : fallbackGeneralWorkspace) : (activeTab !== 'workspaces' && workspaces.length > 0 ? workspaces[0] : null));
 
     return (
-      <div className="w-full h-full relative">
+      <div className={`w-full ${activeTab === 'ai-tutor' ? 'h-full flex-1 flex flex-col min-h-0' : 'h-full'} relative`}>
         {/* Workspace Views */}
-        <div className={isWorkspaceTab ? 'block' : 'hidden'}>
+        <div className={isWorkspaceTab ? (activeTab === 'ai-tutor' ? 'h-full flex-1 flex flex-col min-h-0' : 'block') : 'hidden'}>
           {targetWorkspace ? (
             <WorkspaceContainer 
               workspace={targetWorkspace} 
@@ -632,7 +656,7 @@ export default function App() {
           />
 
           {/* Active Workspace Viewport */}
-          <main id="workspace-main-content" className={`flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 md:p-8 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-8 ${isFocusMode ? 'max-w-none w-full' : 'max-w-7xl mx-auto w-full'} transition-all duration-300`}>
+          <main id="workspace-main-content" className={`flex-1 min-w-0 ${activeTab === 'ai-tutor' ? 'p-0 md:p-8 pb-[calc(4rem+env(safe-area-inset-bottom,0px))] md:pb-8 h-[calc(100dvh-3.5rem)] md:h-auto overflow-hidden md:overflow-y-auto flex flex-col' : 'overflow-y-auto overflow-x-hidden p-3 sm:p-5 md:p-8 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-8'} ${isFocusMode || activeTab === 'ai-tutor' ? 'max-w-none w-full' : 'max-w-7xl mx-auto w-full'} transition-all duration-300`}>
             <AnimatePresence mode="wait">
               <motion.div
                 key={`workspace-main-${activeTab}-${activeWorkspace?.id || 'none'}`}
@@ -640,6 +664,7 @@ export default function App() {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
                 transition={{ duration: 0.25, ease: "easeOut" }}
+                className={activeTab === 'ai-tutor' ? 'h-full flex-1 flex flex-col min-h-0 w-full' : 'w-full'}
               >
                 {renderDashboardContent()}
               </motion.div>

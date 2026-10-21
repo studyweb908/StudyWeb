@@ -8,7 +8,7 @@ import {
   ArrowRight,
   Sparkles
 } from 'lucide-react';
-import { CURATED_DAILY_QUOTES, DailyQuoteItem } from './DailyQuoteCard';
+import { RICH_ACADEMIC_QUOTES, getStoredDailyQuote } from '../../services/dailyQuoteEngine';
 import { playDopaminePopSound } from '../../utils/audioEffects';
 
 interface WelcomeBackModalProps {
@@ -61,19 +61,17 @@ export default function WelcomeBackModal({
 }: WelcomeBackModalProps) {
   const [copiedQuote, setCopiedQuote] = useState(false);
 
-  // Continuously rotate quote index across visits/sessions to give fresh parameters each time
-  const [quoteIndex, setQuoteIndex] = useState(() => {
+  // Continuously rotate quote across visits or use today's internet quote
+  const currentQuote = useMemo(() => {
+    const todayQuote = getStoredDailyQuote();
+    if (todayQuote) return todayQuote;
     const prev = parseInt(localStorage.getItem('studyweb_welcome_quote_index') || '0', 10);
-    const next = (prev + 1) % CURATED_DAILY_QUOTES.length;
+    const next = (prev + 1) % RICH_ACADEMIC_QUOTES.length;
     try {
       localStorage.setItem('studyweb_welcome_quote_index', String(next));
     } catch {}
-    return next;
-  });
-
-  const currentQuote: DailyQuoteItem = useMemo(() => {
-    return CURATED_DAILY_QUOTES[quoteIndex % CURATED_DAILY_QUOTES.length] || CURATED_DAILY_QUOTES[0];
-  }, [quoteIndex]);
+    return RICH_ACADEMIC_QUOTES[next] || RICH_ACADEMIC_QUOTES[0];
+  }, [isOpen]);
 
   // Dopamine confetti and popping sound triggers when modal opens
   useEffect(() => {
