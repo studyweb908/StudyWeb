@@ -617,7 +617,7 @@ export default function DashboardHome({
             <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-6 shadow-sm">
               <div className="flex items-center gap-2 mb-1">
                 <div className="w-7 h-7 flex items-center justify-center shrink-0">
-                  <img src="/favicon.png" alt="StudyWeb Logo" className="w-full h-full object-contain dark:invert select-none" />
+                  <img src="/logo-inner.png" alt="StudyWeb Logo" className="w-full h-full object-contain select-none" />
                 </div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">AI Tutor</h3>
               </div>

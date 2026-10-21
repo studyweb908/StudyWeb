@@ -37,13 +37,13 @@ export default function Footer() {
           <div className="col-span-2 lg:col-span-2">
             <div className="flex items-center gap-4 mb-6">
               <img 
-                src="/logo.png" 
+                src="/logo-inner.png" 
                 alt="StudyWeb Logo" 
-                width="48" 
-                height="56" 
+                width="44" 
+                height="48" 
                 loading="lazy" 
                 decoding="async" 
-                className="w-12 h-14 object-contain invert mix-blend-screen" 
+                className="w-11 h-12 object-contain select-none" 
               />
               <div className="flex flex-col justify-center mt-1 text-white">
                 <span className="font-serif font-semibold text-2xl tracking-[0.15em] leading-none mb-1">

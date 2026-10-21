@@ -396,9 +396,10 @@ export default function Navigation() {
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <a href="#" className="flex items-center gap-2">
-                <img src="/logo.png" alt="Study Web Logo" className="h-10 sm:h-12 md:h-16 w-auto object-contain dark:invert transition-all" />
+            <div className="flex items-center gap-3">
+              <a href="#" className="flex items-center gap-2.5">
+                <img src="/logo-inner.png" alt="StudyWeb Logo" className="h-9 sm:h-10 md:h-11 w-auto object-contain select-none transition-all" />
+                <span className="font-extrabold font-display text-lg sm:text-xl tracking-tight text-brand-text">StudyWeb</span>
               </a>
             </div>
 
@@ -563,7 +564,7 @@ export default function Navigation() {
 
               {/* Header */}
               <div className="text-center space-y-1 mb-2.5 sm:mb-3 pr-4">
-                <img src="/logo.png" alt="StudyWeb Logo" className="h-6 sm:h-7 mx-auto dark:invert mb-0.5" />
+                <img src="/logo-inner.png" alt="StudyWeb Logo" className="h-7 sm:h-8 mx-auto object-contain select-none mb-1" />
                 <h3 className="text-base sm:text-lg font-bold font-display text-brand-text">
                   {authMode === 'login' && 'Welcome Back'}
                   {authMode === 'signup' && 'Create Account'}

@@ -208,7 +208,7 @@ export const DailyQuoteCard: React.FC<DailyQuoteCardProps> = ({
   const handleRefreshQuote = async () => {
     setIsRefreshing(true);
     try {
-      const fresh = await fetchFreshInternetQuote();
+      const fresh = await fetchFreshInternetQuote(true);
       if (fresh) {
         setActiveQuote(fresh);
         saveStoredDailyQuote(fresh);

@@ -124,31 +124,66 @@ export default function CursorMotionCanvas() {
       });
     }
 
+    // Smooth ribbon trail points for fluid cursor swipe motion
+    const trailLength = 22;
+    const trail: { x: number; y: number }[] = Array.from({ length: trailLength }, () => ({
+      x: width / 2,
+      y: height / 3
+    }));
+
     const render = () => {
       ctx.clearRect(0, 0, width, height);
 
       // Lerp mouse
-      mouseX += (targetX - mouseX) * 0.12;
-      mouseY += (targetY - mouseY) * 0.12;
+      mouseX += (targetX - mouseX) * 0.18;
+      mouseY += (targetY - mouseY) * 0.18;
 
-      // 1. Render soft ambient cursor backlight aura
+      // Update ribbon trail with spring follow
+      trail[0].x = mouseX;
+      trail[0].y = mouseY;
+      for (let i = 1; i < trailLength; i++) {
+        trail[i].x += (trail[i - 1].x - trail[i].x) * 0.38;
+        trail[i].y += (trail[i - 1].y - trail[i].y) * 0.38;
+      }
+
+      // 1. Render soft ambient cursor spotlight aura
       if (isInteracting) {
-        const glowRadius = Math.min(width, height) * 0.35;
+        const glowRadius = Math.min(width, height) * 0.32;
         const radialGradient = ctx.createRadialGradient(
           mouseX, mouseY, 0,
           mouseX, mouseY, glowRadius
         );
-        radialGradient.addColorStop(0, 'rgba(99, 102, 241, 0.08)');
-        radialGradient.addColorStop(0.4, 'rgba(168, 85, 247, 0.03)');
+        radialGradient.addColorStop(0, 'rgba(81, 69, 245, 0.11)');
+        radialGradient.addColorStop(0.45, 'rgba(139, 92, 246, 0.045)');
         radialGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
 
         ctx.fillStyle = radialGradient;
         ctx.beginPath();
         ctx.arc(mouseX, mouseY, glowRadius, 0, Math.PI * 2);
         ctx.fill();
+
+        // 1B. Render fluid silk ribbon curve following cursor swipe
+        ctx.save();
+        for (let i = 0; i < trailLength - 1; i++) {
+          const ratio = 1 - i / trailLength;
+          const p1 = trail[i];
+          const p2 = trail[i + 1];
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          if (Math.hypot(dx, dy) > 0.2) {
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.strokeStyle = `rgba(81, 69, 245, ${ratio * 0.35})`;
+            ctx.lineWidth = Math.max(1, ratio * 5.5);
+            ctx.lineCap = 'round';
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
       }
 
-      // 2. Render and connect ambient nodes
+      // 2. Render and connect ambient nodes + magnetic connection to cursor
       for (let i = 0; i < ambientNodes.length; i++) {
         const node = ambientNodes[i];
         node.x += node.vx;
@@ -159,17 +194,26 @@ export default function CursorMotionCanvas() {
         if (node.y < 0) node.y = height;
         if (node.y > height) node.y = 0;
 
-        // Mouse magnetic repel/attract
+        // Mouse magnetic repel/attract + tether line
         const mdx = node.x - mouseX;
         const mdy = node.y - mouseY;
         const mDist = Math.sqrt(mdx * mdx + mdy * mdy);
-        if (mDist < 160 && mDist > 0) {
-          const force = (160 - mDist) / 160;
-          node.x += (mdx / mDist) * force * 1.5;
-          node.y += (mdy / mDist) * force * 1.5;
+        if (mDist < 190 && mDist > 0) {
+          const force = (190 - mDist) / 190;
+          node.x += (mdx / mDist) * force * 1.1;
+          node.y += (mdy / mDist) * force * 1.1;
+
+          if (isInteracting) {
+            ctx.strokeStyle = `rgba(81, 69, 245, ${0.22 * force})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(mouseX, mouseY);
+            ctx.lineTo(node.x, node.y);
+            ctx.stroke();
+          }
         }
 
-        ctx.fillStyle = 'rgba(147, 130, 255, 0.25)';
+        ctx.fillStyle = 'rgba(81, 69, 245, 0.32)';
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.baseRadius, 0, Math.PI * 2);
         ctx.fill();
@@ -180,9 +224,9 @@ export default function CursorMotionCanvas() {
           const ndx = node.x - other.x;
           const ndy = node.y - other.y;
           const dist = Math.sqrt(ndx * ndx + ndy * ndy);
-          if (dist < 110) {
-            ctx.strokeStyle = `rgba(165, 150, 255, ${0.12 * (1 - dist / 110)})`;
-            ctx.lineWidth = 0.8;
+          if (dist < 130) {
+            ctx.strokeStyle = `rgba(99, 102, 241, ${0.15 * (1 - dist / 130)})`;
+            ctx.lineWidth = 0.85;
             ctx.beginPath();
             ctx.moveTo(node.x, node.y);
             ctx.lineTo(other.x, other.y);
@@ -208,14 +252,10 @@ export default function CursorMotionCanvas() {
 
         const currentAlpha = p.alpha * (1 - progress);
         ctx.fillStyle = `${p.color}${currentAlpha})`;
-        ctx.shadowColor = `${p.color}0.8)`;
-        ctx.shadowBlur = 6;
 
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size * (1 - progress * 0.5), 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, p.size * (1 - progress * 0.4), 0, Math.PI * 2);
         ctx.fill();
-
-        ctx.shadowBlur = 0; // Reset shadow
       }
 
       animationFrameId = requestAnimationFrame(render);
@@ -235,7 +275,6 @@ export default function CursorMotionCanvas() {
     <canvas
       ref={canvasRef}
       className="fixed inset-0 pointer-events-none z-10 w-full h-full"
-      style={{ mixBlendMode: 'screen' }}
       aria-hidden="true"
     />
   );

@@ -535,7 +535,7 @@ export default function App() {
       studyHours: 0,
       lastOpened: new Date().toISOString()
     };
-    const targetWorkspace = activeWorkspace || (activeTab === 'ai-tutor' ? (workspaces.length > 0 ? workspaces[0] : fallbackGeneralWorkspace) : (activeTab !== 'workspaces' && workspaces.length > 0 ? workspaces[0] : null));
+    const targetWorkspace = activeWorkspace || (activeTab !== 'workspaces' ? (workspaces.length > 0 ? workspaces[0] : fallbackGeneralWorkspace) : null);
 
     return (
       <div className={`w-full ${activeTab === 'ai-tutor' ? 'h-full flex-1 flex flex-col min-h-0' : 'h-full'} relative`}>

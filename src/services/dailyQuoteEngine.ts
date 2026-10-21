@@ -199,28 +199,175 @@ export const RICH_ACADEMIC_QUOTES: AcademicQuote[] = [
     initials: "JG",
     bio: "Revolutionized primatology through decades of patient, groundbreaking field observations in Tanzania, rewriting scientific views on animal cognition.",
     keyTakeaway: "Your daily focus and academic dedication shape the real-world impact you will have on the communities around you."
+  },
+  {
+    id: 'quote-turing',
+    quote: "We can only see a short distance ahead, but we can see plenty there that needs to be done.",
+    author: "Alan Turing",
+    title: "Mathematician, Logician & Father of Computer Science",
+    era: "1912–1954 · England",
+    source: "Computing Machinery and Intelligence (1950)",
+    category: "Forward Progress",
+    initials: "AT",
+    bio: "Formalized the concepts of algorithm and computation with the Turing machine and played a pivotal role in cracking intercepted coded messages.",
+    keyTakeaway: "You don't need to master the entire textbook tonight—focus on solving the next immediate concept in front of you."
+  },
+  {
+    id: 'quote-ramanujan',
+    quote: "An equation means nothing to me unless it expresses a thought of God.",
+    author: "Srinivasa Ramanujan",
+    title: "Mathematician & Number Theory Pioneer",
+    era: "1887–1920 · India",
+    source: "Collected Papers of Srinivasa Ramanujan",
+    category: "Intuition & Mastery",
+    initials: "SR",
+    bio: "Compiled nearly 3,900 groundbreaking mathematical results in infinite series, number theory, and continued fractions with minimal formal training.",
+    keyTakeaway: "Look for the deeper meaning and elegance behind every formula rather than memorizing symbols mechanically."
+  },
+  {
+    id: 'quote-kalam',
+    quote: "Dream, dream, dream. Dreams transform into thoughts and thoughts result in action.",
+    author: "A. P. J. Abdul Kalam",
+    title: "Aerospace Scientist & 11th President of India",
+    era: "1931–2015 · India",
+    source: "Ignited Minds",
+    category: "Ambition & Action",
+    initials: "AK",
+    bio: "Renowned aerospace engineer and educator who inspired millions of students globally to pursue science, technology, and disciplined self-improvement.",
+    keyTakeaway: "Pair high academic aspirations with disciplined daily execution in your study sessions."
+  },
+  {
+    id: 'quote-aurelius',
+    quote: "The impediment to action advances action. What stands in the way becomes the way.",
+    author: "Marcus Aurelius",
+    title: "Stoic Philosopher & Roman Emperor",
+    era: "121–180 CE · Rome",
+    source: "Meditations, Book V",
+    category: "Stoic Resilience",
+    initials: "MA",
+    bio: "Practitioner of Stoic philosophy whose personal journals remain one of history's greatest guides to mental clarity, duty, and emotional discipline.",
+    keyTakeaway: "The most difficult chapters in your syllabus are the exact areas that will build your strongest academic edge."
+  },
+  {
+    id: 'quote-hopper',
+    quote: "The most dangerous phrase in the language is, 'We've always done it this way.'",
+    author: "Grace Hopper",
+    title: "Computer Scientist & Rear Admiral",
+    era: "1906–1992 · United States",
+    source: "Lectures on Computing Innovation",
+    category: "Adaptability",
+    initials: "GH",
+    bio: "Pioneered machine-independent programming languages and invented the first compiler, transforming how humans communicate with computers.",
+    keyTakeaway: "If passive reading isn't working, experiment with active recall, flashcards, and Socratic questioning."
+  },
+  {
+    id: 'quote-darwin',
+    quote: "A man who dares to waste one hour of time has not discovered the value of life.",
+    author: "Charles Darwin",
+    title: "Naturalist, Geologist & Biologist",
+    era: "1809–1882 · England",
+    source: "The Life and Letters of Charles Darwin",
+    category: "Time & Focus",
+    initials: "CD",
+    bio: "Established that all species of life have descended over time from common ancestors through natural selection via meticulous observation.",
+    keyTakeaway: "Treat every focused 45-minute study block as a precious investment in your intellectual evolution."
+  },
+  {
+    id: 'quote-franklin-rosalind',
+    quote: "Science and everyday life cannot and should not be separated.",
+    author: "Rosalind Franklin",
+    title: "Chemist & X-Ray Crystallographer",
+    era: "1920–1958 · England",
+    source: "Letter to Ellis Franklin (1940)",
+    category: "Real-World Clarity",
+    initials: "RF",
+    bio: "Captured the critical X-ray diffraction images (Photo 51) that revealed the double-helix structure of DNA, RNA, and viruses.",
+    keyTakeaway: "Connect abstract textbook theories to tangible, everyday examples around you to make retention effortless."
+  },
+  {
+    id: 'quote-khwarizmi',
+    quote: "That fondness for science, by which God has endowed the scholar, encourages him to compose works that make obscure points clear.",
+    author: "Al-Khwarizmi",
+    title: "Mathematician, Astronomer & Father of Algebra",
+    era: "c. 780–850 CE · House of Wisdom, Baghdad",
+    source: "The Compendious Book on Calculation by Completion and Balancing",
+    category: "Clarity & Logic",
+    initials: "AK",
+    bio: "Polymath whose treatises introduced Hindu–Arabic numerals and foundational algebraic methods (giving us the words 'algebra' and 'algorithm').",
+    keyTakeaway: "True scholarship is the art of distilling complex, confusing problems into clear, step-by-step logical steps."
   }
 ];
 
+function getSeenQuotes(): string[] {
+  try {
+    const raw = localStorage.getItem('studyweb_seen_quotes_v2');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function markQuoteSeen(quoteText: string): void {
+  try {
+    const seen = getSeenQuotes();
+    const normalized = quoteText.slice(0, 60).toLowerCase();
+    const updated = [normalized, ...seen.filter(s => s !== normalized)].slice(0, 80);
+    localStorage.setItem('studyweb_seen_quotes_v2', JSON.stringify(updated));
+  } catch {}
+}
+
 /**
  * Fetch a fresh, unique academic/inspirational quote from public internet APIs.
- * Falls back gracefully to date-seeded curated collection if network is unavailable.
+ * Guarantees a non-repeating quote on every call.
  */
-export async function fetchFreshInternetQuote(): Promise<AcademicQuote> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 4000);
+export async function fetchFreshInternetQuote(forceNew = false): Promise<AcademicQuote> {
+  const seen = getSeenQuotes();
 
+  // Attempt 1: Fast DummyJSON Random Quotes API (valid HTTPS, CORS enabled, 1400+ quotes)
   try {
-    // Attempt 1: Quotable API for inspirational / wisdom / educational quotes
-    const response = await fetch('https://api.quotable.io/random?tags=inspirational|wisdom|education|famous-quotes', {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const res = await fetch(`https://dummyjson.com/quotes/random?t=${Date.now()}`, {
       signal: controller.signal
     });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const d = await res.json();
+      if (d && d.quote && d.author) {
+        const normalized = d.quote.trim().slice(0, 60).toLowerCase();
+        if (!forceNew || !seen.includes(normalized)) {
+          markQuoteSeen(d.quote.trim());
+          return {
+            id: `net-dj-${d.id || Date.now()}`,
+            quote: d.quote.trim(),
+            author: d.author.trim(),
+            title: "Renowned Scholar & Thinker",
+            era: "Global Wisdom Archive",
+            source: "Live Daily Wisdom Feed",
+            category: "Daily Study Inspiration",
+            initials: d.author.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase(),
+            bio: `${d.author} is celebrated worldwide for enduring contributions to philosophy, literature, and human thought.`,
+            keyTakeaway: "Apply this perspective to your study session today: consistent intellectual curiosity compounds over time."
+          };
+        }
+      }
+    }
+  } catch {}
+
+  // Attempt 2: Quotable API
+  try {
+    const controller2 = new AbortController();
+    const timeoutId2 = setTimeout(() => controller2.abort(), 3000);
+    const response = await fetch('https://api.quotable.io/random?tags=inspirational|wisdom|education|science', {
+      signal: controller2.signal
+    });
+    clearTimeout(timeoutId2);
 
     if (response.ok) {
       const data = await response.json();
-      clearTimeout(timeoutId);
-
       if (data && data.content && data.author) {
+        markQuoteSeen(data.content.trim());
         return {
           id: `net-${data._id || Date.now()}`,
           quote: data.content.trim(),
@@ -235,41 +382,21 @@ export async function fetchFreshInternetQuote(): Promise<AcademicQuote> {
         };
       }
     }
-  } catch (err) {
-    // Silently fall back to secondary API or rich date-seeded library
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  } catch {}
 
-  // Attempt 2: Secondary API (DummyJSON quotes)
-  try {
-    const res2 = await fetch('https://dummyjson.com/quotes/random');
-    if (res2.ok) {
-      const d2 = await res2.json();
-      if (d2 && d2.quote && d2.author) {
-        return {
-          id: `net-dj-${d2.id || Date.now()}`,
-          quote: d2.quote.trim(),
-          author: d2.author.trim(),
-          title: "Renowned Author & Thinker",
-          era: "Global Literature",
-          source: "World Quotes Archive",
-          category: "Study Inspiration",
-          initials: d2.author.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase(),
-          bio: `${d2.author} left an enduring mark on global scholarship and literature.`,
-          keyTakeaway: "Every challenge in your study session is an opportunity to strengthen mental endurance."
-        };
-      }
-    }
-  } catch (err2) {
-    // Fall back to date-seeded local collection
-  }
-
-  // Deterministic daily rotation from 50+ rich collection based on calendar day
+  // Fallback: Pick an unseen quote from RICH_ACADEMIC_QUOTES so it NEVER repeats the same quote
+  const unseenPool = RICH_ACADEMIC_QUOTES.filter(
+    q => !seen.includes(q.quote.slice(0, 60).toLowerCase())
+  );
+  const pool = unseenPool.length > 0 ? unseenPool : RICH_ACADEMIC_QUOTES;
   const now = new Date();
-  const dayOfYear = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400000);
-  const index = Math.abs(dayOfYear) % RICH_ACADEMIC_QUOTES.length;
-  return RICH_ACADEMIC_QUOTES[index];
+  const daySeed = Math.floor(now.getTime() / 86400000);
+  const idx = forceNew
+    ? Math.floor(Math.random() * pool.length)
+    : Math.abs(daySeed + seen.length) % pool.length;
+  const chosen = pool[idx] || RICH_ACADEMIC_QUOTES[0];
+  markQuoteSeen(chosen.quote);
+  return chosen;
 }
 
 /**

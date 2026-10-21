@@ -8,7 +8,7 @@ import {
   ArrowRight,
   Sparkles
 } from 'lucide-react';
-import { RICH_ACADEMIC_QUOTES, getStoredDailyQuote } from '../../services/dailyQuoteEngine';
+import { RICH_ACADEMIC_QUOTES, getStoredDailyQuote, fetchFreshInternetQuote, saveStoredDailyQuote, AcademicQuote } from '../../services/dailyQuoteEngine';
 import { playDopaminePopSound } from '../../utils/audioEffects';
 
 interface WelcomeBackModalProps {
@@ -61,8 +61,7 @@ export default function WelcomeBackModal({
 }: WelcomeBackModalProps) {
   const [copiedQuote, setCopiedQuote] = useState(false);
 
-  // Continuously rotate quote across visits or use today's internet quote
-  const currentQuote = useMemo(() => {
+  const [currentQuote, setCurrentQuote] = useState<AcademicQuote>(() => {
     const todayQuote = getStoredDailyQuote();
     if (todayQuote) return todayQuote;
     const prev = parseInt(localStorage.getItem('studyweb_welcome_quote_index') || '0', 10);
@@ -71,6 +70,16 @@ export default function WelcomeBackModal({
       localStorage.setItem('studyweb_welcome_quote_index', String(next));
     } catch {}
     return RICH_ACADEMIC_QUOTES[next] || RICH_ACADEMIC_QUOTES[0];
+  });
+
+  useEffect(() => {
+    if (!isOpen) return;
+    fetchFreshInternetQuote(true).then(q => {
+      if (q) {
+        setCurrentQuote(q);
+        saveStoredDailyQuote(q);
+      }
+    });
   }, [isOpen]);
 
   // Dopamine confetti and popping sound triggers when modal opens

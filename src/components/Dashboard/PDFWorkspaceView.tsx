@@ -1475,7 +1475,7 @@ Student Question:
         <div className="px-5 py-4 border-b border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-slate-900 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8.5 h-8.5 sm:w-9 sm:h-9 flex items-center justify-center shrink-0">
-              <img src="/favicon.png" alt="StudyWeb Logo" className="w-full h-full object-contain dark:invert select-none" />
+              <img src="/logo-inner.png" alt="StudyWeb Logo" className="w-full h-full object-contain select-none" />
             </div>
             <div>
               <span className="font-black text-slate-800 dark:text-white text-sm tracking-tight">Notebook Chat Companion</span>
