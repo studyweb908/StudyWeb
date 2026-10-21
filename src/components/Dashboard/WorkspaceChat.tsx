@@ -13,7 +13,8 @@ import {
   ChevronDown, 
   BookOpen, 
   FileText,
-  AlertTriangle
+  AlertTriangle,
+  Globe
 } from 'lucide-react';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import { useMicrophoneWaveform } from '../../hooks/useMicrophoneWaveform';
@@ -94,6 +95,7 @@ interface WorkspaceChatProps {
   onSelectWorkspace?: (ws: Workspace) => void;
   onUpdateWorkspace?: (updated: Workspace) => void;
   onOpenUploadModal?: () => void;
+  onOpenWebResearch?: () => void;
 }
 
 export default function WorkspaceChat({
@@ -101,7 +103,8 @@ export default function WorkspaceChat({
   workspaces,
   userId: propUserId,
   onSelectWorkspace,
-  onUpdateWorkspace
+  onUpdateWorkspace,
+  onOpenWebResearch
 }: WorkspaceChatProps) {
   const [resolvedUserId, setResolvedUserId] = useState<string | null>(propUserId || null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -266,6 +269,57 @@ export default function WorkspaceChat({
       iconType: 'tutor'
     }, resolvedUserId);
   }, [workspace.id, resolvedUserId]);
+
+  // Listen for Gemini Notebook Web Research imports coming from Upload Material
+  useEffect(() => {
+    const handleNotebookResearchChat = (e: any) => {
+      const detail = e?.detail;
+      if (!detail) return;
+      const { query, researchBrief, importedFiles = [] } = detail;
+
+      const sourceListMd = importedFiles.length > 0
+        ? importedFiles
+            .map((f: any, idx: number) => `${idx + 1}. **[${(f.type || 'WEB').toUpperCase()}] ${f.name}** — ${f.summary || 'Indexed into workspace'}`)
+            .join('\n')
+        : '';
+
+      const takeawaysMd = Array.isArray(researchBrief?.keyTakeaways) && researchBrief.keyTakeaways.length > 0
+        ? `\n\n### Key Research Takeaways\n` + researchBrief.keyTakeaways.map((t: string) => `- ${t}`).join('\n')
+        : '';
+
+      const questionsMd = Array.isArray(researchBrief?.suggestedQuestions) && researchBrief.suggestedQuestions.length > 0
+        ? `\n\n### Suggested Follow-Up Questions\n` + researchBrief.suggestedQuestions.map((q: string) => `- *"${q}"*`).join('\n')
+        : '';
+
+      const citations: Citation[] = importedFiles.slice(0, 5).map((f: any) => ({
+        sourceName: f.name,
+        quote: f.summary || f.highlights?.[0] || 'Imported web research source'
+      }));
+
+      const userMsg: Message = {
+        id: `research-user-${Date.now()}`,
+        sender: 'user',
+        text: `Research "${query}" across the web and load the best sources into this workspace.`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        attachedFileNames: importedFiles.map((f: any) => f.name)
+      };
+
+      const aiMsg: Message = {
+        id: `research-ai-${Date.now() + 1}`,
+        sender: 'ai',
+        text: `### 📚 ${researchBrief?.title || `Notebook Research Synthesis: ${query}`}\n\n${researchBrief?.overview || `I have researched **${query}** across Google, YouTube, Wikipedia, and academic repositories and added **${importedFiles.length} source${importedFiles.length === 1 ? '' : 's'}** directly into **${workspace.name}**.`}${takeawaysMd}\n\n### Imported Workspace Sources (${importedFiles.length})\n${sourceListMd}${questionsMd}\n\nAll of these sources are now indexed in your workspace. Ask me any question below to dive deeper, generate practice questions, or compare specific sources!`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        source: `Notebook Web Research • ${importedFiles.length} Sources Indexed`,
+        persona: activePersona,
+        citations
+      };
+
+      setMessages(prev => [...prev, userMsg, aiMsg]);
+    };
+
+    window.addEventListener('studyweb-notebook-research-chat', handleNotebookResearchChat);
+    return () => window.removeEventListener('studyweb-notebook-research-chat', handleNotebookResearchChat);
+  }, [workspace.name, activePersona]);
 
   // Reset chat thread
   const handleResetChat = () => {
@@ -1246,6 +1300,23 @@ export default function WorkspaceChat({
                 Attach
               </span>
             </button>
+
+            {/* 1B. DISCOVER WEB SOURCES BUTTON (GEMINI NOTEBOOK STYLE) */}
+            {onOpenWebResearch && (
+              <button
+                type="button"
+                onClick={onOpenWebResearch}
+                disabled={isThinking}
+                className="h-9 w-9 sm:h-10 sm:w-auto sm:px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shrink-0 bg-indigo-50/80 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/70 border border-indigo-200/90 dark:border-indigo-800/80 shadow-2xs group mb-0.5"
+                title="Discover & import sources from Google, YouTube, Wikipedia & PDFs"
+                aria-label="Research Web Sources"
+              >
+                <Globe className="w-4 h-4 text-indigo-600 dark:text-indigo-400 transition-colors" />
+                <span className="text-xs font-bold hidden md:inline text-indigo-700 dark:text-indigo-300">
+                  Discover Sources
+                </span>
+              </button>
+            )}
 
             {/* 2. VOICE INPUT BUTTON */}
             <button

@@ -184,6 +184,8 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
 
   // State handlers to bubble up modifications
   const handleAddFile = (newFile: WorkspaceFile) => {
+    const existingIds = new Set((workspace.files || []).map(f => f.id));
+    if (existingIds.has(newFile.id)) return;
     const updatedFiles = [newFile, ...(workspace.files || [])];
     
     // Also create a concept node for the newly uploaded file!
@@ -216,6 +218,61 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
 
     // Save uploaded file directly to Supabase workspace_files
     WorkspaceSyncService.saveWorkspaceFile(workspace.id, newFile);
+  };
+
+  const handleAddMultipleFiles = (newFiles: WorkspaceFile[], newNote?: WorkspaceNote) => {
+    if ((!newFiles || newFiles.length === 0) && !newNote) return;
+
+    const existingIds = new Set((workspace.files || []).map(f => f.id));
+    const uniqueNewFiles = (newFiles || []).filter(f => !existingIds.has(f.id));
+
+    const updatedFiles = [...uniqueNewFiles, ...(workspace.files || [])];
+    const newNodes = uniqueNewFiles.map(f => ({
+      id: `n-${f.id}`,
+      label: f.name.slice(0, 20) + '...',
+      type: 'file' as const,
+      color: '#3B82F6',
+      x: 100 + Math.random() * 120,
+      y: 100 + Math.random() * 120,
+      details: `${f.type.toUpperCase()} file`
+    }));
+    const newLinks = newNodes.map(n => ({
+      source: 'n-root',
+      target: n.id
+    }));
+
+    let updatedNotes = workspace.notes || [];
+    if (newNote) {
+      const existsIdx = updatedNotes.findIndex(n => n.id === newNote.id);
+      if (existsIdx !== -1) {
+        updatedNotes = [...updatedNotes];
+        updatedNotes[existsIdx] = newNote;
+      } else {
+        updatedNotes = [newNote, ...updatedNotes];
+      }
+    }
+
+    updateWorkspaceState({
+      files: updatedFiles,
+      notes: updatedNotes,
+      nodes: [...workspace.nodes, ...newNodes],
+      links: [...workspace.links, ...newLinks]
+    });
+
+    if (uniqueNewFiles.length > 0) {
+      recordUserActivity({
+        title: `Researched & imported ${uniqueNewFiles.length} web source${uniqueNewFiles.length === 1 ? '' : 's'}`,
+        detail: `Added to workspace ${workspace.name} (${uniqueNewFiles.map(f => f.name).slice(0, 2).join(', ')})`,
+        iconType: 'upload'
+      });
+    }
+
+    uniqueNewFiles.forEach(file => {
+      WorkspaceSyncService.saveWorkspaceFile(workspace.id, file);
+    });
+    if (newNote) {
+      WorkspaceSyncService.saveWorkspaceNote(workspace.id, newNote);
+    }
   };
 
   const handleRemoveFile = async (fileId: string) => {
@@ -452,9 +509,20 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
           <WorkspaceLibrary 
             workspace={workspace} 
             onAddFile={handleAddFile}
+            onAddMultipleFiles={handleAddMultipleFiles}
             onRemoveFile={handleRemoveFile}
             onClearAllFiles={handleClearAllFiles}
             onUpdateWorkspace={onUpdateWorkspace}
+            onOpenResearchInChat={(researchPayload) => {
+              setActiveTab('chat');
+              setTimeout(() => {
+                window.dispatchEvent(
+                  new CustomEvent('studyweb-notebook-research-chat', {
+                    detail: researchPayload
+                  })
+                );
+              }, 120);
+            }}
           />
         </div>
 
@@ -464,6 +532,7 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
             workspaces={workspaces}
             onSelectWorkspace={onSwitchWorkspace}
             onUpdateWorkspace={onUpdateWorkspace}
+            onOpenWebResearch={() => setActiveTab('library')}
           />
         </div>
 

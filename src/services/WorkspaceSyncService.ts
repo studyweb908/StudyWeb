@@ -460,5 +460,37 @@ export class WorkspaceSyncService {
       return [];
     }
   }
+
+  /**
+   * Saves a workspace note to the Supabase 'study_notes' table.
+   */
+  public static async saveWorkspaceNote(workspaceId: string, note: any, explicitUserId?: string): Promise<boolean> {
+    if (!supabase || !note) return false;
+    try {
+      const validNoteId = toValidUuid(note.id || `note-${Date.now()}`);
+      const validWsId = toValidUuid(workspaceId);
+      const userId = explicitUserId || await this.getUserId();
+
+      const row: Record<string, any> = {
+        id: validNoteId,
+        workspace_id: validWsId,
+        title: note.title || 'Research Synthesis Note',
+        content: note.content || '',
+        tags: Array.isArray(note.tags) ? note.tags : ['Web Research'],
+        updated_at: new Date().toISOString()
+      };
+      if (userId) {
+        row.user_id = userId;
+      }
+
+      const { error } = await supabase
+        .from('study_notes')
+        .upsert(row, { onConflict: 'id' });
+
+      return !error;
+    } catch {
+      return false;
+    }
+  }
 }
 

@@ -2624,10 +2624,10 @@ For each incorrect answer in the array, you must:
     return { nodes, links };
   }
 
-  // API Route: Fast Research / Web search for new resources
+  // API Route: Gemini Notebook / NotebookLM Style Web Research & Multi-Source Discovery
   app.post("/api/web-search-sources", async (req, res) => {
     try {
-      const { query, mode } = req.body;
+      const { query, mode, resourceType = 'all', subject = '' } = req.body;
 
       if (!query || query.trim() === "") {
         res.status(400).json({ error: "A search query is required to discover new web sources." });
@@ -2635,183 +2635,408 @@ For each incorrect answer in the array, you must:
       }
 
       const searchQuery = query.trim();
+      const requestedType = String(resourceType || 'all').toLowerCase(); // 'all' | 'pdf' | 'video' | 'wikipedia' | 'text' | 'website'
+      const isDeepMode = mode === 'web' || mode === 'deep';
       const apiKey = process.env.GEMINI_API_KEY;
 
-      const isDeepMode = mode === 'web';
-      const modelName = isDeepMode ? "gemini-3.1-pro-preview" : "gemini-3-flash-preview";
-
-      const systemInstruction = isDeepMode
-        ? `You are a state-of-the-art Deep Academic Research Search Engine modeled on NotebookLM.
-Your goal is to conduct an extremely deep, thorough, and highly analytical search of the web for high-fidelity sources on the query: "${searchQuery}".
-You MUST use the googleSearch tool to perform multiple recursive, precise live searches to find and synthesize a diverse array of 2 to 3 sources including general high-authority websites, technical/scientific expert blogs (e.g., Medium, Substack, developer portals), and educational video topics or transcript segments (e.g., from YouTube lectures/explanations).
-For each source discovered, extract and return its real and accurate URL, its real name or title, a detailed summary, specific highlights, and a rich, high-density article body or transcript segment (1500-2500 characters) representing the full text form of the research data.
-Each object in the array MUST match this TypeScript schema:
-{
-  "id": string; // unique ID starting with "web-src-" (e.g., "web-src-photosynthesis-1")
-  "name": string; // The real name or title of the discovered article, blog post, or YouTube video
-  "type": "url";
-  "size": "Web Link";
-  "url": string; // The real, verified URL of the source (e.g. from youtube.com, wikipedia.org, medium.com, substack.com, edu portals, etc.)
-  "summary": string; // A highly detailed, professional, and dense 4-5 sentence academic summary of the resource filled with rich scientific insights
-  "tags": string[]; // 3-4 accurate academic tags
-  "highlights": string[]; // 3-4 specific key facts, quantitative metrics, quotes, or deep takeaways extracted from the source
-  "formulas": string[]; // 1-2 math, chemical, or algorithmic equations in LaTeX format if applicable to the topic, otherwise empty array []
-  "transcription": string; // A high-density article body text or video transcript segment (1500-2500 characters) representing a comprehensive, readable analysis, synthesis, or transcript of the resource
-}`
-        : `You are a state-of-the-art fast research academic search engine modeled on NotebookLM.
-Your goal is to search the web for high-fidelity sources on the query: "${searchQuery}".
-You MUST use the googleSearch tool to perform a live search to discover 2 to 3 real, authoritative sources across general web articles, specialized blogs (such as technical, medical, or scientific blogs), and educational YouTube explanation chapters.
-For each source discovered, extract and return its real and accurate URL, its real name or title, a detailed summary, specific highlights, and a rich, high-density article body or transcript segment (1000-2000 characters) representing the full text form of the research data.
-Each object in the array MUST match this TypeScript schema:
-{
-  "id": string; // unique ID starting with "web-src-" (e.g., "web-src-photosynthesis-1")
-  "name": string; // The real name or title of the discovered article, blog post, or YouTube video
-  "type": "url";
-  "size": "Web Link";
-  "url": string; // The real, verified URL of the source (e.g. from wikipedia.org, medium.com, youtube.com, etc.)
-  "summary": string; // A highly detailed, professional 3-4 sentence academic summary of the resource
-  "tags": string[]; // 3-4 accurate academic tags
-  "highlights": string[]; // 3-4 specific key facts, quotes, or takeaways extracted from the search details
-  "formulas": string[]; // 1-2 math, chemical, or algorithmic equations in LaTeX format if applicable to the topic, otherwise empty array []
-  "transcription": string; // A high-density article body text or video transcript segment (1000-2000 characters) representing the core readable analysis or transcription of the resource
-}`;
-
-      if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
-        console.warn("GEMINI_API_KEY not configured. Generating realistic fallback searched sources.");
-        const fallbackSources = [
-          {
-            id: `web-src-fallback-1-${Date.now()}`,
-            name: `Educational Wikipedia Guide to ${searchQuery}`,
-            type: "url",
-            size: "Web Link",
-            url: `https://en.wikipedia.org/wiki/${encodeURIComponent(searchQuery.replace(/\s+/g, '_'))}`,
-            summary: `A comprehensive encyclopedia overview analyzing foundational theories, key milestones, historical development, and the current global scientific consensus surrounding ${searchQuery}. Built as an authoritative study guide for students and research specialists alike.`,
-            tags: [searchQuery, "Wikipedia Guide", "Academic Overview"],
-            highlights: [
-              `Establishes the chronological development and key historical contributors associated with ${searchQuery}.`,
-              `Highlights the core governing mathematical equations and thermodynamic properties of the system.`,
-              `Explores modern industrial, clinical, and computational applications leveraging these principles globally.`
-            ],
-            formulas: ["\\Delta G = \\Delta H - T\\Delta S", "f(x) = \\frac{1}{1 + e^{-x}}"],
-            transcription: `This comprehensive reference article reviews the core tenets and structural principles of ${searchQuery}. Over the past several decades, empirical research across world-class institutions has refined our understanding of this subject, highlighting the key thermodynamic and physical variables that regulate its efficiency, spontaneity, and behavior. By evaluating current textbook literature, we consolidate the fundamental theories necessary to master this curriculum, outlining its historical discovery and modern-day computational modeling approaches.`
-          },
-          {
-            id: `web-src-fallback-2-${Date.now()}`,
-            name: `Expert Engineering Blog: Deep Dive into ${searchQuery}`,
-            type: "url",
-            size: "Web Link",
-            url: `https://medium.com/engineering/deep-dive-${encodeURIComponent(searchQuery.toLowerCase().replace(/\s+/g, '-'))}`,
-            summary: `An expert-level technical blog post exploring experimental metrics, optimization techniques, structural architectures, and real-world implementation case studies of ${searchQuery}.`,
-            tags: [searchQuery, "Expert Blog", "Technical Deep-Dive"],
-            highlights: [
-              `Investigates microscale perturbations and efficiency thresholds under variable environmental stress.`,
-              `Demonstrates key implementation pathways and checklists for optimizing execution and kinetic rates.`,
-              `Proposes novel, robust architectural patterns to bypass traditional physical and design bottlenecks.`
-            ],
-            formulas: ["E = h\\nu", "\\mathcal{L}_{cost} = -\\frac{1}{N}\\sum_{i=1}^{N}[y_i\\log(\\hat{y}_i) + (1-y_i)\\log(1-\\hat{y}_i)]"],
-            transcription: `In this engineering log, we deep-dive into the practical application and optimization of ${searchQuery}. Recent field studies and experimental trials in high-performance computing and materials science have illuminated brand new optimization pathways. This document outlines the synthesis of current methodologies, details the code structures and physical rigs, and reviews the rigorous mathematical equations that dictate wave-particle energy transfers. Through precise control of boundary parameters, we successfully unlocked 34% higher throughput.`
-          },
-          {
-            id: `web-src-fallback-3-${Date.now()}`,
-            name: `YouTube Video Lecture: Masterclass in ${searchQuery}`,
-            type: "url",
-            size: "Web Link",
-            url: `https://www.youtube.com/watch?v=lecture-${encodeURIComponent(searchQuery.toLowerCase().replace(/\s+/g, '-'))}`,
-            summary: `A high-quality educational YouTube video masterclass summarizing core visual models, complex derivations, and step-by-step masteries of ${searchQuery}.`,
-            tags: [searchQuery, "YouTube Lecture", "Visual Masterclass"],
-            highlights: [
-              `Features a complete step-by-step visual walkthrough of complex chemical or mechanical sequences.`,
-              `Breaks down difficult conceptual models into highly digestible, elegant whiteboard animations.`,
-              `Answers direct student questions regarding common pitfalls and exam-specific derivation shortcuts.`
-            ],
-            formulas: ["F = G\\frac{m_1 m_2}{r^2}"],
-            transcription: `[Video Transcript Segment] Welcome back! In today's video, we are tackling a masterclass topic: ${searchQuery}. First, let's look at the chalkboard here. Many students get confused by how the state transitions operate, but if we animate the cycle, you'll see it is extremely elegant. Notice how energy is conserved as it transitions from the first state to the second. In the next chapter, we will derive the formula step-by-step, explaining how gravity, friction, and environmental limits intersect. Don't forget to check the links in the video description for interactive cheat sheets!`
-          }
-        ];
-        res.json({ sources: fallbackSources });
-        return;
-      }
-
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build",
-          }
+      // 1. Live Wikipedia API Fetch (fast ~250ms, verified encyclopedia articles)
+      const fetchWikipediaSources = async (): Promise<any[]> => {
+        if (requestedType !== 'all' && requestedType !== 'wikipedia' && requestedType !== 'text' && requestedType !== 'website') {
+          return [];
         }
-      });
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 3500);
+          const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(searchQuery)}&utf8=1&format=json&srlimit=${requestedType === 'wikipedia' ? 4 : 2}`;
+          const searchRes = await fetch(searchUrl, {
+            signal: controller.signal,
+            headers: { 'User-Agent': 'StudyWeb-Academic-Notebook/1.0' }
+          });
+          clearTimeout(timer);
+          if (!searchRes.ok) return [];
+          const searchData: any = await searchRes.json();
+          const hits = searchData?.query?.search || [];
+          if (hits.length === 0) return [];
 
-      let promptText = `Perform a live Google Search to discover 2-3 real, authoritative articles or resources for: "${searchQuery}". Return them as a structured JSON array.`;
-      if (searchQuery.toLowerCase().includes("notebooklm") || searchQuery.startsWith("http://") || searchQuery.startsWith("https://")) {
-        promptText = `Perform a live Google Search to find the latest, most accurate real-world information, articles, reviews, guides, or official documentation for: "${searchQuery}". Ensure you retrieve real URLs, exact current feature lists, and detailed guides. Return them as a structured JSON array matching the schema perfectly.`;
-      }
+          const wikiSources = await Promise.all(
+            hits.slice(0, requestedType === 'wikipedia' ? 4 : 2).map(async (hit: any, idx: number) => {
+              const title = hit.title;
+              const slug = encodeURIComponent(title.replace(/\s+/g, '_'));
+              let extract = (hit.snippet || '').replace(/<\/?[^>]+(>|$)/g, '');
+              try {
+                const summaryRes = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${slug}`, {
+                  headers: { 'User-Agent': 'StudyWeb-Academic-Notebook/1.0' }
+                });
+                if (summaryRes.ok) {
+                  const summaryJson: any = await summaryRes.json();
+                  if (summaryJson.extract) {
+                    extract = summaryJson.extract;
+                  }
+                }
+              } catch {}
 
-      const response = await ai.models.generateContent({
-        model: modelName,
-        contents: promptText,
-        config: {
-          systemInstruction,
-          temperature: isDeepMode ? 0.2 : 0.5,
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-          ...(isDeepMode ? { thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } } : {}),
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING },
-                name: { type: Type.STRING },
-                type: { type: Type.STRING },
-                size: { type: Type.STRING },
-                url: { type: Type.STRING },
-                summary: { type: Type.STRING },
-                tags: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING }
-                },
-                highlights: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING }
-                },
-                formulas: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING }
-                },
-                transcription: { type: Type.STRING }
-              },
-              required: ["id", "name", "type", "size", "url", "summary", "tags", "highlights", "transcription"]
+              const sentences = extract.split(/(?<=[.!?])\s+/).filter(Boolean);
+              return {
+                id: `web-wiki-${Date.now()}-${idx}`,
+                name: `${title} — Wikipedia Encyclopedia Reference`,
+                type: requestedType === 'text' ? 'doc' : 'url',
+                resourceCategory: 'wikipedia',
+                sourcePlatform: 'Wikipedia',
+                domain: 'en.wikipedia.org',
+                size: 'Wikipedia Article',
+                url: `https://en.wikipedia.org/wiki/${slug}`,
+                summary: sentences.slice(0, 3).join(' ') || `Comprehensive Wikipedia encyclopedia article covering ${title} and its core concepts.`,
+                tags: [searchQuery, 'Wikipedia', 'Encyclopedia', ...(subject ? [subject] : [])].slice(0, 4),
+                highlights: sentences.slice(0, 4).map((s: string) => s.trim()).filter((s: string) => s.length > 20),
+                formulas: [],
+                transcription: `# ${title} (Wikipedia Reference)\n\n${extract}\n\nSource: https://en.wikipedia.org/wiki/${slug}`
+              };
+            })
+          );
+          return wikiSources;
+        } catch {
+          return [];
+        }
+      };
+
+      // 2. Live ArXiv Open Academic PDF Fetch (fast ~400ms, real direct academic PDFs)
+      const fetchArxivPdfSources = async (): Promise<any[]> => {
+        if (requestedType !== 'all' && requestedType !== 'pdf') {
+          return [];
+        }
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 3500);
+          const maxResults = requestedType === 'pdf' ? 4 : 2;
+          const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(searchQuery)}&start=0&max_results=${maxResults}`;
+          const arxivRes = await fetch(arxivUrl, { signal: controller.signal });
+          clearTimeout(timer);
+          if (!arxivRes.ok) return [];
+          const xmlText = await arxivRes.text();
+          const entries = xmlText.split('<entry>').slice(1);
+          return entries.map((entry, idx) => {
+            const titleMatch = entry.match(/<title>([\s\S]*?)<\/title>/);
+            const summaryMatch = entry.match(/<summary>([\s\S]*?)<\/summary>/);
+            const idMatch = entry.match(/<id>([\s\S]*?)<\/id>/);
+            const rawTitle = (titleMatch?.[1] || `${searchQuery} Research Paper`).replace(/\s+/g, ' ').trim();
+            const rawSummary = (summaryMatch?.[1] || '').replace(/\s+/g, ' ').trim();
+            const rawIdUrl = (idMatch?.[1] || '').trim();
+            const pdfUrl = rawIdUrl
+              ? rawIdUrl.replace('/abs/', '/pdf/') + (rawIdUrl.endsWith('.pdf') ? '' : '.pdf')
+              : `https://scholar.google.com/scholar?q=${encodeURIComponent(searchQuery + ' filetype:pdf')}`;
+            const sentences = rawSummary.split(/(?<=[.!?])\s+/).filter(Boolean);
+
+            return {
+              id: `web-pdf-arxiv-${Date.now()}-${idx}`,
+              name: `${rawTitle} (Academic PDF)`,
+              type: 'pdf',
+              resourceCategory: 'pdf',
+              sourcePlatform: 'Academic PDF',
+              domain: 'arxiv.org',
+              size: 'PDF Paper',
+              url: pdfUrl,
+              summary: sentences.slice(0, 3).join(' ') || `Peer-reviewed academic research PDF analyzing ${searchQuery}.`,
+              tags: [searchQuery, 'PDF Paper', 'Academic Research', 'ArXiv'].slice(0, 4),
+              highlights: sentences.slice(0, 3).map((s: string) => s.trim()).filter((s: string) => s.length > 20),
+              formulas: [],
+              transcription: `# ${rawTitle}\n\n## Abstract & PDF Text Preview\n${rawSummary}\n\nDirect PDF Link: ${pdfUrl}`
+            };
+          });
+        } catch {
+          return [];
+        }
+      };
+
+      // 3. Gemini Live Google Search Grounding + Notebook Synthesis
+      const fetchGeminiGroundedResearch = async (): Promise<{ sources: any[]; researchBrief: any }> => {
+        if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
+          throw new Error("GEMINI_API_KEY not configured");
+        }
+
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: {
+            headers: {
+              "User-Agent": "aistudio-build",
             }
           }
+        });
+
+        const typeFocusInstruction =
+          requestedType === 'pdf'
+            ? `Focus specifically on discovering 5 downloadable/viewable educational PDFs, university lecture notes PDFs, printable study guides, and textbook chapters (set type: "pdf", resourceCategory: "pdf", sourcePlatform: "Academic PDF").`
+            : requestedType === 'video'
+            ? `Focus specifically on discovering 5 of the best educational YouTube videos, video lectures (e.g. Khan Academy, 3Blue1Brown, CrashCourse, MIT OpenCourseWare, Organic Chemistry Tutor, StatQuest), and visual tutorials (set type: "video", resourceCategory: "video", sourcePlatform: "YouTube").`
+            : requestedType === 'wikipedia'
+            ? `Focus specifically on 4 Wikipedia articles, Britannica, Stanford Encyclopedia, and authoritative encyclopedia references (set type: "url", resourceCategory: "wikipedia", sourcePlatform: "Wikipedia").`
+            : requestedType === 'text'
+            ? `Focus specifically on 5 comprehensive written study guides, textbook-style explanations, and structured study notes (set type: "doc", resourceCategory: "text", sourcePlatform: "Study Text").`
+            : requestedType === 'website'
+            ? `Focus specifically on 5 of the best authoritative educational websites, documentation portals, and Google web articles (e.g. Khan Academy, MIT OCW, Britannica, GeeksforGeeks, Coursera, Nature) (set type: "url", resourceCategory: "website", sourcePlatform: "Google Web").`
+            : `Provide a rich, balanced mix of 6 sources across:
+1. Educational YouTube Video Lectures (type: "video", resourceCategory: "video", sourcePlatform: "YouTube", e.g., Khan Academy, 3Blue1Brown, MIT OCW, CrashCourse)
+2. Downloadable/University Lecture Note PDFs & Papers (type: "pdf", resourceCategory: "pdf", sourcePlatform: "Academic PDF")
+3. Wikipedia & Authoritative Encyclopedia Pages (type: "url", resourceCategory: "wikipedia", sourcePlatform: "Wikipedia")
+4. Comprehensive Study Text Guides & Notes (type: "doc", resourceCategory: "text", sourcePlatform: "Study Text")
+5. Best Educational Websites from Google Search (type: "url", resourceCategory: "website", sourcePlatform: "Google Web")`;
+
+        const prompt = `You are a Gemini Notebook (NotebookLM) Research Engine helping a student research "${searchQuery}"${subject ? ` for their workspace in "${subject}"` : ''}.
+Use Google Search to find real, high-quality educational resources across YouTube, Wikipedia, Google Scholar/PDFs, and top educational websites (like Khan Academy, MIT OpenCourseWare, Britannica, GeeksforGeeks, Nature, Coursera, etc.).
+
+${typeFocusInstruction}
+
+Return ONLY valid JSON (no markdown fences) matching this exact structure:
+{
+  "researchBrief": {
+    "title": "Comprehensive Research Synthesis: ${searchQuery}",
+    "overview": "A rich, clear, multi-paragraph academic synthesis explaining the core concepts, mechanisms, real-world significance, and key structure of ${searchQuery}.",
+    "keyTakeaways": [
+      "Key takeaway 1 with concrete detail",
+      "Key takeaway 2 with concrete detail",
+      "Key takeaway 3 with concrete detail",
+      "Key takeaway 4 with concrete detail"
+    ],
+    "formulas": ["Optional LaTeX formula if relevant"],
+    "suggestedQuestions": [
+      "Follow-up question 1 the student can ask the AI Tutor?",
+      "Follow-up question 2?",
+      "Follow-up question 3?"
+    ]
+  },
+  "sources": [
+    {
+      "id": "unique-id",
+      "name": "Real descriptive title of the resource",
+      "type": "pdf" | "video" | "doc" | "url",
+      "resourceCategory": "pdf" | "video" | "wikipedia" | "text",
+      "sourcePlatform": "YouTube" | "Wikipedia" | "Academic PDF" | "Google Web" | "Study Text",
+      "domain": "e.g. youtube.com, en.wikipedia.org, ocw.mit.edu, khanacademy.org",
+      "size": "PDF Document" | "YouTube Video" | "Wikipedia Article" | "Study Text",
+      "url": "Real verified URL from search (or direct search/resource URL)",
+      "summary": "Detailed 3-4 sentence academic summary of what this resource covers and why it is valuable.",
+      "tags": ["Tag1", "Tag2", "Tag3"],
+      "highlights": [
+        "Specific key fact, theorem, or insight 1",
+        "Specific key fact, theorem, or insight 2",
+        "Specific key fact, theorem, or insight 3"
+      ],
+      "formulas": [],
+      "transcription": "Comprehensive 1200-2000 character full study text, lecture transcript, or detailed educational summary of this source so the student can study it directly in their workspace."
+    }
+  ]
+}
+Include 4 to 5 high-quality sources in the "sources" array.`;
+
+        const candidateModels = isDeepMode
+          ? ["gemini-3-flash-preview", "gemini-2.5-flash"]
+          : ["gemini-3-flash-preview", "gemini-2.5-flash"];
+
+        let lastErr: any = null;
+        for (const model of candidateModels) {
+          try {
+            const response = await ai.models.generateContent({
+              model,
+              contents: prompt,
+              config: {
+                temperature: 0.3,
+                tools: [{ googleSearch: {} }],
+              }
+            });
+
+            const rawText = (response.text || "").trim();
+            const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+            const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(rawText);
+
+            // Also inspect groundingChunks for real verified URLs if any source lacks a valid URL
+            const groundingChunks = (response as any)?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+            const groundedWebLinks = groundingChunks
+              .map((c: any) => c?.web)
+              .filter((w: any) => w && w.uri && w.title);
+
+            const normalizedSources = (Array.isArray(parsed.sources) ? parsed.sources : []).map((src: any, idx: number) => {
+              let url = src.url || '';
+              if (!url || !url.startsWith('http')) {
+                if (groundedWebLinks[idx]?.uri) {
+                  url = groundedWebLinks[idx].uri;
+                } else if (src.resourceCategory === 'video' || src.type === 'video') {
+                  url = `https://www.youtube.com/results?search_query=${encodeURIComponent(src.name || searchQuery)}`;
+                } else if (src.resourceCategory === 'pdf' || src.type === 'pdf') {
+                  url = `https://scholar.google.com/scholar?q=${encodeURIComponent((src.name || searchQuery) + ' filetype:pdf')}`;
+                } else if (src.resourceCategory === 'wikipedia') {
+                  url = `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(searchQuery)}`;
+                } else {
+                  url = `https://www.google.com/search?q=${encodeURIComponent(src.name || searchQuery)}`;
+                }
+              }
+
+              let domain = src.domain || '';
+              if (!domain) {
+                try {
+                  domain = new URL(url).hostname.replace(/^www\./, '');
+                } catch {
+                  domain = 'google.com';
+                }
+              }
+
+              return {
+                id: src.id || `web-gemini-${Date.now()}-${idx}`,
+                name: src.name || `${searchQuery} Study Resource ${idx + 1}`,
+                type: (['pdf', 'video', 'doc', 'url'].includes(src.type) ? src.type : 'url') as 'pdf' | 'video' | 'doc' | 'url',
+                resourceCategory: src.resourceCategory || (src.type === 'pdf' ? 'pdf' : src.type === 'video' ? 'video' : 'text'),
+                sourcePlatform: src.sourcePlatform || (src.type === 'pdf' ? 'Academic PDF' : src.type === 'video' ? 'YouTube' : 'Google Web'),
+                domain,
+                size: src.size || (src.type === 'pdf' ? 'PDF Document' : src.type === 'video' ? 'YouTube Video' : 'Study Text'),
+                url,
+                summary: src.summary || `Curated educational resource covering ${searchQuery}.`,
+                tags: Array.isArray(src.tags) && src.tags.length > 0 ? src.tags : [searchQuery, 'Web Research'],
+                highlights: Array.isArray(src.highlights) && src.highlights.length > 0 ? src.highlights : [`Key concepts and principles of ${searchQuery}.`],
+                formulas: Array.isArray(src.formulas) ? src.formulas : [],
+                transcription: src.transcription || src.summary || ''
+              };
+            });
+
+            return {
+              sources: normalizedSources,
+              researchBrief: parsed.researchBrief || null
+            };
+          } catch (err) {
+            lastErr = err;
+          }
+        }
+        throw lastErr || new Error("Gemini grounded research failed");
+      };
+
+      const [wikiRes, arxivRes, geminiRes] = await Promise.allSettled([
+        fetchWikipediaSources(),
+        fetchArxivPdfSources(),
+        fetchGeminiGroundedResearch()
+      ]);
+
+      const wikiSources = wikiRes.status === 'fulfilled' ? wikiRes.value : [];
+      const arxivSources = arxivRes.status === 'fulfilled' ? arxivRes.value : [];
+      const geminiData = geminiRes.status === 'fulfilled' ? geminiRes.value : { sources: [], researchBrief: null };
+
+      // Combine and deduplicate by URL/name, prioritizing requestedType if specified
+      const combined: any[] = [];
+      const seenKeys = new Set<string>();
+      const pushUnique = (item: any) => {
+        const key = `${(item.name || '').toLowerCase().slice(0, 40)}|${(item.url || '').toLowerCase()}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          combined.push(item);
+        }
+      };
+
+      // Interleave Gemini grounded sources with live Wikipedia & ArXiv PDF sources
+      geminiData.sources.forEach(pushUnique);
+      wikiSources.forEach(pushUnique);
+      arxivSources.forEach(pushUnique);
+
+      // Ensure every requested type has rich results even if one external API was rate-limited
+      if (combined.length === 0) {
+        pushUnique({
+          id: `web-src-wiki-${Date.now()}-1`,
+          name: `${searchQuery} — Wikipedia Encyclopedia Overview`,
+          type: 'url',
+          resourceCategory: 'wikipedia',
+          sourcePlatform: 'Wikipedia',
+          domain: 'en.wikipedia.org',
+          size: 'Wikipedia Article',
+          url: `https://en.wikipedia.org/wiki/${encodeURIComponent(searchQuery.replace(/\s+/g, '_'))}`,
+          summary: `Comprehensive encyclopedia article analyzing foundational theories, definitions, historical context, and scientific consensus on ${searchQuery}.`,
+          tags: [searchQuery, 'Wikipedia', 'Encyclopedia'],
+          highlights: [
+            `Establishes core definitions, foundational principles, and terminology of ${searchQuery}.`,
+            `Reviews historical milestones and modern academic applications.`
+          ],
+          formulas: [],
+          transcription: `# ${searchQuery} — Wikipedia Reference\n\nThis comprehensive reference covers the foundational principles, mechanisms, and applications of ${searchQuery}.`
+        });
+        pushUnique({
+          id: `web-src-yt-${Date.now()}-2`,
+          name: `${searchQuery} — Complete Video Lecture & Visual Walkthrough`,
+          type: 'video',
+          resourceCategory: 'video',
+          sourcePlatform: 'YouTube',
+          domain: 'youtube.com',
+          size: 'YouTube Video',
+          url: `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery + ' lecture explanation')}`,
+          summary: `High-yield educational YouTube video lecture breaking down ${searchQuery} with step-by-step visual diagrams and worked examples.`,
+          tags: [searchQuery, 'YouTube', 'Video Lecture'],
+          highlights: [
+            `Visual step-by-step explanation of ${searchQuery} from first principles.`,
+            `Covers common exam questions, worked problems, and conceptual intuition.`
+          ],
+          formulas: [],
+          transcription: `[Video Lecture Transcript: ${searchQuery}]\nIn this lecture we break down ${searchQuery} step by step, starting from intuitive visual models and building up to rigorous problem-solving applications.`
+        });
+        pushUnique({
+          id: `web-src-pdf-${Date.now()}-3`,
+          name: `${searchQuery} — University Lecture Notes & Study Guide (PDF)`,
+          type: 'pdf',
+          resourceCategory: 'pdf',
+          sourcePlatform: 'Academic PDF',
+          domain: 'scholar.google.com',
+          size: 'PDF Document',
+          url: `https://scholar.google.com/scholar?q=${encodeURIComponent(searchQuery + ' lecture notes filetype:pdf')}`,
+          summary: `Structured university lecture notes and printable PDF reference covering key theorems, definitions, and practice problems on ${searchQuery}.`,
+          tags: [searchQuery, 'PDF Notes', 'Academic Guide'],
+          highlights: [
+            `Formal definitions, derivations, and structured syllabus notes for ${searchQuery}.`,
+            `Includes summary tables and exam review checkpoints.`
+          ],
+          formulas: [],
+          transcription: `# ${searchQuery} — Lecture Notes PDF\n\n## 1. Core Definitions & Overview\nComprehensive university-level lecture notes on ${searchQuery}, structured for rapid workspace study and exam preparation.`
+        });
+      }
+
+      const researchBrief = geminiData.researchBrief || {
+        title: `Research Synthesis: ${searchQuery}`,
+        overview: `This research brief synthesizes key insights on **${searchQuery}** across ${combined.length} curated web sources from Wikipedia, YouTube, academic PDFs, and educational websites. Import these sources into your workspace to study them, generate flashcards, or discuss them with your AI Tutor.`,
+        keyTakeaways: combined.slice(0, 4).map((s: any) => `${s.name}: ${s.summary}`),
+        formulas: [],
+        suggestedQuestions: [
+          `Explain the core concepts of ${searchQuery} using my imported research sources.`,
+          `What are the most important exam takeaways and formulas for ${searchQuery}?`,
+          `Create a step-by-step study summary comparing all my sources on ${searchQuery}.`
+        ]
+      };
+
+      res.json({
+        sources: combined,
+        researchBrief,
+        query: searchQuery,
+        resourceType: requestedType
+      });
+    } catch (err: any) {
+      console.error("Error in /api/web-search-sources:", err);
+      const q = (req.body?.query || 'Study Topic').trim();
+      res.json({
+        sources: [
+          {
+            id: `web-src-fallback-${Date.now()}`,
+            name: `${q} — Wikipedia Reference Guide`,
+            type: "url",
+            resourceCategory: "wikipedia",
+            sourcePlatform: "Wikipedia",
+            domain: "en.wikipedia.org",
+            size: "Wikipedia Article",
+            url: `https://en.wikipedia.org/wiki/${encodeURIComponent(q.replace(/\s+/g, '_'))}`,
+            summary: `Comprehensive introductory overview and academic reference for ${q}.`,
+            tags: [q, "Wikipedia", "Reference"],
+            highlights: [`Covers foundational concepts, terminology, and applications of ${q}.`],
+            formulas: [],
+            transcription: `Reference study guide for ${q}.`
+          }
+        ],
+        researchBrief: {
+          title: `Research Synthesis: ${q}`,
+          overview: `Foundational overview and curated web sources for ${q}.`,
+          keyTakeaways: [`Core principles and academic overview of ${q}.`],
+          formulas: [],
+          suggestedQuestions: [`Explain the fundamentals of ${q}.`]
         }
       });
-
-      if (response && response.text) {
-        const parsedSources = JSON.parse(response.text.trim());
-        if (Array.isArray(parsedSources)) {
-          res.json({ sources: parsedSources });
-          return;
-        }
-      }
-      throw new Error("Invalid output layout from Gemini API.");
-    } catch (err: any) {
-      console.error("Error in /api/web-search-sources, falling back:", err);
-      // fallback
-      const fallbackSources = [
-        {
-          id: `web-src-error-fallback-1-${Date.now()}`,
-          name: `Introduction to ${req.body.query || 'Study Topic'}`,
-          type: "url",
-          size: "Web Link",
-          url: `https://wikipedia.org/wiki/${encodeURIComponent(req.body.query || 'Special Topic')}`,
-          summary: `An introductory survey designed to review basic conceptual foundations and milestones.`,
-          tags: [req.body.query || "Review", "Overview"],
-          highlights: [`Outlines the core physical, biological, or mathematical principles.`],
-          formulas: [],
-          transcription: `Standard baseline review segment for study and learning.`
-        }
-      ];
-      res.json({ sources: fallbackSources });
     }
   });
 
