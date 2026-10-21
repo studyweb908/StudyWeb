@@ -284,10 +284,11 @@ export default function App() {
       try {
         if (!supabase) return;
         const { data: { session } } = await supabase.auth.getSession();
-        const userId = session?.user?.id || null;
+        const user = session?.user || null;
+        const userId = user?.id || null;
         setCurrentUserId(userId);
 
-        if (userId) {
+        if (userId && user) {
           // 1. Claim any guest workspaces that were created in this browser prior to logging in
           const guestWorkspaces = loadStoredWorkspaces(null);
           if (guestWorkspaces && guestWorkspaces.length > 0) {
@@ -295,13 +296,35 @@ export default function App() {
             clearGuestWorkspaces();
           }
 
-          // 2. Fetch all workspaces strictly owned by this authenticated user from Supabase
-          const remoteWorkspaces = await WorkspaceSyncService.fetchWorkspaces(userId);
-          if (remoteWorkspaces && remoteWorkspaces.length > 0) {
+          // 2. Fetch user's profile and workspaces in parallel strictly from Supabase
+          const [remoteWorkspaces, profileResult] = await Promise.all([
+            WorkspaceSyncService.fetchWorkspaces(userId),
+            supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
+          ]);
+
+          const profileRow = profileResult?.data;
+          const metaName = user.user_metadata?.full_name || user.user_metadata?.name;
+          const dbName = profileRow?.full_name || metaName || (user.email ? user.email.split('@')[0] : '');
+          if (dbName) {
+            localStorage.setItem('studyweb_profile_name', dbName);
+            setWelcomeUserName(dbName);
+          }
+          const dbAvatar = profileRow?.avatar_url || user.user_metadata?.avatar_url || user.user_metadata?.picture;
+          if (dbAvatar) {
+            localStorage.setItem('studyweb_profile_avatar', dbAvatar);
+            localStorage.setItem('studyweb_profile_pic', dbAvatar);
+            setWelcomeAvatarUrl(dbAvatar);
+          }
+          if (profileRow?.school) localStorage.setItem('studyweb_profile_school', profileRow.school);
+          if (profileRow?.grade) localStorage.setItem('studyweb_profile_grade', profileRow.grade);
+          if (profileRow?.bio) localStorage.setItem('studyweb_profile_bio', profileRow.bio);
+          if (profileRow?.learning_goal) localStorage.setItem('studyweb_profile_goal', profileRow.learning_goal);
+          window.dispatchEvent(new Event('studyweb_profile_updated'));
+
+          if (Array.isArray(remoteWorkspaces)) {
             setWorkspaces(remoteWorkspaces);
             saveStoredWorkspaces(remoteWorkspaces, userId);
           } else {
-            // Check if there are user-isolated cached workspaces
             const userCached = loadStoredWorkspaces(userId);
             setWorkspaces(userCached || []);
           }
@@ -334,8 +357,16 @@ export default function App() {
           setCurrentUserId(null);
           setWorkspaces([]);
           setActiveWorkspace(null);
-          localStorage.removeItem('studyweb_is_logged_in');
-          localStorage.removeItem('studyweb_profile_name');
+          [
+            'studyweb_is_logged_in',
+            'studyweb_profile_name',
+            'studyweb_profile_avatar',
+            'studyweb_profile_pic',
+            'studyweb_profile_school',
+            'studyweb_profile_grade',
+            'studyweb_profile_bio',
+            'studyweb_profile_goal'
+          ].forEach(k => localStorage.removeItem(k));
           sessionStorage.clear();
           window.dispatchEvent(new Event('studyweb_profile_updated'));
         }
@@ -468,9 +499,17 @@ export default function App() {
       }
     } catch (e) {}
 
-    // Clear active session flags
-    localStorage.removeItem('studyweb_is_logged_in');
-    localStorage.removeItem('studyweb_profile_name');
+    // Clear active session flags & user profile cache so next user never sees stale data
+    [
+      'studyweb_is_logged_in',
+      'studyweb_profile_name',
+      'studyweb_profile_avatar',
+      'studyweb_profile_pic',
+      'studyweb_profile_school',
+      'studyweb_profile_grade',
+      'studyweb_profile_bio',
+      'studyweb_profile_goal'
+    ].forEach(k => localStorage.removeItem(k));
     sessionStorage.clear();
 
     setWorkspaces([]);
@@ -512,6 +551,8 @@ export default function App() {
   // Helper helper to render active workspace tabs
   const renderDashboardContent = () => {
     const isWorkspaceTab = ['workspaces', 'ai-tutor', 'notes', 'flashcards', 'quiz-center'].includes(activeTab);
+    const allUserFiles = workspaces.flatMap(w => w.files || []);
+    const allUserNotes = workspaces.flatMap(w => w.notes || []);
     const fallbackGeneralWorkspace: Workspace = {
       id: 'general-study',
       name: 'General Study',
@@ -524,12 +565,12 @@ export default function App() {
       template: 'notes',
       pinned: false,
       favorite: false,
-      files: [],
+      files: allUserFiles,
       nodes: [],
       links: [],
       flashcards: [],
       quizzes: [],
-      notes: [],
+      notes: allUserNotes,
       plannerTasks: [],
       streak: 1,
       studyHours: 0,

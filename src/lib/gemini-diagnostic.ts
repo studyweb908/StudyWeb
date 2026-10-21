@@ -29,8 +29,8 @@ export async function testGeminiDiagnostic(prompt: string = "Reply with the word
     // Initialize the official Google Gen AI SDK
     const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
 
-    // Supported candidate models per system guidelines, prioritizing gemini-3.8-flash with fallback for temporary 503 high-demand spikes
-    const candidateModels = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
+    // Supported candidate models per system guidelines, prioritizing gemini-3-flash-preview with fallback for temporary 503 high-demand spikes
+    const candidateModels = ["gemini-3-flash-preview", "gemini-2.5-flash"];
     let rawResponse: any = null;
     let selectedModel = "";
     let lastError: any = null;

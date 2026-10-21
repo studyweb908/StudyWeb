@@ -125,10 +125,10 @@ You are a rapid-fire active recall trainer and flashcard coach:
 ${selectedPersona}
 Explain concepts clearly using simple analogies, key points, and examples. Answer thoroughly and help the student master the subject. NEVER output placeholder text or fake answers.`;
 
-    // Supported Gemini 3 series candidate models
-    const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+    // Supported fast Gemini candidate models
+    const candidateModels = ['gemini-3-flash-preview', 'gemini-2.5-flash'];
     if (deepResearch || modelMode === 'pro') {
-      candidateModels.unshift('gemini-3.1-pro-preview');
+      candidateModels.push('gemini-3.1-pro-preview');
     }
 
     const ai = new GoogleGenAI({

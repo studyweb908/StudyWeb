@@ -30,7 +30,8 @@ import {
   ExternalLink,
   Edit3,
   Camera,
-  Palette
+  Palette,
+  Upload
 } from 'lucide-react';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import QuickPreviewModal from './QuickPreviewModal';
@@ -207,6 +208,14 @@ export default function WorkspaceOverview({
               >
                 <Layers className="w-4 h-4" />
                 <span>All Workspaces</span>
+              </button>
+
+              <button
+                onClick={() => setActiveWorkspaceTab('library')}
+                className="px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/70 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-2xs"
+              >
+                <Upload className="w-4 h-4" />
+                <span>Upload Material</span>
               </button>
 
               <button

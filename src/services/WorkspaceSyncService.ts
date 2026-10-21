@@ -259,18 +259,21 @@ export class WorkspaceSyncService {
         return [];
       }
 
-      // Fetch all files for these workspaces
+      // Fetch all files, notes, and flashcards for these workspaces in parallel
       const wsIds = rows.map((r: any) => r.id);
-      let fileMap: Record<string, WorkspaceFile[]> = {};
+      const fileMap: Record<string, WorkspaceFile[]> = {};
+      const noteMap: Record<string, any[]> = {};
+      const flashcardMap: Record<string, any[]> = {};
 
       try {
-        const { data: fileRows } = await supabase
-          .from('workspace_files')
-          .select('*')
-          .in('workspace_id', wsIds);
+        const [filesRes, notesRes, flashcardsRes] = await Promise.all([
+          supabase.from('workspace_files').select('*').in('workspace_id', wsIds),
+          supabase.from('study_notes').select('*').in('workspace_id', wsIds),
+          supabase.from('flashcards').select('*').in('workspace_id', wsIds)
+        ]);
 
-        if (fileRows) {
-          fileRows.forEach((f: any) => {
+        if (filesRes.data) {
+          filesRes.data.forEach((f: any) => {
             if (!fileMap[f.workspace_id]) {
               fileMap[f.workspace_id] = [];
             }
@@ -294,8 +297,38 @@ export class WorkspaceSyncService {
             });
           });
         }
+
+        if (notesRes.data) {
+          notesRes.data.forEach((n: any) => {
+            if (!noteMap[n.workspace_id]) {
+              noteMap[n.workspace_id] = [];
+            }
+            noteMap[n.workspace_id].push({
+              id: n.id,
+              title: n.title || 'Untitled Note',
+              content: n.content || '',
+              tags: Array.isArray(n.tags) ? n.tags : [],
+              updatedAt: n.updated_at || n.created_at || new Date().toISOString()
+            });
+          });
+        }
+
+        if (flashcardsRes.data) {
+          flashcardsRes.data.forEach((fc: any) => {
+            if (!flashcardMap[fc.workspace_id]) {
+              flashcardMap[fc.workspace_id] = [];
+            }
+            flashcardMap[fc.workspace_id].push({
+              id: fc.id,
+              front: fc.front || fc.question || '',
+              back: fc.back || fc.answer || '',
+              difficulty: fc.difficulty || 'medium',
+              lastReviewed: fc.last_reviewed || undefined
+            });
+          });
+        }
       } catch {
-        // Non-fatal if files fetch fails
+        // Non-fatal if child tables fetch fails
       }
 
       return rows.map((row: any): Workspace => {
@@ -309,6 +342,20 @@ export class WorkspaceSyncService {
           if (f && f.id) fileMapById.set(f.id, f);
         });
         const files = Array.from(fileMapById.values());
+
+        const remoteNotes = noteMap[row.id] || [];
+        const jsonbNotes = Array.isArray(row.notes) ? row.notes : [];
+        const noteMapById = new Map<string, any>();
+        jsonbNotes.forEach((n: any) => { if (n && n.id) noteMapById.set(n.id, n); });
+        remoteNotes.forEach((n: any) => { if (n && n.id) noteMapById.set(n.id, n); });
+        const notes = Array.from(noteMapById.values());
+
+        const remoteFlashcards = flashcardMap[row.id] || [];
+        const jsonbFlashcards = Array.isArray(row.flashcards) ? row.flashcards : [];
+        const fcMapById = new Map<string, any>();
+        jsonbFlashcards.forEach((fc: any) => { if (fc && fc.id) fcMapById.set(fc.id, fc); });
+        remoteFlashcards.forEach((fc: any) => { if (fc && fc.id) fcMapById.set(fc.id, fc); });
+        const flashcards = Array.from(fcMapById.values());
 
         return {
           id: row.id,
@@ -328,9 +375,9 @@ export class WorkspaceSyncService {
           isForSale: Boolean(row.is_for_sale),
           price: row.price ? Number(row.price) : undefined,
           files,
-          flashcards: Array.isArray(row.flashcards) ? row.flashcards : [],
+          flashcards,
           quizzes: Array.isArray(row.quizzes) ? row.quizzes : [],
-          notes: Array.isArray(row.notes) ? row.notes : [],
+          notes,
           plannerTasks: Array.isArray(row.planner_tasks) ? row.planner_tasks : [],
           nodes: Array.isArray(row.nodes) && row.nodes.length > 0 ? row.nodes : [
             { id: 'n-root', label: row.name, type: 'topic', color: '#6366F1', x: 250, y: 150 },

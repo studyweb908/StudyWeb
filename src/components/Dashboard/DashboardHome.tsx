@@ -79,19 +79,33 @@ export default function DashboardHome({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    // Attempt Supabase session retrieval for authenticated user details
+    // Retrieve authenticated user details from Supabase session and profiles table
     if (supabase) {
-      supabase.auth.getUser().then(({ data }) => {
-        if (data?.user) {
-          setCurrentUserId(data.user.id);
-          const metaName = data.user.user_metadata?.full_name || data.user.user_metadata?.name;
-          if (metaName) {
-            setDisplayName(metaName);
-            localStorage.setItem('studyweb_profile_name', metaName);
-          } else if (data.user.email) {
-            const emailName = data.user.email.split('@')[0];
-            const formatted = emailName.charAt(0).toUpperCase() + emailName.slice(1);
-            setDisplayName(formatted);
+      supabase.auth.getSession().then(async ({ data: { session } }) => {
+        if (session?.user) {
+          const user = session.user;
+          setCurrentUserId(user.id);
+          let resolvedName = user.user_metadata?.full_name || user.user_metadata?.name || '';
+
+          try {
+            const { data: profileRow } = await supabase
+              .from('profiles')
+              .select('full_name, name')
+              .eq('id', user.id)
+              .maybeSingle();
+            if (profileRow?.full_name || profileRow?.name) {
+              resolvedName = profileRow.full_name || profileRow.name;
+            }
+          } catch {}
+
+          if (!resolvedName && user.email) {
+            const emailName = user.email.split('@')[0];
+            resolvedName = emailName.charAt(0).toUpperCase() + emailName.slice(1);
+          }
+
+          if (resolvedName) {
+            setDisplayName(resolvedName);
+            localStorage.setItem('studyweb_profile_name', resolvedName);
           }
         }
       }).catch(() => {});
@@ -102,7 +116,11 @@ export default function DashboardHome({
       if (stored) setDisplayName(stored);
     };
     window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    window.addEventListener('studyweb_profile_updated', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('studyweb_profile_updated', handleStorageChange);
+    };
   }, []);
 
   const firstName = useMemo(() => {

@@ -22,16 +22,7 @@ export function loadStoredWorkspaces(userId?: string | null): Workspace[] {
     const data = localStorage.getItem(key);
     if (data) {
       const parsed = JSON.parse(data);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
-      }
-    }
-
-    // Migration fallback for guest or unmigrated local sessions: check legacy key
-    const legacy = localStorage.getItem('studyweb_workspaces_v2');
-    if (legacy) {
-      const parsed = JSON.parse(legacy);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         return parsed;
       }
     }

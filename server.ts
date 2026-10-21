@@ -795,7 +795,7 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
       });
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+        model: "gemini-3-flash-preview",
         contents: "Reply with the word OK."
       });
 
@@ -804,7 +804,7 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
 
       return res.json({
         status: "ok",
-        model: "gemini-3.8-flash",
+        model: "gemini-3-flash-preview",
         reply: text,
         verified: text.length > 0,
         durationMs
@@ -874,7 +874,7 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
 
       // Timeout safety: if Gemini takes more than 4 seconds, deliver clean answer
       const geminiPromise = ai.models.generateContent({
-        model: "gemini-3.8-flash",
+        model: "gemini-3-flash-preview",
         contents: q,
         config: {
           systemInstruction: `You are StudyWeb's voice assistant. Answer the user's question directly, accurately, and conversationally for text-to-speech voice playback.
@@ -933,7 +933,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       const cleanMime = mimeType.split(";")[0] || "audio/webm";
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-lite",
+        model: "gemini-3-flash-preview",
         contents: [
           {
             inlineData: {
@@ -970,7 +970,8 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         citationMode, 
         attachedFiles, 
         model, 
-        workspaceId 
+        workspaceId,
+        userId
       } = req.body;
 
       if (!prompt) {
@@ -1026,22 +1027,67 @@ You are a rapid-fire active recall trainer and flashcard coach:
         ? "Include realistic, helpful academic references, page numbers, or study sources where appropriate (e.g., '[Biology Syllabus, Page 12]')."
         : "Do not worry about providing specific citations or academic reference source lines.";
 
-      // 0. Automatically retrieve workspace study materials from Supabase
+      // 0. Automatically retrieve authenticated user's profile, workspaces, notes, and study materials from Supabase
       let effectiveFiles: any[] = Array.isArray(attachedFiles) ? [...attachedFiles] : [];
       let fetchedFromSupabase = false;
       let supabaseDocCount = 0;
+      let userDatabaseContext = "";
 
       const supabase = getSupabaseServerClient(req.headers.authorization);
-      if (supabase && workspaceId) {
+      if (supabase && (workspaceId || userId || req.headers.authorization)) {
         try {
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Supabase timeout")), 2000));
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Supabase timeout")), 1500));
           const fetchPromise = (async () => {
-            const { data: fileRows, error: fileErr } = await supabase
-              .from('workspace_files')
-              .select('*')
-              .eq('workspace_id', workspaceId);
+            let resolvedUserId = userId;
+            if (!resolvedUserId && req.headers.authorization) {
+              try {
+                const { data: authData } = await supabase.auth.getUser();
+                if (authData?.user?.id) resolvedUserId = authData.user.id;
+              } catch {
+                // ignore
+              }
+            }
 
-            if (!fileErr && fileRows && fileRows.length > 0) {
+            const isRealWorkspaceId = workspaceId && workspaceId !== 'general-study';
+
+            // Run profile, user workspaces, and workspace files queries in parallel for fast execution
+            const [profileRes, userWsRes, wsFilesRes, wsNotesRes] = await Promise.all([
+              resolvedUserId
+                ? supabase.from('profiles').select('full_name, email, school, grade, bio, learning_goal').eq('id', resolvedUserId).maybeSingle()
+                : Promise.resolve({ data: null, error: null }),
+              resolvedUserId
+                ? supabase.from('workspaces').select('id, name, subject, description, files, notes, study_hours, streak').eq('user_id', resolvedUserId).order('updated_at', { ascending: false }).limit(10)
+                : (isRealWorkspaceId
+                  ? supabase.from('workspaces').select('id, name, subject, description, files, notes, study_hours, streak').eq('id', workspaceId).limit(1)
+                  : Promise.resolve({ data: null, error: null })),
+              isRealWorkspaceId
+                ? supabase.from('workspace_files').select('*').eq('workspace_id', workspaceId)
+                : Promise.resolve({ data: null, error: null }),
+              isRealWorkspaceId
+                ? supabase.from('study_notes').select('id, title, content, workspace_id').eq('workspace_id', workspaceId).limit(15)
+                : Promise.resolve({ data: null, error: null })
+            ]);
+
+            const profile = profileRes?.data;
+            const userWorkspaces = Array.isArray(userWsRes?.data) ? userWsRes.data : [];
+            let fileRows = Array.isArray(wsFilesRes?.data) ? wsFilesRes.data : [];
+            const noteRows = Array.isArray(wsNotesRes?.data) ? wsNotesRes.data : [];
+
+            // If user opened AI Tutor from sidebar ('general-study') and has workspaces in DB, fetch their files across their workspaces
+            if (!isRealWorkspaceId && userWorkspaces.length > 0 && fileRows.length === 0) {
+              const allWsIds = userWorkspaces.map((w: any) => w.id);
+              const { data: allUserFiles } = await supabase
+                .from('workspace_files')
+                .select('*')
+                .in('workspace_id', allWsIds)
+                .order('created_at', { ascending: false })
+                .limit(20);
+              if (Array.isArray(allUserFiles) && allUserFiles.length > 0) {
+                fileRows = allUserFiles;
+              }
+            }
+
+            if (fileRows.length > 0) {
               supabaseDocCount = fileRows.length;
               fetchedFromSupabase = true;
 
@@ -1078,25 +1124,60 @@ You are a rapid-fire active recall trainer and flashcard coach:
               });
             }
 
-            const { data: wsRow, error: wsErr } = await supabase
-              .from('workspaces')
-              .select('files, notes, name, subject')
-              .eq('id', workspaceId)
-              .single();
+            // Also incorporate any inline files/notes stored on the user's workspaces
+            if (userWorkspaces.length > 0) {
+              userWorkspaces.forEach((wsRow: any) => {
+                if (Array.isArray(wsRow.files) && wsRow.files.length > 0) {
+                  fetchedFromSupabase = true;
+                  wsRow.files.forEach((sf: any) => {
+                    const existingIdx = effectiveFiles.findIndex(f => f.id === sf.id || f.name === sf.name);
+                    if (existingIdx >= 0) {
+                      effectiveFiles[existingIdx] = { ...sf, ...effectiveFiles[existingIdx], source: 'supabase' };
+                    } else {
+                      effectiveFiles.push({ ...sf, source: 'supabase' });
+                    }
+                  });
+                }
+              });
+              supabaseDocCount = effectiveFiles.length;
+            }
 
-            if (!wsErr && wsRow) {
-              if (Array.isArray(wsRow.files) && wsRow.files.length > 0 && supabaseDocCount === 0) {
-                supabaseDocCount = wsRow.files.length;
-                fetchedFromSupabase = true;
-                wsRow.files.forEach((sf: any) => {
-                  const existingIdx = effectiveFiles.findIndex(f => f.id === sf.id || f.name === sf.name);
-                  if (existingIdx >= 0) {
-                    effectiveFiles[existingIdx] = { ...sf, ...effectiveFiles[existingIdx], source: 'supabase' };
-                  } else {
-                    effectiveFiles.push({ ...sf, source: 'supabase' });
-                  }
-                });
+            // Build student database profile & workspace context for personalized AI tutoring
+            const contextParts: string[] = [];
+            if (profile) {
+              const pDetails = [
+                profile.full_name ? `Name: ${profile.full_name}` : null,
+                profile.school ? `School/Institution: ${profile.school}` : null,
+                profile.grade ? `Academic Level/Grade: ${profile.grade}` : null,
+                profile.learning_goal ? `Learning Goal: ${profile.learning_goal}` : null,
+                profile.bio ? `Academic Focus: ${profile.bio}` : null,
+              ].filter(Boolean);
+              if (pDetails.length > 0) {
+                contextParts.push(`STUDENT PROFILE (Verified from Database):\n- ${pDetails.join('\n- ')}`);
               }
+            }
+
+            if (userWorkspaces.length > 0) {
+              const wsSummaries = userWorkspaces.map((w: any) => {
+                const fCount = Array.isArray(w.files) ? w.files.length : 0;
+                const nCount = Array.isArray(w.notes) ? w.notes.length : 0;
+                return `"${w.name}" (Subject: ${w.subject || 'General'}${w.description ? ` — ${w.description}` : ''}, ${fCount} files, ${nCount} notes)`;
+              });
+              contextParts.push(`STUDENT'S ACTIVE WORKSPACES IN DATABASE (${userWorkspaces.length}):\n- ${wsSummaries.join('\n- ')}`);
+            }
+
+            const allNotes = [
+              ...noteRows,
+              ...userWorkspaces.flatMap((w: any) => Array.isArray(w.notes) ? w.notes : [])
+            ];
+            if (allNotes.length > 0) {
+              const uniqueNotes = Array.from(new Map(allNotes.map((n: any) => [n.id || n.title, n])).values()).slice(0, 8);
+              const noteSnippets = uniqueNotes.map((n: any) => `[Note: "${n.title || 'Study Note'}"] ${String(n.content || '').replace(/<[^>]+>/g, ' ').slice(0, 350)}`);
+              contextParts.push(`STUDENT'S STUDY NOTES IN DATABASE:\n${noteSnippets.join('\n')}`);
+            }
+
+            if (contextParts.length > 0) {
+              userDatabaseContext = `\n--- AUTHENTICATED STUDENT DATABASE CONTEXT ---\n${contextParts.join('\n\n')}\n----------------------------------------------\n`;
             }
           })();
 
@@ -1203,15 +1284,18 @@ DO NOT output generic boilerplate or unrelated analogies. Talk directly and spec
 Present your answer as a clear, structured comparison table highlighting key differences and similarities, followed by a simple summary.`;
       }
 
-      const systemInstruction = `You are an intelligent, friendly, and adaptive AI Study Tutor. When a student asks a question, explain concepts clearly using simple analogies, key points, and examples. If workspace documents or images are provided, ground your answer in them and cite them. If a question is general knowledge (like 'what is a cell'), answer it thoroughly using your general academic knowledge. NEVER output placeholder text or repeat file names as content.
+      const systemInstruction = `You are an intelligent, friendly, and adaptive AI Study Tutor. When a student asks a question, explain concepts clearly using simple analogies, key points, and examples. Ground your answers in the student's real database profile, active workspaces, study notes, and uploaded documents whenever relevant, and cite their files. If a question is general knowledge (like 'what is a cell'), answer it thoroughly using your academic knowledge while tailoring examples to the student's subjects and goals. NEVER output placeholder text, dummy data, or repeat file names as content.
 ${selectedPersonaInstruction}
+${researchGuideline}
+${citationGuideline}
+${userDatabaseContext}
 ${specializedFormatInstruction}
 ${fileOverviewContext}
 - Workspace Materials Context & Retrieved Passages:
 ${groundedSourceContext}`;
 
-      // Candidate Models: standard valid supported Gemini 3 series models
-      const candidateModels: string[] = ["gemini-3.1-flash-lite", "gemini-3.8-flash"];
+      // Candidate Models: prioritize ultra-fast, low-latency Gemini Flash models (~1.2s response)
+      const candidateModels: string[] = ["gemini-3-flash-preview", "gemini-2.5-flash"];
 
       const isComplexQuery = deepResearch || 
         modelMode === 'pro' || 
@@ -1337,11 +1421,11 @@ ${groundedSourceContext}`;
 
             let response: any = null;
             let attempt = 0;
-            const maxModelAttempts = 3;
+            const maxModelAttempts = 2;
             while (attempt < maxModelAttempts) {
               try {
                 attempt++;
-                response = await ai.models.generateContent({
+                const genPromise = ai.models.generateContent({
                   model: currentModel,
                   contents: contentsPayload,
                   config: {
@@ -1349,14 +1433,17 @@ ${groundedSourceContext}`;
                     temperature: 0.7,
                   }
                 });
+                const modelTimeout = new Promise<never>((_, reject) =>
+                  setTimeout(() => reject(new Error(`Model ${currentModel} timed out`)), 10000)
+                );
+                response = await Promise.race([genPromise, modelTimeout]);
                 if (response && response.text) break;
               } catch (retryErr: any) {
                 const errStatus = retryErr?.status || retryErr?.statusCode || (retryErr?.error && retryErr?.error?.code);
                 const retryMsg = retryErr?.message || retryErr?.error?.message || String(retryErr);
                 console.warn(`[AI Tutor Retry][${correlationId}] Model ${currentModel} attempt ${attempt} returned status: ${errStatus || 'unknown'} | Error: ${retryMsg}`);
                 if ((errStatus === 503 || errStatus === 429) && attempt < maxModelAttempts) {
-                  const backoffMs = attempt === 1 ? 600 : 1200;
-                  console.warn(`[AI Tutor Retry][${correlationId}] Retrying ${currentModel} in ${backoffMs}ms...`);
+                  const backoffMs = 350;
                   await new Promise(r => setTimeout(r, backoffMs));
                 } else {
                   throw retryErr;
@@ -1674,7 +1761,7 @@ Return a JSON object with:
   "transcription": "Detailed key topics or voice notes segment..."
 }`;
           const response = await ai.models.generateContent({
-            model: 'gemini-3.8-flash',
+            model: 'gemini-3-flash-preview',
             contents: analysisPrompt,
             config: { responseMimeType: 'application/json' }
           });
@@ -1819,7 +1906,7 @@ You must return a JSON object with the following schema:
 If this is a YouTube video or specific web page, search Google for "${targetName}" or the URL to get the exact real content, key topics, chapter notes, transcription text, and math formulas. Ensure the returned JSON is 100% correct, highly specific, and has zero placeholders.`;
 
       let contents: any = promptContent;
-      let targetModel = "gemini-3.8-flash";
+      let targetModel = "gemini-3-flash-preview";
       let config: any = {
         systemInstruction,
         temperature: 0.2
@@ -1899,7 +1986,7 @@ Return a valid JSON object matching the requested schema.`
       }
 
       let response: any = null;
-      const candidateModels = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"];
+      const candidateModels = ["gemini-3-flash-preview", "gemini-2.5-flash"];
       for (const m of candidateModels) {
         try {
           response = await ai.models.generateContent({
@@ -2130,7 +2217,7 @@ Strictly return a JSON object containing a "questions" array matching the reques
       const prompt = `Generate a practice quiz with ${questionCount} questions of difficulty "${diffLevel}" and type "${qType}" from the following study materials and contextual references:\n\n${contextText}`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+        model: "gemini-3-flash-preview",
         contents: prompt,
         config: {
           systemInstruction,
@@ -2372,7 +2459,7 @@ For each incorrect answer in the array, you must:
 4. Format your explanation using elegant Markdown (using bold text, lists, or headers where appropriate).`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+        model: "gemini-3-flash-preview",
         contents: `Explain the following incorrect quiz answers to help the student learn the underlying concepts:\n\n${questionsPrompt}`,
         config: {
           systemInstruction,
@@ -2551,7 +2638,7 @@ For each incorrect answer in the array, you must:
       const apiKey = process.env.GEMINI_API_KEY;
 
       const isDeepMode = mode === 'web';
-      const modelName = isDeepMode ? "gemini-3.1-pro-preview" : "gemini-3.8-flash";
+      const modelName = isDeepMode ? "gemini-3.1-pro-preview" : "gemini-3-flash-preview";
 
       const systemInstruction = isDeepMode
         ? `You are a state-of-the-art Deep Academic Research Search Engine modeled on NotebookLM.
@@ -2803,7 +2890,7 @@ Your output MUST be a JSON object matching the following TypeScript schema:
       const promptText = `Analyze our entire workspace resources and construct an integrated NotebookLM concept map (mind map) with central root "${workspaceSubject}":\n\n${contextText}`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+        model: "gemini-3-flash-preview",
         contents: promptText,
         config: {
           systemInstruction,
@@ -3019,7 +3106,7 @@ You MUST return a JSON object with a "flashcards" array containing your generate
       const prompt = `Generate ${cardCount} high-quality flashcards of difficulty "${diffLevel}" based on the following materials:\n\n${contextText}`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+        model: "gemini-3-flash-preview",
         contents: prompt,
         config: {
           systemInstruction,
@@ -3185,7 +3272,7 @@ Study Intensity: ${activeIntensity}
 Study Style Preference: ${activeStyle}`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+        model: "gemini-3-flash-preview",
         contents: prompt,
         config: {
           systemInstruction,

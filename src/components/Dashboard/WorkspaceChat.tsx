@@ -18,6 +18,7 @@ import {
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import { useMicrophoneWaveform } from '../../hooks/useMicrophoneWaveform';
 import { recordUserActivity } from '../../utils/userActivity';
+import { supabase } from '../../lib/supabase';
 
 export type TutorPersona = 'plain_english' | 'socratic' | 'exam_prep' | 'flashcard';
 
@@ -89,6 +90,7 @@ interface AttachedDraftFile {
 interface WorkspaceChatProps {
   workspace: Workspace;
   workspaces?: Workspace[];
+  userId?: string | null;
   onSelectWorkspace?: (ws: Workspace) => void;
   onUpdateWorkspace?: (updated: Workspace) => void;
   onOpenUploadModal?: () => void;
@@ -97,9 +99,22 @@ interface WorkspaceChatProps {
 export default function WorkspaceChat({
   workspace,
   workspaces,
+  userId: propUserId,
   onSelectWorkspace,
   onUpdateWorkspace
 }: WorkspaceChatProps) {
+  const [resolvedUserId, setResolvedUserId] = useState<string | null>(propUserId || null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (propUserId) setResolvedUserId(propUserId);
+    if (supabase) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user?.id) setResolvedUserId(session.user.id);
+        if (session?.access_token) setAccessToken(session.access_token);
+      });
+    }
+  }, [propUserId]);
   // Chat input and state
   const [inputValue, setInputValue] = useState('');
   const [isThinking, setIsThinking] = useState(false);
@@ -150,9 +165,12 @@ export default function WorkspaceChat({
     return () => clearInterval(interval);
   }, [isListening]);
 
-  // Clean files list for grounding
+  // Clean files list for grounding (incorporating active workspace files or all user workspace files when in general tutor mode)
   const activeFiles = useMemo(() => {
-    return (workspace.files || []).map(f => {
+    const rawFiles = (workspace.files && workspace.files.length > 0)
+      ? workspace.files
+      : (workspaces || []).flatMap(w => w.files || []);
+    return rawFiles.map(f => {
       const isPlaceholder = f.summary?.includes("comprehensively outlines") || f.summary?.includes("foundational definitions");
       const cleanSummary = isPlaceholder 
         ? (f.name ? `Study material: ${f.name}` : "Study material in workspace") 
@@ -169,29 +187,55 @@ export default function WorkspaceChat({
         highlights: cleanHighlights
       };
     });
-  }, [workspace.files]);
+  }, [workspace.files, workspaces]);
+
+  const chatHistoryKey = `study_chat_history_${resolvedUserId || 'guest'}_${workspace.id}`;
 
   // Persistent conversation messages
   const [messages, setMessages] = useState<Message[]>(() => {
     try {
-      const stored = localStorage.getItem(`study_chat_history_${workspace.id}`);
+      const stored = localStorage.getItem(chatHistoryKey);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {}
 
-    const hasDocs = (workspace.files || []).length > 0;
+    const hasDocs = activeFiles.length > 0;
     return [{
       id: 'welcome-msg',
       sender: 'ai',
       text: hasDocs
-        ? `👋 **Hi! I'm your AI Study Tutor for ${workspace.name}!**\n\nI have loaded your **${workspace.files.length} study document${workspace.files.length === 1 ? '' : 's'}**. Ask me anything, speak using the **Voice** button, or attach documents with the **Attach** button!`
+        ? `👋 **Hi! I'm your AI Study Tutor${workspace.id !== 'general-study' ? ` for ${workspace.name}` : ''}!**\n\nI have loaded your **${activeFiles.length} study document${activeFiles.length === 1 ? '' : 's'}** from your account. Ask me anything, speak using the **Voice** button, or attach documents with the **Attach** button!`
         : `👋 **Hi! I'm your AI Study Tutor!**\n\nAsk me any question about your studies, homework, or concepts. You can type, speak using **Voice Input**, or attach notes using **Attach** to get started!`,
       time: 'Just now',
       persona: 'plain_english'
     }];
   });
+
+  // Reload user-isolated chat history if resolvedUserId or workspace changes
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(chatHistoryKey);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed);
+          return;
+        }
+      }
+    } catch {}
+    const hasDocs = activeFiles.length > 0;
+    setMessages([{
+      id: 'welcome-msg',
+      sender: 'ai',
+      text: hasDocs
+        ? `👋 **Hi! I'm your AI Study Tutor${workspace.id !== 'general-study' ? ` for ${workspace.name}` : ''}!**\n\nI have loaded your **${activeFiles.length} study document${activeFiles.length === 1 ? '' : 's'}** from your account. Ask me anything, speak using the **Voice** button, or attach documents with the **Attach** button!`
+        : `👋 **Hi! I'm your AI Study Tutor!**\n\nAsk me any question about your studies, homework, or concepts. You can type, speak using **Voice Input**, or attach notes using **Attach** to get started!`,
+      time: 'Just now',
+      persona: 'plain_english'
+    }]);
+  }, [chatHistoryKey, activeFiles.length, workspace.id, workspace.name]);
 
   // Save persona preference
   useEffect(() => {
@@ -204,10 +248,10 @@ export default function WorkspaceChat({
   useEffect(() => {
     try {
       if (messages.length > 0) {
-        localStorage.setItem(`study_chat_history_${workspace.id}`, JSON.stringify(messages));
+        localStorage.setItem(chatHistoryKey, JSON.stringify(messages));
       }
     } catch {}
-  }, [messages, workspace.id]);
+  }, [messages, chatHistoryKey]);
 
   // Scroll to bottom on new message
   useEffect(() => {
@@ -220,14 +264,14 @@ export default function WorkspaceChat({
       title: 'Used AI Tutor',
       detail: `Study session with AI Tutor in ${workspace.name}`,
       iconType: 'tutor'
-    });
-  }, [workspace.id]);
+    }, resolvedUserId);
+  }, [workspace.id, resolvedUserId]);
 
   // Reset chat thread
   const handleResetChat = () => {
     if (!window.confirm("Start a new conversation?")) return;
     try {
-      localStorage.removeItem(`study_chat_history_${workspace.id}`);
+      localStorage.removeItem(chatHistoryKey);
     } catch {}
     const p = TUTOR_PERSONAS[activePersona];
     setMessages([{
@@ -555,16 +599,21 @@ export default function WorkspaceChat({
       const maxAttempts = 2;
 
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (accessToken) {
+          headers['Authorization'] = `Bearer ${accessToken}`;
+        }
         response = await fetch('/api/ai-tutor', {
           method: 'POST',
           credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             prompt: userMsg.text,
             history,
             persona: activePersona,
             modelMode: 'auto',
             workspaceId: workspace.id,
+            userId: resolvedUserId,
             attachedFiles: effectiveFiles,
             citationMode: true
           })
@@ -578,7 +627,7 @@ export default function WorkspaceChat({
 
         // If non-JSON received on first attempt, wait briefly and retry
         if (attempt < maxAttempts) {
-          await new Promise(r => setTimeout(r, 600));
+          await new Promise(r => setTimeout(r, 300));
         } else {
           const text = await response.text().catch(() => '');
           const isHtml = text.trim().startsWith('<') || text.includes('<html');
@@ -613,11 +662,6 @@ export default function WorkspaceChat({
         throw customErr;
       }
 
-      const elapsed = Date.now() - startTime;
-      if (elapsed < 400) {
-        await new Promise(r => setTimeout(r, 400 - elapsed));
-      }
-
       const aiMsg: Message = {
         id: `msg-ai-${Date.now() + 1}`,
         sender: 'ai',
@@ -630,10 +674,6 @@ export default function WorkspaceChat({
 
       setMessages(prev => [...prev, aiMsg]);
     } catch (err: any) {
-      const elapsed = Date.now() - startTime;
-      if (elapsed < 400) {
-        await new Promise(r => setTimeout(r, 400 - elapsed));
-      }
 
       const statusCode = err?.statusCode || 'Client Error';
       const rawMsg = err?.message || "Failed to communicate with AI Tutor.";

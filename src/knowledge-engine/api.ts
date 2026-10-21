@@ -406,7 +406,7 @@ async function processDocument(docId: string, workspaceId: string, userId: strin
         const prompt = `Generate the following document summaries as a JSON array of 5 objects, where each object has "title" and "content" (string formatted as HTML with h3, ul, li). The summaries must be based entirely on the provided raw document content.\n1. Short summary\n2. Detailed summary\n3. Revision notes\n4. Bullet notes\n5. Last minute notes\nRaw document content: ${rawContent.substring(0, 15000)}\nReturn ONLY valid JSON in the format: [{"title": "Short summary", "content": "..."}]`;
         
         const response = await ai.models.generateContent({
-          model: "gemini-3.1-flash-lite",
+          model: "gemini-3-flash-preview",
           contents: prompt,
           config: { responseMimeType: "application/json" }
         }) as any;
@@ -690,7 +690,7 @@ knowledgeRouter.post('/suggest-tags', async (req, res) => {
       const prompt = `Analyze the following document snippet and suggest 3-5 short, relevant tags (1-2 words each) for categorization. Return ONLY a valid JSON array of strings, like ["tag1", "tag2"].\n\nSnippet:\n${content.substring(0, 5000)}`;
       
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-lite",
+        model: "gemini-3-flash-preview",
         contents: prompt,
         config: { responseMimeType: "application/json" }
       });

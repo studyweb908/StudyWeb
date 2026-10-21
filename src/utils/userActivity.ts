@@ -123,45 +123,68 @@ export function getRealUserActivities(
     iconType: ActivityIconType;
   }[] = [];
 
-  // 1. Load explicitly recorded user events
+  // 1. Load explicitly recorded user events strictly for this user
   if (typeof window !== 'undefined') {
     try {
       const primaryKey = getUserActivityStorageKey(userId);
-      const keysToLoad = [primaryKey];
-      // If signed in, also incorporate guest entries so no real actions are missed
-      if (primaryKey !== 'studyweb_real_activities_guest') {
-        keysToLoad.push('studyweb_real_activities_guest');
-      }
-
-      keysToLoad.forEach(key => {
-        const raw = localStorage.getItem(key);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            parsed.forEach(item => {
-              if (item && item.title) {
-                activities.push({
-                  id: item.id || `act-saved-${item.timestamp}-${Math.random().toString(36).slice(2, 6)}`,
-                  title: item.title,
-                  detail: item.detail || '',
-                  timestamp: item.timestamp || Date.now(),
-                  iconType: item.iconType || 'workspace'
-                });
-              }
-            });
-          }
+      const raw = localStorage.getItem(primaryKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(item => {
+            if (item && item.title) {
+              activities.push({
+                id: item.id || `act-saved-${item.timestamp}-${Math.random().toString(36).slice(2, 6)}`,
+                title: item.title,
+                detail: item.detail || '',
+                timestamp: item.timestamp || Date.now(),
+                iconType: item.iconType || 'workspace'
+              });
+            }
+          });
         }
-      });
+      }
     } catch {
       // Ignore parse failure
     }
   }
 
-  // 2. Return strictly recorded real user events (zero dummy/synthetic data)
-  // Deduplicate by title & detail within a 15-second window or identical IDs
+  // 2. Also incorporate real database workspaces, uploaded files, and notes owned by this user
+  if (Array.isArray(workspaces) && workspaces.length > 0) {
+    workspaces.forEach(ws => {
+      if (!ws || !ws.name) return;
+      if (Array.isArray(ws.files)) {
+        ws.files.forEach(file => {
+          if (file && file.name) {
+            activities.push({
+              id: `act-file-${file.id}`,
+              title: `Uploaded material: ${file.name}`,
+              detail: `Workspace: ${ws.name}`,
+              timestamp: parseActivityTime(file.uploadDate),
+              iconType: 'upload'
+            });
+          }
+        });
+      }
+      if (Array.isArray(ws.notes)) {
+        ws.notes.forEach(note => {
+          if (note && note.title) {
+            activities.push({
+              id: `act-note-${note.id}`,
+              title: `Saved study note: ${note.title}`,
+              detail: `Workspace: ${ws.name}`,
+              timestamp: parseActivityTime(note.updatedAt),
+              iconType: 'note'
+            });
+          }
+        });
+      }
+    });
+  }
+
+  // 3. Deduplicate by title & detail within a 15-second window or identical IDs
   const seen = new Set<string>();
   const unique = activities.filter(item => {
-    // 15-second window deduplication so repeated interactions over time are preserved
     const timeBucket = Math.floor(item.timestamp / 15000);
     const key = `${item.title}-${item.detail}-${timeBucket}`;
     if (seen.has(key)) return false;

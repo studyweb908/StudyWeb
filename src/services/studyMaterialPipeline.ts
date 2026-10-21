@@ -323,7 +323,7 @@ Produce the complete structured JSON study package matching the required schema.
   }
 
   // Model selection with graceful fallback on 503 high demand
-  const modelCandidates = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+  const modelCandidates = ['gemini-3-flash-preview', 'gemini-2.5-flash'];
   let lastError: any = null;
 
   for (const model of modelCandidates) {

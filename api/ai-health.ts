@@ -45,7 +45,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     });
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-3-flash-preview',
       contents: 'Reply with the word OK.'
     });
 
@@ -54,7 +54,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     return res.status(200).json({
       status: 'ok',
-      model: 'gemini-3.8-flash',
+      model: 'gemini-3-flash-preview',
       reply: text,
       verified: text.length > 0,
       durationMs
