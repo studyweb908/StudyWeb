@@ -1990,6 +1990,116 @@ ${groundedSourceContext}`;
     }
   });
 
+  // API Route: AI Tutor Text-to-Speech (TTS) via Gemini 3.8 Flash Lite TTS
+  app.post("/api/ai-tutor-tts", async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    try {
+      const rawText = String(req.body?.text || "").trim();
+      const persona = String(req.body?.persona || "socratic").trim();
+      const requestedVoice = String(req.body?.voiceName || (persona === "socratic" ? "Zephyr" : "Kore")).trim();
+
+      if (!rawText) {
+        return res.status(400).json({ error: "Text is required for TTS synthesis." });
+      }
+
+      // Strip markdown, asterisks, brackets, citation tags, and code blocks for spoken audio
+      const cleanText = rawText
+        .replace(/```[\s\S]*?```/g, "")
+        .replace(/`([^`]+)`/g, "$1")
+        .replace(/\[Source:[^\]]+\]/gi, "")
+        .replace(/\[\d+:\d+\]/g, "")
+        .replace(/#{1,6}\s+/g, "")
+        .replace(/\*\*(.*?)\*\*/g, "$1")
+        .replace(/\*(.*?)\*/g, "$1")
+        .replace(/__([^_]+)__/g, "$1")
+        .replace(/_([^_]+)_/g, "$1")
+        .replace(/[-*•]\s+/g, "")
+        .replace(/\n{2,}/g, ". ")
+        .replace(/\n/g, " ")
+        .trim()
+        .slice(0, 1800); // Keep focused for rapid audio delivery
+
+      if (!cleanText) {
+        return res.status(400).json({ error: "Cleaned text is empty." });
+      }
+
+      const apiKey = getGeminiApiKey();
+      if (!apiKey) {
+        return res.status(200).json({
+          success: false,
+          fallbackToBrowser: true,
+          message: "Gemini API key not configured, fallback to client synthesis."
+        });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: { headers: { "User-Agent": "aistudio-build" } }
+      });
+
+      const styleInstruction = persona === "socratic"
+        ? "Thoughtful, encouraging Socratic tutor asking guiding questions and scaffolding concepts"
+        : persona === "exam_prep"
+        ? "High-energy, focused exam coach emphasizing testable points and active recall"
+        : "Warm, articulate, friendly academic tutor explaining concepts clearly";
+
+      const validVoice = ["Kore", "Puck", "Fenrir", "Charon", "Zephyr"].includes(requestedVoice)
+        ? requestedVoice
+        : (persona === "socratic" ? "Zephyr" : "Kore");
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.8-flash-lite-tts",
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: cleanText,
+                speechMetadata: {
+                  style: styleInstruction
+                }
+              }
+            ]
+          }
+        ] as any,
+        config: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: validVoice
+              }
+            }
+          }
+        }
+      });
+
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (base64Audio) {
+        return res.json({
+          success: true,
+          audioBase64: base64Audio,
+          mimeType: "audio/wav",
+          voiceUsed: validVoice,
+          cleanedText: cleanText
+        });
+      }
+
+      return res.json({
+        success: false,
+        fallbackToBrowser: true,
+        message: "No audio data returned from Gemini TTS."
+      });
+    } catch (ttsErr: any) {
+      console.warn("[AI Tutor TTS Warning]:", ttsErr?.message || ttsErr);
+      return res.status(200).json({
+        success: false,
+        fallbackToBrowser: true,
+        error: ttsErr?.message || "TTS synthesis unavailable, falling back to browser speech."
+      });
+    }
+  });
+
   // Helper: SSRF validator
   function isValidPublicUrl(urlString: string): boolean {
     try {

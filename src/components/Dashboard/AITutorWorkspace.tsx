@@ -205,6 +205,42 @@ export default function AITutorWorkspace() {
   const { activeWorkspace } = useTaskContext();
   const targetWsId = activeWorkspace?.id || 'local-workspace';
 
+  // Workspace Logo helper (supports custom image/data-url, emoji, and theme accents)
+  const workspaceLogo = (activeWorkspace as any)?.logo || (activeWorkspace as any)?.icon || (activeWorkspace as any)?.logoUrl || activeWorkspace?.emoji || '🧬';
+  const isWorkspaceImageLogo = typeof workspaceLogo === 'string' &&
+    (workspaceLogo.startsWith('data:') || workspaceLogo.startsWith('http://') || workspaceLogo.startsWith('https://') || (workspaceLogo.startsWith('/') && !workspaceLogo.includes('logo-inner.png')));
+
+  const renderWorkspaceLogo = (sizeClass = 'w-7 h-7 sm:w-9 sm:h-9', textClass = 'text-base sm:text-lg') => {
+    const themeBg: Record<string, string> = {
+      indigo: 'bg-indigo-50 dark:bg-indigo-950/70 border-indigo-200/80 dark:border-indigo-800/60 text-indigo-600 dark:text-indigo-300',
+      emerald: 'bg-emerald-50 dark:bg-emerald-950/70 border-emerald-200/80 dark:border-emerald-800/60 text-emerald-600 dark:text-emerald-300',
+      amber: 'bg-amber-50 dark:bg-amber-950/70 border-amber-200/80 dark:border-amber-800/60 text-amber-600 dark:text-amber-300',
+      rose: 'bg-rose-50 dark:bg-rose-950/70 border-rose-200/80 dark:border-rose-800/60 text-rose-600 dark:text-rose-300',
+      violet: 'bg-violet-50 dark:bg-violet-950/70 border-violet-200/80 dark:border-violet-800/60 text-violet-600 dark:text-violet-300',
+      cyan: 'bg-cyan-50 dark:bg-cyan-950/70 border-cyan-200/80 dark:border-cyan-800/60 text-cyan-600 dark:text-cyan-300',
+    };
+    const currentThemeClass = themeBg[activeWorkspace?.colorTheme || 'indigo'] || themeBg.indigo;
+
+    return (
+      <div 
+        className={`${sizeClass} rounded-xl border flex items-center justify-center shrink-0 overflow-hidden shadow-2xs select-none ${currentThemeClass}`}
+        title={`Workspace: ${activeWorkspace?.name || 'Study Workspace'}`}
+      >
+        {isWorkspaceImageLogo ? (
+          <img 
+            src={workspaceLogo} 
+            alt={`${activeWorkspace?.name || 'Workspace'} Logo`} 
+            className="w-full h-full object-cover select-none" 
+          />
+        ) : (
+          <span className={`${textClass} leading-none select-none`}>
+            {workspaceLogo}
+          </span>
+        )}
+      </div>
+    );
+  };
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -242,6 +278,80 @@ export default function AITutorWorkspace() {
     page?: number;
     quote: string;
   } | null>(null);
+
+  // Auditory TTS state
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+
+  const stopTutorSpeech = () => {
+    if (audioPlayerRef.current) {
+      try { audioPlayerRef.current.pause(); } catch {}
+      audioPlayerRef.current = null;
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try { window.speechSynthesis.cancel(); } catch {}
+    }
+    setSpeakingMsgId(null);
+  };
+
+  const handleSpeakTutor = async (id: string, text: string) => {
+    if (speakingMsgId === id) {
+      stopTutorSpeech();
+      return;
+    }
+    stopTutorSpeech();
+
+    const clean = text
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\[Source:[^\]]+\]/gi, '')
+      .replace(/\[\d+:\d+\]/g, '')
+      .replace(/#{1,6}\s+/g, '')
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/[-*•]\s+/g, '')
+      .replace(/\n+/g, '. ')
+      .trim();
+
+    if (!clean) return;
+
+    try {
+      setSpeakingMsgId(id);
+      const storedVoice = localStorage.getItem('study_tutor_voice_profile') || 'neutral';
+      const geminiVoiceMap: Record<string, string> = {
+        female: 'Kore',
+        male: 'Fenrir',
+        neutral: 'Zephyr',
+        energetic: 'Puck'
+      };
+      const resolvedVoice = geminiVoiceMap[storedVoice] || 'Zephyr';
+
+      const res = await fetch('/api/ai-tutor-tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: clean, persona: 'socratic', voiceName: resolvedVoice })
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.success && data?.audioBase64) {
+          const audio = new Audio(`data:${data.mimeType || 'audio/wav'};base64,${data.audioBase64}`);
+          audioPlayerRef.current = audio;
+          audio.onended = () => setSpeakingMsgId(null);
+          audio.onerror = () => setSpeakingMsgId(null);
+          await audio.play();
+          return;
+        }
+      }
+    } catch {}
+
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      const u = new SpeechSynthesisUtterance(clean.slice(0, 1500));
+      u.rate = 0.95;
+      u.onend = () => setSpeakingMsgId(null);
+      u.onerror = () => setSpeakingMsgId(null);
+      window.speechSynthesis.speak(u);
+    }
+  };
 
   // Pomodoro Focus Timer States
   const [showFocusTimer, setShowFocusTimer] = useState(false);
@@ -889,9 +999,7 @@ export default function AITutorWorkspace() {
         {/* Top Controller Bar */}
         <div className="px-3 sm:px-6 py-2 sm:py-3.5 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-950/20 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center shrink-0">
-              <img src="/logo-inner.png" alt="StudyWeb Logo" className="w-full h-full object-contain select-none" />
-            </div>
+            {renderWorkspaceLogo('w-7 h-7 sm:w-9 sm:h-9', 'text-base sm:text-lg')}
             <div className="min-w-0">
               <h3 className="font-extrabold text-slate-900 dark:text-white text-xs sm:text-sm flex items-center gap-1.5 truncate">
                 <span>AI Tutor</span>
@@ -977,7 +1085,7 @@ export default function AITutorWorkspace() {
                     ME
                   </div>
                 ) : (
-                  <img src="/logo-inner.png" alt="AI Tutor" className="w-full h-full object-contain select-none" />
+                  renderWorkspaceLogo('w-full h-full', 'text-xs sm:text-sm')
                 )}
               </div>
 
@@ -1127,7 +1235,24 @@ export default function AITutorWorkspace() {
                     </div>
                   )}
                 </div>
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 px-1">{msg.time}</span>
+                <div className="flex items-center gap-2 px-1 mt-0.5">
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500">{msg.time}</span>
+                  {msg.sender === 'ai' && (
+                    <button
+                      type="button"
+                      onClick={() => handleSpeakTutor(msg.id, msg.text)}
+                      className={`text-[10px] font-semibold flex items-center gap-1 cursor-pointer transition-colors px-2 py-0.5 rounded-md ${
+                        speakingMsgId === msg.id
+                          ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/70 font-bold'
+                          : 'text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-300'
+                      }`}
+                      title="Listen to Socratic tutor response aloud"
+                    >
+                      <Volume2 className="w-3 h-3" />
+                      <span>{speakingMsgId === msg.id ? 'Stop Audio' : 'Listen'}</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}
@@ -1142,7 +1267,7 @@ export default function AITutorWorkspace() {
                 className="flex gap-3 sm:gap-4 max-w-xl mr-auto"
               >
                 <div className="w-7 h-7 sm:w-8.5 sm:h-8.5 flex items-center justify-center flex-shrink-0">
-                  <img src="/logo-inner.png" alt="AI Tutor" className="w-full h-full object-contain animate-pulse select-none" />
+                  {renderWorkspaceLogo('w-full h-full animate-pulse', 'text-xs sm:text-sm')}
                 </div>
                 <div className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-800/60 px-4 sm:px-6 py-3 sm:py-5 rounded-[16px] sm:rounded-[20px] rounded-tl-none shadow-[0_2px_8px_-2px_rgba(0,0,0,0.04)] text-xs sm:text-[15px]">
                   <div className="flex items-center gap-2.5 sm:gap-3">

@@ -634,9 +634,23 @@ export default function DashboardHome({
           <motion.div variants={itemVariants} className="w-full">
             <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-6 shadow-sm">
               <div className="flex items-center gap-2 mb-1">
-                <div className="w-7 h-7 flex items-center justify-center shrink-0">
-                  <img src="/logo-inner.png" alt="StudyWeb Logo" className="w-full h-full object-contain select-none" />
-                </div>
+                {(() => {
+                  const homeWs = activeWorkspace || (workspaces && workspaces[0]) || null;
+                  const wsLogo = (homeWs as any)?.logo || (homeWs as any)?.icon || (homeWs as any)?.logoUrl || homeWs?.emoji || '🧬';
+                  const isImg = typeof wsLogo === 'string' && (wsLogo.startsWith('data:') || wsLogo.startsWith('http') || (wsLogo.startsWith('/') && !wsLogo.includes('logo-inner.png')));
+                  return (
+                    <div 
+                      className="w-7 h-7 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 flex items-center justify-center shrink-0 overflow-hidden shadow-2xs select-none"
+                      title={homeWs?.name ? `Workspace: ${homeWs.name}` : 'AI Tutor'}
+                    >
+                      {isImg ? (
+                        <img src={wsLogo} alt="Workspace Logo" className="w-full h-full object-cover select-none" />
+                      ) : (
+                        <span className="text-sm leading-none select-none">{wsLogo}</span>
+                      )}
+                    </div>
+                  );
+                })()}
                 <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">AI Tutor</h3>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">

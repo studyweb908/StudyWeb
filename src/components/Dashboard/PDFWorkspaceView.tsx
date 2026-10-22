@@ -1551,9 +1551,22 @@ Student Question:
         {/* Header indicator */}
         <div className="px-5 py-4 border-b border-slate-200/60 dark:border-slate-800/80 bg-white dark:bg-slate-900 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8.5 h-8.5 sm:w-9 sm:h-9 flex items-center justify-center shrink-0">
-              <img src="/logo-inner.png" alt="StudyWeb Logo" className="w-full h-full object-contain select-none" />
-            </div>
+            {(() => {
+              const wsLogo = (workspace as any)?.logo || (workspace as any)?.icon || (workspace as any)?.logoUrl || workspace?.emoji || '🧬';
+              const isImg = typeof wsLogo === 'string' && (wsLogo.startsWith('data:') || wsLogo.startsWith('http') || (wsLogo.startsWith('/') && !wsLogo.includes('logo-inner.png')));
+              return (
+                <div 
+                  className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 flex items-center justify-center shrink-0 overflow-hidden shadow-2xs select-none"
+                  title={workspace?.name ? `Workspace: ${workspace.name}` : 'Study Workspace'}
+                >
+                  {isImg ? (
+                    <img src={wsLogo} alt="Workspace Logo" className="w-full h-full object-cover select-none" />
+                  ) : (
+                    <span className="text-base sm:text-lg leading-none select-none">{wsLogo}</span>
+                  )}
+                </div>
+              );
+            })()}
             <div>
               <span className="font-black text-slate-800 dark:text-white text-sm tracking-tight">Notebook Chat Companion</span>
               <span className="block text-[9px] text-slate-400 font-extrabold uppercase tracking-widest mt-0.5">AP Context-Aware Tutor</span>
@@ -1590,9 +1603,19 @@ Student Question:
                   <div className="w-full h-full rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 flex items-center justify-center font-extrabold text-[10px]">
                     YOU
                   </div>
-                ) : (
-                  <img src="/logo-inner.png" alt="AI Tutor" className="w-full h-full object-contain select-none" />
-                )}
+                ) : (() => {
+                  const wsLogo = (workspace as any)?.logo || (workspace as any)?.icon || (workspace as any)?.logoUrl || workspace?.emoji || '🧬';
+                  const isImg = typeof wsLogo === 'string' && (wsLogo.startsWith('data:') || wsLogo.startsWith('http') || (wsLogo.startsWith('/') && !wsLogo.includes('logo-inner.png')));
+                  return (
+                    <div className="w-full h-full rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 flex items-center justify-center overflow-hidden">
+                      {isImg ? (
+                        <img src={wsLogo} alt="AI" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-xs">{wsLogo}</span>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
               
               <div className={`px-4 py-3 rounded-2xl text-xs leading-relaxed shadow-sm relative group max-w-[calc(100%-40px)] border ${

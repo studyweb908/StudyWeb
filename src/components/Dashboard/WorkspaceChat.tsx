@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sparkles, 
@@ -14,12 +14,20 @@ import {
   BookOpen, 
   FileText,
   AlertTriangle,
-  Globe
+  Globe,
+  Volume2,
+  VolumeX,
+  Square,
+  Headphones,
+  Play,
+  Check,
+  Sliders
 } from 'lucide-react';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import { useMicrophoneWaveform } from '../../hooks/useMicrophoneWaveform';
 import { recordUserActivity } from '../../utils/userActivity';
 import { supabase } from '../../lib/supabase';
+import { AITutorBackgroundService, getChatHistoryKey } from '../../services/AITutorBackgroundService';
 
 export type TutorPersona = 'plain_english' | 'socratic' | 'exam_prep' | 'flashcard';
 
@@ -52,6 +60,62 @@ export const TUTOR_PERSONAS: Record<TutorPersona, {
     icon: '⚡',
     shortDesc: 'Active memory drill',
     samplePrompt: 'Give me a rapid active-recall flashcard question to test my memory.'
+  }
+};
+
+export type VoiceProfileId = 'female' | 'male' | 'neutral' | 'energetic';
+
+export interface VoiceProfile {
+  id: VoiceProfileId;
+  name: string;
+  genderLabel: string;
+  gender: 'female' | 'male' | 'neutral';
+  geminiVoice: 'Kore' | 'Fenrir' | 'Zephyr' | 'Puck';
+  description: string;
+  icon: string;
+  samplePhrase: string;
+}
+
+export const VOICE_PROFILES: Record<VoiceProfileId, VoiceProfile> = {
+  female: {
+    id: 'female',
+    name: 'Kore',
+    genderLabel: 'Female Voice',
+    gender: 'female',
+    geminiVoice: 'Kore',
+    description: 'Warm, clear, and articulate academic guide',
+    icon: '👩‍🏫',
+    samplePhrase: "Hello! I'm your academic tutor. What questions or concepts shall we explore today?"
+  },
+  male: {
+    id: 'male',
+    name: 'Fenrir',
+    genderLabel: 'Male Voice',
+    gender: 'male',
+    geminiVoice: 'Fenrir',
+    description: 'Deep, confident, and authoritative mentor',
+    icon: '👨‍🏫',
+    samplePhrase: "Greetings. Let's break down this concept step-by-step to master it."
+  },
+  neutral: {
+    id: 'neutral',
+    name: 'Zephyr',
+    genderLabel: 'Neutral Voice',
+    gender: 'neutral',
+    geminiVoice: 'Zephyr',
+    description: 'Calm, thoughtful, and balanced Socratic philosopher',
+    icon: '🧭',
+    samplePhrase: "Welcome. What fundamental principles lie behind the question you are thinking about?"
+  },
+  energetic: {
+    id: 'energetic',
+    name: 'Puck',
+    genderLabel: 'Dynamic Voice',
+    gender: 'male',
+    geminiVoice: 'Puck',
+    description: 'Upbeat, high-energy, and enthusiastic active recall coach',
+    icon: '⚡',
+    samplePhrase: "Ready for an active recall challenge? Let's test your memory and level up!"
   }
 };
 
@@ -118,7 +182,7 @@ export default function WorkspaceChat({
   }, [propUserId]);
   // Chat input and state
   const [inputValue, setInputValue] = useState('');
-  const [isThinking, setIsThinking] = useState(false);
+  const [isThinking, setIsThinking] = useState<boolean>(() => AITutorBackgroundService.isWorkspaceThinking(workspace.id));
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const [showPersonaMenu, setShowPersonaMenu] = useState(false);
@@ -148,6 +212,246 @@ export default function WorkspaceChat({
   const lastFinalTranscriptRef = useRef<string>('');
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Auditory Feedback (TTS) State
+  const [autoSpeak, setAutoSpeak] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem('study_tutor_auto_speak');
+      if (stored !== null) return stored === 'true';
+    } catch {}
+    return true; // Enabled by default for auditory feedback
+  });
+
+  const [selectedVoiceProfile, setSelectedVoiceProfile] = useState<VoiceProfileId>(() => {
+    try {
+      const stored = localStorage.getItem('study_tutor_voice_profile');
+      if (stored && (stored in VOICE_PROFILES)) return stored as VoiceProfileId;
+    } catch {}
+    return 'neutral'; // Default to neutral (Zephyr) for Socratic inquiry
+  });
+
+  const [speechRate, setSpeechRate] = useState<number>(() => {
+    try {
+      const stored = localStorage.getItem('study_tutor_speech_rate');
+      if (stored) {
+        const val = parseFloat(stored);
+        if (!isNaN(val) && val >= 0.8 && val <= 1.5) return val;
+      }
+    } catch {}
+    return 1.0;
+  });
+
+  const [showVoiceSettings, setShowVoiceSettings] = useState(false);
+  const [isPlayingPreview, setIsPlayingPreview] = useState<string | null>(null);
+  const voiceSettingsRef = useRef<HTMLDivElement>(null);
+
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const [targetLoadingId, setTargetLoadingId] = useState<string | null>(null);
+  const [isTtsLoading, setIsTtsLoading] = useState(false);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Close voice settings on outside click
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (voiceSettingsRef.current && !voiceSettingsRef.current.contains(e.target as Node)) {
+        setShowVoiceSettings(false);
+      }
+    };
+    if (showVoiceSettings) {
+      document.addEventListener('mousedown', handleOutsideClick);
+    }
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showVoiceSettings]);
+
+  // Stop any active speech (both HTML5 audio and browser speech synthesis)
+  const stopSpeech = useCallback(() => {
+    if (currentAudioRef.current) {
+      try {
+        currentAudioRef.current.pause();
+        currentAudioRef.current.currentTime = 0;
+      } catch {}
+      currentAudioRef.current = null;
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+    }
+    setSpeakingMessageId(null);
+    setTargetLoadingId(null);
+    setIsTtsLoading(false);
+    setIsPlayingPreview(null);
+  }, []);
+
+  // Cleanup speech on unmount
+  useEffect(() => {
+    return () => {
+      stopSpeech();
+    };
+  }, [stopSpeech]);
+
+  // Natural speech text cleaner: strips markdown headers, bullet symbols, citation tags, and code blocks
+  const cleanSpeechText = (raw: string): string => {
+    if (!raw) return '';
+    return raw
+      .replace(/```[\s\S]*?```/g, '') // remove code blocks
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\[Source:[^\]]+\]/gi, '') // remove citation source tags
+      .replace(/\[\d+:\d+\]/g, '')
+      .replace(/#{1,6}\s+/g, '') // remove markdown headings
+      .replace(/\*\*(.*?)\*\*/g, '$1') // remove bold
+      .replace(/\*(.*?)\*/g, '$1') // remove italics
+      .replace(/__([^_]+)__/g, '$1')
+      .replace(/_([^_]+)_/g, '$1')
+      .replace(/[-*•]\s+/g, '') // remove bullet points
+      .replace(/\n{2,}/g, '. ')
+      .replace(/\n/g, ' ')
+      .trim();
+  };
+
+  const speakWithBrowserSynthesis = useCallback((textToSpeak: string, msgId: string, voiceIdOverride?: VoiceProfileId, customRate?: number) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      setSpeakingMessageId(null);
+      setIsTtsLoading(false);
+      setTargetLoadingId(null);
+      setIsPlayingPreview(null);
+      return;
+    }
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(textToSpeak.slice(0, 1500));
+      
+      const targetProfile = VOICE_PROFILES[voiceIdOverride || selectedVoiceProfile] || VOICE_PROFILES.neutral;
+      const targetGender = targetProfile.gender;
+
+      const voices = window.speechSynthesis.getVoices() || [];
+      let matchedVoice: SpeechSynthesisVoice | undefined;
+
+      if (targetGender === 'female') {
+        matchedVoice = voices.find(v => 
+          v.lang.startsWith('en') && (v.name.includes('Samantha') || v.name.includes('Karen') || v.name.includes('Zira') || v.name.includes('Victoria') || (v.name.includes('Google') && v.name.includes('Female')) || v.name.includes('Female'))
+        );
+      } else if (targetGender === 'male') {
+        matchedVoice = voices.find(v => 
+          v.lang.startsWith('en') && (v.name.includes('Daniel') || v.name.includes('Alex') || v.name.includes('David') || v.name.includes('George') || (v.name.includes('Google') && v.name.includes('Male')) || v.name.includes('Male'))
+        );
+      } else {
+        matchedVoice = voices.find(v => 
+          v.lang.startsWith('en') && (v.name.includes('Moira') || v.name.includes('Natural') || v.name.includes('Google UK English Male') || v.name.includes('en-GB'))
+        );
+      }
+
+      const naturalVoice = matchedVoice || voices.find(v => v.lang.startsWith('en')) || voices[0];
+      if (naturalVoice) utterance.voice = naturalVoice;
+
+      utterance.rate = customRate || speechRate || 1.0;
+      utterance.pitch = targetGender === 'female' ? 1.04 : targetGender === 'male' ? 0.95 : 1.0;
+
+      utterance.onstart = () => {
+        setSpeakingMessageId(msgId);
+        setIsTtsLoading(false);
+        setTargetLoadingId(null);
+      };
+
+      utterance.onend = () => {
+        setSpeakingMessageId(prev => prev === msgId ? null : prev);
+        setIsPlayingPreview(null);
+      };
+
+      utterance.onerror = () => {
+        setSpeakingMessageId(prev => prev === msgId ? null : prev);
+        setIsTtsLoading(false);
+        setTargetLoadingId(null);
+        setIsPlayingPreview(null);
+      };
+
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      setSpeakingMessageId(null);
+      setIsTtsLoading(false);
+      setTargetLoadingId(null);
+      setIsPlayingPreview(null);
+    }
+  }, [selectedVoiceProfile, speechRate]);
+
+  const handleSpeakMessage = useCallback(async (msgId: string, text: string, persona?: TutorPersona, voiceProfileOverride?: VoiceProfileId) => {
+    // If currently speaking this message, clicking again toggles pause/stop
+    if (speakingMessageId === msgId) {
+      stopSpeech();
+      return;
+    }
+
+    stopSpeech();
+    const cleanText = cleanSpeechText(text);
+    if (!cleanText) return;
+
+    setTargetLoadingId(msgId);
+    setIsTtsLoading(true);
+
+    const activeProfile = VOICE_PROFILES[voiceProfileOverride || selectedVoiceProfile] || VOICE_PROFILES.neutral;
+
+    try {
+      // 1. Try high-fidelity Gemini 3.8 Flash Lite TTS endpoint
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6500);
+
+      const res = await fetch('/api/ai-tutor-tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: cleanText,
+          persona: persona || activePersona,
+          voiceName: activeProfile.geminiVoice
+        }),
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data && data.success && data.audioBase64) {
+          const audio = new Audio(`data:${data.mimeType || 'audio/wav'};base64,${data.audioBase64}`);
+          audio.playbackRate = speechRate || 1.0;
+          currentAudioRef.current = audio;
+
+          audio.onplay = () => {
+            setSpeakingMessageId(msgId);
+            setIsTtsLoading(false);
+            setTargetLoadingId(null);
+          };
+
+          audio.onended = () => {
+            setSpeakingMessageId(prev => prev === msgId ? null : prev);
+            currentAudioRef.current = null;
+            setIsPlayingPreview(null);
+          };
+
+          audio.onerror = () => {
+            currentAudioRef.current = null;
+            speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
+          };
+
+          await audio.play();
+          return;
+        }
+      }
+
+      speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
+    } catch {
+      speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
+    }
+  }, [speakingMessageId, stopSpeech, activePersona, selectedVoiceProfile, speechRate, speakWithBrowserSynthesis]);
+
+  // Preview a voice profile sample phrase
+  const handlePreviewVoice = (vProfile: VoiceProfile) => {
+    if (speakingMessageId === `preview-${vProfile.id}`) {
+      stopSpeech();
+      setIsPlayingPreview(null);
+      return;
+    }
+    setIsPlayingPreview(vProfile.id);
+    handleSpeakMessage(`preview-${vProfile.id}`, vProfile.samplePhrase, 'socratic', vProfile.id);
+  };
 
   // Animated soundwave pulses while listening
   useEffect(() => {
@@ -277,6 +581,59 @@ export default function WorkspaceChat({
     }]);
   }, [chatHistoryKey, activeFiles.length, workspace.id, workspace.name]);
 
+  // Listen for background AI Tutor query events and window focus/visibility changes
+  useEffect(() => {
+    const handleStatusChange = () => {
+      const thinking = AITutorBackgroundService.isWorkspaceThinking(workspace.id);
+      setIsThinking(thinking);
+    };
+
+    const handleMessageCompleted = (e: any) => {
+      const detail = e.detail;
+      if (!detail || detail.workspaceId !== workspace.id) return;
+      const newMsg = detail.message;
+      if (!newMsg) return;
+
+      setIsThinking(false);
+      setMessages(prev => {
+        if (prev.some(m => m.id === newMsg.id)) return prev;
+        return [...prev, newMsg];
+      });
+
+      if (autoSpeak) {
+        handleSpeakMessage(newMsg.id, newMsg.text, newMsg.persona);
+      }
+    };
+
+    const handleVisibilityOrFocus = () => {
+      try {
+        const stored = localStorage.getItem(chatHistoryKey);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setMessages(parsed);
+          }
+        }
+      } catch {}
+      setIsThinking(AITutorBackgroundService.isWorkspaceThinking(workspace.id));
+    };
+
+    window.addEventListener('studyweb-tutor-status-change', handleStatusChange);
+    window.addEventListener('studyweb-tutor-message-completed', handleMessageCompleted);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+    // Initial check on mount or workspace update
+    handleStatusChange();
+
+    return () => {
+      window.removeEventListener('studyweb-tutor-status-change', handleStatusChange);
+      window.removeEventListener('studyweb-tutor-message-completed', handleMessageCompleted);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
+  }, [workspace.id, chatHistoryKey, autoSpeak, handleSpeakMessage]);
+
   // Save persona preference
   useEffect(() => {
     try {
@@ -315,9 +672,7 @@ export default function WorkspaceChat({
     setInputValue('');
     setAttachedDrafts([]);
     setIsThinking(false);
-    if ('speechSynthesis' in window) {
-      try { window.speechSynthesis.cancel(); } catch {}
-    }
+    stopSpeech();
     const p = TUTOR_PERSONAS[activePersona];
     const hasDocs = activeFiles.length > 0;
     setMessages([{
@@ -583,6 +938,7 @@ export default function WorkspaceChat({
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
+    stopSpeech();
     setMessages(prev => [...prev, userMsg]);
     setInputValue('');
     setAttachedDrafts([]); // Clear attachment queue
@@ -716,114 +1072,29 @@ export default function WorkspaceChat({
     };
 
     try {
-      let data: any = null;
-
-      // Sanitize oversized browser cookies so request headers remain lightweight
-      try {
-        const { FileUploadService } = await import('../../services/FileUploadService');
-        FileUploadService.sanitizeBrowserCookies();
-      } catch {}
-
-      // Attempt 1: POST to /api/ai-tutor with same-origin credentials and body-based token (prevents proxy 400 rejection)
-      try {
-        const postRes = await fetch('/api/ai-tutor', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify({
-            prompt: userMsg.text,
-            history,
-            persona: activePersona,
-            modelMode: 'auto',
-            workspaceId: workspace.id,
-            userId: resolvedUserId,
-            supabaseToken: accessToken || undefined,
-            attachedFiles: compactAttachedFiles,
-            citationMode: true
-          })
-        });
-
-        const contentType = postRes.headers.get('content-type') || '';
-        if (postRes.ok && contentType.includes('application/json')) {
-          const parsed = await postRes.json().catch(() => null);
-          if (parsed && (parsed.reply || parsed.text)) {
-            data = parsed;
-          }
-        }
-      } catch {
-        // Proceed to lightweight fallback
-      }
-
-      // Attempt 2: GET fallback with query params and same-origin credentials
-      if (!data) {
-        try {
-          const params = new URLSearchParams({
-            prompt: userMsg.text.slice(0, 1200),
-            persona: activePersona,
-            workspaceId: workspace.id || 'general-study'
-          });
-          if (resolvedUserId) params.set('userId', resolvedUserId);
-          const firstVideo = compactAttachedFiles.find(f => f.type === 'video' || (f.url && f.url.startsWith('http')));
-          if (firstVideo && firstVideo.url) {
-            params.set('fileUrl', firstVideo.url);
-            params.set('fileName', firstVideo.name);
-          }
-
-          const getRes = await fetch(`/api/ai-tutor?${params.toString()}`, {
-            method: 'GET',
-            credentials: 'same-origin',
-            headers: { 'Accept': 'application/json' }
-          });
-
-          const contentType = getRes.headers.get('content-type') || '';
-          if (getRes.ok && contentType.includes('application/json')) {
-            const parsed = await getRes.json().catch(() => null);
-            if (parsed && (parsed.reply || parsed.text)) {
-              data = parsed;
-            }
-          }
-        } catch {
-          // Fall through
-        }
-      }
-
-      if (!data || (!data.reply && !data.text)) {
-        const fallback = buildClientFallbackReply(userMsg.text);
-        data = {
-          reply: fallback.reply,
-          citations: fallback.citations,
-          source: 'StudyWeb AI Tutor',
-          personaUsed: activePersona
-        };
-      }
-
-      const aiMsg: Message = {
-        id: `msg-ai-${Date.now() + 1}`,
-        sender: 'ai',
-        text: data.reply || data.text || 'I am ready to help you with your question.',
-        citations: data.citations,
-        source: data.source || 'Gemini AI',
-        persona: (data.personaUsed as TutorPersona) || activePersona,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-
-      setMessages(prev => [...prev, aiMsg]);
-    } catch {
-      const fallback = buildClientFallbackReply(userMsg.text);
-      const aiMsg: Message = {
-        id: `msg-ai-${Date.now() + 1}`,
-        sender: 'ai',
-        text: fallback.reply,
-        citations: fallback.citations,
-        source: 'StudyWeb AI Tutor',
+      const aiMsg = await AITutorBackgroundService.sendTutorMessage({
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        userId: resolvedUserId,
+        prompt: userMsg.text,
         persona: activePersona,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
+        history,
+        compactAttachedFiles,
+        accessToken,
+        userMsg,
+        buildFallbackReply: buildClientFallbackReply
+      });
 
-      setMessages(prev => [...prev, aiMsg]);
+      setMessages(prev => {
+        if (prev.some(m => m.id === aiMsg.id)) return prev;
+        return [...prev, aiMsg as Message];
+      });
+
+      if (autoSpeak) {
+        handleSpeakMessage(aiMsg.id, aiMsg.text, aiMsg.persona as TutorPersona);
+      }
+    } catch (err) {
+      console.error('[WorkspaceChat] Error sending message to background tutor:', err);
     } finally {
       setIsThinking(false);
     }
@@ -950,6 +1221,42 @@ export default function WorkspaceChat({
     );
   };
 
+  // Workspace Logo helper (supports custom image/data-url, emoji, and theme accents)
+  const workspaceLogo = (workspace as any)?.logo || (workspace as any)?.icon || (workspace as any)?.logoUrl || workspace?.emoji || '🧬';
+  const isWorkspaceImageLogo = typeof workspaceLogo === 'string' &&
+    (workspaceLogo.startsWith('data:') || workspaceLogo.startsWith('http://') || workspaceLogo.startsWith('https://') || (workspaceLogo.startsWith('/') && !workspaceLogo.includes('logo-inner.png')));
+
+  const renderWorkspaceLogo = (sizeClass = 'w-7 h-7 sm:w-8.5 sm:h-8.5', textClass = 'text-base sm:text-lg') => {
+    const themeBg: Record<string, string> = {
+      indigo: 'bg-indigo-50 dark:bg-indigo-950/70 border-indigo-200/80 dark:border-indigo-800/60 text-indigo-600 dark:text-indigo-300',
+      emerald: 'bg-emerald-50 dark:bg-emerald-950/70 border-emerald-200/80 dark:border-emerald-800/60 text-emerald-600 dark:text-emerald-300',
+      amber: 'bg-amber-50 dark:bg-amber-950/70 border-amber-200/80 dark:border-amber-800/60 text-amber-600 dark:text-amber-300',
+      rose: 'bg-rose-50 dark:bg-rose-950/70 border-rose-200/80 dark:border-rose-800/60 text-rose-600 dark:text-rose-300',
+      violet: 'bg-violet-50 dark:bg-violet-950/70 border-violet-200/80 dark:border-violet-800/60 text-violet-600 dark:text-violet-300',
+      cyan: 'bg-cyan-50 dark:bg-cyan-950/70 border-cyan-200/80 dark:border-cyan-800/60 text-cyan-600 dark:text-cyan-300',
+    };
+    const currentThemeClass = themeBg[workspace.colorTheme || 'indigo'] || themeBg.indigo;
+
+    return (
+      <div 
+        className={`${sizeClass} rounded-xl border flex items-center justify-center shrink-0 overflow-hidden shadow-2xs select-none ${currentThemeClass}`}
+        title={`Workspace: ${workspace.name}`}
+      >
+        {isWorkspaceImageLogo ? (
+          <img 
+            src={workspaceLogo} 
+            alt={`${workspace.name} Logo`} 
+            className="w-full h-full object-cover select-none" 
+          />
+        ) : (
+          <span className={`${textClass} leading-none select-none`}>
+            {workspaceLogo}
+          </span>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="w-full h-full md:h-[calc(100vh-130px)] md:min-h-[500px] flex flex-col bg-white dark:bg-slate-950 md:rounded-2xl md:border md:border-slate-200/90 dark:md:border-slate-800 md:shadow-sm relative font-sans overflow-hidden">
       
@@ -958,11 +1265,9 @@ export default function WorkspaceChat({
       {/* ============================================================== */}
       <header className="px-2.5 sm:px-6 py-2 sm:py-3 border-b border-slate-200/80 dark:border-slate-800/80 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md flex items-center justify-between gap-1.5 sm:gap-2 shrink-0 z-20">
         
-        {/* Left: Tutor Branding & Workspace indicator */}
+        {/* Left: Workspace Logo & AI Tutor Branding */}
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          <div className="w-7 h-7 sm:w-8.5 sm:h-8.5 flex items-center justify-center shrink-0">
-            <img src="/logo-inner.png" alt="StudyWeb Logo" className="w-full h-full object-contain select-none" />
-          </div>
+          {renderWorkspaceLogo('w-7 h-7 sm:w-8.5 sm:h-8.5', 'text-base sm:text-lg')}
 
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
@@ -1086,6 +1391,206 @@ export default function WorkspaceChat({
             )}
           </div>
 
+          {/* AI Tutor Voice Settings Popover */}
+          <div className="relative" ref={voiceSettingsRef}>
+            <button
+              type="button"
+              onClick={() => setShowVoiceSettings(prev => !prev)}
+              className={`px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all border active:scale-95 shadow-2xs ${
+                showVoiceSettings || autoSpeak
+                  ? 'bg-indigo-50 dark:bg-indigo-950/70 border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-300'
+                  : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200/80 dark:border-slate-750/80'
+              }`}
+              title="Voice Profile & Text-to-Speech Settings"
+            >
+              <Volume2 className={`w-3.5 h-3.5 ${autoSpeak ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'}`} />
+              <span className="hidden sm:inline font-bold">
+                {VOICE_PROFILES[selectedVoiceProfile]?.name || 'Voice'}
+              </span>
+              <span className="hidden md:inline text-[10px] opacity-75 font-normal">
+                ({VOICE_PROFILES[selectedVoiceProfile]?.genderLabel.split(' ')[0]})
+              </span>
+              <ChevronDown className="w-2.5 h-2.5 text-slate-400" />
+            </button>
+
+            {showVoiceSettings && (
+              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-4 z-50 space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
+                {/* Header */}
+                <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                      <Volume2 className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white leading-tight">
+                        Tutor Voice Settings
+                      </h4>
+                      <p className="text-[10px] text-slate-400 font-medium">Auditory Socratic feedback & profiles</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowVoiceSettings(false)}
+                    className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Auto-Speech Toggle Switch */}
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200/70 dark:border-slate-800/70">
+                  <div>
+                    <div className="font-bold text-xs text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                      <span>Auto-Speak Responses</span>
+                      {autoSpeak && (
+                        <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded uppercase">Active</span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Read tutor feedback aloud automatically</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !autoSpeak;
+                      setAutoSpeak(next);
+                      try { localStorage.setItem('study_tutor_auto_speak', String(next)); } catch {}
+                      if (!next) stopSpeech();
+                    }}
+                    className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
+                      autoSpeak ? 'bg-indigo-600 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
+                    }`}
+                  >
+                    <motion.div 
+                      layout
+                      transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                      className="bg-white w-4 h-4 rounded-full shadow-md"
+                    />
+                  </button>
+                </div>
+
+                {/* Voice Profile Selection */}
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 px-0.5">
+                    Select Voice Profile
+                  </div>
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {(Object.keys(VOICE_PROFILES) as VoiceProfileId[]).map((vKey) => {
+                      const v = VOICE_PROFILES[vKey];
+                      const isSelected = selectedVoiceProfile === vKey;
+                      const isPreviewing = isPlayingPreview === vKey || speakingMessageId === `preview-${vKey}`;
+
+                      return (
+                        <div
+                          key={vKey}
+                          onClick={() => {
+                            setSelectedVoiceProfile(vKey);
+                            try { localStorage.setItem('study_tutor_voice_profile', vKey); } catch {}
+                          }}
+                          className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2.5 ${
+                            isSelected
+                              ? 'bg-indigo-50/70 dark:bg-indigo-950/60 border-indigo-400/80 dark:border-indigo-600/80 shadow-xs'
+                              : 'bg-white dark:bg-slate-800/40 border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className="text-xl shrink-0 select-none">{v.icon}</span>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-extrabold text-xs text-slate-900 dark:text-white">
+                                  {v.name}
+                                </span>
+                                <span className={`text-[9.5px] font-bold px-1.5 py-0.2 rounded-md ${
+                                  v.genderLabel.includes('Female')
+                                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                                    : v.genderLabel.includes('Male')
+                                    ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                                    : v.genderLabel.includes('Dynamic')
+                                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                }`}>
+                                  {v.genderLabel}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate leading-tight mt-0.5">
+                                {v.description}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Sample button & checkmark */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handlePreviewVoice(v);
+                              }}
+                              className={`p-1.5 rounded-lg border text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer ${
+                                isPreviewing
+                                  ? 'bg-indigo-600 text-white border-indigo-600'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-950 border-slate-200 dark:border-slate-700'
+                              }`}
+                              title={`Preview ${v.name} voice`}
+                            >
+                              {isPreviewing ? (
+                                <>
+                                  <Square className="w-2.5 h-2.5 fill-current" />
+                                  <span>Stop</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="w-2.5 h-2.5 fill-current" />
+                                  <span>Sample</span>
+                                </>
+                              )}
+                            </button>
+                            {isSelected && (
+                              <div className="w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                                <Check className="w-2.5 h-2.5 stroke-[3]" />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Speech Pace Rate */}
+                <div className="space-y-1.5 pt-0.5">
+                  <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-slate-400 px-0.5">
+                    <span>Speech Pace</span>
+                    <span className="text-indigo-600 dark:text-indigo-400 font-bold">{speechRate}x Speed</span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[
+                      { rate: 0.85, label: '0.85x' },
+                      { rate: 1.0, label: '1.0x (Normal)' },
+                      { rate: 1.15, label: '1.15x' },
+                      { rate: 1.25, label: '1.25x' }
+                    ].map(item => (
+                      <button
+                        key={item.rate}
+                        type="button"
+                        onClick={() => {
+                          setSpeechRate(item.rate);
+                          try { localStorage.setItem('study_tutor_speech_rate', String(item.rate)); } catch {}
+                        }}
+                        className={`py-1 px-1.5 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer text-center ${
+                          speechRate === item.rate
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                            : 'bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* New Chat Button */}
           <button
             onClick={handleResetChat}
@@ -1137,8 +1642,8 @@ export default function WorkspaceChat({
             >
               {/* AI Avatar */}
               {msg.sender === 'ai' && (
-                <div className="w-7 h-7 sm:w-8.5 sm:h-8.5 flex items-center justify-center shrink-0 mt-0.5">
-                  <img src="/logo-inner.png" alt="AI Tutor" className="w-full h-full object-contain select-none" />
+                <div className="shrink-0 mt-0.5">
+                  {renderWorkspaceLogo('w-7 h-7 sm:w-8.5 sm:h-8.5', 'text-xs sm:text-sm')}
                 </div>
               )}
 
@@ -1234,12 +1739,47 @@ export default function WorkspaceChat({
                   )}
                 </div>
 
-                {/* AI Bubble Actions: Copy */}
-                {msg.sender === 'ai' && (
-                  <div className="flex items-center gap-3 pl-2 text-xs text-slate-400">
+                {/* AI Bubble Actions: Listen (TTS) & Copy */}
+                {msg.sender === 'ai' && !msg.isError && (
+                  <div className="flex items-center gap-2 pl-2 text-xs text-slate-400 mt-1">
                     <button
+                      type="button"
+                      onClick={() => handleSpeakMessage(msg.id, msg.text, msg.persona)}
+                      className={`flex items-center gap-1.5 cursor-pointer transition-colors px-2.5 py-1 rounded-xl text-xs font-semibold border ${
+                        speakingMessageId === msg.id
+                          ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/70 border-indigo-200 dark:border-indigo-800 font-bold shadow-2xs'
+                          : 'hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-slate-100 dark:hover:bg-slate-800 border-transparent hover:border-slate-200 dark:hover:border-slate-750'
+                      }`}
+                      title={speakingMessageId === msg.id ? "Stop auditory playback" : "Listen to this tutor explanation aloud"}
+                    >
+                      {speakingMessageId === msg.id ? (
+                        <>
+                          <Square className="w-3.5 h-3.5 fill-current text-indigo-600 dark:text-indigo-400" />
+                          <span>Stop</span>
+                          {/* Animated sound wave bars */}
+                          <div className="flex items-center gap-0.5 ml-0.5">
+                            <span className="w-0.5 h-2.5 bg-indigo-600 dark:bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <span className="w-0.5 h-3.5 bg-indigo-600 dark:bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <span className="w-0.5 h-2 bg-indigo-600 dark:bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                          </div>
+                        </>
+                      ) : isTtsLoading && targetLoadingId === msg.id ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-500" />
+                          <span>Preparing Voice...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="w-3.5 h-3.5 text-indigo-500" />
+                          <span>Listen</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => handleCopy(msg.id, msg.text)}
-                      className="hover:text-indigo-600 flex items-center gap-1 cursor-pointer transition-colors"
+                      className="hover:text-indigo-600 dark:hover:text-indigo-300 flex items-center gap-1.5 cursor-pointer transition-colors px-2.5 py-1 rounded-xl text-xs border border-transparent hover:bg-slate-100 dark:hover:bg-slate-800 hover:border-slate-200 dark:hover:border-slate-750"
                       title="Copy text to clipboard"
                     >
                       {copiedMsgId === msg.id ? (
@@ -1270,8 +1810,8 @@ export default function WorkspaceChat({
           {/* Thinking Indicator */}
           {isThinking && (
             <div className="flex gap-2.5 sm:gap-3.5 items-center">
-              <div className="w-7 h-7 sm:w-8.5 sm:h-8.5 flex items-center justify-center shrink-0">
-                <img src="/logo-inner.png" alt="AI Tutor" className="w-full h-full object-contain animate-pulse select-none" />
+              <div className="shrink-0">
+                {renderWorkspaceLogo('w-7 h-7 sm:w-8.5 sm:h-8.5 animate-pulse', 'text-xs sm:text-sm')}
               </div>
               <div className="px-3.5 py-2.5 sm:p-4 rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-xs sm:text-sm font-semibold text-slate-500 flex items-center gap-2 shadow-xs">
                 <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-500 animate-pulse shrink-0" />
