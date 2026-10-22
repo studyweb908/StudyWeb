@@ -408,88 +408,6 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
           </motion.div>
         )}
       </AnimatePresence>
-      {activeTab !== 'overview' && activeTab !== 'chat' && (
-        /* COMPACT CLINICAL UPPER HEADER FOR SPECIALIZED TOOLS */
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-white border border-slate-150 rounded-[20px] p-6 shadow-sm backdrop-blur-md">
-          <div className="flex items-center gap-3 text-left">
-            <button
-              onClick={() => setActiveTab('overview')}
-              className="p-2 hover:bg-slate-50 rounded-xl text-slate-500 cursor-pointer border border-slate-150 flex items-center justify-center transition-all active:scale-95 shrink-0"
-              title="Back to Workspace Dashboard"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </button>
-            
-            <div className="flex items-center gap-2.5 min-w-0 relative">
-              <div className="w-10 h-10 bg-slate-50 rounded-xl border border-slate-150 flex items-center justify-center text-xl shadow-inner shrink-0 overflow-hidden">
-                {workspace.emoji && (workspace.emoji.startsWith('data:') || workspace.emoji.startsWith('http')) ? (
-                  <img src={workspace.emoji} alt="Logo" className="w-full h-full object-cover" />
-                ) : (
-                  workspace.emoji || '🧬'
-                )}
-              </div>
-              <div className="min-w-0">
-                <h1 className="text-sm sm:text-base font-black text-slate-900 leading-tight truncate">
-                  {workspace.name}
-                </h1>
-                <p className="text-[10px] text-slate-450 font-bold uppercase tracking-wider flex items-center gap-1.5 mt-0.5">
-                  <span className="bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded-md font-extrabold text-[9px]">
-                    {workspace.subject}
-                  </span>
-                  <span>•</span>
-                  <span className="capitalize text-slate-600 font-extrabold">
-                    {activeTab === 'chat' 
-                      ? 'AI Tutor' 
-                      : activeTab === 'quiz' 
-                        ? 'Quiz Center' 
-                        : activeTab === 'library' 
-                          ? 'Upload Material' 
-                          : activeTab === 'notes' 
-                            ? 'Notes' 
-                            : activeTab === 'flashcards' 
-                              ? 'Flashcards' 
-                              : activeTab}
-                  </span>
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
-            {/* Quick bookmarking inside focused view */}
-            <button 
-              onClick={() => updateWorkspaceState({ pinned: !workspace.pinned })}
-              className={`p-2 rounded-xl border transition-all cursor-pointer ${
-                workspace.pinned 
-                  ? 'bg-amber-50 border-amber-200 text-amber-500' 
-                  : 'bg-white border-slate-200 text-slate-400 hover:text-slate-600'
-              }`}
-              title="Pin Workspace"
-            >
-              <Pin className="w-3.5 h-3.5 fill-current" />
-            </button>
-            <button 
-              onClick={() => updateWorkspaceState({ favorite: !workspace.favorite })}
-              className={`p-2 rounded-xl border transition-all cursor-pointer ${
-                workspace.favorite 
-                  ? 'bg-rose-50 border-rose-200 text-rose-500' 
-                  : 'bg-white border-slate-200 text-slate-400 hover:text-slate-600'
-              }`}
-              title="Favorite Workspace"
-            >
-              <Star className="w-3.5 h-3.5 fill-current" />
-            </button>
-            <div className="h-6 w-[1px] bg-slate-200 mx-1 hidden sm:block" />
-            <button
-              onClick={onBack}
-              className="px-3 py-2 border border-slate-200 text-xs font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-xl cursor-pointer transition-all flex items-center gap-1.5"
-            >
-              All Workspaces
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* RENDER ACTIVE TAB COMPONENT CONTAINER */}
       <div className={`transition-all ${activeTab === 'chat' ? 'h-full flex-1 flex flex-col min-h-0 bg-transparent rounded-none' : 'bg-white dark:bg-slate-900 rounded-[24px]'}`}>
         <div className={activeTab === 'overview' ? 'block' : 'hidden'}>
@@ -513,16 +431,6 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
             onRemoveFile={handleRemoveFile}
             onClearAllFiles={handleClearAllFiles}
             onUpdateWorkspace={onUpdateWorkspace}
-            onOpenResearchInChat={(researchPayload) => {
-              setActiveTab('chat');
-              setTimeout(() => {
-                window.dispatchEvent(
-                  new CustomEvent('studyweb-notebook-research-chat', {
-                    detail: researchPayload
-                  })
-                );
-              }, 120);
-            }}
           />
         </div>
 
@@ -532,7 +440,6 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
             workspaces={workspaces}
             onSelectWorkspace={onSwitchWorkspace}
             onUpdateWorkspace={onUpdateWorkspace}
-            onOpenWebResearch={() => setActiveTab('library')}
           />
         </div>
 

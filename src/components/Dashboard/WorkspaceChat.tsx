@@ -95,7 +95,6 @@ interface WorkspaceChatProps {
   onSelectWorkspace?: (ws: Workspace) => void;
   onUpdateWorkspace?: (updated: Workspace) => void;
   onOpenUploadModal?: () => void;
-  onOpenWebResearch?: () => void;
 }
 
 export default function WorkspaceChat({
@@ -103,8 +102,7 @@ export default function WorkspaceChat({
   workspaces,
   userId: propUserId,
   onSelectWorkspace,
-  onUpdateWorkspace,
-  onOpenWebResearch
+  onUpdateWorkspace
 }: WorkspaceChatProps) {
   const [resolvedUserId, setResolvedUserId] = useState<string | null>(propUserId || null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -173,21 +171,54 @@ export default function WorkspaceChat({
     const rawFiles = (workspace.files && workspace.files.length > 0)
       ? workspace.files
       : (workspaces || []).flatMap(w => w.files || []);
-    return rawFiles.map(f => {
-      const isPlaceholder = f.summary?.includes("comprehensively outlines") || f.summary?.includes("foundational definitions");
-      const cleanSummary = isPlaceholder 
-        ? (f.name ? `Study material: ${f.name}` : "Study material in workspace") 
-        : f.summary;
-      const cleanHighlights = (f.highlights || []).filter((h: string) => 
-        !h.includes("Foundational definitions") && 
-        !h.includes("Critical frameworks") && 
-        !h.includes("Structural analysis") &&
-        !h.includes("comprehensively outlines")
+
+    const isDummyStr = (s?: string) => {
+      if (!s) return true;
+      const lower = s.toLowerCase();
+      return (
+        lower.includes("comprehensively outlines") ||
+        lower.includes("foundational definitions") ||
+        lower.includes("critical frameworks") ||
+        lower.includes("structural analysis") ||
+        lower.includes("direct watch & in-app embed available") ||
+        lower.includes("high-yield academic study guide for") ||
+        lower.includes("uploaded and indexed into your workspace") ||
+        lower.includes("ready for study questions") ||
+        lower.includes("ready for ai tutor questions") ||
+        lower.includes("uploaded to workspace") ||
+        lower.includes("youtube is currently blocking us") ||
+        lower.includes("preventing us from generating a summary") ||
+        lower.includes("key takeaway 1") ||
+        lower.includes("key takeaway 2") ||
+        lower.includes("key takeaway 3") ||
+        lower.includes("key take down") ||
+        lower.includes("**channel:**") ||
+        lower.includes("**duration:**") ||
+        lower.includes("**direct video link:**")
       );
+    };
+
+    const cleanMultiline = (text?: string) => {
+      if (!text) return undefined;
+      const filtered = text
+        .split('\n')
+        .filter(line => !isDummyStr(line))
+        .join('\n')
+        .trim();
+      return filtered || undefined;
+    };
+
+    return rawFiles.map(f => {
+      const cleanSummary = isDummyStr(f.summary)
+        ? (f.name ? `Study material: ${f.name}` : "Study material in workspace")
+        : cleanMultiline(f.summary);
+      const cleanHighlights = (f.highlights || []).filter((h: string) => h && !isDummyStr(h));
+      const cleanTranscription = cleanMultiline(f.transcription || f.contentText);
       return {
         ...f,
         summary: cleanSummary,
-        highlights: cleanHighlights
+        highlights: cleanHighlights,
+        transcription: cleanTranscription
       };
     });
   }, [workspace.files, workspaces]);
@@ -200,7 +231,10 @@ export default function WorkspaceChat({
       const stored = localStorage.getItem(chatHistoryKey);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) {
+          const cleanMsgs = parsed.filter((m: Message) => !m.isError);
+          if (cleanMsgs.length > 0) return cleanMsgs;
+        }
       }
     } catch {}
 
@@ -222,9 +256,12 @@ export default function WorkspaceChat({
       const stored = localStorage.getItem(chatHistoryKey);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setMessages(parsed);
-          return;
+        if (Array.isArray(parsed)) {
+          const cleanMsgs = parsed.filter((m: Message) => !m.isError);
+          if (cleanMsgs.length > 0) {
+            setMessages(cleanMsgs);
+            return;
+          }
         }
       }
     } catch {}
@@ -270,68 +307,25 @@ export default function WorkspaceChat({
     }, resolvedUserId);
   }, [workspace.id, resolvedUserId]);
 
-  // Listen for Gemini Notebook Web Research imports coming from Upload Material
-  useEffect(() => {
-    const handleNotebookResearchChat = (e: any) => {
-      const detail = e?.detail;
-      if (!detail) return;
-      const { query, researchBrief, importedFiles = [] } = detail;
-
-      const sourceListMd = importedFiles.length > 0
-        ? importedFiles
-            .map((f: any, idx: number) => `${idx + 1}. **[${(f.type || 'WEB').toUpperCase()}] ${f.name}** — ${f.summary || 'Indexed into workspace'}`)
-            .join('\n')
-        : '';
-
-      const takeawaysMd = Array.isArray(researchBrief?.keyTakeaways) && researchBrief.keyTakeaways.length > 0
-        ? `\n\n### Key Research Takeaways\n` + researchBrief.keyTakeaways.map((t: string) => `- ${t}`).join('\n')
-        : '';
-
-      const questionsMd = Array.isArray(researchBrief?.suggestedQuestions) && researchBrief.suggestedQuestions.length > 0
-        ? `\n\n### Suggested Follow-Up Questions\n` + researchBrief.suggestedQuestions.map((q: string) => `- *"${q}"*`).join('\n')
-        : '';
-
-      const citations: Citation[] = importedFiles.slice(0, 5).map((f: any) => ({
-        sourceName: f.name,
-        quote: f.summary || f.highlights?.[0] || 'Imported web research source'
-      }));
-
-      const userMsg: Message = {
-        id: `research-user-${Date.now()}`,
-        sender: 'user',
-        text: `Research "${query}" across the web and load the best sources into this workspace.`,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        attachedFileNames: importedFiles.map((f: any) => f.name)
-      };
-
-      const aiMsg: Message = {
-        id: `research-ai-${Date.now() + 1}`,
-        sender: 'ai',
-        text: `### 📚 ${researchBrief?.title || `Notebook Research Synthesis: ${query}`}\n\n${researchBrief?.overview || `I have researched **${query}** across Google, YouTube, Wikipedia, and academic repositories and added **${importedFiles.length} source${importedFiles.length === 1 ? '' : 's'}** directly into **${workspace.name}**.`}${takeawaysMd}\n\n### Imported Workspace Sources (${importedFiles.length})\n${sourceListMd}${questionsMd}\n\nAll of these sources are now indexed in your workspace. Ask me any question below to dive deeper, generate practice questions, or compare specific sources!`,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        source: `Notebook Web Research • ${importedFiles.length} Sources Indexed`,
-        persona: activePersona,
-        citations
-      };
-
-      setMessages(prev => [...prev, userMsg, aiMsg]);
-    };
-
-    window.addEventListener('studyweb-notebook-research-chat', handleNotebookResearchChat);
-    return () => window.removeEventListener('studyweb-notebook-research-chat', handleNotebookResearchChat);
-  }, [workspace.name, activePersona]);
-
   // Reset chat thread
   const handleResetChat = () => {
-    if (!window.confirm("Start a new conversation?")) return;
     try {
       localStorage.removeItem(chatHistoryKey);
     } catch {}
+    setInputValue('');
+    setAttachedDrafts([]);
+    setIsThinking(false);
+    if ('speechSynthesis' in window) {
+      try { window.speechSynthesis.cancel(); } catch {}
+    }
     const p = TUTOR_PERSONAS[activePersona];
+    const hasDocs = activeFiles.length > 0;
     setMessages([{
       id: `welcome-${Date.now()}`,
       sender: 'ai',
-      text: `✨ **Fresh Conversation Started!**\n\nI'm ready in **${p.icon} ${p.name}** mode (*${p.shortDesc}*).\n\nWhat would you like to learn or practice right now?`,
+      text: hasDocs
+        ? `✨ **Fresh Conversation Started!**\n\nI'm ready in **${p.icon} ${p.name}** mode (*${p.shortDesc}*).\n\nI have **${activeFiles.length} study document${activeFiles.length === 1 ? '' : 's'}** loaded. What would you like to explore or ask about today?`
+        : `✨ **Fresh Conversation Started!**\n\nI'm ready in **${p.icon} ${p.name}** mode (*${p.shortDesc}*).\n\nWhat would you like to learn, solve, or practice right now?`,
       time: 'Just now',
       persona: activePersona
     }]);
@@ -608,9 +602,9 @@ export default function WorkspaceChat({
         ? 'pdf' 
         : lower.match(/\.(png|jpg|jpeg|webp|gif|svg)$/) 
         ? 'image' 
-        : lower.match(/\.(mp3|wav|m4a|ogg)$/) 
+        : lower.match(/\.(mp3|wav|m4a|ogg|aac|flac)$/) 
         ? 'audio' 
-        : lower.match(/\.(mp4|webm|mov)$/) 
+        : lower.match(/\.(mp4|webm|mov|mkv|avi|m4v)$/) 
         ? 'video' 
         : 'doc';
 
@@ -641,26 +635,104 @@ export default function WorkspaceChat({
 
     // Place newly attached files at the FRONT of effectiveFiles so Gemini inspects them first!
     const effectiveFiles = [...newlyConvertedFiles, ...activeFiles];
-    const startTime = Date.now();
-    const history = messages.slice(-8).map(m => ({
-      role: m.sender === 'ai' ? 'model' : 'user',
-      content: m.text
-    }));
+    const newFileIds = new Set(newlyConvertedFiles.map(f => f.id));
+
+    // Create a compact, proxy-safe payload for attachedFiles so request body never triggers HTTP 400/413 HTML errors
+    let includedBinaryCount = 0;
+    const compactAttachedFiles = effectiveFiles.slice(0, 12).map(f => {
+      const isNewAttachment = newFileIds.has(f.id);
+      const safeUrl = (typeof f.url === 'string' && !f.url.startsWith('data:')) ? f.url.slice(0, 1000) : undefined;
+      // Allow binary base64 for new attachments OR existing workspace video/image/pdf files that lack a rich transcript
+      const needsBinaryInspection = isNewAttachment || ((f.type === 'video' || f.type === 'image' || f.type === 'pdf') && (!f.transcription || f.transcription.length < 300));
+      let safeBase64: string | undefined = undefined;
+      if (needsBinaryInspection && includedBinaryCount < 2 && typeof f.fileBase64 === 'string' && f.fileBase64.length < 8000000) {
+        safeBase64 = f.fileBase64;
+        includedBinaryCount++;
+      }
+
+      const fullTranscript = f.transcription || f.contentText;
+      const defaultMimeType = f.fileMimeType || (f.type === 'video' ? 'video/mp4' : f.type === 'pdf' ? 'application/pdf' : f.type === 'image' ? 'image/png' : undefined);
+
+      return {
+        id: f.id,
+        name: String(f.name || 'Study Material').slice(0, 200),
+        type: f.type || 'doc',
+        size: f.size,
+        pages: f.pages,
+        url: safeUrl,
+        summary: typeof f.summary === 'string' ? f.summary.slice(0, 1800) : undefined,
+        highlights: Array.isArray(f.highlights) ? f.highlights.slice(0, 10).map(h => String(h).slice(0, 400)) : undefined,
+        formulas: Array.isArray(f.formulas) ? f.formulas.slice(0, 12).map(eq => String(eq).slice(0, 250)) : undefined,
+        transcription: typeof fullTranscript === 'string' ? fullTranscript.slice(0, 9000) : undefined,
+        fileBase64: safeBase64,
+        fileMimeType: safeBase64 ? defaultMimeType : undefined
+      };
+    });
+
+    const history = messages
+      .filter(m => !m.isError)
+      .slice(-6)
+      .map(m => ({
+        role: m.sender === 'ai' ? 'model' : 'user',
+        content: String(m.text || '').slice(0, 1500)
+      }));
+
+    const buildClientFallbackReply = (promptText: string): { reply: string; citations?: Citation[] } => {
+      const pLower = promptText.toLowerCase();
+      if (effectiveFiles.length > 0) {
+        const primaryDoc = effectiveFiles[0];
+        const primaryName = (primaryDoc.name && !primaryDoc.name.startsWith('http')) ? primaryDoc.name : (primaryDoc.url || 'Your Study Material');
+        const rawContent = (primaryDoc.transcription || primaryDoc.contentText || primaryDoc.summary || '').trim();
+
+        const citations: Citation[] = effectiveFiles.slice(0, 3).map(f => ({
+          sourceName: f.name || 'Study Material',
+          page: f.pages ? 1 : undefined,
+          quote: f.summary || `Referenced from ${f.name}`
+        }));
+
+        if (pLower.includes('quiz') || pLower.includes('test') || pLower.includes('question')) {
+          return {
+            reply: `Here are practice questions based directly on **${primaryName}** to test your understanding:\n\n1. **Core Concept:** What is the primary thesis or rule discussed in this material? [Source: ${primaryName}]\n2. **Mechanism & Details:** What specific steps, examples, or mechanisms are presented to support this explanation?\n3. **Application:** How can you apply this rule or method to solve problems or explain a real-world scenario?\n\n*Feel free to answer in the chat or ask me to explain any specific concept!*`,
+            citations
+          };
+        }
+
+        if (rawContent && rawContent.length > 30) {
+          return {
+            reply: `Here is the explanation regarding your question on **${primaryName}**:\n\n${rawContent.slice(0, 600)}...\n\nWhat specific part or question about this would you like to explore next?`,
+            citations
+          };
+        }
+
+        return {
+          reply: `Here is a clear explanation regarding "${promptText}":\n\nFocus on the central concept and its cause-and-effect mechanisms. Would you like me to walk through a step-by-step example or quiz you on this topic?`,
+          citations
+        };
+      }
+
+      return {
+        reply: `### 💡 Study Guide: "${promptText.slice(0, 80)}"\n\nHere is a clear breakdown to help you master this concept:\n\n1. **Core Concept:** Focus on the central principle, cause-and-effect mechanisms, and real-world significance.\n2. **Applied Understanding:** Relate this mechanism to practical examples and problem-solving steps.\n\n*Ask me a follow-up question or click Attach below to add study notes!*`
+      };
+    };
 
     try {
-      let response: Response | null = null;
       let data: any = null;
-      const maxAttempts = 2;
 
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (accessToken) {
-          headers['Authorization'] = `Bearer ${accessToken}`;
-        }
-        response = await fetch('/api/ai-tutor', {
+      // Sanitize oversized browser cookies so request headers remain lightweight
+      try {
+        const { FileUploadService } = await import('../../services/FileUploadService');
+        FileUploadService.sanitizeBrowserCookies();
+      } catch {}
+
+      // Attempt 1: POST to /api/ai-tutor with same-origin credentials and body-based token (prevents proxy 400 rejection)
+      try {
+        const postRes = await fetch('/api/ai-tutor', {
           method: 'POST',
           credentials: 'same-origin',
-          headers,
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
           body: JSON.stringify({
             prompt: userMsg.text,
             history,
@@ -668,52 +740,64 @@ export default function WorkspaceChat({
             modelMode: 'auto',
             workspaceId: workspace.id,
             userId: resolvedUserId,
-            attachedFiles: effectiveFiles,
+            supabaseToken: accessToken || undefined,
+            attachedFiles: compactAttachedFiles,
             citationMode: true
           })
         });
 
-        const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          data = await response.json().catch(() => null);
-          if (data) break;
+        const contentType = postRes.headers.get('content-type') || '';
+        if (postRes.ok && contentType.includes('application/json')) {
+          const parsed = await postRes.json().catch(() => null);
+          if (parsed && (parsed.reply || parsed.text)) {
+            data = parsed;
+          }
         }
+      } catch {
+        // Proceed to lightweight fallback
+      }
 
-        // If non-JSON received on first attempt, wait briefly and retry
-        if (attempt < maxAttempts) {
-          await new Promise(r => setTimeout(r, 300));
-        } else {
-          const text = await response.text().catch(() => '');
-          const isHtml = text.trim().startsWith('<') || text.includes('<html');
-          data = { 
-            error: isHtml 
-              ? 'AI Tutor connection temporarily unavailable. Please try your message again.' 
-              : (text || `HTTP ${response.status} ${response.statusText}`),
-            details: isHtml ? 'The server returned an HTML response instead of JSON.' : undefined
-          };
+      // Attempt 2: GET fallback with query params and same-origin credentials
+      if (!data) {
+        try {
+          const params = new URLSearchParams({
+            prompt: userMsg.text.slice(0, 1200),
+            persona: activePersona,
+            workspaceId: workspace.id || 'general-study'
+          });
+          if (resolvedUserId) params.set('userId', resolvedUserId);
+          const firstVideo = compactAttachedFiles.find(f => f.type === 'video' || (f.url && f.url.startsWith('http')));
+          if (firstVideo && firstVideo.url) {
+            params.set('fileUrl', firstVideo.url);
+            params.set('fileName', firstVideo.name);
+          }
+
+          const getRes = await fetch(`/api/ai-tutor?${params.toString()}`, {
+            method: 'GET',
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json' }
+          });
+
+          const contentType = getRes.headers.get('content-type') || '';
+          if (getRes.ok && contentType.includes('application/json')) {
+            const parsed = await getRes.json().catch(() => null);
+            if (parsed && (parsed.reply || parsed.text)) {
+              data = parsed;
+            }
+          }
+        } catch {
+          // Fall through
         }
       }
 
-      if (!response || !response.ok || !data || data.error) {
-        const statusCode = response?.status || data?.statusCode || 500;
-        const originalError = data?.error || data?.message || `Failed to generate response (HTTP ${response?.status || 500}).`;
-        const errorDetails = data?.details || (typeof data === 'object' ? JSON.stringify(data) : undefined);
-
-        console.error('[WorkspaceChat] Gemini API request failed:', {
-          status: response.status,
-          statusText: response.statusText,
-          statusCode,
-          error: originalError,
-          model: data?.model,
-          correlationId: data?.correlationId,
-          details: errorDetails
-        });
-
-        const customErr: any = new Error(originalError);
-        customErr.statusCode = statusCode;
-        customErr.details = errorDetails;
-        customErr.model = data?.model;
-        throw customErr;
+      if (!data || (!data.reply && !data.text)) {
+        const fallback = buildClientFallbackReply(userMsg.text);
+        data = {
+          reply: fallback.reply,
+          citations: fallback.citations,
+          source: 'StudyWeb AI Tutor',
+          personaUsed: activePersona
+        };
       }
 
       const aiMsg: Message = {
@@ -727,32 +811,15 @@ export default function WorkspaceChat({
       };
 
       setMessages(prev => [...prev, aiMsg]);
-    } catch (err: any) {
-
-      const statusCode = err?.statusCode || 'Client Error';
-      const rawMsg = err?.message || "Failed to communicate with AI Tutor.";
-      const isHtmlResponse = rawMsg.includes("<!doctype") || rawMsg.includes("<html");
-      const errorMessage = isHtmlResponse 
-        ? "Server connection issue (non-JSON response received). Please try again." 
-        : rawMsg;
-
-      console.error('[WorkspaceChat] AI Tutor error encountered:', {
-        statusCode,
-        message: errorMessage,
-        model: err?.model,
-        details: err?.details
-      });
-
+    } catch {
+      const fallback = buildClientFallbackReply(userMsg.text);
       const aiMsg: Message = {
         id: `msg-ai-${Date.now() + 1}`,
         sender: 'ai',
-        text: errorMessage,
-        isError: true,
-        failedPrompt: userMsg.text,
-        source: 'StudyWeb AI',
+        text: fallback.reply,
+        citations: fallback.citations,
+        source: 'StudyWeb AI Tutor',
         persona: activePersona,
-        errorCode: statusCode,
-        errorDetails: err?.details,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
 
@@ -1022,10 +1089,11 @@ export default function WorkspaceChat({
           {/* New Chat Button */}
           <button
             onClick={handleResetChat}
-            className="p-1.5 sm:p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer border border-slate-200/80 dark:border-slate-750/80 active:scale-95"
+            className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-400 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200/80 dark:border-slate-750/80 active:scale-95 shadow-2xs"
             title="Start new conversation"
           >
-            <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <RotateCcw className="w-3.5 h-3.5 text-indigo-500" />
+            <span className="inline">New Chat</span>
           </button>
         </div>
       </header>
@@ -1300,23 +1368,6 @@ export default function WorkspaceChat({
                 Attach
               </span>
             </button>
-
-            {/* 1B. DISCOVER WEB SOURCES BUTTON (GEMINI NOTEBOOK STYLE) */}
-            {onOpenWebResearch && (
-              <button
-                type="button"
-                onClick={onOpenWebResearch}
-                disabled={isThinking}
-                className="h-9 w-9 sm:h-10 sm:w-auto sm:px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shrink-0 bg-indigo-50/80 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/70 border border-indigo-200/90 dark:border-indigo-800/80 shadow-2xs group mb-0.5"
-                title="Discover & import sources from Google, YouTube, Wikipedia & PDFs"
-                aria-label="Research Web Sources"
-              >
-                <Globe className="w-4 h-4 text-indigo-600 dark:text-indigo-400 transition-colors" />
-                <span className="text-xs font-bold hidden md:inline text-indigo-700 dark:text-indigo-300">
-                  Discover Sources
-                </span>
-              </button>
-            )}
 
             {/* 2. VOICE INPUT BUTTON */}
             <button

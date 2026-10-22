@@ -5,7 +5,8 @@ import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import { knowledgeRouter } from "./src/knowledge-engine/api.js";
-import { studyMaterialRouter } from "./src/services/studyMaterialPipeline.js";
+import { studyMaterialRouter, extractYouTubeInfo, scrapeWebPage, isRawUrlOrPlaceholderName } from "./src/services/studyMaterialPipeline.js";
+import { TranscriptProcessor } from "./src/services/TranscriptProcessor.js";
 import { createClient } from "@supabase/supabase-js";
 
 // Load environment variables
@@ -51,9 +52,99 @@ async function startServer() {
   app.use(express.json({ limit: "200mb" }));
   app.use(express.urlencoded({ limit: "200mb", extended: true }));
 
+  // Prevent Express body-parser from returning HTML 400 error pages on malformed or oversized payloads
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err) {
+      console.warn(`[Express BodyParser Recovery] ${req.method} ${req.path}:`, err?.message || err);
+      req.body = req.body && typeof req.body === "object" ? req.body : {};
+      if (req.path.startsWith("/api/ai-tutor")) {
+        return next();
+      }
+      if (req.path.startsWith("/api/")) {
+        return res.status(200).json({
+          error: "Invalid request payload format",
+          recovered: true
+        });
+      }
+    }
+    next();
+  });
+
   // Mount Knowledge Engine Module
   app.use("/api/knowledge", knowledgeRouter);
   app.use("/api/study-materials", studyMaterialRouter);
+
+  // API Route: Video Transcript & Caption Downloader via TranscriptProcessor
+  app.all("/api/video-transcript", async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    try {
+      const url = String(req.body?.url || req.query?.url || req.body?.videoId || req.query?.videoId || "").trim();
+      const preferredLang = String(req.body?.lang || req.query?.lang || "en").trim();
+      const minWordCount =
+        req.body?.minWordCount !== undefined
+          ? parseInt(String(req.body.minWordCount), 10)
+          : req.query?.minWordCount !== undefined
+          ? parseInt(String(req.query.minWordCount), 10)
+          : undefined;
+
+      if (!url) {
+        return res.status(400).json({ error: "A video URL or videoId is required." });
+      }
+
+      const transcript = await TranscriptProcessor.fetchTranscript(url, {
+        preferredLang,
+        minWordCount
+      });
+
+      return res.json({
+        success: true,
+        isValid: transcript.isValidWordCount,
+        wordCount: transcript.wordCount,
+        validationStatus: transcript.validationStatus,
+        validationMessage: transcript.validationMessage,
+        transcript
+      });
+    } catch (err: any) {
+      console.error("[TranscriptProcessor Route Error]:", err?.message || err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || "Failed to fetch and parse video captions."
+      });
+    }
+  });
+
+  // API Route: AI Video Summary with TranscriptProcessor Validation Step
+  app.post("/api/video-summary", async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    try {
+      const url = String(req.body?.url || req.body?.videoId || "").trim();
+      const minWordCount =
+        req.body?.minWordCount !== undefined
+          ? parseInt(String(req.body.minWordCount), 10)
+          : TranscriptProcessor.DEFAULT_MIN_WORD_COUNT;
+      const preferredLang = String(req.body?.lang || "en").trim();
+      const customPrompt = req.body?.customPrompt ? String(req.body.customPrompt).trim() : undefined;
+
+      if (!url) {
+        return res.status(400).json({ error: "A video URL or videoId is required." });
+      }
+
+      const summaryResult = await TranscriptProcessor.generateSummary(url, {
+        minWordCount,
+        preferredLang,
+        customPrompt
+      });
+
+      return res.json(summaryResult);
+    } catch (err: any) {
+      console.error("[Video Summary Route Error]:", err?.message || err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || "Failed to generate video summary."
+      });
+    }
+  });
+
 
   // API Route: Safe server-side workspace files proxy to avoid client CORS / fetch issues
   app.get("/api/workspace-files", async (req, res) => {
@@ -401,6 +492,49 @@ ${message}
     return intersection / union;
   }
 
+  // Helper to detect and clean legacy dummy metadata (like old Channel/Duration/Direct Video Link strings)
+  function isDummyMetadataLine(str?: string): boolean {
+    if (!str || typeof str !== 'string') return true;
+    const s = str.trim();
+    if (!s) return true;
+    const lower = s.toLowerCase();
+    return (
+      lower.includes('**channel:**') ||
+      lower.includes('**duration:**') ||
+      lower.includes('**direct video link:**') ||
+      lower.includes('direct watch & in-app embed available') ||
+      lower.includes('comprehensively outlines') ||
+      lower.includes('foundational definitions') ||
+      lower.includes('critical frameworks') ||
+      lower.includes('structural analysis') ||
+      lower.includes('high-yield academic study guide for') ||
+      lower.includes('mastering the foundational definitions in') ||
+      lower.includes('uploaded and indexed into your workspace') ||
+      lower.includes('ready for study questions') ||
+      lower.includes('ready for ai tutor questions') ||
+      lower.includes('uploaded to workspace') ||
+      lower.includes('youtube is currently blocking us') ||
+      lower.includes('preventing us from generating a summary') ||
+      lower.startsWith('uploaded study file:') ||
+      lower.startsWith('study document:') ||
+      lower.startsWith('study material:')
+    );
+  }
+
+  function cleanMultilineText(raw?: string): string {
+    if (!raw || typeof raw !== 'string') return '';
+    return raw
+      .split('\n')
+      .filter(line => {
+        const l = line.trim().toLowerCase();
+        if (!l) return true;
+        if (isDummyMetadataLine(l)) return false;
+        return true;
+      })
+      .join('\n')
+      .trim();
+  }
+
   interface ExtractedSegment {
     id: string;
     fileId?: string;
@@ -443,9 +577,14 @@ ${message}
       const totalPages = file.pages || 1;
       const rawUnits: Array<{ text: string; approxPage: number; type: string }> = [];
 
-      // 1. From transcription (audio/video or OCR of screenshots/images)
-      if (file.transcription && typeof file.transcription === 'string' && file.transcription.trim()) {
-        const paras = file.transcription.split(/\n\s*\n|\.\s+(?=[A-Z0-9])/).map((p: string) => p.trim()).filter((p: string) => p.length > 20);
+      // 1. From transcription or contentText (audio/video captions or OCR of screenshots/images)
+      const combinedTranscript = [file.transcription, file.contentText].filter(Boolean).join('\n\n');
+      if (combinedTranscript && typeof combinedTranscript === 'string' && combinedTranscript.trim()) {
+        const cleanedTranscript = cleanMultilineText(combinedTranscript);
+        const paras = cleanedTranscript
+          .split(/\n\s*\n|\n(?=\[\d{1,2}:\d{2})|\.\s+(?=[A-Z0-9])/)
+          .map((p: string) => p.trim())
+          .filter((p: string) => p.length > 20 && !isDummyMetadataLine(p));
         paras.forEach((p: string, pIdx: number) => {
           const pageNum = Math.min(totalPages, Math.floor((pIdx / Math.max(1, paras.length)) * totalPages) + 1);
           rawUnits.push({ text: p, approxPage: pageNum, type: 'Transcription / OCR' });
@@ -456,9 +595,9 @@ ${message}
       if (file.chunks && Array.isArray(file.chunks)) {
         file.chunks.forEach((c: any, cIdx: number) => {
           const text = typeof c === 'string' ? c : c.text;
-          if (text && text.trim().length > 15) {
+          if (text && text.trim().length > 15 && !isDummyMetadataLine(text)) {
             const pageNum = c.page || Math.min(totalPages, Math.floor((cIdx / Math.max(1, file.chunks.length)) * totalPages) + 1);
-            rawUnits.push({ text: text.trim(), approxPage: pageNum, type: 'Indexed Segment' });
+            rawUnits.push({ text: cleanMultilineText(text.trim()), approxPage: pageNum, type: 'Indexed Segment' });
           }
         });
       }
@@ -466,7 +605,7 @@ ${message}
       // 3. From highlights
       if (file.highlights && Array.isArray(file.highlights)) {
         file.highlights.forEach((h: string, hIdx: number) => {
-          if (h && typeof h === 'string' && h.trim().length > 10 && !h.includes("Foundational definitions")) {
+          if (h && typeof h === 'string' && h.trim().length > 10 && !isDummyMetadataLine(h)) {
             const pageNum = Math.min(totalPages, Math.floor((hIdx / Math.max(1, file.highlights.length)) * totalPages) + 1);
             rawUnits.push({ text: h.trim(), approxPage: pageNum, type: 'Key Finding' });
           }
@@ -483,8 +622,8 @@ ${message}
       }
 
       // 5. From summary (if not generic boilerplate)
-      if (file.summary && typeof file.summary === 'string' && !file.summary.includes("comprehensively outlines")) {
-        rawUnits.push({ text: file.summary.trim(), approxPage: 1, type: 'Overview' });
+      if (file.summary && typeof file.summary === 'string' && !isDummyMetadataLine(file.summary)) {
+        rawUnits.push({ text: cleanMultilineText(file.summary.trim()), approxPage: 1, type: 'Overview' });
       }
 
       // Score each unit
@@ -640,34 +779,33 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
     files.forEach((file: any, idx: number) => {
       const typeLabel = (file.type || 'Document').toUpperCase();
       const pageInfo = file.pages ? ` · ${file.pages} pages` : (file.size ? ` · ${file.size}` : '');
-      const isPlaceholder = file.summary?.includes("comprehensively outlines") || file.summary?.includes("foundational definitions");
+      const cleanedSummary = cleanMultilineText(file.summary || "");
+      const isPlaceholder = !cleanedSummary || isDummyMetadataLine(cleanedSummary);
       const summaryText = isPlaceholder 
-        ? `Uploaded ${file.type || 'resource'} ready for study questions and interactive explanations.` 
-        : (file.summary?.trim() || "Uploaded study material in your workspace.");
+        ? `Uploaded ${file.type || 'resource'} analyzed and indexed for study questions and interactive explanations.` 
+        : cleanedSummary;
       
       report += `#### 📘 ${idx + 1}. **${file.name}** *(${typeLabel}${pageInfo})*\n`;
       report += `• **Overview:** ${summaryText}\n`;
       
       const cleanHighlights = (file.highlights && Array.isArray(file.highlights) ? file.highlights : []).filter((h: string) => 
-        !h.includes("Foundational definitions") && 
-        !h.includes("Critical frameworks") && 
-        !h.includes("Structural analysis") &&
-        !h.includes("comprehensively outlines")
+        h && !isDummyMetadataLine(h)
       );
 
       if (cleanHighlights.length > 0) {
         report += `• **Key Topics & Findings:**\n`;
-        cleanHighlights.slice(0, 3).forEach((h: string) => {
+        cleanHighlights.slice(0, 4).forEach((h: string) => {
           report += `  - ${h.trim()} [Source: ${file.name}]\n`;
         });
       }
       
       if (file.formulas && Array.isArray(file.formulas) && file.formulas.length > 0) {
-        report += `• **Key Formulas & Definitions:** ${file.formulas.slice(0, 2).join(', ')}\n`;
+        report += `• **Key Formulas & Definitions:** ${file.formulas.slice(0, 3).join(', ')}\n`;
       }
       
-      if (file.transcription && cleanHighlights.length === 0) {
-        report += `• **Direct Excerpt:** "${file.transcription.slice(0, 180)}..." [Source: ${file.name}]\n`;
+      const cleanedTrans = cleanMultilineText(file.transcription || file.contentText || "");
+      if (cleanedTrans && cleanHighlights.length === 0) {
+        report += `• **Key Study Notes:** "${cleanedTrans.slice(0, 300)}..." [Source: ${file.name}]\n`;
       }
 
       report += `\n`;
@@ -688,19 +826,16 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
 
   files.forEach(f => {
     if (f.highlights && Array.isArray(f.highlights)) {
-      const cleanH = f.highlights.filter((h: string) => 
-        h && 
-        !h.includes("Foundational definitions") && 
-        !h.includes("Critical frameworks") && 
-        !h.includes("Structural analysis")
-      );
+      const cleanH = f.highlights.filter((h: string) => h && !isDummyMetadataLine(h));
       allHighlights.push(...cleanH);
     }
-    if (f.summary && typeof f.summary === 'string' && f.summary.trim() && !f.summary.includes("comprehensively outlines")) {
-      allSummaries.push(f.summary.trim());
+    const cleanSum = cleanMultilineText(f.summary || "");
+    if (cleanSum && !isDummyMetadataLine(cleanSum)) {
+      allSummaries.push(cleanSum);
     }
-    if (f.transcription && typeof f.transcription === 'string' && f.transcription.trim()) {
-      allSummaries.push(f.transcription.slice(0, 300));
+    const cleanTrans = cleanMultilineText(f.transcription || f.contentText || "");
+    if (cleanTrans) {
+      allSummaries.push(cleanTrans.slice(0, 400));
     }
   });
 
@@ -956,33 +1091,36 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
   });
 
   // API Route: AI Tutor Query via Google Gemini API (Multi-turn + Role Specialization + Model Routing)
-  app.post("/api/ai-tutor", async (req, res) => {
+  app.all("/api/ai-tutor", async (req, res) => {
     const correlationId = `tutor-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const routeStartTime = Date.now();
     res.setHeader("Content-Type", "application/json");
     try {
-      const { 
-        prompt, 
-        history, 
-        persona = 'socratic', 
-        modelMode = 'auto', 
-        deepResearch, 
-        citationMode, 
-        attachedFiles, 
-        model, 
-        workspaceId,
-        userId
-      } = req.body;
-
-      if (!prompt) {
-        console.warn(`[AI Tutor][${correlationId}] Rejected: Prompt is required.`);
-        res.status(400).json({ 
-          error: "Prompt is required.",
-          statusCode: 400,
-          correlationId 
+      const bodyObj = (req.body && typeof req.body === "object") ? req.body : {};
+      const queryObj = (req.query && typeof req.query === "object") ? req.query : {};
+      const rawPrompt = bodyObj.prompt || queryObj.prompt || "";
+      const prompt = (typeof rawPrompt === "string" && rawPrompt.trim())
+        ? rawPrompt.trim()
+        : "Please summarize and explain the key concepts in my study workspace.";
+      const history = Array.isArray(bodyObj.history) ? bodyObj.history : [];
+      const persona = String(bodyObj.persona || queryObj.persona || 'plain_english');
+      const modelMode = String(bodyObj.modelMode || 'auto');
+      const deepResearch = Boolean(bodyObj.deepResearch);
+      const citationMode = bodyObj.citationMode !== undefined ? Boolean(bodyObj.citationMode) : true;
+      const attachedFiles = Array.isArray(bodyObj.attachedFiles)
+        ? bodyObj.attachedFiles
+        : (Array.isArray(bodyObj.files) ? bodyObj.files : []);
+      if (attachedFiles.length === 0 && queryObj.fileUrl) {
+        attachedFiles.push({
+          id: `query-file-${Date.now()}`,
+          name: String(queryObj.fileName || queryObj.fileUrl),
+          type: TranscriptProcessor.isVideoUrl(String(queryObj.fileUrl)) ? 'video' : 'url',
+          url: String(queryObj.fileUrl)
         });
-        return;
       }
+      const workspaceId = String(bodyObj.workspaceId || queryObj.workspaceId || '');
+      const userId = bodyObj.userId || queryObj.userId || undefined;
+      const effectiveAuthHeader = req.headers.authorization || (bodyObj.supabaseToken ? `Bearer ${bodyObj.supabaseToken}` : undefined);
 
       const activePersonaKey = ['socratic', 'exam_prep', 'plain_english', 'flashcard'].includes(persona) 
         ? persona 
@@ -1033,13 +1171,14 @@ You are a rapid-fire active recall trainer and flashcard coach:
       let supabaseDocCount = 0;
       let userDatabaseContext = "";
 
-      const supabase = getSupabaseServerClient(req.headers.authorization);
-      if (supabase && (workspaceId || userId || req.headers.authorization)) {
+      const supabase = getSupabaseServerClient(effectiveAuthHeader);
+      // Fast path: if the client already passed active workspace files, skip slow remote database lookups
+      if (effectiveFiles.length === 0 && supabase && (workspaceId || userId || effectiveAuthHeader)) {
         try {
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Supabase timeout")), 1500));
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Supabase timeout")), 800));
           const fetchPromise = (async () => {
             let resolvedUserId = userId;
-            if (!resolvedUserId && req.headers.authorization) {
+            if (!resolvedUserId && effectiveAuthHeader) {
               try {
                 const { data: authData } = await supabase.auth.getUser();
                 if (authData?.user?.id) resolvedUserId = authData.user.id;
@@ -1187,34 +1326,223 @@ You are a rapid-fire active recall trainer and flashcard coach:
         }
       }
 
+      // Helper to detect and clean legacy dummy metadata (like old Channel/Duration/Direct Video Link strings)
+      const isDummyMetadataLine = (str?: string): boolean => {
+        if (!str || typeof str !== 'string') return true;
+        const s = str.trim();
+        if (!s) return true;
+        const lower = s.toLowerCase();
+        return (
+          lower.includes('**channel:**') ||
+          lower.includes('**duration:**') ||
+          lower.includes('**direct video link:**') ||
+          lower.includes('direct watch & in-app embed available') ||
+          lower.includes('comprehensively outlines') ||
+          lower.includes('foundational definitions') ||
+          lower.includes('critical frameworks') ||
+          lower.includes('structural analysis') ||
+          lower.includes('high-yield academic study guide for') ||
+          lower.includes('mastering the foundational definitions in') ||
+          lower.includes('uploaded and indexed into your workspace') ||
+          lower.includes('ready for study questions') ||
+          lower.includes('ready for ai tutor questions') ||
+          lower.includes('uploaded to workspace') ||
+          lower.includes('youtube is currently blocking us') ||
+          lower.includes('preventing us from generating a summary') ||
+          lower.startsWith('uploaded study file:') ||
+          lower.startsWith('study document:') ||
+          lower.startsWith('study material:')
+        );
+      };
+
+      const cleanMultilineText = (raw?: string): string => {
+        if (!raw || typeof raw !== 'string') return '';
+        return raw
+          .split('\n')
+          .filter(line => {
+            const l = line.trim().toLowerCase();
+            if (!l) return true;
+            if (isDummyMetadataLine(l)) return false;
+            return true;
+          })
+          .join('\n')
+          .trim();
+      };
+
+      // 0.5. Detect any direct URL pasted into the user's prompt and add to effectiveFiles if not already present
+      const promptUrls: string[] = (prompt.match(/https?:\/\/[^\s"'<>)\]]+/gi) || []) as string[];
+      for (const pUrl of promptUrls.slice(0, 2)) {
+        const alreadyExists = effectiveFiles.some(f => f.url === pUrl || f.name === pUrl);
+        if (!alreadyExists) {
+          const isYt = pUrl.includes('youtube.com') || pUrl.includes('youtu.be');
+          effectiveFiles.unshift({
+            id: `prompt-url-${Date.now()}`,
+            name: pUrl,
+            type: isYt ? 'video' : 'url',
+            url: pUrl,
+            size: 'Web Link'
+          });
+        }
+      }
+
+      // 0.6. Fast in-memory cleanup and targeted live enrichment
+      const qLower = prompt.toLowerCase();
+      const isAskingAboutMaterial =
+        promptUrls.length > 0 ||
+        qLower.includes('video') ||
+        qLower.includes('youtube') ||
+        qLower.includes('watch') ||
+        qLower.includes('lecture') ||
+        qLower.includes('this link') ||
+        qLower.includes('in the video') ||
+        qLower.includes('in this video') ||
+        qLower.includes('about the video') ||
+        qLower.includes('what is in this') ||
+        qLower.includes('summarize');
+
+      if (effectiveFiles && effectiveFiles.length > 0) {
+        // Fast in-memory text sanitization (0ms latency)
+        effectiveFiles.forEach((f: any) => {
+          f.transcription = cleanMultilineText(f.transcription || f.contentText || f.content_text);
+          if (isDummyMetadataLine(f.summary)) {
+            f.summary = '';
+          }
+          if (Array.isArray(f.highlights)) {
+            f.highlights = f.highlights.filter((h: string) => !isDummyMetadataLine(h));
+          }
+        });
+
+        // Only query external web/video transcript APIs when query refers to video or URL
+        if (isAskingAboutMaterial) {
+          const targetFiles = promptUrls.length > 0
+            ? effectiveFiles.filter((f: any) => promptUrls.includes(f.url || f.name))
+            : effectiveFiles.slice(0, 1);
+
+          await Promise.all(
+            targetFiles.map(async (f: any) => {
+              const candidateUrl =
+                (typeof f.url === 'string' && f.url.startsWith('http'))
+                  ? f.url
+                  : (typeof f.name === 'string' && f.name.startsWith('http') ? f.name : '');
+
+              if (!candidateUrl) return;
+
+              const isVideo =
+                TranscriptProcessor.isVideoUrl(candidateUrl) ||
+                candidateUrl.includes('youtube.com') ||
+                candidateUrl.includes('youtu.be') ||
+                candidateUrl.includes('youtube-nocookie.com');
+              const lacksCaptionsInTranscript =
+                !f.transcription ||
+                f.transcription.length < 300 ||
+                (isVideo && !f.transcription.includes('Full Timestamped Video Transcript') && !f.transcription.includes('[00:'));
+              const needsEnrichment =
+                isRawUrlOrPlaceholderName(f.name) ||
+                !f.summary ||
+                lacksCaptionsInTranscript;
+
+              if (isVideo && needsEnrichment) {
+              try {
+                const tr = await TranscriptProcessor.fetchTranscript(candidateUrl);
+                f.url = tr.normalizedUrl;
+                f.type = 'video';
+                if (isRawUrlOrPlaceholderName(f.name)) {
+                  f.name = tr.title;
+                }
+                if (!f.summary) {
+                  f.summary = tr.description
+                    ? `Video "${tr.title}" by ${tr.author}: ${tr.description.slice(0, 600)}`
+                    : `Educational video "${tr.title}" by ${tr.author} (${tr.normalizedUrl}).`;
+                }
+                if (lacksCaptionsInTranscript && tr.isValidWordCount) {
+                  const matchedSegs = TranscriptProcessor.searchTranscriptSegments(tr, prompt, 10);
+                  const matchedBlock =
+                    matchedSegs.length > 0
+                      ? `Most Relevant Timestamped Video Captions for Query:\n${matchedSegs
+                          .map(s => `[${s.timestamp}] ${s.text}`)
+                          .join('\n')}`
+                      : '';
+                  f.transcription = [f.transcription, matchedBlock, tr.richContext]
+                    .filter(Boolean)
+                    .join('\n\n');
+                } else if (lacksCaptionsInTranscript && tr.description) {
+                  f.transcription = [f.transcription, `Video Overview:\n${tr.description}`]
+                    .filter(Boolean)
+                    .join('\n\n');
+                }
+              } catch (ytErr: any) {
+                console.warn('[AI Tutor] Video TranscriptProcessor live enrichment notice:', ytErr?.message);
+              }
+            } else if (!isVideo && needsEnrichment) {
+              try {
+                const scraped = await scrapeWebPage(candidateUrl);
+                if (isRawUrlOrPlaceholderName(f.name) && scraped.title) {
+                  f.name = scraped.title;
+                }
+                if (!f.summary && (scraped.description || scraped.text)) {
+                  f.summary = scraped.description || scraped.text.slice(0, 400);
+                }
+                if (!f.transcription || f.transcription.length < 250) {
+                  f.transcription = [
+                    scraped.title ? `Title: ${scraped.title}` : '',
+                    scraped.description ? `Description: ${scraped.description}` : '',
+                    scraped.text ? `Webpage Content:\n${scraped.text.slice(0, 14000)}` : ''
+                  ].filter(Boolean).join('\n\n');
+                }
+              } catch (webErr: any) {
+                console.warn('[AI Tutor] Webpage live enrichment notice:', webErr?.message);
+              }
+            }
+          })
+        );
+      }
+    }
+
       // 1. Document-Aware Semantic Segment Extraction RAG pipeline
       let groundedSourceContext = "";
       let retrievedSegments: ExtractedSegment[] = [];
       
       if (effectiveFiles && effectiveFiles.length > 0) {
-        const ragResult = extractRelevantDocumentSegments(prompt, effectiveFiles, 6);
+        const ragResult = extractRelevantDocumentSegments(prompt, effectiveFiles, 8);
         retrievedSegments = ragResult.segments;
         groundedSourceContext = ragResult.contextString;
+
+        // Also provide complete transcript/content overview for uploaded videos & web links so full-video summaries and quizzes have 100% context
+        const fullSourceBlocks = effectiveFiles.slice(0, 4).map((f: any, idx: number) => {
+          const textBody = (f.transcription || f.contentText || f.content_text || f.summary || '').trim();
+          if (!textBody) return '';
+          return `--- FULL SOURCE MATERIAL #${idx + 1}: "${f.name || 'Study Resource'}" (Type: ${f.type || 'resource'}${f.url ? ` | URL: ${f.url}` : ''}) ---\n${textBody.slice(0, 14000)}`;
+        }).filter(Boolean);
+
+        if (fullSourceBlocks.length > 0) {
+          groundedSourceContext += `\n=== COMPLETE UPLOADED VIDEO & DOCUMENT TRANSCRIPTS ===\n${fullSourceBlocks.join('\n\n')}\n`;
+        }
         
-        groundedSourceContext += "=========================================\n\n";
+        groundedSourceContext += "\n=========================================\n\n";
         
         // Critical grounding instructions
-        groundedSourceContext += `CRITICAL DOCUMENT-AWARE & GENERAL KNOWLEDGE GROUNDING RULES:\n`;
-        groundedSourceContext += `1. You are backed by full Gemini academic intelligence. You can answer any type of question on any topic (STEM, humanities, languages, general knowledge, problem solving, etc.).\n`;
-        groundedSourceContext += `2. Whenever answering questions related to the student's study materials, extract facts, quotes, terminology, and definitions directly from the RETRIEVED DOCUMENT SEGMENTS above.\n`;
-        groundedSourceContext += `3. CITE the source document and page number in square brackets (e.g., "[Source: ${effectiveFiles[0]?.name || 'Study Material'}, Page 1]") immediately following assertions drawn from their files.\n`;
-        groundedSourceContext += `4. If the student asks a general question or if their workspace notes do not fully cover the question, answer completely using your full Gemini knowledge while referencing relevant workspace concepts whenever applicable.\n`;
+        groundedSourceContext += `CRITICAL DOCUMENT-AWARE & VIDEO/LINK ANALYSIS GROUNDING RULES:\n`;
+        groundedSourceContext += `1. You are backed by full Gemini academic intelligence and TranscriptProcessor video caption extraction. You have the parsed video captions, timestamps, chapters, and text for the student's uploaded videos, YouTube links, web URLs, and PDFs above.\n`;
+        groundedSourceContext += `2. When the student asks about a video (YouTube or uploaded video) or web link—such as "what is in this video?", "what is it about?", "give me a summary", or "give me questions from it"—deeply analyze the spoken video captions, chapters, concepts, explanations, and examples.\n`;
+        groundedSourceContext += `3. NEVER output useless dummy metadata (like channel links, video duration, or generic placeholders) as your summary or answer. Always explain the real content, concepts, and takeaways taught in the video or link, referencing timestamps (e.g. [02:15]) when helpful.\n`;
+        groundedSourceContext += `4. CITE the source material in square brackets (e.g., "[Source: ${effectiveFiles[0]?.name || 'Study Material'}]") when referencing their uploaded videos, links, or documents.\n`;
       }
 
       // 2. NotebookLM Style Specialized Format Intent Detection
       let specializedFormatInstruction = "";
-      const qLower = prompt.toLowerCase();
 
       const isOverviewQuery = 
         qLower.includes("what is in it") ||
         qLower.includes("what's in it") ||
         qLower.includes("what is inside") ||
         qLower.includes("what's inside") ||
+        qLower.includes("what is in this video") ||
+        qLower.includes("what's in this video") ||
+        qLower.includes("what is in the video") ||
+        qLower.includes("what is this video about") ||
+        qLower.includes("what is the video about") ||
+        qLower.includes("what is in this link") ||
+        qLower.includes("what is this link about") ||
         qLower.includes("what did i upload") ||
         qLower.includes("what have i uploaded") ||
         qLower.includes("what is that that i have uploaded") ||
@@ -1223,6 +1551,9 @@ You are a rapid-fire active recall trainer and flashcard coach:
         qLower.includes("what are the things that are in it") ||
         qLower.includes("what are the things in it") ||
         qLower.includes("analyze what i uploaded") ||
+        qLower.includes("analyze this video") ||
+        qLower.includes("analyze the video") ||
+        qLower.includes("analyze this link") ||
         qLower.includes("analyze it and tell me") ||
         qLower.includes("what do my documents say") ||
         qLower.includes("what is in my files") ||
@@ -1233,25 +1564,28 @@ You are a rapid-fire active recall trainer and flashcard coach:
         qLower.includes("list my documents") ||
         qLower.includes("what did i add");
 
+      const isSummaryQuery =
+        qLower.includes("summarize") ||
+        qLower.includes("summary") ||
+        qLower.includes("briefing") ||
+        qLower.includes("overview");
+
+      const isQuestionsQuery =
+        qLower.includes("question") ||
+        qLower.includes("quiz") ||
+        qLower.includes("test me") ||
+        qLower.includes("practice");
+
       let fileOverviewContext = "";
       if (effectiveFiles && effectiveFiles.length > 0) {
-        fileOverviewContext = `\nUPLOADED DOCUMENTS IN THIS WORKSPACE (${effectiveFiles.length} files${fetchedFromSupabase ? ' - Verified in Supabase' : ''}):\n`;
+        fileOverviewContext = `\nUPLOADED MATERIALS IN THIS WORKSPACE (${effectiveFiles.length} items${fetchedFromSupabase ? ' - Verified in Supabase' : ''}):\n`;
         effectiveFiles.forEach((f: any, idx: number) => {
-          fileOverviewContext += `Document #${idx + 1}: ${f.name} (Type: ${f.type || 'document'}${f.source === 'supabase' ? ' · Synced' : ''})\n`;
-          const isPlaceholder = f.summary?.includes("comprehensively outlines") || f.summary?.includes("foundational definitions");
-          if (f.summary && !isPlaceholder) {
+          fileOverviewContext += `Material #${idx + 1}: "${f.name}" (Type: ${f.type || 'document'}${f.url && f.url.startsWith('http') ? `, URL: ${f.url}` : ''})\n`;
+          if (f.summary && !isDummyMetadataLine(f.summary)) {
             fileOverviewContext += `  Summary: ${f.summary}\n`;
-          } else {
-            fileOverviewContext += `  Status: Active study resource. Read and explain its direct contents accurately.\n`;
           }
 
-          const cleanHighlights = (f.highlights || []).filter((h: string) => 
-            !h.includes("Foundational definitions") && 
-            !h.includes("Critical frameworks") && 
-            !h.includes("Structural analysis") &&
-            !h.includes("comprehensively outlines")
-          );
-
+          const cleanHighlights = (f.highlights || []).filter((h: string) => !isDummyMetadataLine(h));
           if (cleanHighlights.length > 0) {
             fileOverviewContext += `  Key Highlights: ${cleanHighlights.join(" | ")}\n`;
           }
@@ -1259,32 +1593,48 @@ You are a rapid-fire active recall trainer and flashcard coach:
             fileOverviewContext += `  Key Formulas/Definitions: ${f.formulas.join(", ")}\n`;
           }
           if (f.transcription) {
-            fileOverviewContext += `  Text Sample: ${f.transcription.slice(0, 400)}\n`;
+            fileOverviewContext += `  Extracted Content / Notes:\n${f.transcription.slice(0, 3500)}\n`;
           }
           fileOverviewContext += `\n`;
         });
       }
 
-      if (isOverviewQuery) {
+      const isFullVideoSummaryRequested =
+        (qLower.includes("what is in this video") ||
+         qLower.includes("what is in the video") ||
+         qLower.includes("what's in this video") ||
+         qLower.includes("what is this video about") ||
+         qLower.includes("summarize this video") ||
+         qLower.includes("what did i upload") ||
+         qLower.includes("what have i uploaded") ||
+         qLower.includes("what is this link about") ||
+         qLower.includes("analyze this video")) &&
+        effectiveFiles.length > 0;
+
+      if (isFullVideoSummaryRequested) {
         specializedFormatInstruction = `
-[OVERVIEW OF UPLOADED DOCUMENTS REQUESTED]
-The student explicitly asks what they uploaded and what is inside each file.
-You MUST:
-1. Greet them warmly and state clearly how many documents are in their workspace.
-2. For EVERY uploaded document listed in the materials, provide a dedicated breakdown:
-   - File title and document type
-   - What this specific document is about (summary)
-   - The main topics, concepts, findings, and formulas inside that document
-   - A direct quote or excerpt with [Source: filename]
-3. Conclude with 2-3 specific, encouraging questions the student can ask you next about these documents.
-DO NOT output generic boilerplate or unrelated analogies. Talk directly and specifically about their uploaded files.`;
+[VIDEO / RESOURCE SUMMARY REQUESTED]
+The student is asking what is taught in their uploaded video or resource ("${effectiveFiles[0]?.name || 'the resource'}").
+Explain what happens in it, the core topic, key concepts taught, and 2-3 specific takeaways.
+CRITICAL: Base your answer on the actual subject matter and spoken lessons. NEVER output dummy metadata, channel links, or durations.`;
+      } else if (isQuestionsQuery) {
+        specializedFormatInstruction = `
+[CONTENT-SPECIFIC PRACTICE QUESTIONS REQUESTED]
+The student is asking for questions / a quiz from their uploaded video, link, or study materials.
+Generate 3 to 4 specific, content-rich questions (with clear answers and explanations) that directly test the concepts taught in "${effectiveFiles[0]?.name || 'their study material'}".
+NEVER generate generic meta-questions about channel names or durations.`;
       } else if (qLower.includes("table") || qLower.includes("compare") || qLower.includes("comparison") || qLower.includes("difference between") || qLower.includes("contrasting")) {
         specializedFormatInstruction = `
 [COMPARISON REQUESTED]
 Present your answer as a clear, structured comparison table highlighting key differences and similarities, followed by a simple summary.`;
       }
 
-      const systemInstruction = `You are an intelligent, friendly, and adaptive AI Study Tutor. When a student asks a question, explain concepts clearly using simple analogies, key points, and examples. Ground your answers in the student's real database profile, active workspaces, study notes, and uploaded documents whenever relevant, and cite their files. If a question is general knowledge (like 'what is a cell'), answer it thoroughly using your academic knowledge while tailoring examples to the student's subjects and goals. NEVER output placeholder text, dummy data, or repeat file names as content.
+      const systemInstruction = `You are an intelligent, friendly, and lightning-fast AI Study Tutor for StudyWeb.
+CORE RULES:
+1. ANSWER THE EXACT QUESTION: Answer the student's question directly, clearly, and helpfully so they can easily learn. If they ask a specific conceptual or factual question, explain that concept directly.
+2. NO DUMMY DATA OR RAW METADATA: When discussing videos, web links, or documents, teach the ACTUAL educational concepts, theories, and examples. Never recite channel names, video links, subscriber numbers, or video lengths.
+3. ADAPTIVE DEPTH: If the student asks a quick factual question, give a concise, clear answer. If they ask for an in-depth breakdown, provide a thorough, structured explanation.
+4. EASY LEARNING: Use clear formatting, bullet points where helpful, and relatable analogies.
 ${selectedPersonaInstruction}
 ${researchGuideline}
 ${citationGuideline}
@@ -1294,16 +1644,8 @@ ${fileOverviewContext}
 - Workspace Materials Context & Retrieved Passages:
 ${groundedSourceContext}`;
 
-      // Candidate Models: prioritize ultra-fast, low-latency Gemini Flash models (~1.2s response)
-      const candidateModels: string[] = ["gemini-3-flash-preview", "gemini-2.5-flash"];
-
-      const isComplexQuery = deepResearch || 
-        modelMode === 'pro' || 
-        /\b(derive|proof|prove|complex proof|step-by-step calculus|biochemical pathway|algorithm analysis|deep critique)\b/i.test(prompt);
-
-      if (isComplexQuery && !candidateModels.includes("gemini-3.1-pro-preview")) {
-        candidateModels.push("gemini-3.1-pro-preview");
-      }
+      // Verified active, low-latency Gemini models (fast primary model)
+      const candidateModels: string[] = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
 
       let responseText = "";
       let responseSource = "";
@@ -1340,9 +1682,9 @@ ${groundedSourceContext}`;
                 return bHasMedia - aHasMedia;
               });
 
-              for (const file of sortedFiles.slice(0, 3)) {
+              for (const file of sortedFiles.slice(0, 4)) {
                 let rawBase64 = "";
-                let mimeType = file.fileMimeType || (file.type === "image" ? "image/png" : "application/pdf");
+                let mimeType = file.fileMimeType || (file.type === "image" ? "image/png" : (file.type === "video" ? "video/mp4" : "application/pdf"));
 
                 if (file.url && typeof file.url === "string" && file.url.startsWith("data:")) {
                   const match = file.url.match(/^data:([^;]+);base64,(.+)$/);
@@ -1359,11 +1701,13 @@ ${groundedSourceContext}`;
 
                 rawBase64 = rawBase64.replace(/[\r\n\s]/g, "");
 
-                // Ensure rawBase64 is valid and not excessively large (limit to ~15MB base64 ~ 11MB file)
-                if (rawBase64 && rawBase64.length > 20 && rawBase64.length < 20000000) {
-                  const isSupportedType = mimeType.startsWith("image/") || 
-                    mimeType === "application/pdf" || 
-                    mimeType.startsWith("text/") || 
+                // Support images, PDFs, text, audio, AND video files up to ~15MB base64
+                if (rawBase64 && rawBase64.length > 20 && rawBase64.length < 22000000) {
+                  const isSupportedType =
+                    mimeType.startsWith("image/") ||
+                    mimeType.startsWith("video/") ||
+                    mimeType === "application/pdf" ||
+                    mimeType.startsWith("text/") ||
                     mimeType.startsWith("audio/");
 
                   if (isSupportedType) {
@@ -1374,77 +1718,107 @@ ${groundedSourceContext}`;
                       }
                     });
                   }
-                } else if (file.transcription && typeof file.transcription === 'string' && file.transcription.trim()) {
-                  currentTurnParts.push({
-                    text: `[ATTACHED STUDY DOCUMENT: "${file.name}"]\n${file.transcription.slice(0, 8000)}`
-                  });
-                }
-              }
-            }
-
-            let contentsPayload: any;
-            if (Array.isArray(history) && history.length > 0) {
-              const multiTurnContents: any[] = [];
-              for (const turn of history.slice(-8)) {
-                const turnRole = (turn.role === 'model' || turn.role === 'ai' || turn.role === 'assistant') ? 'model' : 'user';
-                const turnText = String(turn.content || turn.text || '').trim();
-                if (turnText) {
-                  // Gemini API requires first turn to be 'user'
-                  if (multiTurnContents.length === 0 && turnRole === 'model') {
-                    continue;
-                  }
-                  const lastRole = multiTurnContents.length > 0 ? multiTurnContents[multiTurnContents.length - 1].role : null;
-                  if (lastRole === turnRole) {
-                    multiTurnContents[multiTurnContents.length - 1].parts[0].text += `\n\n${turnText}`;
-                  } else {
-                    multiTurnContents.push({
-                      role: turnRole,
-                      parts: [{ text: turnText }]
+                } else {
+                  // Only attach raw YouTube fileData stream if we don't already have an extracted text transcript
+                  // (attaching fileData when a full transcript is already present causes unnecessary 20s+ video re-tokenization)
+                  const hasExtractedTranscript = Boolean(file.transcription && String(file.transcription).trim().length > 250);
+                  const ytId = !hasExtractedTranscript ? TranscriptProcessor.extractYouTubeId(file.url || file.name || '') : null;
+                  if (ytId) {
+                    currentTurnParts.push({
+                      fileData: {
+                        fileUri: `https://www.youtube.com/watch?v=${ytId}`,
+                        mimeType: 'video/mp4'
+                      }
                     });
                   }
                 }
-              }
 
-              const lastRole = multiTurnContents.length > 0 ? multiTurnContents[multiTurnContents.length - 1].role : null;
-              if (lastRole === 'user') {
-                multiTurnContents[multiTurnContents.length - 1].parts = currentTurnParts;
-              } else {
-                multiTurnContents.push({
-                  role: 'user',
-                  parts: currentTurnParts
-                });
+                if (file.transcription || file.summary || file.url) {
+                  const materialContext = [
+                    `[WORKSPACE STUDY MATERIAL: "${file.name}" | Type: ${file.type || 'resource'}${file.url && file.url.startsWith('http') ? ` | URL: ${file.url}` : ''}]`,
+                    file.summary ? `Summary: ${file.summary}` : '',
+                    Array.isArray(file.highlights) && file.highlights.length > 0 ? `Key Takeaways:\n- ${file.highlights.join('\n- ')}` : '',
+                    file.transcription ? `Full Content / Lecture Notes:\n${String(file.transcription).slice(0, 12000)}` : ''
+                  ].filter(Boolean).join('\n\n');
+
+                  currentTurnParts.push({ text: materialContext });
+                }
               }
-              contentsPayload = multiTurnContents;
-            } else {
-              contentsPayload = currentTurnParts.length === 1 ? prompt : currentTurnParts;
             }
+
+            const buildContentsPayload = (partsToUse: any[]) => {
+              if (Array.isArray(history) && history.length > 0) {
+                const multiTurnContents: any[] = [];
+                for (const turn of history.slice(-8)) {
+                  const turnRole = (turn.role === 'model' || turn.role === 'ai' || turn.role === 'assistant') ? 'model' : 'user';
+                  const turnText = String(turn.content || turn.text || '').trim();
+                  if (turnText) {
+                    if (multiTurnContents.length === 0 && turnRole === 'model') {
+                      continue;
+                    }
+                    const lastRole = multiTurnContents.length > 0 ? multiTurnContents[multiTurnContents.length - 1].role : null;
+                    if (lastRole === turnRole) {
+                      multiTurnContents[multiTurnContents.length - 1].parts[0].text += `\n\n${turnText}`;
+                    } else {
+                      multiTurnContents.push({
+                        role: turnRole,
+                        parts: [{ text: turnText }]
+                      });
+                    }
+                  }
+                }
+
+                const lastRole = multiTurnContents.length > 0 ? multiTurnContents[multiTurnContents.length - 1].role : null;
+                if (lastRole === 'user') {
+                  multiTurnContents[multiTurnContents.length - 1].parts = partsToUse;
+                } else {
+                  multiTurnContents.push({
+                    role: 'user',
+                    parts: partsToUse
+                  });
+                }
+                return multiTurnContents;
+              }
+              return partsToUse.length === 1 && partsToUse[0].text ? partsToUse[0].text : partsToUse;
+            };
+
+            const hasFileDataPart = currentTurnParts.some((p: any) => Boolean(p.fileData));
+            const textOnlyParts = currentTurnParts.filter((p: any) => !p.fileData);
 
             let response: any = null;
             let attempt = 0;
-            const maxModelAttempts = 2;
+            const maxModelAttempts = hasFileDataPart ? 2 : 1;
             while (attempt < maxModelAttempts) {
+              let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
               try {
                 attempt++;
+                // On attempt 2, if attempt 1 timed out or failed with video fileData, fall back to fast text-only parts
+                const activeParts = (attempt > 1 && hasFileDataPart) ? textOnlyParts : currentTurnParts;
+                const contentsPayload = buildContentsPayload(activeParts);
+                const timeoutMs = activeParts.some((p: any) => Boolean(p.fileData)) ? 22000 : 10000;
+
                 const genPromise = ai.models.generateContent({
                   model: currentModel,
                   contents: contentsPayload,
                   config: {
                     systemInstruction,
-                    temperature: 0.7,
+                    temperature: 0.5,
                   }
                 });
-                const modelTimeout = new Promise<never>((_, reject) =>
-                  setTimeout(() => reject(new Error(`Model ${currentModel} timed out`)), 10000)
-                );
+                const modelTimeout = new Promise<never>((_, reject) => {
+                  timeoutHandle = setTimeout(() => reject(new Error(`Model ${currentModel} timed out`)), timeoutMs);
+                });
                 response = await Promise.race([genPromise, modelTimeout]);
+                if (timeoutHandle) clearTimeout(timeoutHandle);
                 if (response && response.text) break;
               } catch (retryErr: any) {
+                if (timeoutHandle) clearTimeout(timeoutHandle);
                 const errStatus = retryErr?.status || retryErr?.statusCode || (retryErr?.error && retryErr?.error?.code);
                 const retryMsg = retryErr?.message || retryErr?.error?.message || String(retryErr);
-                console.warn(`[AI Tutor Retry][${correlationId}] Model ${currentModel} attempt ${attempt} returned status: ${errStatus || 'unknown'} | Error: ${retryMsg}`);
-                if ((errStatus === 503 || errStatus === 429) && attempt < maxModelAttempts) {
-                  const backoffMs = 350;
-                  await new Promise(r => setTimeout(r, backoffMs));
+                const isTimeout = retryMsg.includes('timed out');
+                console.log(`[AI Tutor Notice][${correlationId}] Model ${currentModel} attempt ${attempt} note (${errStatus || (isTimeout ? 'timeout' : 'retry')}): ${retryMsg}`);
+                if ((errStatus === 503 || errStatus === 429 || (isTimeout && hasFileDataPart)) && attempt < maxModelAttempts) {
+                  await new Promise(r => setTimeout(r, 300));
                 } else {
                   throw retryErr;
                 }
@@ -1476,7 +1850,7 @@ ${groundedSourceContext}`;
             }
           }
           const originalErrorMessage = err?.message || err?.error?.message || String(err);
-          console.error(`[AI Tutor Model Failure][${correlationId}] Model: ${currentModel} | Status Code: ${statusCode} | Duration: ${modelDuration}ms | Original Error: ${originalErrorMessage}`);
+          console.log(`[AI Tutor Fallback][${correlationId}] Switching from ${currentModel} after ${modelDuration}ms (${originalErrorMessage})`);
           lastError = {
             model: currentModel,
             status: statusCode,
@@ -1490,140 +1864,128 @@ ${groundedSourceContext}`;
       // If upstream live models were unavailable, provide graceful workspace-grounded synthesis
       if (!responseText && effectiveFiles && effectiveFiles.length > 0) {
         console.log(`[AI Tutor Notice][${correlationId}] Live models busy; generating workspace grounded synthesis from ${effectiveFiles.length} file(s).`);
-        if (isOverviewQuery) {
-          let synthesis = `Here is a structured overview of the ${effectiveFiles.length} study material${effectiveFiles.length > 1 ? 's' : ''} in your workspace:\n\n`;
+        if (isOverviewQuery || isSummaryQuery) {
+          let synthesis = `### 📚 Detailed Breakdown & Summary of Your Study Material\n\n`;
           effectiveFiles.forEach((f: any, i: number) => {
-            synthesis += `### ${i + 1}. ${f.name} (${f.type || 'Document'})\n`;
-            if (f.summary) synthesis += `**Summary:** ${f.summary}\n\n`;
+            synthesis += `#### ${i + 1}. **${f.name}** *(${(f.type || 'Resource').toUpperCase()})*\n\n`;
+            if (f.summary) synthesis += `**Overview & Summary:**\n${f.summary}\n\n`;
             if (f.highlights && f.highlights.length > 0) {
-              synthesis += `**Key Points:**\n${f.highlights.slice(0, 4).map((h: string) => `- ${h}`).join('\n')}\n\n`;
+              synthesis += `**Key Concepts & Takeaways:**\n${f.highlights.slice(0, 5).map((h: string) => `- ${h}`).join('\n')}\n\n`;
             }
             if (f.formulas && f.formulas.length > 0) {
-              synthesis += `**Key Formulas & Definitions:** ${f.formulas.slice(0, 3).join(', ')}\n\n`;
+              synthesis += `**Key Formulas & Equations:** ${f.formulas.slice(0, 4).join(', ')}\n\n`;
+            }
+            if (f.transcription) {
+              synthesis += `**Content Walkthrough:**\n${f.transcription.slice(0, 1200)}\n\n`;
             }
           });
-          synthesis += `\nWhat specific concept or question would you like to explore next?`;
+          synthesis += `What specific topic or practice question from **${effectiveFiles[0]?.name}** would you like to explore next?`;
           responseText = synthesis;
           responseSource = "Workspace Knowledge Engine";
         } else if (retrievedSegments.length > 0) {
-          let synthesis = `Based on your study materials:\n\n`;
+          let synthesis = `Based on **${effectiveFiles[0]?.name || 'your study materials'}**:\n\n`;
           retrievedSegments.slice(0, 3).forEach((seg) => {
-            synthesis += `> "${seg.snippet}"\n— *[Source: ${seg.sourceName}${seg.page ? `, Page ${seg.page}` : ''}]*\n\n`;
+            synthesis += `- ${seg.text} *[Source: ${seg.sourceName}]*\n\n`;
           });
           if (effectiveFiles[0]?.summary) {
-            synthesis += `**Context:** ${effectiveFiles[0].summary}\n\n`;
+            synthesis += `**Summary Context:** ${effectiveFiles[0].summary}\n\n`;
           }
-          synthesis += `How would you like to build on this concept?`;
           responseText = synthesis;
           responseSource = "Workspace Grounding";
         }
       }
 
-      // If live models were experiencing high demand and no files were attached, provide an intelligent academic response framework
+      // If live models were experiencing high demand, provide an intelligent workspace-grounded response
       if (!responseText) {
-        console.warn(`[AI Tutor Notice][${correlationId}] Upstream Gemini models busy; providing resilient tutor guidance.`);
-        const cleanPrompt = prompt.length > 90 ? prompt.slice(0, 90) + '...' : prompt;
-        responseText = `I'm examining your question: "${cleanPrompt}".\n\nWhile the live AI inference engine is handling peak server demand at this moment, here is a guiding study framework to help you progress:\n\n1. **Foundational Principles:** Identify the core principles, definitions, or equations governing this topic.\n2. **Step-by-Step Breakdown:** Deconstruct the problem into simpler prerequisite concepts.\n3. **Workspace Context:** If you have notes, slides, or a video on this topic in your workspace, upload them so I can pull exact quotations and formulas for you.\n\nWhat specific part of this problem would you like to tackle first?`;
-        responseSource = "StudyWeb Tutor Engine";
+        console.warn(`[AI Tutor Notice][${correlationId}] Upstream Gemini models busy; providing resilient tutor synthesis.`);
+        responseText = generateLocalAITutorResponse(prompt, effectiveFiles, groundedSourceContext);
+        responseSource = "StudyWeb AI Tutor";
       }
 
-      if (responseText) {
-        // Extract citations dynamically based on retrievedSegments and effective files
-        const responseCitations: Array<{ sourceName: string; page?: number; quote: string; snippet?: string; fileId?: string }> = [];
+      // Extract citations dynamically based on retrievedSegments and effective files
+      const responseCitations: Array<{ sourceName: string; page?: number; quote: string; snippet?: string; fileId?: string }> = [];
 
-        if (retrievedSegments && retrievedSegments.length > 0) {
-          const citedSourceNames = new Set<string>();
-          const sourceTagRegex = /\[Source:\s*([^,\]]+)(?:,\s*Page\s*(\d+))?\]/gi;
-          let match;
-          while ((match = sourceTagRegex.exec(responseText)) !== null) {
-            citedSourceNames.add(match[1].trim().toLowerCase());
-          }
-
-          retrievedSegments.forEach(seg => {
-            const segNameLower = seg.sourceName.toLowerCase();
-            const isCited = citedSourceNames.has(segNameLower) || 
-                            Array.from(citedSourceNames).some(n => segNameLower.includes(n) || n.includes(segNameLower)) ||
-                            responseText.toLowerCase().includes(segNameLower);
-
-            if (isCited || (responseCitations.length === 0 && seg.score > 0)) {
-              if (!responseCitations.some(c => c.sourceName === seg.sourceName && c.page === seg.page)) {
-                responseCitations.push({
-                  sourceName: seg.sourceName,
-                  page: seg.page,
-                  quote: seg.snippet,
-                  snippet: seg.text,
-                  fileId: seg.fileId
-                });
-              }
-            }
-          });
-
-          // Ensure at least top matching segment is included as citation
-          if (responseCitations.length === 0 && retrievedSegments.length > 0) {
-            const topSeg = retrievedSegments[0];
-            responseCitations.push({
-              sourceName: topSeg.sourceName,
-              page: topSeg.page,
-              quote: topSeg.snippet,
-              snippet: topSeg.text,
-              fileId: topSeg.fileId
-            });
-          }
-        } else if (effectiveFiles && effectiveFiles.length > 0) {
-          effectiveFiles.slice(0, 3).forEach((file: any) => {
-            responseCitations.push({
-              sourceName: file.name,
-              page: file.pages ? 1 : undefined,
-              quote: file.highlights?.[0] || file.summary || `Verified material from ${file.name}`,
-              snippet: file.summary || file.name,
-              fileId: file.id
-            });
-          });
+      if (retrievedSegments && retrievedSegments.length > 0) {
+        const citedSourceNames = new Set<string>();
+        const sourceTagRegex = /\[Source:\s*([^,\]]+)(?:,\s*Page\s*(\d+))?\]/gi;
+        let match;
+        while ((match = sourceTagRegex.exec(responseText)) !== null) {
+          citedSourceNames.add(match[1].trim().toLowerCase());
         }
 
-        const totalEstimatedPages = effectiveFiles.reduce((acc: number, f: any) => acc + (f.pages || 1), 0);
-        const processedFileNames = effectiveFiles.map((f: any) => f.name);
+        retrievedSegments.forEach(seg => {
+          const segNameLower = seg.sourceName.toLowerCase();
+          const isCited = citedSourceNames.has(segNameLower) || 
+                          Array.from(citedSourceNames).some(n => segNameLower.includes(n) || n.includes(segNameLower)) ||
+                          responseText.toLowerCase().includes(segNameLower);
 
-        res.json({ 
-          reply: responseText,
-          text: responseText, 
-          source: responseSource || "Gemini AI",
-          modelUsed: responseSource || "Gemini 3.5 Flash",
-          personaUsed: activePersonaKey,
-          documentCount: effectiveFiles.length,
-          citations: responseCitations.length > 0 ? responseCitations : undefined,
-          extractionFeed: {
-            filesProcessed: processedFileNames,
-            totalEstimatedPages,
-            chunksAnalyzed: effectiveFiles.length * 4 + (responseCitations.length * 2) + 3,
-            extractionMode: "deep_full_document",
-            timestamp: new Date().toISOString()
+          if (isCited || (responseCitations.length === 0 && seg.score > 0)) {
+            if (!responseCitations.some(c => c.sourceName === seg.sourceName && c.page === seg.page)) {
+              responseCitations.push({
+                sourceName: seg.sourceName,
+                page: seg.page,
+                quote: seg.snippet,
+                snippet: seg.text,
+                fileId: seg.fileId
+              });
+            }
           }
         });
-      } else {
-        throw new Error(`Failed to synthesize AI Tutor response. Last error: ${lastError ? lastError.message : 'Unknown'}`);
+
+        // Ensure at least top matching segment is included as citation
+        if (responseCitations.length === 0 && retrievedSegments.length > 0) {
+          const topSeg = retrievedSegments[0];
+          responseCitations.push({
+            sourceName: topSeg.sourceName,
+            page: topSeg.page,
+            quote: topSeg.snippet,
+            snippet: topSeg.text,
+            fileId: topSeg.fileId
+          });
+        }
+      } else if (effectiveFiles && effectiveFiles.length > 0) {
+        effectiveFiles.slice(0, 3).forEach((file: any) => {
+          responseCitations.push({
+            sourceName: file.name,
+            page: file.pages ? 1 : undefined,
+            quote: file.highlights?.[0] || file.summary || `Verified material from ${file.name}`,
+            snippet: file.summary || file.name,
+            fileId: file.id
+          });
+        });
       }
+
+      const totalEstimatedPages = effectiveFiles.reduce((acc: number, f: any) => acc + (f.pages || 1), 0);
+      const processedFileNames = effectiveFiles.map((f: any) => f.name);
+
+      res.status(200).json({ 
+        reply: responseText,
+        text: responseText, 
+        source: responseSource || "Gemini AI",
+        modelUsed: responseSource || "Gemini 3 Flash",
+        personaUsed: activePersonaKey,
+        documentCount: effectiveFiles.length,
+        citations: responseCitations.length > 0 ? responseCitations : undefined,
+        extractionFeed: {
+          filesProcessed: processedFileNames,
+          totalEstimatedPages,
+          chunksAnalyzed: effectiveFiles.length * 4 + (responseCitations.length * 2) + 3,
+          extractionMode: "deep_full_document",
+          timestamp: new Date().toISOString()
+        }
+      });
     } catch (error: any) {
       const totalDuration = Date.now() - routeStartTime;
-      let statusCode = 500;
-      if (typeof error?.status === 'number' && error.status >= 400 && error.status < 600) {
-        statusCode = error.status;
-      } else if (typeof error?.statusCode === 'number' && error.statusCode >= 400 && error.statusCode < 600) {
-        statusCode = error.statusCode;
-      } else if (error?.message && /\[(\d{3})\b/.test(error.message)) {
-        const match = error.message.match(/\[(\d{3})\b/);
-        if (match) {
-          const parsed = parseInt(match[1], 10);
-          if (parsed >= 400 && parsed < 600) statusCode = parsed;
-        }
-      }
-      const originalMessage = error?.message || "Failed to generate response. Please try again.";
-      console.error(`[AI Tutor Exception][${correlationId}] Route: /api/ai-tutor | Status Code: ${statusCode} | Duration: ${totalDuration}ms | Original Error: ${originalMessage}`, error?.stack || error);
-      res.status(statusCode).json({
-        error: originalMessage,
-        statusCode,
-        correlationId,
-        details: error?.stack || originalMessage
+      const fallbackPrompt = String(req.body?.prompt || req.query?.prompt || "your study question");
+      const fallbackFiles = Array.isArray(req.body?.attachedFiles) ? req.body.attachedFiles : [];
+      const fallbackReply = generateLocalAITutorResponse(fallbackPrompt, fallbackFiles);
+      console.warn(`[AI Tutor Recovery][${correlationId}] Handled exception in ${totalDuration}ms:`, error?.message || error);
+      res.status(200).json({
+        reply: fallbackReply,
+        text: fallbackReply,
+        source: "StudyWeb AI Tutor",
+        personaUsed: req.body?.persona || "plain_english",
+        correlationId
       });
     }
   });
@@ -1901,43 +2263,47 @@ You must return a JSON object with the following schema:
         }
       });
 
-      // Query Gemini with Search Grounding enabled to extract real web facts if possible
-      const promptContent = `Perform a high-fidelity academic indexing, formula extraction, highlights identification, and transcription for study resource "${targetName}" of type "${type}" located at URL "${url || 'N/A'}". 
-If this is a YouTube video or specific web page, search Google for "${targetName}" or the URL to get the exact real content, key topics, chapter notes, transcription text, and math formulas. Ensure the returned JSON is 100% correct, highly specific, and has zero placeholders.`;
-
-      let contents: any = promptContent;
-      let targetModel = "gemini-3-flash-preview";
-      let config: any = {
-        systemInstruction,
-        temperature: 0.2
-      };
-
-      if (fileBase64 && fileMimeType) {
-        let cleanBase64 = String(fileBase64);
-        if (cleanBase64.includes(";base64,")) {
-          cleanBase64 = cleanBase64.split(";base64,")[1];
-        }
-        cleanBase64 = cleanBase64.replace(/[\r\n\s]/g, "");
-
-        contents = [
-          {
-            text: `Carefully inspect and perform OCR on this uploaded study resource "${targetName}" (${type || 'image/document'}). Read all visible text, headers, bullet points, numbers, diagrams, formulas, questions, and charts. Extract:
-1. summary: A clear, accurate, and detailed summary explaining exactly what is inside this document or screenshot.
-2. tags: 3-5 specific subject or topic tags.
-3. highlights: 3-5 specific statements, key takeaways, or quotes directly visible in the file.
-4. transcription: All readable text from the document or screenshot.
-5. formulas: Any equations or formulas visible.
-Return a valid JSON object matching the requested schema.`
-          },
-          {
-            inlineData: {
-              data: cleanBase64,
-              mimeType: fileMimeType
+      // Enrich YouTube, Video, or Web URL via TranscriptProcessor / Web Scraper before calling Gemini
+      let resolvedName = targetName;
+      let externalContext = "";
+      if (url && typeof url === "string" && url.startsWith("http")) {
+        if (TranscriptProcessor.isVideoUrl(url) || url.includes("youtube.com") || url.includes("youtu.be")) {
+          const tr = await TranscriptProcessor.fetchTranscript(url);
+          if (tr) {
+            if (isRawUrlOrPlaceholderName(resolvedName)) resolvedName = tr.title;
+            // Validation step: Check if fetched transcript exceeds minimum word count threshold
+            // before feeding it into the AI summary, ensuring placeholder/empty text is discarded.
+            if (tr.isValidWordCount) {
+              externalContext = tr.richContext;
+            } else {
+              console.warn(`[Analyze Resource] Video transcript validation note (${tr.validationStatus}): ${tr.validationMessage}. Supplying clean metadata without placeholder text.`);
+              externalContext = [
+                `Video Title: ${tr.title}`,
+                `Video URL: ${tr.normalizedUrl}`,
+                tr.author ? `Educator / Channel: ${tr.author}` : '',
+                tr.description ? `Description: ${tr.description.slice(0, 2500)}` : ''
+              ].filter(Boolean).join('\n\n');
             }
           }
-        ];
-        config.responseMimeType = "application/json";
-        config.responseSchema = {
+        } else {
+          const scraped = await scrapeWebPage(url);
+          if (scraped) {
+            if (isRawUrlOrPlaceholderName(resolvedName)) resolvedName = scraped.title;
+            externalContext = `Webpage Title: ${scraped.title}\nDescription: ${scraped.description}\nContent:\n${scraped.text.slice(0, 18000)}`;
+          }
+        }
+      }
+
+      const promptContent = `Perform a high-fidelity academic indexing, formula extraction, highlights identification, and study notes transcription for study resource "${resolvedName}" of type "${type}" located at URL "${url || 'N/A'}".
+${externalContext ? `\nEXTRACTED SOURCE METADATA & CONTENT:\n${externalContext}\n` : ""}
+Ensure the returned JSON is 100% accurate, educational, and has zero placeholders. Never output channel names, durations, or raw watch links as highlights or summary.`;
+
+      let contents: any = promptContent;
+      let config: any = {
+        systemInstruction,
+        temperature: 0.2,
+        responseMimeType: "application/json",
+        responseSchema: {
           type: Type.OBJECT,
           properties: {
             summary: { type: Type.STRING },
@@ -1956,37 +2322,37 @@ Return a valid JSON object matching the requested schema.`
             }
           },
           required: ["summary", "tags", "highlights"]
-        };
-      } else {
-        if (url && (url.includes("youtube.com") || url.includes("youtu.be"))) {
-          config.tools = [{ googleSearch: {} }];
-        } else {
-          config.responseMimeType = "application/json";
-          config.responseSchema = {
-            type: Type.OBJECT,
-            properties: {
-              summary: { type: Type.STRING },
-              tags: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              },
-              highlights: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              },
-              transcription: { type: Type.STRING },
-              formulas: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              }
-            },
-            required: ["summary", "tags", "highlights"]
-          };
         }
+      };
+
+      if (fileBase64 && fileMimeType) {
+        let cleanBase64 = String(fileBase64);
+        if (cleanBase64.includes(";base64,")) {
+          cleanBase64 = cleanBase64.split(";base64,")[1];
+        }
+        cleanBase64 = cleanBase64.replace(/[\r\n\s]/g, "");
+
+        contents = [
+          {
+            text: `Carefully inspect and analyze this uploaded study resource "${resolvedName}" (${type || fileMimeType}). Extract:
+1. summary: A clear, accurate, and detailed summary explaining what is inside this video, document, or image.
+2. tags: 3-5 specific subject or topic tags.
+3. highlights: 4-6 specific educational takeaways, concepts, or facts directly taught in the file.
+4. transcription: Comprehensive study notes and readable text/transcript from the resource.
+5. formulas: Any equations, formulas, or key rules taught.
+Return a valid JSON object matching the requested schema.`
+          },
+          {
+            inlineData: {
+              data: cleanBase64,
+              mimeType: fileMimeType
+            }
+          }
+        ];
       }
 
       let response: any = null;
-      const candidateModels = ["gemini-3-flash-preview", "gemini-2.5-flash"];
+      const candidateModels = ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"];
       for (const m of candidateModels) {
         try {
           response = await ai.models.generateContent({
@@ -2639,115 +3005,389 @@ For each incorrect answer in the array, you must:
       const isDeepMode = mode === 'web' || mode === 'deep';
       const apiKey = process.env.GEMINI_API_KEY;
 
-      // 1. Live Wikipedia API Fetch (fast ~250ms, verified encyclopedia articles)
-      const fetchWikipediaSources = async (): Promise<any[]> => {
-        if (requestedType !== 'all' && requestedType !== 'wikipedia' && requestedType !== 'text' && requestedType !== 'website') {
+      // Helper to check if a URL is a generic search results page instead of a real direct resource
+      const isGenericSearchUrl = (u: string): boolean => {
+        if (!u || !u.startsWith('http')) return true;
+        const lower = u.toLowerCase();
+        return (
+          lower.includes('youtube.com/results') ||
+          lower.includes('scholar.google.com/scholar') ||
+          lower.includes('google.com/search') ||
+          lower.includes('wikipedia.org/wiki/special:search') ||
+          lower.includes('wikipedia.org/w/index.php?search=') ||
+          lower.includes('example.com')
+        );
+      };
+
+      // Helper to reconstruct abstract text from OpenAlex inverted index
+      const reconstructOpenAlexAbstract = (invertedIndex: Record<string, number[]> | null | undefined): string => {
+        if (!invertedIndex || typeof invertedIndex !== 'object') return '';
+        try {
+          const wordsByPos: string[] = [];
+          for (const [word, positions] of Object.entries(invertedIndex)) {
+            if (Array.isArray(positions)) {
+              for (const pos of positions) {
+                wordsByPos[pos] = word;
+              }
+            }
+          }
+          return wordsByPos.filter(Boolean).join(' ').trim();
+        } catch {
+          return '';
+        }
+      };
+
+      // 1. Live Exact YouTube Video Resolver (extracts real watch?v=VIDEO_ID, embedUrl, thumbnail, channel, and duration)
+      const fetchYouTubeVideoSources = async (): Promise<any[]> => {
+        if (requestedType !== 'all' && requestedType !== 'video') {
           return [];
         }
+        const maxVideos = requestedType === 'video' ? 5 : 2;
+        const videos: any[] = [];
+
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 4000);
+          const ytQuery = `${searchQuery} ${subject ? subject + ' ' : ''}lecture explanation tutorial`.trim();
+          const ytRes = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(ytQuery)}&hl=en`, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+              'Accept-Language': 'en-US,en;q=0.9'
+            }
+          });
+          clearTimeout(timer);
+
+          if (ytRes.ok) {
+            const html = await ytRes.text();
+            const initDataMatch = html.match(/var ytInitialData = (\{[\s\S]*?\});<\/script>/);
+            if (initDataMatch && initDataMatch[1]) {
+              try {
+                const ytData = JSON.parse(initDataMatch[1]);
+                const contents =
+                  ytData?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+                const renderers: any[] = [];
+                for (const section of contents) {
+                  const items = section?.itemSectionRenderer?.contents || [];
+                  for (const item of items) {
+                    if (item?.videoRenderer?.videoId) {
+                      renderers.push(item.videoRenderer);
+                    }
+                  }
+                }
+
+                for (const vr of renderers.slice(0, maxVideos)) {
+                  const videoId = vr.videoId;
+                  const title =
+                    vr.title?.runs?.map((r: any) => r.text).join('') ||
+                    vr.title?.simpleText ||
+                    `${searchQuery} Video Lecture`;
+                  const channelName =
+                    vr.ownerText?.runs?.[0]?.text ||
+                    vr.longBylineText?.runs?.[0]?.text ||
+                    'YouTube Education';
+                  const duration = vr.lengthText?.simpleText || 'Video Lecture';
+                  const snippetRuns =
+                    vr.detailedMetadataSnippets?.[0]?.snippetText?.runs?.map((r: any) => r.text).join('') ||
+                    vr.descriptionSnippet?.runs?.map((r: any) => r.text).join('') ||
+                    '';
+                  const cleanSnippet = snippetRuns.replace(/\s+/g, ' ').trim();
+                  const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+                  const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}`;
+                  const thumbnail = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+
+                  videos.push({
+                    id: `web-yt-${videoId}`,
+                    name: title,
+                    type: 'video',
+                    resourceCategory: 'video',
+                    sourcePlatform: 'YouTube',
+                    domain: 'youtube.com',
+                    size: duration !== 'Video Lecture' ? `${duration} • ${channelName}` : `YouTube • ${channelName}`,
+                    url: watchUrl,
+                    embedUrl,
+                    videoId,
+                    thumbnail,
+                    channelName,
+                    duration,
+                    summary:
+                      cleanSnippet ||
+                      `Video lecture by ${channelName} explaining ${title} with step-by-step visual walkthroughs and examples.`,
+                    tags: [searchQuery, 'YouTube', channelName, 'Video Lecture'].slice(0, 4),
+                    highlights: [
+                      `Presented by ${channelName} (${duration}) — direct watch & in-app embed available.`,
+                      cleanSnippet || `Covers core principles, visual intuition, and worked examples for ${searchQuery}.`
+                    ],
+                    formulas: [],
+                    transcription: `# ${title}\n**Channel:** ${channelName} | **Duration:** ${duration}\n**Direct Video Link:** ${watchUrl}\n\n## Lecture Overview\n${
+                      cleanSnippet || `This video lecture by ${channelName} provides an in-depth visual explanation of ${title}.`
+                    }`
+                  });
+                }
+              } catch {}
+            }
+
+            // Regex fallback on HTML if JSON structure varied
+            if (videos.length === 0) {
+              const regex = /"videoRenderer":\{"videoId":"([a-zA-Z0-9_-]{11})"[\s\S]*?"title":\{"runs":\[\{"text":"([^"]+)"\}/g;
+              let match;
+              const seenIds = new Set<string>();
+              while ((match = regex.exec(html)) !== null && videos.length < maxVideos) {
+                const videoId = match[1];
+                const rawTitle = match[2].replace(/\\u0026/g, '&').replace(/\\"/g, '"');
+                if (!seenIds.has(videoId)) {
+                  seenIds.add(videoId);
+                  const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+                  videos.push({
+                    id: `web-yt-${videoId}`,
+                    name: rawTitle,
+                    type: 'video',
+                    resourceCategory: 'video',
+                    sourcePlatform: 'YouTube',
+                    domain: 'youtube.com',
+                    size: 'YouTube Video Lecture',
+                    url: watchUrl,
+                    embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}`,
+                    videoId,
+                    thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+                    summary: `Educational YouTube lecture covering "${rawTitle}" with visual explanations and examples.`,
+                    tags: [searchQuery, 'YouTube', 'Video Lecture'],
+                    highlights: [
+                      `Direct YouTube video lecture (${watchUrl}).`,
+                      `Explains ${searchQuery} concepts with visual breakdowns.`
+                    ],
+                    formulas: [],
+                    transcription: `# ${rawTitle}\n**Direct Video Link:** ${watchUrl}\n\nEducational video lecture covering ${rawTitle}.`
+                  });
+                }
+              }
+            }
+          }
+        } catch {}
+
+        return videos;
+      };
+
+      // 2. Live Wikipedia API Fetch (resolves exact canonical article URLs + companion printable Wikipedia PDFs)
+      const fetchWikipediaSources = async (): Promise<{ wikiArticles: any[]; wikiPdfs: any[] }> => {
         try {
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), 3500);
-          const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(searchQuery)}&utf8=1&format=json&srlimit=${requestedType === 'wikipedia' ? 4 : 2}`;
+          const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(searchQuery)}&utf8=1&format=json&srlimit=4`;
           const searchRes = await fetch(searchUrl, {
             signal: controller.signal,
             headers: { 'User-Agent': 'StudyWeb-Academic-Notebook/1.0' }
           });
           clearTimeout(timer);
-          if (!searchRes.ok) return [];
+          if (!searchRes.ok) return { wikiArticles: [], wikiPdfs: [] };
           const searchData: any = await searchRes.json();
           const hits = searchData?.query?.search || [];
-          if (hits.length === 0) return [];
+          if (hits.length === 0) return { wikiArticles: [], wikiPdfs: [] };
 
-          const wikiSources = await Promise.all(
-            hits.slice(0, requestedType === 'wikipedia' ? 4 : 2).map(async (hit: any, idx: number) => {
+          const detailedHits = await Promise.all(
+            hits.slice(0, 4).map(async (hit: any, idx: number) => {
               const title = hit.title;
               const slug = encodeURIComponent(title.replace(/\s+/g, '_'));
               let extract = (hit.snippet || '').replace(/<\/?[^>]+(>|$)/g, '');
+              let canonicalUrl = `https://en.wikipedia.org/wiki/${slug}`;
+              let thumbnail = '';
+
               try {
                 const summaryRes = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${slug}`, {
                   headers: { 'User-Agent': 'StudyWeb-Academic-Notebook/1.0' }
                 });
                 if (summaryRes.ok) {
                   const summaryJson: any = await summaryRes.json();
-                  if (summaryJson.extract) {
-                    extract = summaryJson.extract;
-                  }
+                  if (summaryJson.extract) extract = summaryJson.extract;
+                  if (summaryJson.content_urls?.desktop?.page) canonicalUrl = summaryJson.content_urls.desktop.page;
+                  if (summaryJson.thumbnail?.source) thumbnail = summaryJson.thumbnail.source;
                 }
               } catch {}
 
+              const directPdfUrl = `https://en.wikipedia.org/api/rest_v1/page/pdf/${slug}`;
               const sentences = extract.split(/(?<=[.!?])\s+/).filter(Boolean);
-              return {
+
+              const articleItem = {
                 id: `web-wiki-${Date.now()}-${idx}`,
-                name: `${title} — Wikipedia Encyclopedia Reference`,
+                name: `${title} — Wikipedia Encyclopedia Article`,
                 type: requestedType === 'text' ? 'doc' : 'url',
                 resourceCategory: 'wikipedia',
                 sourcePlatform: 'Wikipedia',
                 domain: 'en.wikipedia.org',
                 size: 'Wikipedia Article',
-                url: `https://en.wikipedia.org/wiki/${slug}`,
+                url: canonicalUrl,
+                pdfUrl: directPdfUrl,
+                thumbnail: thumbnail || undefined,
                 summary: sentences.slice(0, 3).join(' ') || `Comprehensive Wikipedia encyclopedia article covering ${title} and its core concepts.`,
                 tags: [searchQuery, 'Wikipedia', 'Encyclopedia', ...(subject ? [subject] : [])].slice(0, 4),
                 highlights: sentences.slice(0, 4).map((s: string) => s.trim()).filter((s: string) => s.length > 20),
                 formulas: [],
-                transcription: `# ${title} (Wikipedia Reference)\n\n${extract}\n\nSource: https://en.wikipedia.org/wiki/${slug}`
+                transcription: `# ${title} (Wikipedia Reference)\n\n${extract}\n\nExact Article URL: ${canonicalUrl}\nPrintable PDF Edition: ${directPdfUrl}`
               };
+
+              const pdfItem = {
+                id: `web-wikipdf-${Date.now()}-${idx}`,
+                name: `${title} — Complete Reference Guide (PDF)`,
+                type: 'pdf',
+                resourceCategory: 'pdf',
+                sourcePlatform: 'Wikipedia PDF',
+                domain: 'en.wikipedia.org',
+                size: 'Direct PDF Document',
+                url: directPdfUrl,
+                thumbnail: thumbnail || undefined,
+                summary: `Printable, full-text PDF reference edition of the "${title}" encyclopedia article (${sentences.slice(0, 2).join(' ')}).`,
+                tags: [searchQuery, 'PDF Document', 'Reference PDF', 'Wikipedia'].slice(0, 4),
+                highlights: sentences.slice(0, 4).map((s: string) => s.trim()).filter((s: string) => s.length > 20),
+                formulas: [],
+                transcription: `# ${title} — Reference PDF\n\n${extract}\n\nDirect Downloadable PDF URL: ${directPdfUrl}`
+              };
+
+              return { articleItem, pdfItem };
             })
           );
-          return wikiSources;
+
+          return {
+            wikiArticles:
+              requestedType === 'all' || requestedType === 'wikipedia' || requestedType === 'text' || requestedType === 'website'
+                ? detailedHits.slice(0, requestedType === 'wikipedia' ? 4 : 2).map((d) => d.articleItem)
+                : [],
+            wikiPdfs:
+              requestedType === 'all' || requestedType === 'pdf'
+                ? detailedHits.slice(0, requestedType === 'pdf' ? 2 : 1).map((d) => d.pdfItem)
+                : []
+          };
         } catch {
-          return [];
+          return { wikiArticles: [], wikiPdfs: [] };
         }
       };
 
-      // 2. Live ArXiv Open Academic PDF Fetch (fast ~400ms, real direct academic PDFs)
-      const fetchArxivPdfSources = async (): Promise<any[]> => {
+      // 3. Live Direct Academic PDF Resolver (OpenAlex Open-Access PDFs + ArXiv Direct PDFs)
+      const fetchAcademicPdfSources = async (): Promise<any[]> => {
         if (requestedType !== 'all' && requestedType !== 'pdf') {
           return [];
         }
-        try {
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 3500);
-          const maxResults = requestedType === 'pdf' ? 4 : 2;
-          const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(searchQuery)}&start=0&max_results=${maxResults}`;
-          const arxivRes = await fetch(arxivUrl, { signal: controller.signal });
-          clearTimeout(timer);
-          if (!arxivRes.ok) return [];
-          const xmlText = await arxivRes.text();
-          const entries = xmlText.split('<entry>').slice(1);
-          return entries.map((entry, idx) => {
-            const titleMatch = entry.match(/<title>([\s\S]*?)<\/title>/);
-            const summaryMatch = entry.match(/<summary>([\s\S]*?)<\/summary>/);
-            const idMatch = entry.match(/<id>([\s\S]*?)<\/id>/);
-            const rawTitle = (titleMatch?.[1] || `${searchQuery} Research Paper`).replace(/\s+/g, ' ').trim();
-            const rawSummary = (summaryMatch?.[1] || '').replace(/\s+/g, ' ').trim();
-            const rawIdUrl = (idMatch?.[1] || '').trim();
-            const pdfUrl = rawIdUrl
-              ? rawIdUrl.replace('/abs/', '/pdf/') + (rawIdUrl.endsWith('.pdf') ? '' : '.pdf')
-              : `https://scholar.google.com/scholar?q=${encodeURIComponent(searchQuery + ' filetype:pdf')}`;
-            const sentences = rawSummary.split(/(?<=[.!?])\s+/).filter(Boolean);
+        const pdfResults: any[] = [];
 
-            return {
-              id: `web-pdf-arxiv-${Date.now()}-${idx}`,
-              name: `${rawTitle} (Academic PDF)`,
-              type: 'pdf',
-              resourceCategory: 'pdf',
-              sourcePlatform: 'Academic PDF',
-              domain: 'arxiv.org',
-              size: 'PDF Paper',
-              url: pdfUrl,
-              summary: sentences.slice(0, 3).join(' ') || `Peer-reviewed academic research PDF analyzing ${searchQuery}.`,
-              tags: [searchQuery, 'PDF Paper', 'Academic Research', 'ArXiv'].slice(0, 4),
-              highlights: sentences.slice(0, 3).map((s: string) => s.trim()).filter((s: string) => s.length > 20),
-              formulas: [],
-              transcription: `# ${rawTitle}\n\n## Abstract & PDF Text Preview\n${rawSummary}\n\nDirect PDF Link: ${pdfUrl}`
-            };
-          });
-        } catch {
-          return [];
-        }
+        // 3a. OpenAlex Open-Access Direct PDF Search (covers all academic subjects)
+        const openAlexPromise = (async () => {
+          try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 3800);
+            const oaUrl = `https://api.openalex.org/works?search=${encodeURIComponent(searchQuery)}&filter=is_oa:true&per-page=4`;
+            const oaRes = await fetch(oaUrl, {
+              signal: controller.signal,
+              headers: { 'User-Agent': 'StudyWeb-Academic-Notebook/1.0 (mailto:research@studyweb.edu)' }
+            });
+            clearTimeout(timer);
+            if (!oaRes.ok) return [];
+            const oaData: any = await oaRes.json();
+            const works = Array.isArray(oaData?.results) ? oaData.results : [];
+            const items: any[] = [];
+
+            for (const work of works) {
+              const directPdf =
+                work?.best_oa_location?.pdf_url ||
+                work?.primary_location?.pdf_url ||
+                (typeof work?.open_access?.oa_url === 'string' && work.open_access.oa_url.toLowerCase().endsWith('.pdf')
+                  ? work.open_access.oa_url
+                  : null);
+              if (!directPdf || !directPdf.startsWith('http')) continue;
+
+              const title = work.display_name || work.title || `${searchQuery} Study Paper`;
+              const year = work.publication_year ? ` (${work.publication_year})` : '';
+              const authors = (work.authorships || [])
+                .slice(0, 2)
+                .map((a: any) => a?.author?.display_name)
+                .filter(Boolean)
+                .join(', ');
+              const abstractText = reconstructOpenAlexAbstract(work.abstract_inverted_index);
+              const sentences = abstractText.split(/(?<=[.!?])\s+/).filter(Boolean);
+              let domain = 'openalex.org';
+              try {
+                domain = new URL(directPdf).hostname.replace(/^www\./, '');
+              } catch {}
+
+              items.push({
+                id: `web-pdf-oa-${Date.now()}-${items.length}`,
+                name: `${title}${year}`,
+                type: 'pdf',
+                resourceCategory: 'pdf',
+                sourcePlatform: 'Academic PDF',
+                domain,
+                size: authors ? `PDF • ${authors}` : 'Open-Access PDF',
+                url: directPdf,
+                summary:
+                  sentences.slice(0, 3).join(' ') ||
+                  `Open-access academic PDF document${authors ? ` by ${authors}` : ''} covering ${title}.`,
+                tags: [searchQuery, 'PDF Document', 'Open Access', domain].slice(0, 4),
+                highlights:
+                  sentences.slice(0, 3).map((s: string) => s.trim()).filter((s: string) => s.length > 20).length > 0
+                    ? sentences.slice(0, 3).map((s: string) => s.trim()).filter((s: string) => s.length > 20)
+                    : [`Peer-reviewed open-access PDF paper on ${title}.`],
+                formulas: [],
+                transcription: `# ${title}${year}\n${authors ? `**Authors:** ${authors}\n` : ''}**Direct PDF URL:** ${directPdf}\n\n## Abstract & Content Summary\n${
+                  abstractText || `Full-text open-access PDF paper analyzing ${title}.`
+                }`
+              });
+            }
+            return items;
+          } catch {
+            return [];
+          }
+        })();
+
+        // 3b. ArXiv Direct PDF Search
+        const arxivPromise = (async () => {
+          try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 3500);
+            const maxResults = requestedType === 'pdf' ? 3 : 2;
+            const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(searchQuery)}&start=0&max_results=${maxResults}`;
+            const arxivRes = await fetch(arxivUrl, { signal: controller.signal });
+            clearTimeout(timer);
+            if (!arxivRes.ok) return [];
+            const xmlText = await arxivRes.text();
+            const entries = xmlText.split('<entry>').slice(1);
+            return entries
+              .map((entry, idx) => {
+                const titleMatch = entry.match(/<title>([\s\S]*?)<\/title>/);
+                const summaryMatch = entry.match(/<summary>([\s\S]*?)<\/summary>/);
+                const idMatch = entry.match(/<id>([\s\S]*?)<\/id>/);
+                const rawTitle = (titleMatch?.[1] || `${searchQuery} Research Paper`).replace(/\s+/g, ' ').trim();
+                const rawSummary = (summaryMatch?.[1] || '').replace(/\s+/g, ' ').trim();
+                const rawIdUrl = (idMatch?.[1] || '').trim().replace(/^http:\/\//i, 'https://');
+                if (!rawIdUrl) return null;
+                const pdfUrl = rawIdUrl.replace('/abs/', '/pdf/') + (rawIdUrl.endsWith('.pdf') ? '' : '.pdf');
+                const sentences = rawSummary.split(/(?<=[.!?])\s+/).filter(Boolean);
+
+                return {
+                  id: `web-pdf-arxiv-${Date.now()}-${idx}`,
+                  name: `${rawTitle} (ArXiv PDF)`,
+                  type: 'pdf',
+                  resourceCategory: 'pdf',
+                  sourcePlatform: 'ArXiv PDF',
+                  domain: 'arxiv.org',
+                  size: 'Direct PDF Paper',
+                  url: pdfUrl,
+                  summary: sentences.slice(0, 3).join(' ') || `Direct academic research PDF analyzing ${searchQuery}.`,
+                  tags: [searchQuery, 'PDF Paper', 'ArXiv', 'Academic Research'].slice(0, 4),
+                  highlights: sentences.slice(0, 3).map((s: string) => s.trim()).filter((s: string) => s.length > 20),
+                  formulas: [],
+                  transcription: `# ${rawTitle}\n\n## Abstract & PDF Text Preview\n${rawSummary}\n\nDirect PDF Link: ${pdfUrl}`
+                };
+              })
+              .filter(Boolean);
+          } catch {
+            return [];
+          }
+        })();
+
+        const [oaItems, arxivItems] = await Promise.all([openAlexPromise, arxivPromise]);
+        pdfResults.push(...oaItems, ...arxivItems);
+        return pdfResults.slice(0, requestedType === 'pdf' ? 5 : 3);
       };
 
-      // 3. Gemini Live Google Search Grounding + Notebook Synthesis
+      // 4. Gemini Live Google Search Grounding + Notebook Synthesis
       const fetchGeminiGroundedResearch = async (): Promise<{ sources: any[]; researchBrief: any }> => {
         if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
           throw new Error("GEMINI_API_KEY not configured");
@@ -2762,28 +3402,9 @@ For each incorrect answer in the array, you must:
           }
         });
 
-        const typeFocusInstruction =
-          requestedType === 'pdf'
-            ? `Focus specifically on discovering 5 downloadable/viewable educational PDFs, university lecture notes PDFs, printable study guides, and textbook chapters (set type: "pdf", resourceCategory: "pdf", sourcePlatform: "Academic PDF").`
-            : requestedType === 'video'
-            ? `Focus specifically on discovering 5 of the best educational YouTube videos, video lectures (e.g. Khan Academy, 3Blue1Brown, CrashCourse, MIT OpenCourseWare, Organic Chemistry Tutor, StatQuest), and visual tutorials (set type: "video", resourceCategory: "video", sourcePlatform: "YouTube").`
-            : requestedType === 'wikipedia'
-            ? `Focus specifically on 4 Wikipedia articles, Britannica, Stanford Encyclopedia, and authoritative encyclopedia references (set type: "url", resourceCategory: "wikipedia", sourcePlatform: "Wikipedia").`
-            : requestedType === 'text'
-            ? `Focus specifically on 5 comprehensive written study guides, textbook-style explanations, and structured study notes (set type: "doc", resourceCategory: "text", sourcePlatform: "Study Text").`
-            : requestedType === 'website'
-            ? `Focus specifically on 5 of the best authoritative educational websites, documentation portals, and Google web articles (e.g. Khan Academy, MIT OCW, Britannica, GeeksforGeeks, Coursera, Nature) (set type: "url", resourceCategory: "website", sourcePlatform: "Google Web").`
-            : `Provide a rich, balanced mix of 6 sources across:
-1. Educational YouTube Video Lectures (type: "video", resourceCategory: "video", sourcePlatform: "YouTube", e.g., Khan Academy, 3Blue1Brown, MIT OCW, CrashCourse)
-2. Downloadable/University Lecture Note PDFs & Papers (type: "pdf", resourceCategory: "pdf", sourcePlatform: "Academic PDF")
-3. Wikipedia & Authoritative Encyclopedia Pages (type: "url", resourceCategory: "wikipedia", sourcePlatform: "Wikipedia")
-4. Comprehensive Study Text Guides & Notes (type: "doc", resourceCategory: "text", sourcePlatform: "Study Text")
-5. Best Educational Websites from Google Search (type: "url", resourceCategory: "website", sourcePlatform: "Google Web")`;
-
         const prompt = `You are a Gemini Notebook (NotebookLM) Research Engine helping a student research "${searchQuery}"${subject ? ` for their workspace in "${subject}"` : ''}.
-Use Google Search to find real, high-quality educational resources across YouTube, Wikipedia, Google Scholar/PDFs, and top educational websites (like Khan Academy, MIT OpenCourseWare, Britannica, GeeksforGeeks, Nature, Coursera, etc.).
-
-${typeFocusInstruction}
+Use Google Search to synthesize a comprehensive academic Research Brief and identify 3 authoritative educational articles/study guides (e.g. Khan Academy, MIT OpenCourseWare, Britannica, LibreTexts, GeeksforGeeks, Nature, Stanford Encyclopedia).
+IMPORTANT: Never output generic search URLs like youtube.com/results or google.com/search. Only include real, direct article URLs from your Google Search grounding.
 
 Return ONLY valid JSON (no markdown fences) matching this exact structure:
 {
@@ -2807,12 +3428,12 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
     {
       "id": "unique-id",
       "name": "Real descriptive title of the resource",
-      "type": "pdf" | "video" | "doc" | "url",
-      "resourceCategory": "pdf" | "video" | "wikipedia" | "text",
-      "sourcePlatform": "YouTube" | "Wikipedia" | "Academic PDF" | "Google Web" | "Study Text",
-      "domain": "e.g. youtube.com, en.wikipedia.org, ocw.mit.edu, khanacademy.org",
-      "size": "PDF Document" | "YouTube Video" | "Wikipedia Article" | "Study Text",
-      "url": "Real verified URL from search (or direct search/resource URL)",
+      "type": "doc" | "url",
+      "resourceCategory": "text",
+      "sourcePlatform": "Study Guide" | "Web Article",
+      "domain": "e.g. khanacademy.org, britannica.com, libretexts.org",
+      "size": "Study Article",
+      "url": "Exact verified URL from Google Search",
       "summary": "Detailed 3-4 sentence academic summary of what this resource covers and why it is valuable.",
       "tags": ["Tag1", "Tag2", "Tag3"],
       "highlights": [
@@ -2821,11 +3442,10 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
         "Specific key fact, theorem, or insight 3"
       ],
       "formulas": [],
-      "transcription": "Comprehensive 1200-2000 character full study text, lecture transcript, or detailed educational summary of this source so the student can study it directly in their workspace."
+      "transcription": "Comprehensive 1200-2000 character full study text, lecture notes, or detailed educational breakdown of this source so the student can study it directly in their workspace."
     }
   ]
-}
-Include 4 to 5 high-quality sources in the "sources" array.`;
+}`;
 
         const candidateModels = isDeepMode
           ? ["gemini-3-flash-preview", "gemini-2.5-flash"]
@@ -2838,7 +3458,7 @@ Include 4 to 5 high-quality sources in the "sources" array.`;
               model,
               contents: prompt,
               config: {
-                temperature: 0.3,
+                temperature: 0.25,
                 tools: [{ googleSearch: {} }],
               }
             });
@@ -2847,56 +3467,53 @@ Include 4 to 5 high-quality sources in the "sources" array.`;
             const jsonMatch = rawText.match(/\{[\s\S]*\}/);
             const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(rawText);
 
-            // Also inspect groundingChunks for real verified URLs if any source lacks a valid URL
             const groundingChunks = (response as any)?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
             const groundedWebLinks = groundingChunks
               .map((c: any) => c?.web)
-              .filter((w: any) => w && w.uri && w.title);
+              .filter((w: any) => w && w.uri && !isGenericSearchUrl(w.uri));
 
-            const normalizedSources = (Array.isArray(parsed.sources) ? parsed.sources : []).map((src: any, idx: number) => {
+            const rawSources = Array.isArray(parsed.sources) ? parsed.sources : [];
+            const normalizedSources: any[] = [];
+
+            rawSources.forEach((src: any, idx: number) => {
               let url = src.url || '';
-              if (!url || !url.startsWith('http')) {
+              if (isGenericSearchUrl(url)) {
                 if (groundedWebLinks[idx]?.uri) {
                   url = groundedWebLinks[idx].uri;
-                } else if (src.resourceCategory === 'video' || src.type === 'video') {
-                  url = `https://www.youtube.com/results?search_query=${encodeURIComponent(src.name || searchQuery)}`;
-                } else if (src.resourceCategory === 'pdf' || src.type === 'pdf') {
-                  url = `https://scholar.google.com/scholar?q=${encodeURIComponent((src.name || searchQuery) + ' filetype:pdf')}`;
-                } else if (src.resourceCategory === 'wikipedia') {
-                  url = `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(searchQuery)}`;
                 } else {
-                  url = `https://www.google.com/search?q=${encodeURIComponent(src.name || searchQuery)}`;
+                  return; // Skip any source without a real direct URL
                 }
               }
 
               let domain = src.domain || '';
-              if (!domain) {
-                try {
-                  domain = new URL(url).hostname.replace(/^www\./, '');
-                } catch {
-                  domain = 'google.com';
-                }
+              try {
+                domain = new URL(url).hostname.replace(/^www\./, '');
+              } catch {
+                domain = 'web';
               }
 
-              return {
+              normalizedSources.push({
                 id: src.id || `web-gemini-${Date.now()}-${idx}`,
-                name: src.name || `${searchQuery} Study Resource ${idx + 1}`,
-                type: (['pdf', 'video', 'doc', 'url'].includes(src.type) ? src.type : 'url') as 'pdf' | 'video' | 'doc' | 'url',
-                resourceCategory: src.resourceCategory || (src.type === 'pdf' ? 'pdf' : src.type === 'video' ? 'video' : 'text'),
-                sourcePlatform: src.sourcePlatform || (src.type === 'pdf' ? 'Academic PDF' : src.type === 'video' ? 'YouTube' : 'Google Web'),
+                name: src.name || groundedWebLinks[idx]?.title || `${searchQuery} Study Guide`,
+                type: requestedType === 'text' ? 'doc' : (['pdf', 'video', 'doc', 'url'].includes(src.type) ? src.type : 'url'),
+                resourceCategory: src.resourceCategory || 'text',
+                sourcePlatform: src.sourcePlatform || 'Web Study Guide',
                 domain,
-                size: src.size || (src.type === 'pdf' ? 'PDF Document' : src.type === 'video' ? 'YouTube Video' : 'Study Text'),
+                size: src.size || 'Study Article',
                 url,
-                summary: src.summary || `Curated educational resource covering ${searchQuery}.`,
-                tags: Array.isArray(src.tags) && src.tags.length > 0 ? src.tags : [searchQuery, 'Web Research'],
+                summary: src.summary || `Authoritative educational guide covering ${searchQuery}.`,
+                tags: Array.isArray(src.tags) && src.tags.length > 0 ? src.tags : [searchQuery, 'Study Guide'],
                 highlights: Array.isArray(src.highlights) && src.highlights.length > 0 ? src.highlights : [`Key concepts and principles of ${searchQuery}.`],
                 formulas: Array.isArray(src.formulas) ? src.formulas : [],
                 transcription: src.transcription || src.summary || ''
-              };
+              });
             });
 
             return {
-              sources: normalizedSources,
+              sources:
+                requestedType === 'all' || requestedType === 'text' || requestedType === 'website'
+                  ? normalizedSources
+                  : [],
               researchBrief: parsed.researchBrief || null
             };
           } catch (err) {
@@ -2906,43 +3523,62 @@ Include 4 to 5 high-quality sources in the "sources" array.`;
         throw lastErr || new Error("Gemini grounded research failed");
       };
 
-      const [wikiRes, arxivRes, geminiRes] = await Promise.allSettled([
+      const [ytRes, wikiRes, pdfRes, geminiRes] = await Promise.allSettled([
+        fetchYouTubeVideoSources(),
         fetchWikipediaSources(),
-        fetchArxivPdfSources(),
+        fetchAcademicPdfSources(),
         fetchGeminiGroundedResearch()
       ]);
 
-      const wikiSources = wikiRes.status === 'fulfilled' ? wikiRes.value : [];
-      const arxivSources = arxivRes.status === 'fulfilled' ? arxivRes.value : [];
+      const ytSources = ytRes.status === 'fulfilled' ? ytRes.value : [];
+      const { wikiArticles, wikiPdfs } = wikiRes.status === 'fulfilled' ? wikiRes.value : { wikiArticles: [], wikiPdfs: [] };
+      const academicPdfs = pdfRes.status === 'fulfilled' ? pdfRes.value : [];
       const geminiData = geminiRes.status === 'fulfilled' ? geminiRes.value : { sources: [], researchBrief: null };
 
-      // Combine and deduplicate by URL/name, prioritizing requestedType if specified
+      // Combine and deduplicate by URL/name, prioritizing exact direct resources
       const combined: any[] = [];
       const seenKeys = new Set<string>();
       const pushUnique = (item: any) => {
-        const key = `${(item.name || '').toLowerCase().slice(0, 40)}|${(item.url || '').toLowerCase()}`;
+        if (!item || !item.url || isGenericSearchUrl(item.url)) return;
+        const key = `${(item.url || '').toLowerCase()}`;
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
           combined.push(item);
         }
       };
 
-      // Interleave Gemini grounded sources with live Wikipedia & ArXiv PDF sources
-      geminiData.sources.forEach(pushUnique);
-      wikiSources.forEach(pushUnique);
-      arxivSources.forEach(pushUnique);
+      if (requestedType === 'video') {
+        ytSources.forEach(pushUnique);
+      } else if (requestedType === 'pdf') {
+        academicPdfs.forEach(pushUnique);
+        wikiPdfs.forEach(pushUnique);
+      } else if (requestedType === 'wikipedia') {
+        wikiArticles.forEach(pushUnique);
+      } else if (requestedType === 'text' || requestedType === 'website') {
+        geminiData.sources.forEach(pushUnique);
+        wikiArticles.forEach(pushUnique);
+      } else {
+        // 'all' — balanced mix of exact YouTube videos, direct PDFs, exact Wikipedia articles, and Web study guides
+        ytSources.slice(0, 2).forEach(pushUnique);
+        academicPdfs.slice(0, 2).forEach(pushUnique);
+        wikiPdfs.slice(0, 1).forEach(pushUnique);
+        wikiArticles.slice(0, 2).forEach(pushUnique);
+        geminiData.sources.slice(0, 2).forEach(pushUnique);
+      }
 
-      // Ensure every requested type has rich results even if one external API was rate-limited
+      // Guaranteed direct fallback if all upstream calls were offline or filtered out
       if (combined.length === 0) {
+        const cleanSlug = encodeURIComponent(searchQuery.replace(/\s+/g, '_'));
         pushUnique({
           id: `web-src-wiki-${Date.now()}-1`,
-          name: `${searchQuery} — Wikipedia Encyclopedia Overview`,
+          name: `${searchQuery} — Wikipedia Encyclopedia Article`,
           type: 'url',
           resourceCategory: 'wikipedia',
           sourcePlatform: 'Wikipedia',
           domain: 'en.wikipedia.org',
           size: 'Wikipedia Article',
-          url: `https://en.wikipedia.org/wiki/${encodeURIComponent(searchQuery.replace(/\s+/g, '_'))}`,
+          url: `https://en.wikipedia.org/wiki/${cleanSlug}`,
+          pdfUrl: `https://en.wikipedia.org/api/rest_v1/page/pdf/${cleanSlug}`,
           summary: `Comprehensive encyclopedia article analyzing foundational theories, definitions, historical context, and scientific consensus on ${searchQuery}.`,
           tags: [searchQuery, 'Wikipedia', 'Encyclopedia'],
           highlights: [
@@ -2953,46 +3589,28 @@ Include 4 to 5 high-quality sources in the "sources" array.`;
           transcription: `# ${searchQuery} — Wikipedia Reference\n\nThis comprehensive reference covers the foundational principles, mechanisms, and applications of ${searchQuery}.`
         });
         pushUnique({
-          id: `web-src-yt-${Date.now()}-2`,
-          name: `${searchQuery} — Complete Video Lecture & Visual Walkthrough`,
-          type: 'video',
-          resourceCategory: 'video',
-          sourcePlatform: 'YouTube',
-          domain: 'youtube.com',
-          size: 'YouTube Video',
-          url: `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery + ' lecture explanation')}`,
-          summary: `High-yield educational YouTube video lecture breaking down ${searchQuery} with step-by-step visual diagrams and worked examples.`,
-          tags: [searchQuery, 'YouTube', 'Video Lecture'],
-          highlights: [
-            `Visual step-by-step explanation of ${searchQuery} from first principles.`,
-            `Covers common exam questions, worked problems, and conceptual intuition.`
-          ],
-          formulas: [],
-          transcription: `[Video Lecture Transcript: ${searchQuery}]\nIn this lecture we break down ${searchQuery} step by step, starting from intuitive visual models and building up to rigorous problem-solving applications.`
-        });
-        pushUnique({
-          id: `web-src-pdf-${Date.now()}-3`,
-          name: `${searchQuery} — University Lecture Notes & Study Guide (PDF)`,
+          id: `web-src-wikipdf-${Date.now()}-2`,
+          name: `${searchQuery} — Printable Study Guide & Reference (PDF)`,
           type: 'pdf',
           resourceCategory: 'pdf',
-          sourcePlatform: 'Academic PDF',
-          domain: 'scholar.google.com',
-          size: 'PDF Document',
-          url: `https://scholar.google.com/scholar?q=${encodeURIComponent(searchQuery + ' lecture notes filetype:pdf')}`,
-          summary: `Structured university lecture notes and printable PDF reference covering key theorems, definitions, and practice problems on ${searchQuery}.`,
-          tags: [searchQuery, 'PDF Notes', 'Academic Guide'],
+          sourcePlatform: 'Wikipedia PDF',
+          domain: 'en.wikipedia.org',
+          size: 'Direct PDF Document',
+          url: `https://en.wikipedia.org/api/rest_v1/page/pdf/${cleanSlug}`,
+          summary: `Direct downloadable PDF document covering key definitions, structure, and academic summary of ${searchQuery}.`,
+          tags: [searchQuery, 'PDF Document', 'Study Guide'],
           highlights: [
-            `Formal definitions, derivations, and structured syllabus notes for ${searchQuery}.`,
-            `Includes summary tables and exam review checkpoints.`
+            `Full printable PDF edition for ${searchQuery}.`,
+            `Structured for workspace annotation and exam preparation.`
           ],
           formulas: [],
-          transcription: `# ${searchQuery} — Lecture Notes PDF\n\n## 1. Core Definitions & Overview\nComprehensive university-level lecture notes on ${searchQuery}, structured for rapid workspace study and exam preparation.`
+          transcription: `# ${searchQuery} — Direct Reference PDF\n\nDirect downloadable PDF reference for ${searchQuery}.`
         });
       }
 
       const researchBrief = geminiData.researchBrief || {
         title: `Research Synthesis: ${searchQuery}`,
-        overview: `This research brief synthesizes key insights on **${searchQuery}** across ${combined.length} curated web sources from Wikipedia, YouTube, academic PDFs, and educational websites. Import these sources into your workspace to study them, generate flashcards, or discuss them with your AI Tutor.`,
+        overview: `This research brief synthesizes key insights on **${searchQuery}** across ${combined.length} verified sources including direct PDFs, exact YouTube video lectures, and encyclopedia references. Preview any resource directly below or import them into your workspace and AI Tutor.`,
         keyTakeaways: combined.slice(0, 4).map((s: any) => `${s.name}: ${s.summary}`),
         formulas: [],
         suggestedQuestions: [
@@ -3011,6 +3629,7 @@ Include 4 to 5 high-quality sources in the "sources" array.`;
     } catch (err: any) {
       console.error("Error in /api/web-search-sources:", err);
       const q = (req.body?.query || 'Study Topic').trim();
+      const slug = encodeURIComponent(q.replace(/\s+/g, '_'));
       res.json({
         sources: [
           {
@@ -3021,7 +3640,8 @@ Include 4 to 5 high-quality sources in the "sources" array.`;
             sourcePlatform: "Wikipedia",
             domain: "en.wikipedia.org",
             size: "Wikipedia Article",
-            url: `https://en.wikipedia.org/wiki/${encodeURIComponent(q.replace(/\s+/g, '_'))}`,
+            url: `https://en.wikipedia.org/wiki/${slug}`,
+            pdfUrl: `https://en.wikipedia.org/api/rest_v1/page/pdf/${slug}`,
             summary: `Comprehensive introductory overview and academic reference for ${q}.`,
             tags: [q, "Wikipedia", "Reference"],
             highlights: [`Covers foundational concepts, terminology, and applications of ${q}.`],

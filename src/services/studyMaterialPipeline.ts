@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
 import { toValidUuid, isValidUuid, generateUuid } from '../utils/uuid';
+import { TranscriptProcessor, TranscriptResult, TranscriptValidationStatus, TranscriptValidationResult } from './TranscriptProcessor';
 
 export const studyMaterialRouter = express.Router();
 
@@ -74,8 +75,28 @@ export function validateSafeUrl(urlString: string): { valid: boolean; error?: st
   }
 }
 
+export function isRawUrlOrPlaceholderName(name?: string | null): boolean {
+  if (!name) return true;
+  const trimmed = name.trim();
+  if (!trimmed) return true;
+  const lower = trimmed.toLowerCase();
+  return (
+    lower.startsWith('http://') ||
+    lower.startsWith('https://') ||
+    lower.startsWith('www.') ||
+    lower === 'web link' ||
+    lower === 'youtube video' ||
+    lower === 'study resource' ||
+    lower === 'external study resource' ||
+    lower === 'uploaded document' ||
+    lower === 'untitled resource' ||
+    lower === 'web resource' ||
+    /^youtube video \([a-z0-9_-]+\)$/i.test(trimmed)
+  );
+}
+
 /**
- * Scrapes readable content from an accessible public webpage safely
+ * Scrapes readable content from an accessible public webpage safely (with dedicated Wikipedia API enrichment)
  */
 export async function scrapeWebPage(urlString: string): Promise<{ title: string; description: string; text: string }> {
   const check = validateSafeUrl(urlString);
@@ -83,15 +104,48 @@ export async function scrapeWebPage(urlString: string): Promise<{ title: string;
     throw new Error(check.error || 'Invalid or forbidden URL.');
   }
 
+  const parsedUrl = check.url;
+
+  // Dedicated high-precision path for Wikipedia articles
+  if (parsedUrl.hostname.toLowerCase().includes('wikipedia.org') && parsedUrl.pathname.includes('/wiki/')) {
+    try {
+      const rawTitle = decodeURIComponent(parsedUrl.pathname.split('/wiki/')[1] || '').split('#')[0];
+      if (rawTitle) {
+        const lang = parsedUrl.hostname.split('.')[0] || 'en';
+        const apiUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=${encodeURIComponent(rawTitle)}&format=json&redirects=1`;
+        const wikiRes = await fetch(apiUrl, {
+          headers: { 'User-Agent': 'StudyWeb-Academic-Analyzer/1.0' }
+        });
+        if (wikiRes.ok) {
+          const wikiData = await wikiRes.json() as any;
+          const pages = wikiData?.query?.pages || {};
+          const firstPage = Object.values(pages)[0] as any;
+          if (firstPage && firstPage.extract) {
+            const cleanTitle = firstPage.title || rawTitle.replace(/_/g, ' ');
+            const fullExtract = String(firstPage.extract).trim();
+            return {
+              title: cleanTitle,
+              description: fullExtract.slice(0, 400),
+              text: fullExtract.slice(0, 28000)
+            };
+          }
+        }
+      }
+    } catch {
+      // Fall through to standard HTML scraper
+    }
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 12000);
 
   try {
-    const res = await fetch(check.url.toString(), {
+    const res = await fetch(parsedUrl.toString(), {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 StudyWebBot/1.0',
-        'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
       }
     });
 
@@ -102,19 +156,24 @@ export async function scrapeWebPage(urlString: string): Promise<{ title: string;
     }
 
     const contentType = res.headers.get('content-type') || '';
-    if (!contentType.includes('text/html') && !contentType.includes('text/plain')) {
-      throw new Error('Target resource is not a readable HTML webpage or text document.');
+    if (!contentType.includes('text/html') && !contentType.includes('text/plain') && !contentType.includes('application/xhtml+xml')) {
+      const pathSegs = parsedUrl.pathname.split('/').filter(Boolean);
+      const fallbackTitle = pathSegs.length > 0
+        ? decodeURIComponent(pathSegs[pathSegs.length - 1]).replace(/[-_]/g, ' ')
+        : parsedUrl.hostname;
+      return {
+        title: fallbackTitle,
+        description: `Direct resource from ${parsedUrl.hostname}`,
+        text: `Resource URL: ${parsedUrl.toString()}\nTitle: ${fallbackTitle}`
+      };
     }
 
     const html = await res.text();
-    if (html.length > 5 * 1024 * 1024) {
-      throw new Error('Webpage content exceeds maximum allowed size (5MB).');
-    }
 
     // Extract title
     let title = '';
-    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-    if (titleMatch) title = titleMatch[1].trim();
+    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    if (titleMatch) title = titleMatch[1].replace(/\s+/g, ' ').trim();
 
     const ogTitleMatch = html.match(/<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i) ||
                          html.match(/<meta\s+content=["']([^"']+)["']\s+property=["']og:title["']/i);
@@ -124,28 +183,36 @@ export async function scrapeWebPage(urlString: string): Promise<{ title: string;
     let description = '';
     const descMatch = html.match(/<meta\s+name=["']description["']\s+content=["']([^"']+)["']/i) ||
                       html.match(/<meta\s+content=["']([^"']+)["']\s+name=["']description["']/i) ||
-                      html.match(/<meta\s+property=["']og:description["']\s+content=["']([^"']+)["']/i);
+                      html.match(/<meta\s+property=["']og:description["']\s+content=["']([^"']+)["']/i) ||
+                      html.match(/<meta\s+content=["']([^"']+)["']\s+property=["']og:description["']/i);
     if (descMatch && descMatch[1]) description = descMatch[1].trim();
 
     // Clean HTML to extract readable paragraphs, headings, lists
     const cleanText = html
-      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
-      .replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, '')
-      .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, '')
-      .replace(/<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>/gi, '')
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
+      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
+      .replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, ' ')
+      .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, ' ')
+      .replace(/<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>/gi, ' ')
+      .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, ' ')
+      .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, ' ')
       .replace(/<[^>]+>/g, ' ')
       .replace(/&nbsp;/g, ' ')
       .replace(/&amp;/g, '&')
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
       .replace(/\s+/g, ' ')
       .trim();
 
+    const decodeEntities = (s: string) =>
+      s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ').trim();
+
     return {
-      title: title || 'Web Resource',
-      description,
-      text: cleanText.substring(0, 20000)
+      title: decodeEntities(title) || parsedUrl.hostname,
+      description: decodeEntities(description),
+      text: cleanText.substring(0, 28000)
     };
   } catch (err: any) {
     clearTimeout(timeoutId);
@@ -157,52 +224,48 @@ export async function scrapeWebPage(urlString: string): Promise<{ title: string;
 }
 
 /**
- * Normalizes YouTube URLs and retrieves official oEmbed video metadata
+ * Normalizes YouTube & video URLs and fetches real spoken captions/transcripts, chapters,
+ * description, and metadata via TranscriptProcessor.
  */
-export async function extractYouTubeInfo(url: string): Promise<{
+export async function extractYouTubeInfo(
+  url: string,
+  options?: { minWordCount?: number; preferredLang?: string }
+): Promise<{
   videoId: string;
   normalizedUrl: string;
   title: string;
   author: string;
+  description: string;
+  chapters: string[];
+  hasCaptions: boolean;
+  wordCount: number;
+  isValidWordCount: boolean;
+  validationStatus: TranscriptValidationStatus;
+  validationMessage: string;
+  timestampedText: string;
+  plainText: string;
+  richContext: string;
+  transcriptResult: TranscriptResult;
 }> {
-  let videoId = '';
-  try {
-    const parsed = new URL(url.trim());
-    if (parsed.hostname.includes('youtube.com')) {
-      videoId = parsed.searchParams.get('v') || '';
-      if (!videoId && parsed.pathname.startsWith('/embed/')) {
-        videoId = parsed.pathname.replace('/embed/', '');
-      } else if (!videoId && parsed.pathname.startsWith('/shorts/')) {
-        videoId = parsed.pathname.replace('/shorts/', '');
-      }
-    } else if (parsed.hostname.includes('youtu.be')) {
-      videoId = parsed.pathname.replace('/', '');
-    }
-  } catch {
-    throw new Error('Invalid YouTube URL format.');
-  }
+  const transcriptResult = await TranscriptProcessor.fetchTranscript(url, options);
 
-  if (!videoId || videoId.length < 5) {
-    throw new Error('Could not parse a valid YouTube video ID from the provided URL.');
-  }
-
-  const normalizedUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  let title = `YouTube Video (${videoId})`;
-  let author = 'YouTube Creator';
-
-  try {
-    const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(normalizedUrl)}&format=json`;
-    const res = await fetch(oembedUrl);
-    if (res.ok) {
-      const data = await res.json() as any;
-      if (data?.title) title = data.title;
-      if (data?.author_name) author = data.author_name;
-    }
-  } catch {
-    // Non-fatal fallback to video ID
-  }
-
-  return { videoId, normalizedUrl, title, author };
+  return {
+    videoId: transcriptResult.videoId,
+    normalizedUrl: transcriptResult.normalizedUrl,
+    title: transcriptResult.title,
+    author: transcriptResult.author,
+    description: transcriptResult.description,
+    chapters: transcriptResult.chapters.map(ch => `[${ch.timestamp}] ${ch.title}`),
+    hasCaptions: transcriptResult.hasCaptions,
+    wordCount: transcriptResult.wordCount,
+    isValidWordCount: transcriptResult.isValidWordCount,
+    validationStatus: transcriptResult.validationStatus,
+    validationMessage: transcriptResult.validationMessage,
+    timestampedText: transcriptResult.timestampedText,
+    plainText: transcriptResult.plainText,
+    richContext: transcriptResult.richContext,
+    transcriptResult
+  };
 }
 
 export interface StructuredStudyAnalysis {
@@ -218,6 +281,51 @@ export interface StructuredStudyAnalysis {
   revisionOutline: string[];
   formulas?: string[];
   transcription?: string;
+}
+
+/**
+ * Formats a complete, human-readable study document combining detailed notes, key takeaways, definitions, transcript, and practice Q&A
+ */
+export function buildComprehensiveStudyDocument(analysis: StructuredStudyAnalysis): string {
+  const sections: string[] = [];
+
+  if (analysis.summary) {
+    sections.push(`## Executive Summary\n${analysis.summary}`);
+  }
+
+  if (analysis.detailedNotes && analysis.detailedNotes !== analysis.summary) {
+    sections.push(`## Detailed Content & Lecture Breakdown\n${analysis.detailedNotes}`);
+  }
+
+  if (analysis.keyTakeaways && analysis.keyTakeaways.length > 0) {
+    sections.push(`## Key Takeaways & Highlights\n${analysis.keyTakeaways.map((k, i) => `${i + 1}. ${k}`).join('\n')}`);
+  }
+
+  if (analysis.conceptsAndDefinitions && analysis.conceptsAndDefinitions.length > 0) {
+    sections.push(
+      `## Core Concepts & Definitions\n${analysis.conceptsAndDefinitions
+        .map(c => `- **${c.concept}:** ${c.definition}`)
+        .join('\n')}`
+    );
+  }
+
+  if (analysis.formulas && analysis.formulas.length > 0) {
+    sections.push(`## Key Formulas & Equations\n${analysis.formulas.map(f => `- ${f}`).join('\n')}`);
+  }
+
+  if (analysis.practiceQuestions && analysis.practiceQuestions.length > 0) {
+    sections.push(
+      `## Practice Questions & Answers\n${analysis.practiceQuestions
+        .map((q, i) => `**Q${i + 1}: ${q.question}**\n- **Answer:** ${q.answer}\n- **Explanation:** ${q.explanation}`)
+        .join('\n\n')}`
+    );
+  }
+
+  if (analysis.transcription && !sections.join('\n').includes(analysis.transcription.slice(0, 120))) {
+    sections.push(`## Extracted Transcript / Source Passage\n${analysis.transcription}`);
+  }
+
+  return sections.join('\n\n');
 }
 
 /**
@@ -237,42 +345,45 @@ export async function runGeminiStructuredAnalysis(
 ): Promise<StructuredStudyAnalysis> {
   const { name, type, sourceText, sourceUrl, fileBase64, fileMimeType, youtubeAuthor } = options;
 
-  const isYouTube = type === 'video' || (sourceUrl && (sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be')));
+  const isYouTube = Boolean(sourceUrl && (sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be')));
+  const isVideoFile = type === 'video' || Boolean(fileMimeType && fileMimeType.startsWith('video/'));
 
   const systemInstruction = `You are an elite academic AI tutor and study material analyst for StudyWeb.
-Your goal is to thoroughly analyze the provided educational material and produce a comprehensive, structured, production-grade study resource.
-Analyze the source carefully: extract real facts, concepts, definitions, math formulas (in LaTeX), and chapter takeaways.
-Never fabricate facts or produce generic filler.
+Your goal is to thoroughly analyze the provided educational material (whether it is a YouTube video, an uploaded video file, a web article/URL, or a document) and produce a comprehensive, deeply informative, structured study resource.
+CRITICAL RULES:
+1. Analyze the actual educational content, concepts, mechanisms, arguments, examples, and step-by-step explanations taught in the material.
+2. NEVER output useless metadata (such as channel links, video duration, or generic boilerplate) as the summary, highlights, or transcription.
+3. Explain clearly WHAT is in the video/link/document, WHAT it is about, break down all major concepts in detail, and generate high-yield practice questions and answers from the content.
 
 You must return a valid JSON object strictly matching this schema:
 {
-  "title": "Clear descriptive title of the material",
-  "summary": "A rich 3-4 sentence academic summary explaining exactly what this resource covers",
-  "detailedNotes": "Detailed structured study notes formatted with Markdown headings, key bullet points, and explanatory text",
-  "tags": ["3 to 5 tags. You MUST include at least one pedagogical classification tag from ['Lecture', 'Reading', 'Tutorial', 'Practice', 'Research', 'Reference'], followed by specific subject/topic tags (e.g. ['Lecture', 'Calculus', 'Derivatives'])"],
+  "title": "Clean, accurate, descriptive title of the video, webpage, or document (never a raw URL)",
+  "summary": "A comprehensive 4-6 sentence summary explaining clearly what this video/link/resource is about, what happens in it, and the main educational concepts taught",
+  "detailedNotes": "In-depth, structured study notes formatted with Markdown headings and bullet points covering every section, concept, example, and explanation in the material",
+  "tags": ["3 to 5 tags. Include at least one pedagogical tag from ['Lecture', 'Reading', 'Tutorial', 'Practice', 'Research', 'Reference'], followed by specific subject/topic tags"],
   "mainTopics": [
     { "topic": "Topic Name", "subtopics": ["Subtopic A", "Subtopic B"] }
   ],
   "conceptsAndDefinitions": [
-    { "concept": "Key Concept", "definition": "Clear concise academic definition" }
+    { "concept": "Key Concept", "definition": "Clear, detailed explanation or definition from the material" }
   ],
-  "keyTakeaways": ["3 to 5 core bullet takeaways and key insights"],
+  "keyTakeaways": ["5 to 6 specific, factual key takeaways explaining the core lessons and insights from the material"],
   "practiceQuestions": [
-    { "question": "Practice question?", "answer": "Concise correct answer", "explanation": "Detailed step-by-step reasoning" }
+    { "question": "Content-specific question testing understanding of this material?", "answer": "Direct, accurate answer", "explanation": "Step-by-step explanation referencing the concepts in the material" }
   ],
   "flashcards": [
-    { "front": "Flashcard prompt / question / term", "back": "Clear concise answer or definition", "topic": "Topic" }
+    { "front": "Flashcard question or term", "back": "Clear answer or definition", "topic": "Topic" }
   ],
-  "revisionOutline": ["High-yield revision step 1", "Step 2", "Step 3", "Step 4"],
-  "formulas": ["Key equations or formulas in LaTeX format, e.g. E = mc^2, or empty array if none"],
-  "transcription": "Readable transcript, transcription of spoken words, or complete OCR text extracted from document/image"
+  "revisionOutline": ["Step 1", "Step 2", "Step 3", "Step 4"],
+  "formulas": ["Key equations or formulas in LaTeX format if applicable, or empty array"],
+  "transcription": "Detailed lecture walkthrough, transcript of spoken concepts, or extracted article text explaining everything covered in the resource from start to finish"
 }`;
 
   let contents: any;
-  let config: any = {
+  const config: any = {
     systemInstruction,
     responseMimeType: 'application/json',
-    temperature: 0.2
+    temperature: 0.25
   };
 
   if (fileBase64 && fileMimeType) {
@@ -282,12 +393,16 @@ You must return a valid JSON object strictly matching this schema:
     }
     cleanBase64 = cleanBase64.replace(/[\r\n\s]/g, '');
 
-    contents = [
-      {
-        text: `Analyze this uploaded document/file "${name}" (${type}, MIME: ${fileMimeType}). 
+    const mediaPrompt = isVideoFile
+      ? `Watch and analyze this uploaded video file "${name}" (MIME: ${fileMimeType}).
+Carefully inspect both the visual frames/slides/demonstrations and the audio/spoken explanations.
+Tell the student exactly what is in this video, what it is about, summarize its full content, extract all key concepts and takeaways, transcribe the spoken lecture/explanations, and create 5 practice questions with answers based on the video.`
+      : `Analyze this uploaded document/file "${name}" (${type}, MIME: ${fileMimeType}). 
 Perform OCR and deep conceptual extraction on all text, diagrams, formulas, tables, and questions.
-Extract complete study notes, flashcards, practice questions, and definitions as specified in the schema.`
-      },
+Extract complete study notes, flashcards, practice questions, and definitions as specified in the schema.`;
+
+    contents = [
+      { text: mediaPrompt },
       {
         inlineData: {
           data: cleanBase64,
@@ -295,77 +410,113 @@ Extract complete study notes, flashcards, practice questions, and definitions as
         }
       }
     ];
-  } else if (isYouTube) {
-    config = {
-      systemInstruction,
-      responseMimeType: 'application/json',
-      temperature: 0.2
-    };
-    contents = `Analyze and extract complete study materials from this video:
+  } else if (isYouTube || isVideoFile || TranscriptProcessor.isVideoUrl(sourceUrl)) {
+    const ytId = sourceUrl ? TranscriptProcessor.extractYouTubeId(sourceUrl) : null;
+    const videoPromptText = `Deeply analyze this educational video using its video stream, extracted spoken transcript, captions, chapters, and description. Extract its complete academic content, summary, detailed lecture breakdown, key takeaways, and practice questions:
 Video Title: "${name}"
-Author / Creator: "${youtubeAuthor || 'Online Educational Creator'}"
-Video URL: ${sourceUrl || ''}
-${sourceText ? `Video Description / Context:\n${sourceText.slice(0, 10000)}` : ''}
+Creator / Channel: "${youtubeAuthor || 'Educational Creator'}"
+Video URL: ${sourceUrl || 'N/A'}
+${sourceText ? `\nEXTRACTED VIDEO TRANSCRIPT, CAPTIONS, CHAPTERS & METADATA:\n${sourceText.slice(0, 28000)}\n` : ''}
 
-Determine what is taught in this video and extract the full structured study package.
-Include pedagogical tags such as 'Lecture' or 'Tutorial' as appropriate.
-Produce the complete structured JSON response matching the required format.`;
+Instructions:
+1. Base your analysis directly on the actual spoken content and visual demonstrations in this video. Explain clearly what is in this video and what it is about in the "summary" and "detailedNotes".
+2. Do NOT just list channel name, link, or duration—explain the actual subject matter, concepts, step-by-step mechanisms, examples, and lessons taught in "${name}" (including timestamp references where helpful).
+3. Provide 5-6 specific factual "keyTakeaways" and 4-5 content-based "practiceQuestions" (with answers and explanations) so a student can be quizzed on this video.
+4. In "transcription", preserve a comprehensive, timestamped section-by-section lecture walkthrough and spoken transcript covering the concepts taught in the video.`;
+
+    const alreadyHasValidatedTranscript = Boolean(
+      sourceText && sourceText.includes('Full Timestamped Video Transcript')
+    );
+
+    if (ytId && !alreadyHasValidatedTranscript) {
+      contents = [
+        {
+          fileData: {
+            fileUri: `https://www.youtube.com/watch?v=${ytId}`,
+            mimeType: 'video/mp4'
+          }
+        },
+        { text: videoPromptText }
+      ];
+    } else {
+      contents = videoPromptText;
+    }
   } else {
-    const textSnippet = sourceText ? sourceText.substring(0, 30000) : '';
-    contents = `Analyze this educational resource:
-Title/Name: ${name}
-Type: ${type}
+    const textSnippet = sourceText ? sourceText.substring(0, 28000) : '';
+    contents = `Deeply analyze this web link / educational resource and extract its complete academic content, summary, detailed notes, key takeaways, and practice questions:
+Title / Name: "${name}"
+Resource Type: ${type}
 Source URL: ${sourceUrl || 'N/A'}
-Content/Text:
-${textSnippet || name}
+Extracted Webpage Content:
+${textSnippet || `Resource located at ${sourceUrl || name}`}
 
-Produce the complete structured JSON study package matching the required schema. Ensure tags include pedagogical classifications like 'Reading' or 'Reference'.`;
+Instructions:
+1. Provide a clear, thorough "title" (if the current title is a raw URL, replace it with a proper descriptive title of the page/topic).
+2. Explain clearly what this link/article is about in "summary" and "detailedNotes".
+3. Extract 5-6 specific factual "keyTakeaways" and 4-5 content-based "practiceQuestions" with answers and explanations.`;
   }
 
-  // Model selection with graceful fallback on 503 high demand
-  const modelCandidates = ['gemini-3-flash-preview', 'gemini-2.5-flash'];
-  let lastError: any = null;
+  // Active verified Gemini models (gemini-3-flash-preview and gemini-3.1-flash-lite-preview)
+  const modelCandidates = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview'];
 
   for (const model of modelCandidates) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents,
-        config
-      });
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents,
+          config
+        });
 
-      if (response && response.text) {
-        let text = response.text.trim();
-        if (text.startsWith('```')) {
-          text = text.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/, '').trim();
+        if (response && response.text) {
+          let text = response.text.trim();
+          if (text.startsWith('```')) {
+            text = text.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/, '').trim();
+          }
+          const parsed = JSON.parse(text) as StructuredStudyAnalysis;
+          if (parsed && parsed.summary) {
+            const resolvedTitle = !isRawUrlOrPlaceholderName(parsed.title)
+              ? parsed.title
+              : (!isRawUrlOrPlaceholderName(name) ? name : 'Analyzed Study Resource');
+
+            const structuredResult: StructuredStudyAnalysis = {
+              title: resolvedTitle,
+              summary: parsed.summary,
+              detailedNotes: parsed.detailedNotes || parsed.summary,
+              tags: Array.isArray(parsed.tags) && parsed.tags.length > 0 ? parsed.tags : ['Lecture', 'Study Material'],
+              mainTopics: Array.isArray(parsed.mainTopics) ? parsed.mainTopics : [],
+              conceptsAndDefinitions: Array.isArray(parsed.conceptsAndDefinitions) ? parsed.conceptsAndDefinitions : [],
+              keyTakeaways: Array.isArray(parsed.keyTakeaways) && parsed.keyTakeaways.length > 0 ? parsed.keyTakeaways : [parsed.summary],
+              practiceQuestions: Array.isArray(parsed.practiceQuestions) ? parsed.practiceQuestions : [],
+              flashcards: Array.isArray(parsed.flashcards) ? parsed.flashcards : [],
+              revisionOutline: Array.isArray(parsed.revisionOutline) ? parsed.revisionOutline : [],
+              formulas: Array.isArray(parsed.formulas) ? parsed.formulas : [],
+              transcription: parsed.transcription || parsed.detailedNotes || (sourceText ? sourceText.substring(0, 4000) : parsed.summary)
+            };
+
+            // Enrich transcription with full structured study document + raw timestamped transcript so AI Tutor and Preview Modal have all notes, Q&A, and spoken captions
+            const baseStudyDoc = buildComprehensiveStudyDocument(structuredResult);
+            if (sourceText && sourceText.includes('Full Timestamped Video Transcript') && !baseStudyDoc.includes('Full Timestamped Video Transcript')) {
+              structuredResult.transcription = `${baseStudyDoc}\n\n## Verbatim Timestamped Video Captions\n${sourceText.slice(0, 20000)}`;
+            } else {
+              structuredResult.transcription = baseStudyDoc;
+            }
+            return structuredResult;
+          }
         }
-        const parsed = JSON.parse(text) as StructuredStudyAnalysis;
-        // Validate required fields
-        if (parsed && parsed.summary && Array.isArray(parsed.tags)) {
-          return {
-            title: parsed.title || name,
-            summary: parsed.summary,
-            detailedNotes: parsed.detailedNotes || parsed.summary,
-            tags: parsed.tags.length > 0 ? parsed.tags : ['Study Material'],
-            mainTopics: Array.isArray(parsed.mainTopics) ? parsed.mainTopics : [],
-            conceptsAndDefinitions: Array.isArray(parsed.conceptsAndDefinitions) ? parsed.conceptsAndDefinitions : [],
-            keyTakeaways: Array.isArray(parsed.keyTakeaways) ? parsed.keyTakeaways : [],
-            practiceQuestions: Array.isArray(parsed.practiceQuestions) ? parsed.practiceQuestions : [],
-            flashcards: Array.isArray(parsed.flashcards) ? parsed.flashcards : [],
-            revisionOutline: Array.isArray(parsed.revisionOutline) ? parsed.revisionOutline : [],
-            formulas: Array.isArray(parsed.formulas) ? parsed.formulas : [],
-            transcription: parsed.transcription || (sourceText ? sourceText.substring(0, 1500) : undefined)
-          };
+      } catch (err: any) {
+        const status = err?.status || err?.statusCode;
+        console.warn(`[Study Material Pipeline] Model ${model} (attempt ${attempt}) encountered error (${status || err?.message}).`);
+        if (attempt === 1 && (status === 503 || status === 429)) {
+          await new Promise(r => setTimeout(r, 400));
+          continue;
         }
+        break;
       }
-    } catch (err: any) {
-      lastError = err;
-      console.warn(`[Study Material Pipeline] Model ${model} encountered error (${err?.status || err?.message}). Attempting fallback...`);
-      continue;
     }
   }
 
-  console.warn('[Study Material Pipeline] Gemini models unavailable or rate limited. Using academic domain synthesis fallback.');
+  console.warn('[Study Material Pipeline] Gemini models unavailable. Using academic domain synthesis fallback.');
   return generateReliableStudyFallback(name, type, sourceText, sourceUrl);
 }
 
@@ -375,24 +526,24 @@ export function generateReliableStudyFallback(
   sourceText?: string,
   sourceUrl?: string
 ): StructuredStudyAnalysis {
-  const targetName = name || 'Study Resource';
+  const targetName = !isRawUrlOrPlaceholderName(name) ? name : (sourceUrl || 'Study Resource');
   const lowerName = (targetName + ' ' + (sourceText || '')).toLowerCase();
 
   let subject = 'General Academics';
-  const pedagogicalTag = type === 'video' ? 'Lecture' : (type === 'url' ? 'Reading' : 'Reading');
+  const pedagogicalTag = type === 'video' ? 'Lecture' : 'Reading';
   let tags = [pedagogicalTag, 'Study Material'];
   let formulas: string[] = [];
 
   if (lowerName.includes('bio') || lowerName.includes('cell') || lowerName.includes('mitosis') || lowerName.includes('dna') || lowerName.includes('atp')) {
     subject = 'Cellular Biology';
-    tags = ['Biology', 'Cell Structure', 'Bioenergetics', 'AP Prep'];
+    tags = ['Lecture', 'Biology', 'Cell Structure', 'Bioenergetics'];
     formulas = [
       'C_6H_{12}O_6 + 6O_2 \\rightarrow 6CO_2 + 6H_2O + 36-38 ATP',
       '\\Delta G = \\Delta H - T\\Delta S'
     ];
   } else if (lowerName.includes('math') || lowerName.includes('calc') || lowerName.includes('deriv') || lowerName.includes('integral') || lowerName.includes('algebra')) {
     subject = 'Calculus & Applied Mathematics';
-    tags = ['Calculus', 'Mathematics', 'STEM', 'Formulas'];
+    tags = ['Lecture', 'Calculus', 'Mathematics', 'STEM'];
     formulas = [
       '\\int u \\, dv = uv - \\int v \\, du',
       '\\frac{d}{dx}[f(g(x))] = f\'(g(x)) \\cdot g\'(x)',
@@ -400,62 +551,64 @@ export function generateReliableStudyFallback(
     ];
   } else if (lowerName.includes('chem') || lowerName.includes('reaction') || lowerName.includes('acid') || lowerName.includes('mole')) {
     subject = 'Chemistry & Molecular Science';
-    tags = ['Chemistry', 'Stoichiometry', 'Molecular Science', 'STEM'];
+    tags = ['Lecture', 'Chemistry', 'Stoichiometry', 'Molecular Science'];
     formulas = [
       'PV = nRT',
       'pH = -\\log[H^+]'
     ];
   } else if (lowerName.includes('physic') || lowerName.includes('force') || lowerName.includes('gravity') || lowerName.includes('energy')) {
     subject = 'Physics & Classical Mechanics';
-    tags = ['Physics', 'Mechanics', 'Energy Conservation', 'STEM'];
+    tags = ['Lecture', 'Physics', 'Mechanics', 'Energy Conservation'];
     formulas = [
       'F = ma',
       'E_k = \\frac{1}{2}mv^2'
     ];
   }
 
-  const snippet = sourceText ? sourceText.slice(0, 400).trim() : '';
+  const snippet = sourceText ? sourceText.slice(0, 800).trim() : '';
 
-  return {
+  const fallbackObj: StructuredStudyAnalysis = {
     title: targetName,
-    summary: snippet 
-      ? `Comprehensive analysis of "${targetName}". Covers fundamental principles, conceptual definitions, and key takeaways: ${snippet.slice(0, 180)}...`
-      : `High-yield academic study guide for "${targetName}". Synthesizes core principles, critical vocabulary, and high-yield revision topics for mastery.`,
-    detailedNotes: `### Core Overview: ${targetName}\n\nThis study guide organizes the essential conceptual pillars of **${targetName}** (${subject}).\n\n- **Primary Subject Domain:** ${subject}\n- **Core Focus:** Structural definitions, critical takeaways, and procedural reasoning.\n- **Recommended Study Strategy:** Review the flashcards, test recall with practice questions, and verify formulas.`,
+    summary: snippet
+      ? `Detailed study breakdown of "${targetName}" (${subject}): ${snippet.slice(0, 350)}`
+      : `Comprehensive academic study analysis of "${targetName}" (${subject}), covering core concepts, definitions, mechanisms, and practice questions.`,
+    detailedNotes: snippet
+      ? `### Content Breakdown: ${targetName}\n\n${snippet}`
+      : `### Core Overview: ${targetName}\n\nThis resource covers essential concepts in **${subject}**, focusing on foundational principles, step-by-step mechanisms, and applied problem solving.`,
     tags,
     mainTopics: [
-      { topic: `${subject} Foundations`, subtopics: ['Core Definitions', 'System Architecture', 'Mechanisms of Action'] },
-      { topic: 'Advanced Applications', subtopics: ['Problem Solving', 'Real-world Context', 'Common Pitfalls'] }
+      { topic: `${subject} Core Concepts`, subtopics: ['Foundational Principles', 'Key Mechanisms', 'Practical Examples'] }
     ],
     conceptsAndDefinitions: [
-      { concept: targetName, definition: `Primary study topic covering ${subject} principles and structured analytical steps.` },
-      { concept: 'System Regulation', definition: 'The balancing mechanisms governing equilibrium and operational efficiency within the discipline.' }
+      { concept: targetName, definition: `Core topic in ${subject} explored in this study material.` }
     ],
-    keyTakeaways: [
-      `Mastering the foundational definitions in "${targetName}" is essential for cumulative problem solving.`,
-      `Synthesizing primary equations and structural relationships provides predictive confidence on exams.`,
-      `Active retrieval and spaced flashcard review produce optimal retention of this material.`
-    ],
+    keyTakeaways: snippet
+      ? snippet.split(/(?<=[.!?])\s+/).filter(s => s.length > 25).slice(0, 4)
+      : [
+          `Explores the core mechanisms and foundational principles of ${targetName} in ${subject}.`,
+          `Connects theoretical definitions to step-by-step practical examples and problem-solving.`
+        ],
     practiceQuestions: [
       {
-        question: `What are the primary operational characteristics of ${targetName}?`,
-        answer: `The fundamental principles of ${subject} provide the structural framework and governing laws.`,
-        explanation: `Systematic decomposition reveals the interaction between foundational concepts and empirical observations.`
+        question: `What is the main concept explained in "${targetName}"?`,
+        answer: snippet ? snippet.slice(0, 200) : `The fundamental principles and mechanisms of ${targetName} in ${subject}.`,
+        explanation: `Understanding the core mechanism of ${targetName} helps explain how key processes operate in ${subject}.`
       }
     ],
     flashcards: [
-      { front: `What is the core definition of ${targetName}?`, back: `Primary concept within ${subject} focused on theoretical and practical problem-solving.`, topic: subject },
-      { front: `Key takeaway from ${targetName}`, back: `Understanding underlying mechanisms enables rapid synthesis of complex scenarios.`, topic: subject }
+      { front: `What is the main focus of ${targetName}?`, back: snippet ? snippet.slice(0, 180) : `Core principles and applications of ${targetName} (${subject}).`, topic: subject }
     ],
     revisionOutline: [
-      `1. Review core terminology and definitions for ${targetName}`,
-      `2. Verify key mathematical or stoichiometry relationships`,
-      `3. Complete practice recall questions`,
-      `4. Revisit flashcard deck to solidify long-term memory`
+      `1. Review the core summary and definitions of ${targetName}`,
+      `2. Study the step-by-step mechanisms and examples`,
+      `3. Test understanding using the practice questions`
     ],
     formulas,
-    transcription: sourceText ? sourceText.slice(0, 2000) : undefined
+    transcription: snippet || undefined
   };
+
+  fallbackObj.transcription = buildComprehensiveStudyDocument(fallbackObj);
+  return fallbackObj;
 }
 
 /**
@@ -529,20 +682,65 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
   let sourceUrl = clientUrl ? String(clientUrl).trim() : '';
   let youtubeAuthor = '';
 
+  const isVideoResourceUrl = Boolean(
+    sourceUrl && (
+      TranscriptProcessor.isVideoUrl(sourceUrl) ||
+      sourceUrl.includes('youtube.com') ||
+      sourceUrl.includes('youtu.be') ||
+      sourceUrl.includes('youtube-nocookie.com')
+    )
+  );
+
   try {
-    if (type === 'url' && sourceUrl) {
-      const scraped = await scrapeWebPage(sourceUrl);
-      if (!materialName) materialName = scraped.title;
-      sourceText = scraped.text;
-    } else if (type === 'video' || (sourceUrl && (sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be')))) {
+    if (isVideoResourceUrl) {
       const yt = await extractYouTubeInfo(sourceUrl);
       sourceUrl = yt.normalizedUrl;
       youtubeAuthor = yt.author;
-      if (!materialName) materialName = yt.title;
-    } else if (sourceText && !materialName) {
+      if (isRawUrlOrPlaceholderName(materialName)) {
+        materialName = yt.title;
+      }
+
+      // Validation step: Check if fetched transcript exceeds minimum word count threshold
+      // before feeding into AI summary, ensuring we do not parse placeholder, blocked, or empty content.
+      if (yt.isValidWordCount) {
+        console.log(`[Pipeline] Video transcript validated: ${yt.wordCount} words (status: ${yt.validationStatus}) for "${yt.title}"`);
+        if (!sourceText) {
+          sourceText = yt.richContext;
+        } else {
+          sourceText = `${sourceText}\n\n${yt.richContext}`;
+        }
+      } else {
+        console.warn(`[Pipeline] Video transcript rejected prior to AI summary (${yt.validationStatus}): ${yt.validationMessage}. Word count: ${yt.wordCount}. Supplying verified metadata without placeholder captions.`);
+        const cleanMetadataContext = [
+          `Video Title: ${yt.title}`,
+          `Educator / Creator: ${yt.author}`,
+          `Video URL: ${yt.normalizedUrl}`,
+          yt.description ? `Video Description:\n${yt.description.slice(0, 3500)}` : '',
+          yt.chapters.length > 0 ? `Video Chapters & Timeline:\n${yt.chapters.join('\n')}` : ''
+        ].filter(Boolean).join('\n\n');
+
+        if (!sourceText) {
+          sourceText = cleanMetadataContext;
+        } else {
+          sourceText = `${sourceText}\n\n${cleanMetadataContext}`;
+        }
+      }
+    } else if (sourceUrl && sourceUrl.startsWith('http')) {
+      const scraped = await scrapeWebPage(sourceUrl);
+      if (isRawUrlOrPlaceholderName(materialName) && scraped.title) {
+        materialName = scraped.title;
+      }
+      if (!sourceText) {
+        sourceText = [
+          scraped.title ? `Title: ${scraped.title}` : '',
+          scraped.description ? `Overview: ${scraped.description}` : '',
+          scraped.text ? `Content:\n${scraped.text}` : ''
+        ].filter(Boolean).join('\n\n');
+      }
+    } else if (sourceText && isRawUrlOrPlaceholderName(materialName)) {
       // Auto-generate title for pasted text from first line or words
       const firstLine = sourceText.split('\n')[0].replace(/^[#*-]\s*/, '').trim();
-      materialName = firstLine.length > 3 ? firstLine.slice(0, 40) : `Notes on ${new Date().toLocaleDateString()}`;
+      materialName = firstLine.length > 3 ? firstLine.slice(0, 60) : `Study Notes (${new Date().toLocaleDateString()})`;
     }
   } catch (extractErr: any) {
     console.warn('[Pipeline] Content extraction warning:', extractErr.message);
@@ -630,16 +828,19 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
       youtubeAuthor
     });
 
+    const fullTranscription = analysis.transcription || sourceText || analysis.detailedNotes || analysis.summary;
+
     // Step 4: Update Supabase record with status 'completed' only AFTER analysis succeeds (RULE 5)
     const completedRow = {
       ...initialRow,
-      name: analysis.title || materialName,
+      name: !isRawUrlOrPlaceholderName(analysis.title) ? analysis.title : materialName,
       status: 'completed',
       summary: analysis.summary,
       highlights: analysis.keyTakeaways || [],
       tags: analysis.tags || ['Study Material'],
       formulas: analysis.formulas || [],
-      transcription: analysis.transcription || sourceText.slice(0, 1000) || null,
+      transcription: fullTranscription,
+      content_text: fullTranscription,
       extracted_diagrams: {
         detailedNotes: analysis.detailedNotes,
         mainTopics: analysis.mainTopics,

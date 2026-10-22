@@ -288,20 +288,56 @@ export default function QuickPreviewModal({ file, onClose, onExplore, onUpdateTa
             </div>
           )}
 
-          {/* FILE PREVIEW (PDF / Image / Doc) */}
-          {file.url && !isVideo && (file.type === 'pdf' || file.type === 'image' || file.type === 'doc') && (
-            <div className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden mb-6 mt-4">
+          {/* FILE PREVIEW (PDF / Image) */}
+          {file.url && !isVideo && (file.type === 'pdf' || file.type === 'image') && (
+            <div className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden mb-4">
               {file.type === 'image' ? (
-                <div className="flex items-center justify-center p-4 min-h-[300px]">
-                   <img src={file.url} alt={file.name} className="max-w-full max-h-[400px] object-contain rounded-lg shadow-sm" />
+                <div className="flex items-center justify-center p-4 min-h-[280px]">
+                  <img src={file.url} alt={file.name} className="max-w-full max-h-[380px] object-contain rounded-lg shadow-sm" />
                 </div>
               ) : (
-                <iframe 
-                  src={file.url} 
-                  className="w-full h-[400px]" 
-                  title={file.name}
-                />
+                <div className="flex flex-col">
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-slate-200/70 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-xs">
+                    <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <FileText className="w-3.5 h-3.5 text-rose-500" />
+                      <span>Interactive PDF Document Preview</span>
+                    </span>
+                    <a
+                      href={file.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-indigo-600 dark:text-indigo-400 font-bold hover:underline inline-flex items-center gap-1"
+                    >
+                      <span>Open Direct PDF</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                  <iframe 
+                    src={
+                      file.url.startsWith('http') && !file.url.includes('wikipedia.org/api/rest_v1/page/pdf/')
+                        ? `https://docs.google.com/viewer?url=${encodeURIComponent(file.url)}&embedded=true`
+                        : file.url
+                    } 
+                    className="w-full h-[380px] bg-white" 
+                    title={file.name}
+                  />
+                </div>
               )}
+            </div>
+          )}
+
+          {/* FULL EXTRACTED STUDY CONTENT / TRANSCRIPT READER */}
+          {(file.transcription || file.contentText) && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  <FileText className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Full Study Notes & Extracted Text</span>
+                </div>
+              </div>
+              <div className="p-4 bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 rounded-2xl text-xs sm:text-sm text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-line max-h-64 overflow-y-auto">
+                {file.transcription || file.contentText}
+              </div>
             </div>
           )}
 

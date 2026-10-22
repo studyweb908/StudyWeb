@@ -83,8 +83,14 @@ export async function retrieveKnowledge(workspaceId: string, userId: string, que
     }
   }
   if (filesFallback && filesFallback.length > 0) {
-    for (const file of filesFallback.slice(0, 3)) {
-      const fallbackText = file.summary || (file.highlights ? file.highlights.join(' ') : '') || file.name;
+    for (const file of filesFallback.slice(0, 5)) {
+      const parts: string[] = [];
+      if (file.summary && typeof file.summary === 'string') parts.push(`Summary: ${file.summary}`);
+      if (Array.isArray(file.highlights) && file.highlights.length > 0) parts.push(`Key Takeaways:\n- ${file.highlights.join('\n- ')}`);
+      if (Array.isArray(file.formulas) && file.formulas.length > 0) parts.push(`Formulas & Equations:\n- ${file.formulas.join('\n- ')}`);
+      const richBody = file.transcription || file.contentText || '';
+      if (richBody && typeof richBody === 'string') parts.push(`Detailed Study Notes / Transcript:\n${richBody.slice(0, 8000)}`);
+      const fallbackText = parts.join('\n\n') || file.name;
       if (fallbackText) {
          hasFallback = true;
          knowledgeContext += `[KNOWLEDGE NODE ${index++} | Source: "${file.name}"]\n${fallbackText}\n\n`;
