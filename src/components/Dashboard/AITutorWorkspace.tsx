@@ -317,19 +317,10 @@ export default function AITutorWorkspace() {
 
     try {
       setSpeakingMsgId(id);
-      const storedVoice = localStorage.getItem('study_tutor_voice_profile') || 'neutral';
-      const geminiVoiceMap: Record<string, string> = {
-        female: 'Kore',
-        male: 'Fenrir',
-        neutral: 'Zephyr',
-        energetic: 'Puck'
-      };
-      const resolvedVoice = geminiVoiceMap[storedVoice] || 'Zephyr';
-
       const res = await fetch('/api/ai-tutor-tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: clean, persona: 'socratic', voiceName: resolvedVoice })
+        body: JSON.stringify({ text: clean, persona: 'socratic', voiceName: 'Zephyr' })
       });
       if (res.ok) {
         const data = await res.json().catch(() => null);
