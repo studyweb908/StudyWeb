@@ -323,6 +323,14 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
       nodes: updatedNodes,
       links: updatedLinks
     });
+    window.dispatchEvent(
+      new CustomEvent('studyweb-toast', {
+        detail: {
+          message: 'All files in this workspace were deleted successfully.',
+          type: 'success'
+        }
+      })
+    );
   };
 
   const handleAddFlashcard = (newCard: FlashcardItem) => {
