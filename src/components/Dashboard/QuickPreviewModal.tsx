@@ -18,6 +18,7 @@ import {
   Play
 } from 'lucide-react';
 import { WorkspaceFile } from './WorkspaceTypes';
+import { getNotebookLMDisplayTitle } from '../../utils/notebookTitle';
 
 interface LogEntry {
   type: 'info' | 'success' | 'warn' | 'debug';
@@ -26,7 +27,7 @@ interface LogEntry {
 
 export function getPipelineLogs(file: WorkspaceFile): LogEntry[] {
   if (!file) return [];
-  const name = file.name;
+  const name = getNotebookLMDisplayTitle(file);
   const size = file.size || 'N/A';
   const tagStr = file.tags?.join(', ') || 'N/A';
   const formulaCount = file.formulas?.length || 0;
@@ -222,7 +223,7 @@ export default function QuickPreviewModal({ file, onClose, onExplore, onUpdateTa
               </span>
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-lg font-black text-slate-850 dark:text-slate-100 leading-snug break-words">
-                  {file.name}
+                  {getNotebookLMDisplayTitle(file)}
                 </h2>
                 <div className="flex items-center gap-1 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-100 dark:border-emerald-800">
                   <ShieldCheck className="w-3.5 h-3.5" />

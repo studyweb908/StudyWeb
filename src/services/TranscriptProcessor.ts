@@ -10,6 +10,8 @@
  * content of any video URL provided by the student.
  */
 
+import { cleanNotebookLMTitle, isRawUrlOrPlaceholderTitle } from '../utils/notebookTitle';
+
 export interface TranscriptSegment {
   /** Start time in seconds */
   start: number;
@@ -927,6 +929,33 @@ export class TranscriptProcessor {
         }
       }
 
+      // HTML meta / title fallback if ytInitialPlayerResponse did not provide title or description
+      if (!title) {
+        const ogTitleMatch =
+          html.match(/<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i) ||
+          html.match(/<meta\s+content=["']([^"']+)["']\s+property=["']og:title["']/i);
+        if (ogTitleMatch && ogTitleMatch[1]) {
+          title = this.decodeHtmlEntities(ogTitleMatch[1]);
+        } else {
+          const titleTagMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+          if (titleTagMatch && titleTagMatch[1]) {
+            const rawTagTitle = this.decodeHtmlEntities(titleTagMatch[1]).replace(/\s*-\s*YouTube$/i, '').trim();
+            if (rawTagTitle && rawTagTitle.toLowerCase() !== 'youtube') {
+              title = rawTagTitle;
+            }
+          }
+        }
+      }
+
+      if (!description) {
+        const ogDescMatch =
+          html.match(/<meta\s+property=["']og:description["']\s+content=["']([^"']+)["']/i) ||
+          html.match(/<meta\s+name=["']description["']\s+content=["']([^"']+)["']/i);
+        if (ogDescMatch && ogDescMatch[1]) {
+          description = this.decodeHtmlEntities(ogDescMatch[1]);
+        }
+      }
+
       return {
         segments,
         language,
@@ -1030,9 +1059,13 @@ export class TranscriptProcessor {
 
     // 1. Official YouTube oEmbed
     try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4500);
       const oembedRes = await fetch(
-        `https://www.youtube.com/oembed?url=${encodeURIComponent(normalizedUrl)}&format=json`
+        `https://www.youtube.com/oembed?url=${encodeURIComponent(normalizedUrl)}&format=json`,
+        { signal: controller.signal }
       );
+      clearTimeout(timer);
       if (oembedRes.ok) {
         const data = (await oembedRes.json()) as any;
         if (data?.title && !title) title = String(data.title).trim();
@@ -1040,6 +1073,26 @@ export class TranscriptProcessor {
       }
     } catch {
       // Non-fatal
+    }
+
+    // 1b. Noembed fallback if YouTube oEmbed didn't return title
+    if (!title) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4500);
+        const noembedRes = await fetch(
+          `https://noembed.com/embed?url=${encodeURIComponent(normalizedUrl)}`,
+          { signal: controller.signal }
+        );
+        clearTimeout(timer);
+        if (noembedRes.ok) {
+          const data = (await noembedRes.json()) as any;
+          if (data?.title && !title) title = String(data.title).trim();
+          if (data?.author_name && !author) author = String(data.author_name).trim();
+        }
+      } catch {
+        // Non-fatal
+      }
     }
 
     // 2. YouTube search index for chapter macroMarkers and detailed snippet
@@ -1234,7 +1287,11 @@ export class TranscriptProcessor {
         }
       }
 
-      if (!title) title = `YouTube Video (${ytId})`;
+      if (title && !isRawUrlOrPlaceholderTitle(title)) {
+        title = cleanNotebookLMTitle(title, normalizedUrl, 'video');
+      } else {
+        title = 'YouTube Educational Lecture';
+      }
       if (!author) author = 'YouTube Educator';
 
       if (!durationSeconds && segments.length > 0) {
@@ -1668,11 +1725,22 @@ Include all specific examples, stories, facts, definitions, formulas, and conclu
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: [
-          {
-            text: `You are an elite educational AI tutor and study analyst for StudyWeb.
+      const candidateModels = [
+        'gemini-3-flash-preview',
+        'gemini-3.1-flash-lite-preview',
+        'gemini-3.1-flash-lite',
+        'gemini-flash-latest',
+        'gemini-3.8-flash'
+      ];
+
+      let text = '';
+      for (const model of candidateModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: [
+              {
+                text: `You are an elite educational AI tutor and study analyst for StudyWeb.
 You are provided with a verified, validated spoken transcript for video "${transcript.title}" by "${transcript.author}".
 Total word count: ${validation.wordCount} words.
 
@@ -1689,15 +1757,20 @@ Instructions:
   "summary": "Clear, detailed 3-5 sentence summary of the video content",
   "keyTakeaways": ["Takeaway 1", "Takeaway 2", "Takeaway 3", "Takeaway 4"]
 }`
-          }
-        ],
-        config: {
-          responseMimeType: 'application/json',
-          temperature: 0.2
+              }
+            ],
+            config: {
+              responseMimeType: 'application/json',
+              temperature: 0.2
+            }
+          });
+          text = response?.text?.trim() || '';
+          if (text) break;
+        } catch {
+          // Try next available model
         }
-      });
+      }
 
-      const text = response?.text?.trim() || '';
       if (!text) {
         throw new Error('Received empty response from AI model.');
       }

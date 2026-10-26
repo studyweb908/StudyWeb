@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
 import { toValidUuid, isValidUuid, generateUuid } from '../utils/uuid';
 import { TranscriptProcessor, TranscriptResult, TranscriptValidationStatus, TranscriptValidationResult } from './TranscriptProcessor';
+import { cleanNotebookLMTitle, isRawUrlOrPlaceholderTitle } from '../utils/notebookTitle';
 
 export const studyMaterialRouter = express.Router();
 
@@ -76,23 +77,7 @@ export function validateSafeUrl(urlString: string): { valid: boolean; error?: st
 }
 
 export function isRawUrlOrPlaceholderName(name?: string | null): boolean {
-  if (!name) return true;
-  const trimmed = name.trim();
-  if (!trimmed) return true;
-  const lower = trimmed.toLowerCase();
-  return (
-    lower.startsWith('http://') ||
-    lower.startsWith('https://') ||
-    lower.startsWith('www.') ||
-    lower === 'web link' ||
-    lower === 'youtube video' ||
-    lower === 'study resource' ||
-    lower === 'external study resource' ||
-    lower === 'uploaded document' ||
-    lower === 'untitled resource' ||
-    lower === 'web resource' ||
-    /^youtube video \([a-z0-9_-]+\)$/i.test(trimmed)
-  );
+  return isRawUrlOrPlaceholderTitle(name);
 }
 
 /**
@@ -357,7 +342,7 @@ CRITICAL RULES:
 
 You must return a valid JSON object strictly matching this schema:
 {
-  "title": "Clean, accurate, descriptive title of the video, webpage, or document (never a raw URL)",
+  "title": "Clean, concise, human-readable NotebookLM-style title of the material (e.g., 'The Happy Prince – Class 9th' or 'Cellular Respiration & ATP Synthesis'). NEVER output a raw URL (https://...), domain name, hashtag clutter, or file extension.",
   "summary": "A comprehensive 4-6 sentence summary explaining clearly what this video/link/resource is about, what happens in it, and the main educational concepts taught",
   "detailedNotes": "In-depth, structured study notes formatted with Markdown headings and bullet points covering every section, concept, example, and explanation in the material",
   "tags": ["3 to 5 tags. Include at least one pedagogical tag from ['Lecture', 'Reading', 'Tutorial', 'Practice', 'Research', 'Reference'], followed by specific subject/topic tags"],
@@ -451,20 +436,31 @@ Extracted Webpage Content:
 ${textSnippet || `Resource located at ${sourceUrl || name}`}
 
 Instructions:
-1. Provide a clear, thorough "title" (if the current title is a raw URL, replace it with a proper descriptive title of the page/topic).
+1. Provide a clean, human-readable NotebookLM-style "title" representing the actual subject/topic of the material (never a raw URL or domain).
 2. Explain clearly what this link/article is about in "summary" and "detailedNotes".
 3. Extract 5-6 specific factual "keyTakeaways" and 4-5 content-based "practiceQuestions" with answers and explanations.`;
   }
 
-  // Active verified Gemini models (gemini-3-flash-preview and gemini-3.1-flash-lite-preview)
-  const modelCandidates = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview'];
+  // Active verified Gemini models with high quota availability
+  const modelCandidates = [
+    'gemini-3-flash-preview',
+    'gemini-3.1-flash-lite-preview',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-latest'
+  ];
 
   for (const model of modelCandidates) {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
+        // If first attempt with YouTube fileData failed, retry immediately with text-only prompt
+        const effectiveContents =
+          attempt === 2 && Array.isArray(contents) && contents[0]?.fileData && contents[1]?.text
+            ? contents[1].text
+            : contents;
+
         const response = await ai.models.generateContent({
           model,
-          contents,
+          contents: effectiveContents,
           config
         });
 
@@ -475,9 +471,10 @@ Instructions:
           }
           const parsed = JSON.parse(text) as StructuredStudyAnalysis;
           if (parsed && parsed.summary) {
-            const resolvedTitle = !isRawUrlOrPlaceholderName(parsed.title)
+            const candidateTitle = !isRawUrlOrPlaceholderName(parsed.title)
               ? parsed.title
               : (!isRawUrlOrPlaceholderName(name) ? name : 'Analyzed Study Resource');
+            const resolvedTitle = cleanNotebookLMTitle(candidateTitle, sourceUrl, type);
 
             const structuredResult: StructuredStudyAnalysis = {
               title: resolvedTitle,
@@ -505,10 +502,15 @@ Instructions:
           }
         }
       } catch (err: any) {
-        const status = err?.status || err?.statusCode;
-        console.warn(`[Study Material Pipeline] Model ${model} (attempt ${attempt}) encountered error (${status || err?.message}).`);
-        if (attempt === 1 && (status === 503 || status === 429)) {
-          await new Promise(r => setTimeout(r, 400));
+        const status = err?.status || err?.statusCode || err?.error?.code;
+        const msg = String(err?.message || '');
+        const isQuota = status === 429 || msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED');
+        // If attempt 1 used YouTube fileData and failed for a non-quota reason, retry attempt 2 with text prompt
+        if (!isQuota && attempt === 1 && Array.isArray(contents) && contents[0]?.fileData) {
+          continue;
+        }
+        if (!isQuota && attempt === 1 && status === 503) {
+          await new Promise(r => setTimeout(r, 300));
           continue;
         }
         break;
@@ -516,7 +518,7 @@ Instructions:
     }
   }
 
-  console.warn('[Study Material Pipeline] Gemini models unavailable. Using academic domain synthesis fallback.');
+  console.log('[Study Material Pipeline] Using academic domain synthesis fallback.');
   return generateReliableStudyFallback(name, type, sourceText, sourceUrl);
 }
 
@@ -526,7 +528,7 @@ export function generateReliableStudyFallback(
   sourceText?: string,
   sourceUrl?: string
 ): StructuredStudyAnalysis {
-  const targetName = !isRawUrlOrPlaceholderName(name) ? name : (sourceUrl || 'Study Resource');
+  const targetName = cleanNotebookLMTitle(name, sourceUrl, type);
   const lowerName = (targetName + ' ' + (sourceText || '')).toLowerCase();
 
   let subject = 'General Academics';
@@ -746,9 +748,7 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
     console.warn('[Pipeline] Content extraction warning:', extractErr.message);
   }
 
-  if (!materialName) {
-    materialName = 'Study Resource';
-  }
+  materialName = cleanNotebookLMTitle(materialName, sourceUrl, type);
 
   // Step 2: Save initial record to Supabase with status 'processing' BEFORE calling AI (RULE 5)
   const initialRow = {
@@ -831,9 +831,14 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
     const fullTranscription = analysis.transcription || sourceText || analysis.detailedNotes || analysis.summary;
 
     // Step 4: Update Supabase record with status 'completed' only AFTER analysis succeeds (RULE 5)
+    const finalNotebookTitle = cleanNotebookLMTitle(
+      !isRawUrlOrPlaceholderName(analysis.title) ? analysis.title : materialName,
+      sourceUrl,
+      type
+    );
     const completedRow = {
       ...initialRow,
-      name: !isRawUrlOrPlaceholderName(analysis.title) ? analysis.title : materialName,
+      name: finalNotebookTitle,
       status: 'completed',
       summary: analysis.summary,
       highlights: analysis.keyTakeaways || [],

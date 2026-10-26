@@ -36,6 +36,13 @@ import {
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import QuickPreviewModal from './QuickPreviewModal';
 import EditWorkspaceModal from './EditWorkspaceModal';
+import {
+  cleanNotebookLMTitle,
+  getNotebookLMDisplayTitle,
+  isRawUrlOrPlaceholderTitle,
+  resolveQuickLinkTitleClient
+} from '../../utils/notebookTitle';
+import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 
 interface WorkspaceOverviewProps {
   workspace: Workspace;
@@ -78,6 +85,41 @@ export default function WorkspaceOverview({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editInitialTab, setEditInitialTab] = useState<'general' | 'logo' | 'banner'>('general');
+
+  // Ensure any existing URL-named file in workspace.files is automatically resolved to its analyzed NotebookLM title
+  useEffect(() => {
+    if (!onUpdateWorkspace || files.length === 0) return;
+    const toFix = files.filter(f => isRawUrlOrPlaceholderTitle(f.name));
+    if (toFix.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      const nextFiles = [...files];
+      let changed = false;
+      for (const item of toFix) {
+        try {
+          const resolved = item.url
+            ? await resolveQuickLinkTitleClient(item.url, item.type)
+            : cleanNotebookLMTitle(item.name, item.url, item.type);
+          const idx = nextFiles.findIndex(f => f.id === item.id);
+          if (idx !== -1 && resolved && !isRawUrlOrPlaceholderTitle(resolved)) {
+            nextFiles[idx] = { ...nextFiles[idx], name: resolved };
+            changed = true;
+            WorkspaceSyncService.saveWorkspaceFile(workspace.id, nextFiles[idx]).catch(() => {});
+          }
+        } catch {
+          // Ignore
+        }
+      }
+      if (changed && !cancelled) {
+        onUpdateWorkspace({ ...workspace, files: nextFiles });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace.id, files.length]);
 
   const themeColors = {
     emerald: {
@@ -340,7 +382,7 @@ export default function WorkspaceOverview({
                      <FileText className="w-4 h-4" />}
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 line-clamp-1">{file.name}</h4>
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 line-clamp-1">{getNotebookLMDisplayTitle(file)}</h4>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{file.type}</span>
                       <span className="w-1 h-1 rounded-full bg-slate-200 dark:bg-slate-700" />
@@ -402,7 +444,7 @@ export default function WorkspaceOverview({
                     Remove Source Material?
                   </h3>
                   <p className="text-xs text-slate-400 dark:text-slate-400 mt-1 leading-relaxed">
-                    Are you sure you want to remove <span className="font-bold text-slate-600 dark:text-slate-300">"{fileToRemove.name}"</span> from this workspace?
+                    Are you sure you want to remove <span className="font-bold text-slate-600 dark:text-slate-300">"{getNotebookLMDisplayTitle(fileToRemove)}"</span> from this workspace?
                   </p>
                   <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-2 bg-slate-50 dark:bg-slate-950/40 p-2.5 rounded-xl border border-slate-100/50 dark:border-slate-800">
                     This file's content will no longer be available for AI Tutor questioning or quiz compilation.

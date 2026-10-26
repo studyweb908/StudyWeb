@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../../lib/supabase';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import { recordUserActivity } from '../../utils/userActivity';
+import { cleanNotebookLMTitle } from '../../utils/notebookTitle';
 import { 
   ArrowLeft,
   Settings,
@@ -183,7 +184,11 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
   }, []);
 
   // State handlers to bubble up modifications
-  const handleAddFile = (newFile: WorkspaceFile) => {
+  const handleAddFile = (rawNewFile: WorkspaceFile) => {
+    const newFile: WorkspaceFile = {
+      ...rawNewFile,
+      name: cleanNotebookLMTitle(rawNewFile.name, rawNewFile.url, rawNewFile.type)
+    };
     const existingIds = new Set((workspace.files || []).map(f => f.id));
     if (existingIds.has(newFile.id)) return;
     const updatedFiles = [newFile, ...(workspace.files || [])];
@@ -191,7 +196,7 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
     // Also create a concept node for the newly uploaded file!
     const newFileNode = {
       id: `n-${newFile.id}`,
-      label: newFile.name.slice(0, 20) + '...',
+      label: newFile.name.slice(0, 20) + (newFile.name.length > 20 ? '...' : ''),
       type: 'file' as const,
       color: '#3B82F6',
       x: 100 + Math.random() * 100,
@@ -224,12 +229,17 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
     if ((!newFiles || newFiles.length === 0) && !newNote) return;
 
     const existingIds = new Set((workspace.files || []).map(f => f.id));
-    const uniqueNewFiles = (newFiles || []).filter(f => !existingIds.has(f.id));
+    const uniqueNewFiles = (newFiles || [])
+      .filter(f => !existingIds.has(f.id))
+      .map(f => ({
+        ...f,
+        name: cleanNotebookLMTitle(f.name, f.url, f.type)
+      }));
 
     const updatedFiles = [...uniqueNewFiles, ...(workspace.files || [])];
     const newNodes = uniqueNewFiles.map(f => ({
       id: `n-${f.id}`,
-      label: f.name.slice(0, 20) + '...',
+      label: f.name.slice(0, 20) + (f.name.length > 20 ? '...' : ''),
       type: 'file' as const,
       color: '#3B82F6',
       x: 100 + Math.random() * 120,

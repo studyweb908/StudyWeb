@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { Workspace, WorkspaceFile } from '../components/Dashboard/WorkspaceTypes';
 import { toValidUuid } from '../utils/uuid';
+import { cleanNotebookLMTitle } from '../utils/notebookTitle';
 
 export class WorkspaceSyncService {
   /**
@@ -98,10 +99,11 @@ export class WorkspaceSyncService {
     const validWsId = toValidUuid(workspaceId);
     const userId = explicitUserId || await this.getUserId();
 
+    const cleanName = cleanNotebookLMTitle(file.name, file.url, file.type);
     const fileRow: Record<string, any> = {
       id: validFileId,
       workspace_id: validWsId,
-      name: file.name || 'Untitled Document',
+      name: cleanName || 'Study Material',
       type: file.type || 'doc',
       size: file.size || '1 KB',
       url: file.url || null,

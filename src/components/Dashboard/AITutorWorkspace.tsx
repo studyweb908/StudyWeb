@@ -33,6 +33,7 @@ import {
 import { useMicrophoneWaveform } from '../../hooks/useMicrophoneWaveform';
 import { useTaskContext } from '../../context/TaskContext';
 import { recordUserActivity } from '../../utils/userActivity';
+import { AITutorBackgroundService } from '../../services/AITutorBackgroundService';
 
 interface Message {
   id: string;
@@ -317,10 +318,19 @@ export default function AITutorWorkspace() {
 
     try {
       setSpeakingMsgId(id);
+      const storedVoice = localStorage.getItem('study_tutor_voice_profile') || 'neutral';
+      const geminiVoiceMap: Record<string, string> = {
+        female: 'Kore',
+        male: 'Fenrir',
+        neutral: 'Zephyr',
+        energetic: 'Puck'
+      };
+      const resolvedVoice = geminiVoiceMap[storedVoice] || 'Zephyr';
+
       const res = await fetch('/api/ai-tutor-tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: clean, persona: 'socratic', voiceName: 'Zephyr' })
+        body: JSON.stringify({ text: clean, persona: 'socratic', voiceName: resolvedVoice })
       });
       if (res.ok) {
         const data = await res.json().catch(() => null);
@@ -543,6 +553,32 @@ export default function AITutorWorkspace() {
     }
   };
 
+  const handleClearChat = (showNotification = true) => {
+    stopTutorSpeech();
+    setInputValue('');
+    setSearchQuery('');
+    setIsThinking(false);
+    setIsSearching(false);
+    setActiveCitation(null);
+    setHoveredCitation(null);
+    const wsLabel = activeWorkspace?.name ? ` in **${activeWorkspace.name}**` : '';
+    const freshMsg: Message = {
+      id: `welcome-${Date.now()}`,
+      sender: 'ai',
+      text: `✨ **Chat Cleared!**\n\nYour active workspace${wsLabel} is still open and ready. Ask me any new question or topic whenever you're ready!`,
+      time: 'Just now'
+    };
+    AITutorBackgroundService.resetWorkspaceChat(targetWsId, null, [freshMsg] as any);
+    setMessages([freshMsg]);
+    if (showNotification) {
+      (window as any).showToast?.('Chat history cleared — ready for a new topic!', 'info');
+    }
+  };
+
+  useEffect(() => {
+    handleClearChat(false);
+  }, [targetWsId]);
+
   const handleSend = async (textToSend: string) => {
     if (!textToSend.trim() && attachedFiles.length === 0) return;
 
@@ -578,11 +614,11 @@ export default function AITutorWorkspace() {
         body: JSON.stringify({
           prompt: textToSend || `Please analyze my attached documents: ${attachedFiles.map(f => f.name).join(', ')}`,
           history,
-          persona: 'socratic',
+          persona: 'plain_english',
           deepResearch,
           citationMode,
           workspaceId: targetWsId,
-          attachedFiles,
+          attachedFiles: attachedFiles.map(f => ({ ...f, isDirectAttachment: true })),
           model: selectedModel
         })
       });
@@ -1058,6 +1094,16 @@ export default function AITutorWorkspace() {
             >
               <span>Citations</span>
               {citationMode ? <Check className="w-3 h-3 text-emerald-500" /> : <RefreshCw className="w-2.5 h-2.5 text-slate-400" />}
+            </button>
+
+            {/* Clear Chat Button */}
+            <button
+              onClick={() => handleClearChat(true)}
+              className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10.5px] sm:text-xs font-bold transition-all border cursor-pointer shrink-0 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 border-slate-200 dark:border-slate-700 hover:border-rose-200 dark:hover:border-rose-900/50 hover:bg-rose-50/50 dark:hover:bg-rose-950/30 active:scale-95"
+              title="Clear current conversation history while keeping workspace open"
+            >
+              <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-rose-500" />
+              <span>Clear Chat</span>
             </button>
           </div>
         </div>

@@ -7,6 +7,7 @@ import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import { knowledgeRouter } from "./src/knowledge-engine/api.js";
 import { studyMaterialRouter, extractYouTubeInfo, scrapeWebPage, isRawUrlOrPlaceholderName } from "./src/services/studyMaterialPipeline.js";
 import { TranscriptProcessor } from "./src/services/TranscriptProcessor.js";
+import { cleanNotebookLMTitle } from "./src/utils/notebookTitle.js";
 import { createClient } from "@supabase/supabase-js";
 
 // Load environment variables
@@ -40,6 +41,55 @@ export function getGeminiApiKey(): string | null {
   const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY || process.env.VITE_GEMINI_API_KEY || "AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A";
   if (!key || key.trim() === "" || key === "MY_GEMINI_API_KEY") return "AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A";
   return key.trim();
+}
+
+// Track per-model rate-limit / quota cooldowns so exhausted models are bypassed immediately
+const modelQuotaCooldownMap = new Map<string, number>();
+
+export function isModelOnCooldown(model: string): boolean {
+  const until = modelQuotaCooldownMap.get(model);
+  if (!until) return false;
+  if (Date.now() >= until) {
+    modelQuotaCooldownMap.delete(model);
+    return false;
+  }
+  return true;
+}
+
+export function isQuotaOrRateLimitError(err: any): boolean {
+  const status = err?.status || err?.statusCode || err?.error?.code;
+  const msg = String(err?.message || err?.error?.message || err || "");
+  return (
+    status === 429 ||
+    msg.includes("429") ||
+    msg.includes("RESOURCE_EXHAUSTED") ||
+    msg.toLowerCase().includes("quota") ||
+    msg.toLowerCase().includes("rate limit")
+  );
+}
+
+export function recordModelQuotaCooldown(model: string, err?: any): void {
+  const msg = String(err?.message || err?.error?.message || "");
+  // If daily free-tier quota is reached, place model on a 30-minute cooldown; otherwise 2-minute cooldown
+  const isDailyQuota = msg.includes("PerDay") || msg.includes("free_tier_requests") || msg.includes("retryDelay");
+  const cooldownMs = isDailyQuota ? 30 * 60 * 1000 : 2 * 60 * 1000;
+  modelQuotaCooldownMap.set(model, Date.now() + cooldownMs);
+}
+
+export function getAvailableCandidateModels(preferredModels: string[]): string[] {
+  const available = preferredModels.filter((m) => !isModelOnCooldown(m));
+  return available.length > 0 ? available : preferredModels.slice(0, 2);
+}
+
+export function summarizeModelError(err: any): string {
+  if (isQuotaOrRateLimitError(err)) {
+    return "quota_reached_switching_model";
+  }
+  const status = err?.status || err?.statusCode || err?.error?.code || "transient";
+  const raw = String(err?.message || err?.error?.message || "model unavailable");
+  if (raw.includes("timed out")) return "timeout";
+  if (raw.startsWith("{")) return `status_${status}`;
+  return raw.slice(0, 80).replace(/[\r\n]+/g, " ");
 }
 
 // Initialize the Knowledge Engine database
@@ -551,19 +601,26 @@ ${message}
    * Slices active workspace documents (PDFs, notes, OCR screenshots, audio transcripts) into
    * granular passages and scores them against the user's specific query.
    */
-  function extractRelevantDocumentSegments(query: string, files: any[], topK: number = 6): {
+  function extractRelevantDocumentSegments(
+    query: string,
+    files: any[],
+    topK: number = 6,
+    forceIncludeWhenZeroScore: boolean = false
+  ): {
     segments: ExtractedSegment[];
     contextString: string;
+    hasHighRelevance: boolean;
   } {
     if (!files || files.length === 0) {
-      return { segments: [], contextString: "No uploaded documents available." };
+      return { segments: [], contextString: "", hasHighRelevance: false };
     }
 
     const qLower = query.toLowerCase();
     const stopWords = new Set([
       "what", "is", "the", "are", "tell", "me", "about", "how", "why", "does", "do",
       "explain", "please", "can", "you", "in", "my", "notes", "files", "document", "documents",
-      "this", "that", "there", "and", "or", "for", "with", "from", "into", "give"
+      "this", "that", "there", "and", "or", "for", "with", "from", "into", "give", "question",
+      "answer", "help", "understand", "solve", "find", "show", "write", "make"
     ]);
 
     const rawTokens = qLower.split(/[^a-z0-9_-]+/).filter(w => w.length > 2 && !stopWords.has(w));
@@ -651,8 +708,8 @@ ${message}
 
         // Bonus if user query explicitly mentions file name
         const fnWords = fileName.toLowerCase().split(/[^a-z0-9]+/);
-        if (fnWords.some(w => w.length > 3 && qLower.includes(w))) {
-          score += 4;
+        if (fnWords.some((w: string) => w.length > 3 && qLower.includes(w))) {
+          score += 5;
         }
 
         // Snippet generation
@@ -689,10 +746,12 @@ ${message}
 
     allSegments.sort((a, b) => b.score - a.score);
 
+    const hasHighRelevance = allSegments.length > 0 && allSegments[0].score > 0;
     let selectedSegments: ExtractedSegment[] = [];
-    if (allSegments.length > 0 && allSegments[0].score > 0) {
-      selectedSegments = allSegments.slice(0, topK);
-    } else {
+
+    if (hasHighRelevance) {
+      selectedSegments = allSegments.filter(s => s.score > 0).slice(0, topK);
+    } else if (forceIncludeWhenZeroScore) {
       const fileSeen = new Map<string, number>();
       for (const seg of allSegments) {
         const count = fileSeen.get(seg.sourceName) || 0;
@@ -705,17 +764,24 @@ ${message}
       if (selectedSegments.length === 0) {
         selectedSegments = allSegments.slice(0, topK);
       }
+    } else {
+      // Do not inject unrelated zero-score segments when the user is asking a general question
+      return { segments: [], contextString: "", hasHighRelevance: false };
     }
 
-    let contextString = "=== RETRIEVED DOCUMENT SEGMENTS (Query-Aware Passages) ===\n";
-    contextString += "These passages were extracted and ranked directly from the student's selected workspace documents. Your answers MUST extract facts and quotes from these segments:\n\n";
+    if (selectedSegments.length === 0) {
+      return { segments: [], contextString: "", hasHighRelevance: false };
+    }
+
+    let contextString = "=== RETRIEVED WORKSPACE DOCUMENT SEGMENTS ===\n";
+    contextString += "Use these passages from the student's workspace documents ONLY if they are relevant to answering the student's exact question:\n\n";
 
     selectedSegments.forEach((seg, idx) => {
-      contextString += `[Segment ${idx + 1} | Source: "${seg.sourceName}" | Page ${seg.page} | Relevance: ${seg.score > 0 ? 'High' : 'Reference'}]\n`;
+      contextString += `[Segment ${idx + 1} | Source: "${seg.sourceName}" | Page ${seg.page} | Relevance: ${seg.score > 0 ? 'Matched' : 'Overview'}]\n`;
       contextString += `"${seg.text}"\n\n`;
     });
 
-    return { segments: selectedSegments, contextString };
+    return { segments: selectedSegments, contextString, hasHighRelevance };
   }
 
   /**
@@ -734,21 +800,10 @@ ${message}
   }
 
 function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], groundedSourceContext?: string): string {
-  const pLower = prompt.toLowerCase();
+  const pLower = prompt.toLowerCase().trim();
   const files = attachedFiles || [];
 
-  if (files.length === 0) {
-    return `### 💡 Answer for "${prompt}"\n\n` +
-      `Here is a straightforward explanation based on general knowledge:\n\n` +
-      `• **Core Idea:** Understanding "${prompt}" involves breaking down the main concepts into key definitions, practical steps, and real-world applications.\n` +
-      `• **Key Takeaway:** You can also drop study files (PDFs, slides, or text notes) into this workspace anytime so I can cite your exact documents directly alongside general knowledge!\n\n` +
-      `*Ask me a follow-up question or tap "Quiz me" below to practice!*`;
-  }
-
-  const primaryDoc = files[0];
-  const primaryName = primaryDoc?.name || 'Your Study Notes';
-
-  // Check if user is asking what is in their files or what they uploaded
+  // Check if user is explicitly asking what is in their files or what they uploaded
   const isOverviewQuery = 
     pLower.includes("what is in it") ||
     pLower.includes("what's in it") ||
@@ -756,25 +811,19 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
     pLower.includes("what's inside") ||
     pLower.includes("what did i upload") ||
     pLower.includes("what have i uploaded") ||
-    pLower.includes("what is that that i have uploaded") ||
-    pLower.includes("tell me what are the things") ||
     pLower.includes("tell me what is in") ||
-    pLower.includes("what are the things that are in it") ||
-    pLower.includes("what are the things in it") ||
     pLower.includes("analyze what i uploaded") ||
-    pLower.includes("analyze it and tell me") ||
     pLower.includes("what do my documents say") ||
     pLower.includes("what is in my files") ||
     pLower.includes("what's in my files") ||
     pLower.includes("what files do i have") ||
     pLower.includes("what are my notes about") ||
     pLower.includes("overview of my files") ||
-    pLower.includes("list my documents") ||
-    pLower.includes("what did i add");
+    pLower.includes("list my documents");
 
-  if (isOverviewQuery) {
+  if (files.length > 0 && isOverviewQuery) {
     let report = `### 📂 Overview of Your Uploaded Documents\n\n`;
-    report += `I have carefully read and analyzed all **${files.length} document${files.length === 1 ? '' : 's'}** currently in your workspace. Here is a clear breakdown of each material:\n\n`;
+    report += `Here is a breakdown of the **${files.length} document${files.length === 1 ? '' : 's'}** in your workspace:\n\n`;
 
     files.forEach((file: any, idx: number) => {
       const typeLabel = (file.type || 'Document').toUpperCase();
@@ -782,7 +831,7 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
       const cleanedSummary = cleanMultilineText(file.summary || "");
       const isPlaceholder = !cleanedSummary || isDummyMetadataLine(cleanedSummary);
       const summaryText = isPlaceholder 
-        ? `Uploaded ${file.type || 'resource'} analyzed and indexed for study questions and interactive explanations.` 
+        ? `Uploaded ${file.type || 'resource'} indexed for study questions.` 
         : cleanedSummary;
       
       report += `#### 📘 ${idx + 1}. **${file.name}** *(${typeLabel}${pageInfo})*\n`;
@@ -799,114 +848,27 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
         });
       }
       
-      if (file.formulas && Array.isArray(file.formulas) && file.formulas.length > 0) {
-        report += `• **Key Formulas & Definitions:** ${file.formulas.slice(0, 3).join(', ')}\n`;
-      }
-      
       const cleanedTrans = cleanMultilineText(file.transcription || file.contentText || "");
       if (cleanedTrans && cleanHighlights.length === 0) {
-        report += `• **Key Study Notes:** "${cleanedTrans.slice(0, 300)}..." [Source: ${file.name}]\n`;
+        report += `• **Key Excerpt:** "${cleanedTrans.slice(0, 300)}..." [Source: ${file.name}]\n`;
       }
 
       report += `\n`;
     });
 
-    report += `💡 **What you can ask me next:**\n`;
-    report += `• *"Explain what is in ${files[0]?.name} in simple words"*\n`;
-    report += `• *"Give me 3 practice quiz questions from my notes"*\n`;
-    report += `• *"Summarize the most important takeaways for my exam"*\n`;
-    report += `• Or simply ask any question about your materials!`;
-
-    return report;
+    return report.trim();
   }
 
-  // Extract all real highlights, summaries, and facts from user's attached documents
-  const allHighlights: string[] = [];
-  const allSummaries: string[] = [];
-
-  files.forEach(f => {
-    if (f.highlights && Array.isArray(f.highlights)) {
-      const cleanH = f.highlights.filter((h: string) => h && !isDummyMetadataLine(h));
-      allHighlights.push(...cleanH);
-    }
-    const cleanSum = cleanMultilineText(f.summary || "");
-    if (cleanSum && !isDummyMetadataLine(cleanSum)) {
-      allSummaries.push(cleanSum);
-    }
-    const cleanTrans = cleanMultilineText(f.transcription || f.contentText || "");
-    if (cleanTrans) {
-      allSummaries.push(cleanTrans.slice(0, 400));
-    }
-  });
-
-  // Pull out actual topics or sentences from the student's files
-  const mainInsight1 = allHighlights[0] || allSummaries[0] || "Key concepts and foundational definitions from your study materials.";
-  const mainInsight2 = allHighlights[1] || allSummaries[1] || "Important processes, mechanisms, and rules that govern this topic.";
-  const mainInsight3 = allHighlights[2] || "Critical facts and takeaways commonly tested on quizzes and exams.";
-
-  // Search for prompt keyword matches in files
-  const promptWords = pLower.split(/\s+/).filter(w => w.length > 3 && !['what', 'when', 'where', 'which', 'explain', 'tell', 'about', 'please', 'could', 'would'].includes(w));
-  let matchedFile = files[0];
-  let matchedInsight = "";
-
+  // Check if any file has an actual keyword match with the prompt
+  const promptWords = pLower.split(/[^a-z0-9]+/).filter(w => w.length > 3 && !['what', 'when', 'where', 'which', 'explain', 'tell', 'about', 'please', 'could', 'would', 'question', 'answer'].includes(w));
   for (const f of files) {
-    if (f.highlights && Array.isArray(f.highlights)) {
-      for (const h of f.highlights) {
-        const hLower = h.toLowerCase();
-        if (promptWords.some(pw => hLower.includes(pw))) {
-          matchedInsight = h;
-          matchedFile = f;
-          break;
-        }
-      }
+    const cleanTrans = cleanMultilineText(f.transcription || f.contentText || f.summary || "");
+    if (cleanTrans && promptWords.some(pw => cleanTrans.toLowerCase().includes(pw))) {
+      return `### 💡 From Your Study Material (**${f.name}**)\n\n${cleanTrans.slice(0, 900)}${cleanTrans.length > 900 ? '...' : ''}\n\n*[Source: ${f.name}]*`;
     }
-    if (matchedInsight) break;
   }
 
-  const primaryDocName = matchedFile?.name || primaryName;
-  const activeInsight = matchedInsight || mainInsight1;
-
-  // 1. "Explain Like I'm 5" or Kid-Friendly Explanation
-  if (pLower.includes("like i'm 5") || pLower.includes("eli5") || pLower.includes("five year old") || pLower.includes("simple words") || pLower.includes("very easy")) {
-    return `### 🌟 Simple Explanation (Easy to Understand!)\n\n` +
-      `Here is what your notes in **${primaryDocName}** are teaching you in super simple words:\n\n` +
-      `• **What is it?** ${activeInsight} [Source: ${primaryDocName}]\n` +
-      `• **How does it work?** ${mainInsight2} [Source: ${primaryDocName}]\n` +
-      `• **Why does it matter?** Understanding this makes the rest of your study material easy to follow!\n\n` +
-      `💡 **Quick Tip:** Remember that this concept connects directly with what is covered in your notes.`;
-  }
-
-  // 2. "Summarize" or "Overview"
-  if (pLower.includes("summarize") || pLower.includes("summary") || pLower.includes("briefing") || pLower.includes("overview")) {
-    return `### 📋 Summary of Your Notes (Clear & Simple)\n\n` +
-      `Here is a quick, easy-to-read summary of your **${files.length} active study document${files.length === 1 ? '' : 's'}**:\n\n` +
-      `🌟 **The Big Idea**\n` +
-      `${activeInsight} [Source: ${primaryDocName}]\n\n` +
-      `🔍 **Key Things to Remember:**\n` +
-      `1. **Core Concept:** ${activeInsight} [Source: ${primaryDocName}]\n` +
-      `2. **Key Process:** ${mainInsight2}\n` +
-      `3. **Test Takeaway:** ${mainInsight3}\n\n` +
-      `💡 **Teacher Tip:** Review these points before class, and you will be fully prepared!`;
-  }
-
-  // 3. "Quiz Me" or Practice Questions
-  if (pLower.includes("quiz") || pLower.includes("question") || pLower.includes("test")) {
-    return `### 🎯 Quick Practice Quiz (Test What You Know!)\n\n` +
-      `Here are 3 friendly questions based directly on your study materials (**${primaryDocName}**):\n\n` +
-      `**Question 1:** In your own words, what is the main idea behind: "${activeInsight.slice(0, 75)}..."? [Source: ${primaryDocName}]\n\n` +
-      `**Question 2:** True or False: This topic connects with: "${mainInsight2.slice(0, 60)}..."? *(Hint: Look at the key definitions in your notes!)*\n\n` +
-      `**Question 3:** Why is understanding this important for your upcoming quizzes? [Source: ${primaryDocName}]\n\n` +
-      `💬 *Try answering in the chat, and I'll tell you how you did and explain any tricky parts!*`;
-  }
-
-  // 4. Direct Q&A Answer
-  return `### 💡 Direct Answer from Your Notes\n\n` +
-    `Based directly on your uploaded file **${primaryDocName}**, here is the answer:\n\n` +
-    `🌟 **Key Finding:**\n` +
-    `${activeInsight} [Source: ${primaryDocName}]\n\n` +
-    (mainInsight2 && mainInsight2 !== activeInsight ? `🔍 **Supporting Context:**\n${mainInsight2} [Source: ${primaryDocName}]\n\n` : '') +
-    `📖 *Referenced from:* **${primaryDocName}**\n\n` +
-    `💬 *Would you like me to explain any part of this in more detail, or give you a quick quiz?*`;
+  return `I'm temporarily reconnecting to the AI engine to answer: **"${prompt}"**. Please click send again in a moment for a full explanation.`;
 }
 
   // Diagnostic Route: Verify real Gemini API connectivity independently
@@ -1124,56 +1086,49 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
 
       const activePersonaKey = ['socratic', 'exam_prep', 'plain_english', 'flashcard'].includes(persona) 
         ? persona 
-        : 'socratic';
+        : 'plain_english';
 
       const personaInstructions: Record<string, string> = {
-        socratic: `ROLE: Socratic Guide
-You are an expert Socratic AI Tutor. Instead of lecturing or handing over answers right away:
-- Guide the student through self-discovery by asking thoughtful, scaffolding questions.
-- Acknowledge their partial insights and point them toward the next logical step.
-- Ground your questions and prompts directly in their uploaded study notes and lecture slides.
-- When they make progress, celebrate it and deepen their intuition with a relevant follow-up question.`,
+        socratic: `ROLE: Direct & Socratic Tutor
+- FIRST AND FOREMOST: Directly, clearly, and completely answer the exact question the student asked. Never withhold the answer or respond with only a riddle.
+- Structure your explanation step-by-step so the student immediately gets the exact answer and understands the underlying logic.
+- At the very end of your complete answer, ask 1 thoughtful follow-up question to help the student test or deepen their intuition.`,
 
         exam_prep: `ROLE: Exam Preparation Coach
-You are a rigorous, results-focused Exam Preparation Coach:
-- Highlight high-yield testable topics, critical definitions, equations, and common exam traps.
-- Point out how examiners frame questions around the material in the uploaded files.
-- Provide review checkpoints, grading criteria, and time-saving problem-solving tricks.
-- Challenge the student with quick practice review questions to evaluate their exam readiness.`,
+- FIRST AND FOREMOST: Directly, accurately, and completely answer the exact question or problem the student asked.
+- Highlight key definitions, formulas, step-by-step derivations, and common exam pitfalls related to their specific question.
+- Conclude with a quick exam tip or checkpoint question on the same topic.`,
 
-        plain_english: `ROLE: Plain-English Explainer
-You are a master educator celebrated for explaining complex academic concepts in plain, vivid English:
-- Strip away dense jargon, heavy legalese, and confusing notation.
-- Use intuitive real-world analogies, relatable examples, and step-by-step clarity.
-- Ensure the student understands "why" something works before introducing formal terms.
-- Preserve 100% conceptual and factual accuracy based directly on their uploaded materials.`,
+        plain_english: `ROLE: Clear Plain-English Tutor
+- FIRST AND FOREMOST: Directly, accurately, and completely answer the exact question the student asked in clear, accessible language.
+- Explain both the direct answer and the "why" or "how" behind it using step-by-step clarity and concrete examples.
+- Avoid unnecessary jargon or filler; focus 100% on helping the student understand the exact topic they asked about.`,
 
-        flashcard: `ROLE: Flashcard Active Recall Tester
-You are a rapid-fire active recall trainer and flashcard coach:
-- Present punchy, focused quiz cards one at a time from their materials.
-- If the student just answered a prior card in this thread, immediately evaluate their answer (Score: Correct / Partially Correct / Needs Review), provide a brief 1-sentence rationale with source citation, and then present the next active recall card.
-- Keep responses snappy, energetic, and optimized for spaced repetition.`
+        flashcard: `ROLE: Active Recall & Q&A Coach
+- FIRST AND FOREMOST: If the student asks a question, answer their exact question directly and clearly first.
+- If they ask for flashcards or active recall practice (or after answering their question), provide 1 to 2 concise Q&A flashcards on the exact topic they asked about.`
       };
 
-      const selectedPersonaInstruction = personaInstructions[activePersonaKey] || personaInstructions.socratic;
+      const selectedPersonaInstruction = personaInstructions[activePersonaKey] || personaInstructions.plain_english;
 
       const researchGuideline = deepResearch 
-        ? "Please carry out deep, extensive, highly analytical reasoning. Think step-by-step, breaking down complex theories, logical steps, or historical nuances in deep detail."
-        : "Explain the concept simply, direct, and focused, so a student can quickly grasp the core point.";
+        ? "Provide a comprehensive, deeply analytical step-by-step explanation covering nuances, edge cases, and examples."
+        : "Be clear, well-structured, direct, and easy to follow.";
 
       const citationGuideline = citationMode
-        ? "Include realistic, helpful academic references, page numbers, or study sources where appropriate (e.g., '[Biology Syllabus, Page 12]')."
-        : "Do not worry about providing specific citations or academic reference source lines.";
+        ? "If you use facts from the student's uploaded workspace files to answer their question, cite the file name in brackets (e.g., '[Source: File Name]'). If the question is answered using general academic knowledge, do NOT invent or force citations to unrelated workspace files."
+        : "Do not include citation tags.";
 
-      // 0. Automatically retrieve authenticated user's profile, workspaces, notes, and study materials from Supabase
+      // 0. Retrieve authenticated user's profile and active workspace materials from Supabase (only for the specific active workspace)
       let effectiveFiles: any[] = Array.isArray(attachedFiles) ? [...attachedFiles] : [];
       let fetchedFromSupabase = false;
       let supabaseDocCount = 0;
       let userDatabaseContext = "";
 
+      const isRealWorkspaceId = Boolean(workspaceId && workspaceId !== 'general-study');
       const supabase = getSupabaseServerClient(effectiveAuthHeader);
-      // Fast path: if the client already passed active workspace files, skip slow remote database lookups
-      if (effectiveFiles.length === 0 && supabase && (workspaceId || userId || effectiveAuthHeader)) {
+
+      if (effectiveFiles.length === 0 && supabase && (isRealWorkspaceId || userId || effectiveAuthHeader)) {
         try {
           const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Supabase timeout")), 800));
           const fetchPromise = (async () => {
@@ -1187,46 +1142,27 @@ You are a rapid-fire active recall trainer and flashcard coach:
               }
             }
 
-            const isRealWorkspaceId = workspaceId && workspaceId !== 'general-study';
-
-            // Run profile, user workspaces, and workspace files queries in parallel for fast execution
-            const [profileRes, userWsRes, wsFilesRes, wsNotesRes] = await Promise.all([
+            const [profileRes, wsRes, wsFilesRes, wsNotesRes] = await Promise.all([
               resolvedUserId
-                ? supabase.from('profiles').select('full_name, email, school, grade, bio, learning_goal').eq('id', resolvedUserId).maybeSingle()
+                ? supabase.from('profiles').select('full_name, school, grade, learning_goal').eq('id', resolvedUserId).maybeSingle()
                 : Promise.resolve({ data: null, error: null }),
-              resolvedUserId
-                ? supabase.from('workspaces').select('id, name, subject, description, files, notes, study_hours, streak').eq('user_id', resolvedUserId).order('updated_at', { ascending: false }).limit(10)
-                : (isRealWorkspaceId
-                  ? supabase.from('workspaces').select('id, name, subject, description, files, notes, study_hours, streak').eq('id', workspaceId).limit(1)
-                  : Promise.resolve({ data: null, error: null })),
+              isRealWorkspaceId
+                ? supabase.from('workspaces').select('id, name, subject, description, files, notes').eq('id', workspaceId).limit(1)
+                : Promise.resolve({ data: null, error: null }),
               isRealWorkspaceId
                 ? supabase.from('workspace_files').select('*').eq('workspace_id', workspaceId)
                 : Promise.resolve({ data: null, error: null }),
               isRealWorkspaceId
-                ? supabase.from('study_notes').select('id, title, content, workspace_id').eq('workspace_id', workspaceId).limit(15)
+                ? supabase.from('study_notes').select('id, title, content, workspace_id').eq('workspace_id', workspaceId).limit(10)
                 : Promise.resolve({ data: null, error: null })
             ]);
 
             const profile = profileRes?.data;
-            const userWorkspaces = Array.isArray(userWsRes?.data) ? userWsRes.data : [];
-            let fileRows = Array.isArray(wsFilesRes?.data) ? wsFilesRes.data : [];
+            const activeWsRows = Array.isArray(wsRes?.data) ? wsRes.data : [];
+            const fileRows = Array.isArray(wsFilesRes?.data) ? wsFilesRes.data : [];
             const noteRows = Array.isArray(wsNotesRes?.data) ? wsNotesRes.data : [];
 
-            // If user opened AI Tutor from sidebar ('general-study') and has workspaces in DB, fetch their files across their workspaces
-            if (!isRealWorkspaceId && userWorkspaces.length > 0 && fileRows.length === 0) {
-              const allWsIds = userWorkspaces.map((w: any) => w.id);
-              const { data: allUserFiles } = await supabase
-                .from('workspace_files')
-                .select('*')
-                .in('workspace_id', allWsIds)
-                .order('created_at', { ascending: false })
-                .limit(20);
-              if (Array.isArray(allUserFiles) && allUserFiles.length > 0) {
-                fileRows = allUserFiles;
-              }
-            }
-
-            if (fileRows.length > 0) {
+            if (isRealWorkspaceId && fileRows.length > 0) {
               supabaseDocCount = fileRows.length;
               fetchedFromSupabase = true;
 
@@ -1263,9 +1199,8 @@ You are a rapid-fire active recall trainer and flashcard coach:
               });
             }
 
-            // Also incorporate any inline files/notes stored on the user's workspaces
-            if (userWorkspaces.length > 0) {
-              userWorkspaces.forEach((wsRow: any) => {
+            if (isRealWorkspaceId && activeWsRows.length > 0) {
+              activeWsRows.forEach((wsRow: any) => {
                 if (Array.isArray(wsRow.files) && wsRow.files.length > 0) {
                   fetchedFromSupabase = true;
                   wsRow.files.forEach((sf: any) => {
@@ -1281,7 +1216,6 @@ You are a rapid-fire active recall trainer and flashcard coach:
               supabaseDocCount = effectiveFiles.length;
             }
 
-            // Build student database profile & workspace context for personalized AI tutoring
             const contextParts: string[] = [];
             if (profile) {
               const pDetails = [
@@ -1289,85 +1223,32 @@ You are a rapid-fire active recall trainer and flashcard coach:
                 profile.school ? `School/Institution: ${profile.school}` : null,
                 profile.grade ? `Academic Level/Grade: ${profile.grade}` : null,
                 profile.learning_goal ? `Learning Goal: ${profile.learning_goal}` : null,
-                profile.bio ? `Academic Focus: ${profile.bio}` : null,
               ].filter(Boolean);
               if (pDetails.length > 0) {
-                contextParts.push(`STUDENT PROFILE (Verified from Database):\n- ${pDetails.join('\n- ')}`);
+                contextParts.push(`STUDENT PROFILE:\n- ${pDetails.join('\n- ')}`);
               }
-            }
-
-            if (userWorkspaces.length > 0) {
-              const wsSummaries = userWorkspaces.map((w: any) => {
-                const fCount = Array.isArray(w.files) ? w.files.length : 0;
-                const nCount = Array.isArray(w.notes) ? w.notes.length : 0;
-                return `"${w.name}" (Subject: ${w.subject || 'General'}${w.description ? ` — ${w.description}` : ''}, ${fCount} files, ${nCount} notes)`;
-              });
-              contextParts.push(`STUDENT'S ACTIVE WORKSPACES IN DATABASE (${userWorkspaces.length}):\n- ${wsSummaries.join('\n- ')}`);
             }
 
             const allNotes = [
               ...noteRows,
-              ...userWorkspaces.flatMap((w: any) => Array.isArray(w.notes) ? w.notes : [])
+              ...activeWsRows.flatMap((w: any) => Array.isArray(w.notes) ? w.notes : [])
             ];
             if (allNotes.length > 0) {
-              const uniqueNotes = Array.from(new Map(allNotes.map((n: any) => [n.id || n.title, n])).values()).slice(0, 8);
-              const noteSnippets = uniqueNotes.map((n: any) => `[Note: "${n.title || 'Study Note'}"] ${String(n.content || '').replace(/<[^>]+>/g, ' ').slice(0, 350)}`);
-              contextParts.push(`STUDENT'S STUDY NOTES IN DATABASE:\n${noteSnippets.join('\n')}`);
+              const uniqueNotes = Array.from(new Map(allNotes.map((n: any) => [n.id || n.title, n])).values()).slice(0, 6);
+              const noteSnippets = uniqueNotes.map((n: any) => `[Note: "${n.title || 'Study Note'}"] ${String(n.content || '').replace(/<[^>]+>/g, ' ').slice(0, 300)}`);
+              contextParts.push(`ACTIVE WORKSPACE STUDY NOTES:\n${noteSnippets.join('\n')}`);
             }
 
             if (contextParts.length > 0) {
-              userDatabaseContext = `\n--- AUTHENTICATED STUDENT DATABASE CONTEXT ---\n${contextParts.join('\n\n')}\n----------------------------------------------\n`;
+              userDatabaseContext = `\n${contextParts.join('\n\n')}\n`;
             }
           })();
 
           await Promise.race([fetchPromise, timeoutPromise]);
         } catch (supaErr: any) {
-          console.warn("[AI Tutor] Notice: Supabase query notice, falling back seamlessly to workspace files:", supaErr?.message || supaErr);
+          console.warn("[AI Tutor] Notice: Supabase query notice:", supaErr?.message || supaErr);
         }
       }
-
-      // Helper to detect and clean legacy dummy metadata (like old Channel/Duration/Direct Video Link strings)
-      const isDummyMetadataLine = (str?: string): boolean => {
-        if (!str || typeof str !== 'string') return true;
-        const s = str.trim();
-        if (!s) return true;
-        const lower = s.toLowerCase();
-        return (
-          lower.includes('**channel:**') ||
-          lower.includes('**duration:**') ||
-          lower.includes('**direct video link:**') ||
-          lower.includes('direct watch & in-app embed available') ||
-          lower.includes('comprehensively outlines') ||
-          lower.includes('foundational definitions') ||
-          lower.includes('critical frameworks') ||
-          lower.includes('structural analysis') ||
-          lower.includes('high-yield academic study guide for') ||
-          lower.includes('mastering the foundational definitions in') ||
-          lower.includes('uploaded and indexed into your workspace') ||
-          lower.includes('ready for study questions') ||
-          lower.includes('ready for ai tutor questions') ||
-          lower.includes('uploaded to workspace') ||
-          lower.includes('youtube is currently blocking us') ||
-          lower.includes('preventing us from generating a summary') ||
-          lower.startsWith('uploaded study file:') ||
-          lower.startsWith('study document:') ||
-          lower.startsWith('study material:')
-        );
-      };
-
-      const cleanMultilineText = (raw?: string): string => {
-        if (!raw || typeof raw !== 'string') return '';
-        return raw
-          .split('\n')
-          .filter(line => {
-            const l = line.trim().toLowerCase();
-            if (!l) return true;
-            if (isDummyMetadataLine(l)) return false;
-            return true;
-          })
-          .join('\n')
-          .trim();
-      };
 
       // 0.5. Detect any direct URL pasted into the user's prompt and add to effectiveFiles if not already present
       const promptUrls: string[] = (prompt.match(/https?:\/\/[^\s"'<>)\]]+/gi) || []) as string[];
@@ -1380,28 +1261,66 @@ You are a rapid-fire active recall trainer and flashcard coach:
             name: pUrl,
             type: isYt ? 'video' : 'url',
             url: pUrl,
-            size: 'Web Link'
+            size: 'Web Link',
+            isDirectAttachment: true
           });
         }
       }
 
       // 0.6. Fast in-memory cleanup and targeted live enrichment
       const qLower = prompt.toLowerCase();
-      const isAskingAboutMaterial =
+      const hasDirectTurnAttachment =
         promptUrls.length > 0 ||
-        qLower.includes('video') ||
-        qLower.includes('youtube') ||
-        qLower.includes('watch') ||
-        qLower.includes('lecture') ||
+        effectiveFiles.some((f: any) => Boolean(f.isDirectAttachment));
+
+      const isOverviewQuery = 
+        qLower.includes("what is in it") ||
+        qLower.includes("what's in it") ||
+        qLower.includes("what is inside") ||
+        qLower.includes("what's inside") ||
+        qLower.includes("what is in this video") ||
+        qLower.includes("what's in this video") ||
+        qLower.includes("what is in the video") ||
+        qLower.includes("what is this video about") ||
+        qLower.includes("what is the video about") ||
+        qLower.includes("what is in this link") ||
+        qLower.includes("what is this link about") ||
+        qLower.includes("what did i upload") ||
+        qLower.includes("what have i uploaded") ||
+        qLower.includes("what is that that i have uploaded") ||
+        qLower.includes("tell me what is in") ||
+        qLower.includes("analyze what i uploaded") ||
+        qLower.includes("analyze this video") ||
+        qLower.includes("analyze the video") ||
+        qLower.includes("analyze this link") ||
+        qLower.includes("what do my documents say") ||
+        qLower.includes("what is in my files") ||
+        qLower.includes("what's in my files") ||
+        qLower.includes("what files do i have") ||
+        qLower.includes("what are my notes about") ||
+        qLower.includes("overview of my files") ||
+        qLower.includes("list my documents");
+
+      const isExplicitMaterialQuery =
+        hasDirectTurnAttachment ||
+        isOverviewQuery ||
+        qLower.includes('this video') ||
+        qLower.includes('the video') ||
         qLower.includes('this link') ||
-        qLower.includes('in the video') ||
-        qLower.includes('in this video') ||
-        qLower.includes('about the video') ||
-        qLower.includes('what is in this') ||
-        qLower.includes('summarize');
+        qLower.includes('my file') ||
+        qLower.includes('my files') ||
+        qLower.includes('my notes') ||
+        qLower.includes('my document') ||
+        qLower.includes('this document') ||
+        qLower.includes('this pdf') ||
+        qLower.includes('uploaded') ||
+        qLower.includes('in my workspace') ||
+        effectiveFiles.some((f: any) => {
+          const cleanName = String(f.name || '').toLowerCase().replace(/\.[a-z0-9]+$/, '').trim();
+          return cleanName.length > 4 && qLower.includes(cleanName);
+        });
 
       if (effectiveFiles && effectiveFiles.length > 0) {
-        // Fast in-memory text sanitization (0ms latency)
         effectiveFiles.forEach((f: any) => {
           f.transcription = cleanMultilineText(f.transcription || f.contentText || f.content_text);
           if (isDummyMetadataLine(f.summary)) {
@@ -1412,8 +1331,8 @@ You are a rapid-fire active recall trainer and flashcard coach:
           }
         });
 
-        // Only query external web/video transcript APIs when query refers to video or URL
-        if (isAskingAboutMaterial) {
+        // Only query external web/video transcript APIs when query explicitly refers to video or URL
+        if (isExplicitMaterialQuery) {
           const targetFiles = promptUrls.length > 0
             ? effectiveFiles.filter((f: any) => promptUrls.includes(f.url || f.name))
             : effectiveFiles.slice(0, 1);
@@ -1442,220 +1361,275 @@ You are a rapid-fire active recall trainer and flashcard coach:
                 lacksCaptionsInTranscript;
 
               if (isVideo && needsEnrichment) {
-              try {
-                const tr = await TranscriptProcessor.fetchTranscript(candidateUrl);
-                f.url = tr.normalizedUrl;
-                f.type = 'video';
-                if (isRawUrlOrPlaceholderName(f.name)) {
-                  f.name = tr.title;
+                try {
+                  const tr = await TranscriptProcessor.fetchTranscript(candidateUrl);
+                  f.url = tr.normalizedUrl;
+                  f.type = 'video';
+                  if (isRawUrlOrPlaceholderName(f.name)) {
+                    f.name = tr.title;
+                  }
+                  if (!f.summary) {
+                    f.summary = tr.description
+                      ? `Video "${tr.title}" by ${tr.author}: ${tr.description.slice(0, 600)}`
+                      : `Educational video "${tr.title}" by ${tr.author} (${tr.normalizedUrl}).`;
+                  }
+                  if (lacksCaptionsInTranscript && tr.isValidWordCount) {
+                    const matchedSegs = TranscriptProcessor.searchTranscriptSegments(tr, prompt, 10);
+                    const matchedBlock =
+                      matchedSegs.length > 0
+                        ? `Most Relevant Timestamped Video Captions for Query:\n${matchedSegs
+                            .map(s => `[${s.timestamp}] ${s.text}`)
+                            .join('\n')}`
+                        : '';
+                    f.transcription = [f.transcription, matchedBlock, tr.richContext]
+                      .filter(Boolean)
+                      .join('\n\n');
+                  } else if (lacksCaptionsInTranscript && tr.description) {
+                    f.transcription = [f.transcription, `Video Overview:\n${tr.description}`]
+                      .filter(Boolean)
+                      .join('\n\n');
+                  }
+                } catch (ytErr: any) {
+                  console.warn('[AI Tutor] Video TranscriptProcessor live enrichment notice:', ytErr?.message);
                 }
-                if (!f.summary) {
-                  f.summary = tr.description
-                    ? `Video "${tr.title}" by ${tr.author}: ${tr.description.slice(0, 600)}`
-                    : `Educational video "${tr.title}" by ${tr.author} (${tr.normalizedUrl}).`;
+              } else if (!isVideo && needsEnrichment) {
+                try {
+                  const scraped = await scrapeWebPage(candidateUrl);
+                  if (isRawUrlOrPlaceholderName(f.name) && scraped.title) {
+                    f.name = scraped.title;
+                  }
+                  if (!f.summary && (scraped.description || scraped.text)) {
+                    f.summary = scraped.description || scraped.text.slice(0, 400);
+                  }
+                  if (!f.transcription || f.transcription.length < 250) {
+                    f.transcription = [
+                      scraped.title ? `Title: ${scraped.title}` : '',
+                      scraped.description ? `Description: ${scraped.description}` : '',
+                      scraped.text ? `Webpage Content:\n${scraped.text.slice(0, 14000)}` : ''
+                    ].filter(Boolean).join('\n\n');
+                  }
+                } catch (webErr: any) {
+                  console.warn('[AI Tutor] Webpage live enrichment notice:', webErr?.message);
                 }
-                if (lacksCaptionsInTranscript && tr.isValidWordCount) {
-                  const matchedSegs = TranscriptProcessor.searchTranscriptSegments(tr, prompt, 10);
-                  const matchedBlock =
-                    matchedSegs.length > 0
-                      ? `Most Relevant Timestamped Video Captions for Query:\n${matchedSegs
-                          .map(s => `[${s.timestamp}] ${s.text}`)
-                          .join('\n')}`
-                      : '';
-                  f.transcription = [f.transcription, matchedBlock, tr.richContext]
-                    .filter(Boolean)
-                    .join('\n\n');
-                } else if (lacksCaptionsInTranscript && tr.description) {
-                  f.transcription = [f.transcription, `Video Overview:\n${tr.description}`]
-                    .filter(Boolean)
-                    .join('\n\n');
-                }
-              } catch (ytErr: any) {
-                console.warn('[AI Tutor] Video TranscriptProcessor live enrichment notice:', ytErr?.message);
               }
-            } else if (!isVideo && needsEnrichment) {
-              try {
-                const scraped = await scrapeWebPage(candidateUrl);
-                if (isRawUrlOrPlaceholderName(f.name) && scraped.title) {
-                  f.name = scraped.title;
-                }
-                if (!f.summary && (scraped.description || scraped.text)) {
-                  f.summary = scraped.description || scraped.text.slice(0, 400);
-                }
-                if (!f.transcription || f.transcription.length < 250) {
-                  f.transcription = [
-                    scraped.title ? `Title: ${scraped.title}` : '',
-                    scraped.description ? `Description: ${scraped.description}` : '',
-                    scraped.text ? `Webpage Content:\n${scraped.text.slice(0, 14000)}` : ''
-                  ].filter(Boolean).join('\n\n');
-                }
-              } catch (webErr: any) {
-                console.warn('[AI Tutor] Webpage live enrichment notice:', webErr?.message);
-              }
-            }
-          })
-        );
+            })
+          );
+        }
       }
-    }
 
       // 1. Document-Aware Semantic Segment Extraction RAG pipeline
       let groundedSourceContext = "";
       let retrievedSegments: ExtractedSegment[] = [];
+      let hasRelevantWorkspaceMaterial = false;
       
       if (effectiveFiles && effectiveFiles.length > 0) {
-        const ragResult = extractRelevantDocumentSegments(prompt, effectiveFiles, 8);
+        const ragResult = extractRelevantDocumentSegments(
+          prompt,
+          effectiveFiles,
+          8,
+          isExplicitMaterialQuery
+        );
         retrievedSegments = ragResult.segments;
-        groundedSourceContext = ragResult.contextString;
+        hasRelevantWorkspaceMaterial = ragResult.hasHighRelevance || isExplicitMaterialQuery;
 
-        // Also provide complete transcript/content overview for uploaded videos & web links so full-video summaries and quizzes have 100% context
-        const fullSourceBlocks = effectiveFiles.slice(0, 4).map((f: any, idx: number) => {
-          const textBody = (f.transcription || f.contentText || f.content_text || f.summary || '').trim();
-          if (!textBody) return '';
-          return `--- FULL SOURCE MATERIAL #${idx + 1}: "${f.name || 'Study Resource'}" (Type: ${f.type || 'resource'}${f.url ? ` | URL: ${f.url}` : ''}) ---\n${textBody.slice(0, 14000)}`;
-        }).filter(Boolean);
+        if (hasRelevantWorkspaceMaterial) {
+          groundedSourceContext = ragResult.contextString;
 
-        if (fullSourceBlocks.length > 0) {
-          groundedSourceContext += `\n=== COMPLETE UPLOADED VIDEO & DOCUMENT TRANSCRIPTS ===\n${fullSourceBlocks.join('\n\n')}\n`;
+          const relevantFiles = isExplicitMaterialQuery
+            ? effectiveFiles.slice(0, 3)
+            : effectiveFiles.filter((f: any) =>
+                retrievedSegments.some(s => s.sourceName === f.name || s.fileId === f.id)
+              ).slice(0, 2);
+
+          const fullSourceBlocks = relevantFiles.map((f: any, idx: number) => {
+            const textBody = (f.transcription || f.contentText || f.content_text || f.summary || '').trim();
+            if (!textBody) return '';
+            return `--- WORKSPACE MATERIAL #${idx + 1}: "${f.name || 'Study Resource'}" (Type: ${f.type || 'resource'}${f.url ? ` | URL: ${f.url}` : ''}) ---\n${textBody.slice(0, 8000)}`;
+          }).filter(Boolean);
+
+          if (fullSourceBlocks.length > 0) {
+            groundedSourceContext += `\n=== RELEVANT WORKSPACE MATERIAL EXCERPTS ===\n${fullSourceBlocks.join('\n\n')}\n=========================================\n`;
+          }
         }
-        
-        groundedSourceContext += "\n=========================================\n\n";
-        
-        // Critical grounding instructions
-        groundedSourceContext += `CRITICAL DOCUMENT-AWARE & VIDEO/LINK ANALYSIS GROUNDING RULES:\n`;
-        groundedSourceContext += `1. You are backed by full Gemini academic intelligence and TranscriptProcessor video caption extraction. You have the parsed video captions, timestamps, chapters, and text for the student's uploaded videos, YouTube links, web URLs, and PDFs above.\n`;
-        groundedSourceContext += `2. When the student asks about a video (YouTube or uploaded video) or web link—such as "what is in this video?", "what is it about?", "give me a summary", or "give me questions from it"—deeply analyze the spoken video captions, chapters, concepts, explanations, and examples.\n`;
-        groundedSourceContext += `3. NEVER output useless dummy metadata (like channel links, video duration, or generic placeholders) as your summary or answer. Always explain the real content, concepts, and takeaways taught in the video or link, referencing timestamps (e.g. [02:15]) when helpful.\n`;
-        groundedSourceContext += `4. CITE the source material in square brackets (e.g., "[Source: ${effectiveFiles[0]?.name || 'Study Material'}]") when referencing their uploaded videos, links, or documents.\n`;
       }
 
-      // 2. NotebookLM Style Specialized Format Intent Detection
+      // 2. Precise Intent Detection (no false positives when user simply says "I have a question")
       let specializedFormatInstruction = "";
 
-      const isOverviewQuery = 
-        qLower.includes("what is in it") ||
-        qLower.includes("what's in it") ||
-        qLower.includes("what is inside") ||
-        qLower.includes("what's inside") ||
-        qLower.includes("what is in this video") ||
-        qLower.includes("what's in this video") ||
-        qLower.includes("what is in the video") ||
-        qLower.includes("what is this video about") ||
-        qLower.includes("what is the video about") ||
-        qLower.includes("what is in this link") ||
-        qLower.includes("what is this link about") ||
-        qLower.includes("what did i upload") ||
-        qLower.includes("what have i uploaded") ||
-        qLower.includes("what is that that i have uploaded") ||
-        qLower.includes("tell me what are the things") ||
-        qLower.includes("tell me what is in") ||
-        qLower.includes("what are the things that are in it") ||
-        qLower.includes("what are the things in it") ||
-        qLower.includes("analyze what i uploaded") ||
-        qLower.includes("analyze this video") ||
-        qLower.includes("analyze the video") ||
-        qLower.includes("analyze this link") ||
-        qLower.includes("analyze it and tell me") ||
-        qLower.includes("what do my documents say") ||
-        qLower.includes("what is in my files") ||
-        qLower.includes("what's in my files") ||
-        qLower.includes("what files do i have") ||
-        qLower.includes("what are my notes about") ||
-        qLower.includes("overview of my files") ||
-        qLower.includes("list my documents") ||
-        qLower.includes("what did i add");
-
       const isSummaryQuery =
-        qLower.includes("summarize") ||
-        qLower.includes("summary") ||
-        qLower.includes("briefing") ||
-        qLower.includes("overview");
+        isOverviewQuery ||
+        /\b(summarize|summary|briefing|overview of)\b/i.test(qLower);
 
-      const isQuestionsQuery =
-        qLower.includes("question") ||
-        qLower.includes("quiz") ||
-        qLower.includes("test me") ||
-        qLower.includes("practice");
+      // Only trigger quiz generation when user explicitly asks to be quizzed/tested or asks to generate practice questions
+      const isQuizRequest =
+        /\b(quiz me|test me|give me .*questions|generate .*questions|practice questions|create a quiz|make a quiz|ask me .*questions|flashcards? for)\b/i.test(qLower);
+
+      if (isExplicitMaterialQuery && isSummaryQuery && effectiveFiles.length > 0) {
+        specializedFormatInstruction = `
+[MATERIAL SUMMARY REQUESTED]
+The student is asking what is taught in their uploaded study material ("${effectiveFiles[0]?.name || 'the resource'}").
+Provide a clear, thorough breakdown of the core topic, key concepts, definitions, and main takeaways.`;
+      } else if (isQuizRequest) {
+        specializedFormatInstruction = hasRelevantWorkspaceMaterial && effectiveFiles.length > 0
+          ? `\n[PRACTICE QUIZ REQUESTED]\nGenerate 3 to 4 specific, content-rich practice questions (with clear answers and explanations) testing the concepts in "${effectiveFiles[0]?.name}" or the topic requested by the student.`
+          : `\n[PRACTICE QUIZ REQUESTED]\nGenerate 3 to 4 specific, well-explained practice questions (with answers) on the exact topic requested by the student.`;
+      } else if (/\b(table|compare|comparison|difference between|contrasting)\b/i.test(qLower)) {
+        specializedFormatInstruction = `
+[COMPARISON REQUESTED]
+Include a clear, structured comparison (using a markdown table or side-by-side bullet points) highlighting key differences and similarities, followed by a clear explanation.`;
+      }
 
       let fileOverviewContext = "";
-      if (effectiveFiles && effectiveFiles.length > 0) {
-        fileOverviewContext = `\nUPLOADED MATERIALS IN THIS WORKSPACE (${effectiveFiles.length} items${fetchedFromSupabase ? ' - Verified in Supabase' : ''}):\n`;
-        effectiveFiles.forEach((f: any, idx: number) => {
-          fileOverviewContext += `Material #${idx + 1}: "${f.name}" (Type: ${f.type || 'document'}${f.url && f.url.startsWith('http') ? `, URL: ${f.url}` : ''})\n`;
+      if (hasRelevantWorkspaceMaterial && effectiveFiles && effectiveFiles.length > 0) {
+        fileOverviewContext = `\nRELEVANT WORKSPACE MATERIALS (${effectiveFiles.length} item${effectiveFiles.length === 1 ? '' : 's'}):\n`;
+        effectiveFiles.slice(0, 4).forEach((f: any, idx: number) => {
+          fileOverviewContext += `- Material #${idx + 1}: "${f.name}" (Type: ${f.type || 'document'}${f.url && f.url.startsWith('http') ? `, URL: ${f.url}` : ''})\n`;
           if (f.summary && !isDummyMetadataLine(f.summary)) {
-            fileOverviewContext += `  Summary: ${f.summary}\n`;
+            fileOverviewContext += `  Summary: ${f.summary.slice(0, 500)}\n`;
           }
-
-          const cleanHighlights = (f.highlights || []).filter((h: string) => !isDummyMetadataLine(h));
-          if (cleanHighlights.length > 0) {
-            fileOverviewContext += `  Key Highlights: ${cleanHighlights.join(" | ")}\n`;
-          }
-          if (f.formulas && f.formulas.length > 0) {
-            fileOverviewContext += `  Key Formulas/Definitions: ${f.formulas.join(", ")}\n`;
-          }
-          if (f.transcription) {
-            fileOverviewContext += `  Extracted Content / Notes:\n${f.transcription.slice(0, 3500)}\n`;
-          }
-          fileOverviewContext += `\n`;
         });
       }
 
-      const isFullVideoSummaryRequested =
-        (qLower.includes("what is in this video") ||
-         qLower.includes("what is in the video") ||
-         qLower.includes("what's in this video") ||
-         qLower.includes("what is this video about") ||
-         qLower.includes("summarize this video") ||
-         qLower.includes("what did i upload") ||
-         qLower.includes("what have i uploaded") ||
-         qLower.includes("what is this link about") ||
-         qLower.includes("analyze this video")) &&
-        effectiveFiles.length > 0;
-
-      if (isFullVideoSummaryRequested) {
-        specializedFormatInstruction = `
-[VIDEO / RESOURCE SUMMARY REQUESTED]
-The student is asking what is taught in their uploaded video or resource ("${effectiveFiles[0]?.name || 'the resource'}").
-Explain what happens in it, the core topic, key concepts taught, and 2-3 specific takeaways.
-CRITICAL: Base your answer on the actual subject matter and spoken lessons. NEVER output dummy metadata, channel links, or durations.`;
-      } else if (isQuestionsQuery) {
-        specializedFormatInstruction = `
-[CONTENT-SPECIFIC PRACTICE QUESTIONS REQUESTED]
-The student is asking for questions / a quiz from their uploaded video, link, or study materials.
-Generate 3 to 4 specific, content-rich questions (with clear answers and explanations) that directly test the concepts taught in "${effectiveFiles[0]?.name || 'their study material'}".
-NEVER generate generic meta-questions about channel names or durations.`;
-      } else if (qLower.includes("table") || qLower.includes("compare") || qLower.includes("comparison") || qLower.includes("difference between") || qLower.includes("contrasting")) {
-        specializedFormatInstruction = `
-[COMPARISON REQUESTED]
-Present your answer as a clear, structured comparison table highlighting key differences and similarities, followed by a simple summary.`;
-      }
-
-      const systemInstruction = `You are an intelligent, friendly, and lightning-fast AI Study Tutor for StudyWeb.
-CORE RULES:
-1. ANSWER THE EXACT QUESTION: Answer the student's question directly, clearly, and helpfully so they can easily learn. If they ask a specific conceptual or factual question, explain that concept directly.
-2. NO DUMMY DATA OR RAW METADATA: When discussing videos, web links, or documents, teach the ACTUAL educational concepts, theories, and examples. Never recite channel names, video links, subscriber numbers, or video lengths.
-3. ADAPTIVE DEPTH: If the student asks a quick factual question, give a concise, clear answer. If they ask for an in-depth breakdown, provide a thorough, structured explanation.
-4. EASY LEARNING: Use clear formatting, bullet points where helpful, and relatable analogies.
+      const coreSystemInstruction = `You are StudyWeb's expert AI Tutor.
+CRITICAL PRIORITY #1 — ANSWER THE STUDENT'S EXACT QUESTION DIRECTLY:
+1. Read the student's message carefully and answer the EXACT question, problem, or topic they asked about—directly, thoroughly, and accurately.
+2. NEVER evade the question, NEVER give a generic placeholder/template answer (such as "Understanding X involves breaking down the main concepts..."), and NEVER answer a different question than what the student asked.
+3. If the student asks a math, science, coding, history, language, or general academic question, solve and explain that exact question step-by-step using your full knowledge.
+4. Do NOT force unrelated workspace files into your answer. Only use or reference uploaded workspace files when the student asks about them or when those files directly contain the answer to the student's question.
 ${selectedPersonaInstruction}
 ${researchGuideline}
-${citationGuideline}
-${userDatabaseContext}
-${specializedFormatInstruction}
-${fileOverviewContext}
-- Workspace Materials Context & Retrieved Passages:
-${groundedSourceContext}`;
+${citationGuideline}`;
 
-      // Verified active, low-latency Gemini models (fast primary model)
-      const candidateModels: string[] = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+      const systemInstruction = [
+        coreSystemInstruction,
+        userDatabaseContext,
+        specializedFormatInstruction,
+        fileOverviewContext,
+        groundedSourceContext
+      ].filter(Boolean).join('\n\n');
+
+      // Prioritize gemini-3-flash-preview (verified active & low-latency) and skip any model in quota cooldown
+      const baseCandidateModels: string[] = [
+        "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite-preview",
+        "gemini-3.1-flash-lite",
+        "gemini-flash-latest",
+        "gemini-3.8-flash"
+      ];
+      const candidateModels: string[] = getAvailableCandidateModels(baseCandidateModels);
 
       let responseText = "";
       let responseSource = "";
       let lastError: any = null;
 
+      // Build currentTurnParts: keep the student's exact prompt primary and uncluttered
+      const currentTurnParts: any[] = [{ text: prompt }];
+
+      if (effectiveFiles && effectiveFiles.length > 0 && hasRelevantWorkspaceMaterial) {
+        const candidateAttachmentFiles = effectiveFiles.filter((f: any) =>
+          Boolean(f.isDirectAttachment) ||
+          isExplicitMaterialQuery ||
+          retrievedSegments.some(s => s.sourceName === f.name || s.fileId === f.id)
+        );
+
+        for (const file of candidateAttachmentFiles.slice(0, 2)) {
+          let rawBase64 = "";
+          let mimeType = file.fileMimeType || (file.type === "image" ? "image/png" : (file.type === "video" ? "video/mp4" : "application/pdf"));
+
+          if (file.url && typeof file.url === "string" && file.url.startsWith("data:")) {
+            const match = file.url.match(/^data:([^;]+);base64,(.+)$/);
+            if (match) {
+              mimeType = match[1];
+              rawBase64 = match[2];
+            }
+          } else if (file.fileBase64) {
+            rawBase64 = String(file.fileBase64);
+            if (rawBase64.includes(";base64,")) {
+              rawBase64 = rawBase64.split(";base64,")[1];
+            }
+          }
+
+          rawBase64 = rawBase64.replace(/[\r\n\s]/g, "");
+
+          if (rawBase64 && rawBase64.length > 20 && rawBase64.length < 15000000) {
+            const isSupportedType =
+              mimeType.startsWith("image/") ||
+              mimeType.startsWith("video/") ||
+              mimeType === "application/pdf" ||
+              mimeType.startsWith("text/") ||
+              mimeType.startsWith("audio/");
+
+            if (isSupportedType) {
+              currentTurnParts.push({
+                inlineData: {
+                  mimeType,
+                  data: rawBase64
+                }
+              });
+            }
+          } else if (isExplicitMaterialQuery) {
+            const hasExtractedTranscript = Boolean(file.transcription && String(file.transcription).trim().length > 250);
+            const ytId = !hasExtractedTranscript ? TranscriptProcessor.extractYouTubeId(file.url || file.name || '') : null;
+            if (ytId) {
+              currentTurnParts.push({
+                fileData: {
+                  fileUri: `https://www.youtube.com/watch?v=${ytId}`,
+                  mimeType: 'video/mp4'
+                }
+              });
+            }
+          }
+        }
+      }
+
+      const buildContentsPayload = (partsToUse: any[], maxHistoryTurns: number = 8) => {
+        if (Array.isArray(history) && history.length > 0 && maxHistoryTurns > 0) {
+          const multiTurnContents: any[] = [];
+          for (const turn of history.slice(-maxHistoryTurns)) {
+            const turnRole = (turn.role === 'model' || turn.role === 'ai' || turn.role === 'assistant') ? 'model' : 'user';
+            const turnText = String(turn.content || turn.text || '').trim();
+            if (turnText) {
+              // Skip old dummy/fallback messages in history so they don't pollute new answers
+              if (turnRole === 'model' && (
+                turnText.includes('Understanding "') && turnText.includes('involves breaking down the main concepts') ||
+                turnText.includes('Focus on the central principle, cause-and-effect mechanisms')
+              )) {
+                continue;
+              }
+              if (multiTurnContents.length === 0 && turnRole === 'model') {
+                continue;
+              }
+              const lastRole = multiTurnContents.length > 0 ? multiTurnContents[multiTurnContents.length - 1].role : null;
+              if (lastRole === turnRole) {
+                multiTurnContents[multiTurnContents.length - 1].parts[0].text += `\n\n${turnText}`;
+              } else {
+                multiTurnContents.push({
+                  role: turnRole,
+                  parts: [{ text: turnText }]
+                });
+              }
+            }
+          }
+
+          const lastRole = multiTurnContents.length > 0 ? multiTurnContents[multiTurnContents.length - 1].role : null;
+          if (lastRole === 'user') {
+            multiTurnContents[multiTurnContents.length - 1].parts = partsToUse;
+          } else {
+            multiTurnContents.push({
+              role: 'user',
+              parts: partsToUse
+            });
+          }
+          return multiTurnContents;
+        }
+        return partsToUse.length === 1 && partsToUse[0].text ? partsToUse[0].text : partsToUse;
+      };
+
+      const textOnlyParts = [{ text: prompt }];
+
       for (const currentModel of candidateModels) {
         const modelStartTime = Date.now();
         try {
-          console.log(`[AI Tutor][${correlationId}] Trying candidate model: ${currentModel} (persona: ${activePersonaKey}, mode: ${modelMode})`);
-          // Gemini API (@google/genai)
           const apiKey = getGeminiApiKey();
           if (!apiKey) {
             const noKeyErr = new Error("GEMINI_API_KEY is not configured on the server.");
@@ -1663,207 +1637,105 @@ ${groundedSourceContext}`;
             throw noKeyErr;
           }
 
-            const ai = new GoogleGenAI({
-              apiKey,
-              httpOptions: {
-                headers: {
-                  "User-Agent": "aistudio-build",
-                }
+          const ai = new GoogleGenAI({
+            apiKey,
+            httpOptions: {
+              headers: {
+                "User-Agent": "aistudio-build",
               }
-            });
+            }
+          });
 
-            const currentTurnParts: any[] = [{ text: prompt }];
+          let response: any = null;
+          let attempt = 0;
+          // Give primary working model (gemini-3-flash-preview) up to 3 attempts with progressive payload simplification
+          const maxModelAttempts = currentModel === "gemini-3-flash-preview" ? 3 : 1;
 
-            if (effectiveFiles && effectiveFiles.length > 0) {
-              // Prioritize newly uploaded files that have inline base64 media or text transcriptions
-              const sortedFiles = [...effectiveFiles].sort((a, b) => {
-                const aHasMedia = (a.fileBase64 || (typeof a.url === "string" && a.url.startsWith("data:"))) ? 2 : (a.transcription ? 1 : 0);
-                const bHasMedia = (b.fileBase64 || (typeof b.url === "string" && b.url.startsWith("data:"))) ? 2 : (b.transcription ? 1 : 0);
-                return bHasMedia - aHasMedia;
+          while (attempt < maxModelAttempts) {
+            let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+            try {
+              attempt++;
+              const activeParts = attempt === 1 ? currentTurnParts : textOnlyParts;
+              const activeSystemInstruction = attempt <= 2 ? systemInstruction : coreSystemInstruction;
+              const contentsPayload = buildContentsPayload(activeParts, attempt <= 2 ? 8 : 4);
+              const timeoutMs = activeParts.some((p: any) => Boolean(p.fileData || p.inlineData)) ? 22000 : 16000;
+
+              const genPromise = ai.models.generateContent({
+                model: currentModel,
+                contents: contentsPayload,
+                config: {
+                  systemInstruction: activeSystemInstruction,
+                  temperature: 0.4,
+                }
               });
-
-              for (const file of sortedFiles.slice(0, 4)) {
-                let rawBase64 = "";
-                let mimeType = file.fileMimeType || (file.type === "image" ? "image/png" : (file.type === "video" ? "video/mp4" : "application/pdf"));
-
-                if (file.url && typeof file.url === "string" && file.url.startsWith("data:")) {
-                  const match = file.url.match(/^data:([^;]+);base64,(.+)$/);
-                  if (match) {
-                    mimeType = match[1];
-                    rawBase64 = match[2];
-                  }
-                } else if (file.fileBase64) {
-                  rawBase64 = String(file.fileBase64);
-                  if (rawBase64.includes(";base64,")) {
-                    rawBase64 = rawBase64.split(";base64,")[1];
-                  }
-                }
-
-                rawBase64 = rawBase64.replace(/[\r\n\s]/g, "");
-
-                // Support images, PDFs, text, audio, AND video files up to ~15MB base64
-                if (rawBase64 && rawBase64.length > 20 && rawBase64.length < 22000000) {
-                  const isSupportedType =
-                    mimeType.startsWith("image/") ||
-                    mimeType.startsWith("video/") ||
-                    mimeType === "application/pdf" ||
-                    mimeType.startsWith("text/") ||
-                    mimeType.startsWith("audio/");
-
-                  if (isSupportedType) {
-                    currentTurnParts.push({
-                      inlineData: {
-                        mimeType,
-                        data: rawBase64
-                      }
-                    });
-                  }
-                } else {
-                  // Only attach raw YouTube fileData stream if we don't already have an extracted text transcript
-                  // (attaching fileData when a full transcript is already present causes unnecessary 20s+ video re-tokenization)
-                  const hasExtractedTranscript = Boolean(file.transcription && String(file.transcription).trim().length > 250);
-                  const ytId = !hasExtractedTranscript ? TranscriptProcessor.extractYouTubeId(file.url || file.name || '') : null;
-                  if (ytId) {
-                    currentTurnParts.push({
-                      fileData: {
-                        fileUri: `https://www.youtube.com/watch?v=${ytId}`,
-                        mimeType: 'video/mp4'
-                      }
-                    });
-                  }
-                }
-
-                if (file.transcription || file.summary || file.url) {
-                  const materialContext = [
-                    `[WORKSPACE STUDY MATERIAL: "${file.name}" | Type: ${file.type || 'resource'}${file.url && file.url.startsWith('http') ? ` | URL: ${file.url}` : ''}]`,
-                    file.summary ? `Summary: ${file.summary}` : '',
-                    Array.isArray(file.highlights) && file.highlights.length > 0 ? `Key Takeaways:\n- ${file.highlights.join('\n- ')}` : '',
-                    file.transcription ? `Full Content / Lecture Notes:\n${String(file.transcription).slice(0, 12000)}` : ''
-                  ].filter(Boolean).join('\n\n');
-
-                  currentTurnParts.push({ text: materialContext });
-                }
+              const modelTimeout = new Promise<never>((_, reject) => {
+                timeoutHandle = setTimeout(() => reject(new Error(`Model ${currentModel} timed out`)), timeoutMs);
+              });
+              response = await Promise.race([genPromise, modelTimeout]);
+              if (timeoutHandle) clearTimeout(timeoutHandle);
+              if (response && response.text && response.text.trim()) break;
+            } catch (retryErr: any) {
+              if (timeoutHandle) clearTimeout(timeoutHandle);
+              if (isQuotaOrRateLimitError(retryErr)) {
+                recordModelQuotaCooldown(currentModel, retryErr);
+                throw retryErr;
               }
-            }
-
-            const buildContentsPayload = (partsToUse: any[]) => {
-              if (Array.isArray(history) && history.length > 0) {
-                const multiTurnContents: any[] = [];
-                for (const turn of history.slice(-8)) {
-                  const turnRole = (turn.role === 'model' || turn.role === 'ai' || turn.role === 'assistant') ? 'model' : 'user';
-                  const turnText = String(turn.content || turn.text || '').trim();
-                  if (turnText) {
-                    if (multiTurnContents.length === 0 && turnRole === 'model') {
-                      continue;
-                    }
-                    const lastRole = multiTurnContents.length > 0 ? multiTurnContents[multiTurnContents.length - 1].role : null;
-                    if (lastRole === turnRole) {
-                      multiTurnContents[multiTurnContents.length - 1].parts[0].text += `\n\n${turnText}`;
-                    } else {
-                      multiTurnContents.push({
-                        role: turnRole,
-                        parts: [{ text: turnText }]
-                      });
-                    }
-                  }
-                }
-
-                const lastRole = multiTurnContents.length > 0 ? multiTurnContents[multiTurnContents.length - 1].role : null;
-                if (lastRole === 'user') {
-                  multiTurnContents[multiTurnContents.length - 1].parts = partsToUse;
-                } else {
-                  multiTurnContents.push({
-                    role: 'user',
-                    parts: partsToUse
-                  });
-                }
-                return multiTurnContents;
+              if (attempt < maxModelAttempts) {
+                await new Promise(r => setTimeout(r, 300 * attempt));
+              } else {
+                throw retryErr;
               }
-              return partsToUse.length === 1 && partsToUse[0].text ? partsToUse[0].text : partsToUse;
-            };
-
-            const hasFileDataPart = currentTurnParts.some((p: any) => Boolean(p.fileData));
-            const textOnlyParts = currentTurnParts.filter((p: any) => !p.fileData);
-
-            let response: any = null;
-            let attempt = 0;
-            const maxModelAttempts = hasFileDataPart ? 2 : 1;
-            while (attempt < maxModelAttempts) {
-              let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-              try {
-                attempt++;
-                // On attempt 2, if attempt 1 timed out or failed with video fileData, fall back to fast text-only parts
-                const activeParts = (attempt > 1 && hasFileDataPart) ? textOnlyParts : currentTurnParts;
-                const contentsPayload = buildContentsPayload(activeParts);
-                const timeoutMs = activeParts.some((p: any) => Boolean(p.fileData)) ? 22000 : 10000;
-
-                const genPromise = ai.models.generateContent({
-                  model: currentModel,
-                  contents: contentsPayload,
-                  config: {
-                    systemInstruction,
-                    temperature: 0.5,
-                  }
-                });
-                const modelTimeout = new Promise<never>((_, reject) => {
-                  timeoutHandle = setTimeout(() => reject(new Error(`Model ${currentModel} timed out`)), timeoutMs);
-                });
-                response = await Promise.race([genPromise, modelTimeout]);
-                if (timeoutHandle) clearTimeout(timeoutHandle);
-                if (response && response.text) break;
-              } catch (retryErr: any) {
-                if (timeoutHandle) clearTimeout(timeoutHandle);
-                const errStatus = retryErr?.status || retryErr?.statusCode || (retryErr?.error && retryErr?.error?.code);
-                const retryMsg = retryErr?.message || retryErr?.error?.message || String(retryErr);
-                const isTimeout = retryMsg.includes('timed out');
-                console.log(`[AI Tutor Notice][${correlationId}] Model ${currentModel} attempt ${attempt} note (${errStatus || (isTimeout ? 'timeout' : 'retry')}): ${retryMsg}`);
-                if ((errStatus === 503 || errStatus === 429 || (isTimeout && hasFileDataPart)) && attempt < maxModelAttempts) {
-                  await new Promise(r => setTimeout(r, 300));
-                } else {
-                  throw retryErr;
-                }
-              }
-            }
-
-            if (response && response.text) {
-              responseText = response.text;
-              responseSource = `Gemini (${currentModel})`;
-              console.log(`[AI Tutor Success][${correlationId}] Model ${currentModel} succeeded in ${Date.now() - modelStartTime}ms`);
-              break; // Success!
-            } else {
-              throw new Error("No response text received from Gemini API.");
-            }
-        } catch (err: any) {
-          const modelDuration = Date.now() - modelStartTime;
-          let statusCode = 500;
-          if (typeof err?.status === 'number' && err.status >= 400 && err.status < 600) {
-            statusCode = err.status;
-          } else if (typeof err?.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600) {
-            statusCode = err.statusCode;
-          } else if (typeof err?.error?.code === 'number' && err.error.code >= 400 && err.error.code < 600) {
-            statusCode = err.error.code;
-          } else if (err?.message && /\[(\d{3})\b/.test(err.message)) {
-            const match = err.message.match(/\[(\d{3})\b/);
-            if (match) {
-              const parsed = parseInt(match[1], 10);
-              if (parsed >= 400 && parsed < 600) statusCode = parsed;
             }
           }
-          const originalErrorMessage = err?.message || err?.error?.message || String(err);
-          console.log(`[AI Tutor Fallback][${correlationId}] Switching from ${currentModel} after ${modelDuration}ms (${originalErrorMessage})`);
+
+          if (response && response.text && response.text.trim()) {
+            responseText = response.text.trim();
+            responseSource = `Gemini (${currentModel})`;
+            console.log(`[AI Tutor][${correlationId}] Completed with ${currentModel} in ${Date.now() - modelStartTime}ms`);
+            break;
+          } else {
+            throw new Error("Empty response from model");
+          }
+        } catch (err: any) {
+          if (isQuotaOrRateLimitError(err)) {
+            recordModelQuotaCooldown(currentModel, err);
+          }
+          const cleanNote = summarizeModelError(err);
+          console.log(`[AI Tutor][${correlationId}] Routing from ${currentModel} to next available model (${cleanNote})`);
           lastError = {
             model: currentModel,
-            status: statusCode,
-            message: originalErrorMessage,
-            code: err?.code || err?.error?.status || undefined,
-            details: err?.stack || String(err)
+            status: err?.status || err?.statusCode || 500,
+            message: cleanNote
           };
         }
       }
 
-      // If upstream live models were unavailable, provide graceful workspace-grounded synthesis
-      if (!responseText && effectiveFiles && effectiveFiles.length > 0) {
-        console.log(`[AI Tutor Notice][${correlationId}] Live models busy; generating workspace grounded synthesis from ${effectiveFiles.length} file(s).`);
+      // Final direct recovery with gemini-3-flash-preview on the bare prompt if all candidates failed
+      if (!responseText) {
+        try {
+          const apiKey = getGeminiApiKey();
+          if (apiKey) {
+            const ai = new GoogleGenAI({ apiKey });
+            const directRes = await ai.models.generateContent({
+              model: "gemini-3-flash-preview",
+              contents: prompt,
+              config: {
+                systemInstruction: coreSystemInstruction,
+                temperature: 0.4
+              }
+            });
+            if (directRes?.text?.trim()) {
+              responseText = directRes.text.trim();
+              responseSource = "Gemini (gemini-3-flash-preview)";
+            }
+          }
+        } catch (directErr: any) {
+          console.warn(`[AI Tutor][${correlationId}] Direct recovery attempt notice:`, directErr?.message);
+        }
+      }
+
+      // Only use workspace synthesis if Gemini was completely unreachable AND the question was about workspace files
+      if (!responseText && hasRelevantWorkspaceMaterial && effectiveFiles && effectiveFiles.length > 0) {
         if (isOverviewQuery || isSummaryQuery) {
           let synthesis = `### 📚 Detailed Breakdown & Summary of Your Study Material\n\n`;
           effectiveFiles.forEach((f: any, i: number) => {
@@ -1879,33 +1751,27 @@ ${groundedSourceContext}`;
               synthesis += `**Content Walkthrough:**\n${f.transcription.slice(0, 1200)}\n\n`;
             }
           });
-          synthesis += `What specific topic or practice question from **${effectiveFiles[0]?.name}** would you like to explore next?`;
-          responseText = synthesis;
+          responseText = synthesis.trim();
           responseSource = "Workspace Knowledge Engine";
         } else if (retrievedSegments.length > 0) {
           let synthesis = `Based on **${effectiveFiles[0]?.name || 'your study materials'}**:\n\n`;
           retrievedSegments.slice(0, 3).forEach((seg) => {
             synthesis += `- ${seg.text} *[Source: ${seg.sourceName}]*\n\n`;
           });
-          if (effectiveFiles[0]?.summary) {
-            synthesis += `**Summary Context:** ${effectiveFiles[0].summary}\n\n`;
-          }
-          responseText = synthesis;
+          responseText = synthesis.trim();
           responseSource = "Workspace Grounding";
         }
       }
 
-      // If live models were experiencing high demand, provide an intelligent workspace-grounded response
       if (!responseText) {
-        console.warn(`[AI Tutor Notice][${correlationId}] Upstream Gemini models busy; providing resilient tutor synthesis.`);
-        responseText = generateLocalAITutorResponse(prompt, effectiveFiles, groundedSourceContext);
+        responseText = generateLocalAITutorResponse(prompt, hasRelevantWorkspaceMaterial ? effectiveFiles : [], groundedSourceContext);
         responseSource = "StudyWeb AI Tutor";
       }
 
-      // Extract citations dynamically based on retrievedSegments and effective files
+      // Extract citations ONLY when workspace files were relevant or explicitly cited in the response
       const responseCitations: Array<{ sourceName: string; page?: number; quote: string; snippet?: string; fileId?: string }> = [];
 
-      if (retrievedSegments && retrievedSegments.length > 0) {
+      if (hasRelevantWorkspaceMaterial && retrievedSegments && retrievedSegments.length > 0) {
         const citedSourceNames = new Set<string>();
         const sourceTagRegex = /\[Source:\s*([^,\]]+)(?:,\s*Page\s*(\d+))?\]/gi;
         let match;
@@ -1930,28 +1796,6 @@ ${groundedSourceContext}`;
               });
             }
           }
-        });
-
-        // Ensure at least top matching segment is included as citation
-        if (responseCitations.length === 0 && retrievedSegments.length > 0) {
-          const topSeg = retrievedSegments[0];
-          responseCitations.push({
-            sourceName: topSeg.sourceName,
-            page: topSeg.page,
-            quote: topSeg.snippet,
-            snippet: topSeg.text,
-            fileId: topSeg.fileId
-          });
-        }
-      } else if (effectiveFiles && effectiveFiles.length > 0) {
-        effectiveFiles.slice(0, 3).forEach((file: any) => {
-          responseCitations.push({
-            sourceName: file.name,
-            page: file.pages ? 1 : undefined,
-            quote: file.highlights?.[0] || file.summary || `Verified material from ${file.name}`,
-            snippet: file.summary || file.name,
-            fileId: file.id
-          });
         });
       }
 
@@ -2047,8 +1891,17 @@ ${groundedSourceContext}`;
         ? requestedVoice
         : (persona === "socratic" ? "Zephyr" : "Kore");
 
+      const ttsModel = "gemini-3.8-flash-lite-tts";
+      if (isModelOnCooldown(ttsModel)) {
+        return res.status(200).json({
+          success: false,
+          fallbackToBrowser: true,
+          message: "TTS model on cooldown, using client speech synthesis."
+        });
+      }
+
       const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash-lite-tts",
+        model: ttsModel,
         contents: [
           {
             role: "user",
@@ -2091,11 +1944,14 @@ ${groundedSourceContext}`;
         message: "No audio data returned from Gemini TTS."
       });
     } catch (ttsErr: any) {
-      console.warn("[AI Tutor TTS Warning]:", ttsErr?.message || ttsErr);
+      if (isQuotaOrRateLimitError(ttsErr)) {
+        recordModelQuotaCooldown("gemini-3.8-flash-lite-tts", ttsErr);
+      }
+      console.log(`[AI Tutor TTS] Switching to client speech synthesis (${summarizeModelError(ttsErr)})`);
       return res.status(200).json({
         success: false,
         fallbackToBrowser: true,
-        error: ttsErr?.message || "TTS synthesis unavailable, falling back to browser speech."
+        message: "TTS synthesis switched to browser speech."
       });
     }
   });
@@ -2227,6 +2083,7 @@ Content snippet: ${extractedContent.substring(0, 4000)}
 
 Return a JSON object with:
 {
+  "title": "Clean, concise, human-readable NotebookLM-style title of the material (never a raw URL or domain)",
   "summary": "Comprehensive academic summary of the resource...",
   "tags": ["Tag1", "Tag2", "Tag3"],
   "highlights": ["Key point 1", "Key point 2"],
@@ -2238,6 +2095,9 @@ Return a JSON object with:
             config: { responseMimeType: 'application/json' }
           });
           const parsedAi = JSON.parse(response.text || '{}');
+          if (parsedAi.title && !isRawUrlOrPlaceholderName(parsedAi.title)) {
+            resolvedTitle = parsedAi.title;
+          }
           if (parsedAi.summary) summary = parsedAi.summary;
           if (Array.isArray(parsedAi.tags)) tags = Array.from(new Set([...tags, ...parsedAi.tags]));
           if (Array.isArray(parsedAi.highlights)) highlights = parsedAi.highlights;
@@ -2246,6 +2106,8 @@ Return a JSON object with:
           console.warn("Gemini AI material analysis fallback used:", aiErr);
         }
       }
+
+      resolvedTitle = cleanNotebookLMTitle(resolvedTitle, sourceUrl || url, resourceType);
 
       if (!summary) {
         summary = `Extracted study resource for ${resolvedTitle}. Covers core concepts, key notes, and references.`;
@@ -2486,9 +2348,10 @@ Return a valid JSON object matching the requested schema.`
         }
         
         const data = JSON.parse(textContent);
+        const finalAnalyzedTitle = cleanNotebookLMTitle(resolvedName || targetName, url, type);
         const fileObj: any = {
           id: `file-${Date.now()}`,
-          name: targetName,
+          name: finalAnalyzedTitle,
           type,
           size: size || "N/A",
           uploadDate: "Just Now",
@@ -2510,7 +2373,7 @@ Return a valid JSON object matching the requested schema.`
             return { text, embedding: emb };
           });
           fileObj.chunks = await Promise.all(embedPromises);
-          console.log(`[RAG Indexer] Successfully indexed resource "${targetName}" with ${fileObj.chunks.length} semantic chunks & embeddings.`);
+          console.log(`[RAG Indexer] Successfully indexed resource "${finalAnalyzedTitle}" with ${fileObj.chunks.length} semantic chunks & embeddings.`);
         } catch (ragErr) {
           console.warn("[RAG Indexer] Error pre-processing chunks:", ragErr);
         }
@@ -2527,7 +2390,7 @@ Return a valid JSON object matching the requested schema.`
   });
 
   function generateLocalResourceAnalysis(name: string, type: string, size: string, url?: string) {
-    const targetName = name || url || "Study Resource";
+    const targetName = cleanNotebookLMTitle(name, url, type);
     const lowerName = targetName.toLowerCase();
     
     let summary = "";

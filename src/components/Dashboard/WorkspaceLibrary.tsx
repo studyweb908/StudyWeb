@@ -7,6 +7,12 @@ import { fileUploadService, FileUploadService, FileUploadError } from '../../ser
 import { toValidUuid } from '../../utils/uuid';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import { TranscriptProcessor } from '../../services/TranscriptProcessor';
+import {
+  cleanNotebookLMTitle,
+  getNotebookLMDisplayTitle,
+  isRawUrlOrPlaceholderTitle,
+  resolveQuickLinkTitleClient
+} from '../../utils/notebookTitle';
 import QuickPreviewModal from './QuickPreviewModal';
 
 interface WorkspaceLibraryProps {
@@ -66,7 +72,7 @@ export default function WorkspaceLibrary({
     };
   }, []);
 
-  // Auto-repair any existing video or link in workspace that has a raw URL name or legacy dummy Channel/Duration metadata
+  // Auto-repair any existing video, link, or document in workspace that has a raw URL/placeholder name or legacy dummy metadata
   useEffect(() => {
     const files = workspace.files || [];
     if (!onUpdateWorkspace || files.length === 0) return;
@@ -74,7 +80,9 @@ export default function WorkspaceLibrary({
     const needsRepair = files.filter(f => {
       if (repairedFileIdsRef.current.has(f.id)) return false;
       const hasUrl = typeof f.url === 'string' && f.url.startsWith('http');
-      const nameIsUrl = typeof f.name === 'string' && /^https?:\/\//i.test(f.name.trim());
+      const nameIsUrlOrPlaceholder =
+        isRawUrlOrPlaceholderTitle(f.name) ||
+        (typeof f.name === 'string' && (/https?:\/\/|www\./i.test(f.name) || /\s-\s*YouTube$/i.test(f.name)));
       const hasDummySummary = typeof f.summary === 'string' && (
         f.summary.includes('High-yield academic study guide for') ||
         f.summary.includes('direct watch & in-app embed available') ||
@@ -87,7 +95,7 @@ export default function WorkspaceLibrary({
         f.transcription.includes('**Direct Video Link:**')
       );
       const missingAnalysis = (f.type === 'video' || f.type === 'url') && hasUrl && (!f.transcription || f.transcription.length < 120);
-      return hasUrl && (nameIsUrl || hasDummySummary || hasDummyTranscript || missingAnalysis);
+      return nameIsUrlOrPlaceholder || (hasUrl && (hasDummySummary || hasDummyTranscript || missingAnalysis));
     });
 
     if (needsRepair.length === 0) return;
@@ -101,6 +109,10 @@ export default function WorkspaceLibrary({
       for (const targetFile of needsRepair) {
         repairedFileIdsRef.current.add(targetFile.id);
         try {
+          const quickTitle = targetFile.url
+            ? await resolveQuickLinkTitleClient(targetFile.url, targetFile.type)
+            : cleanNotebookLMTitle(targetFile.name, targetFile.url, targetFile.type);
+
           const res = await fetch('/api/study-materials/process', {
             method: 'POST',
             credentials: 'same-origin',
@@ -111,7 +123,8 @@ export default function WorkspaceLibrary({
             body: JSON.stringify({
               workspaceId: toValidUuid(workspace.id),
               userId: userId || undefined,
-              name: targetFile.name,
+              materialId: targetFile.id,
+              name: !isRawUrlOrPlaceholderTitle(quickTitle) ? quickTitle : targetFile.name,
               type: targetFile.type,
               size: targetFile.size || 'Web Link',
               url: targetFile.url
@@ -123,9 +136,14 @@ export default function WorkspaceLibrary({
             if (mat) {
               const idx = updatedFiles.findIndex(item => item.id === targetFile.id);
               if (idx !== -1) {
+                const resolvedCleanName = cleanNotebookLMTitle(
+                  !isRawUrlOrPlaceholderTitle(mat.name) ? mat.name : quickTitle,
+                  targetFile.url,
+                  targetFile.type
+                );
                 updatedFiles[idx] = {
                   ...updatedFiles[idx],
-                  name: mat.name || updatedFiles[idx].name,
+                  name: resolvedCleanName,
                   summary: mat.summary || updatedFiles[idx].summary,
                   highlights: Array.isArray(mat.highlights) && mat.highlights.length > 0 ? mat.highlights : updatedFiles[idx].highlights,
                   tags: Array.isArray(mat.tags) && mat.tags.length > 0 ? mat.tags : updatedFiles[idx].tags,
@@ -134,7 +152,18 @@ export default function WorkspaceLibrary({
                   formulas: Array.isArray(mat.formulas) && mat.formulas.length > 0 ? mat.formulas : updatedFiles[idx].formulas
                 };
                 updatedAny = true;
+                WorkspaceSyncService.saveWorkspaceFile(workspace.id, updatedFiles[idx]).catch(() => {});
               }
+            }
+          } else if (!cancelled) {
+            const idx = updatedFiles.findIndex(item => item.id === targetFile.id);
+            if (idx !== -1 && isRawUrlOrPlaceholderTitle(updatedFiles[idx].name)) {
+              updatedFiles[idx] = {
+                ...updatedFiles[idx],
+                name: cleanNotebookLMTitle(quickTitle, targetFile.url, targetFile.type)
+              };
+              updatedAny = true;
+              WorkspaceSyncService.saveWorkspaceFile(workspace.id, updatedFiles[idx]).catch(() => {});
             }
           }
         } catch (err) {
@@ -653,11 +682,24 @@ export default function WorkspaceLibrary({
     setIsUploading(true);
     setUploadPercent(0);
     setUploadSeconds(0);
-    setUploadFileName(name || url || 'Resource');
+    const initialUploadLabel = isRawUrlOrPlaceholderTitle(name)
+      ? (type === 'video' ? 'Analyzing Video & Generating Title...' : 'Analyzing Material & Generating Title...')
+      : cleanNotebookLMTitle(name, url, type);
+    setUploadFileName(initialUploadLabel);
     setUploadType(type);
     setCurrentSteps(steps);
     setCurrentStepIdx(0);
     setUploadStep(steps[0]);
+
+    // Immediately kick off fast client-side title resolution for URLs/YouTube links
+    const quickTitlePromise = url
+      ? resolveQuickLinkTitleClient(url, type).then(resolved => {
+          if (resolved && !isRawUrlOrPlaceholderTitle(resolved)) {
+            setUploadFileName(resolved);
+          }
+          return resolved;
+        }).catch(() => '')
+      : Promise.resolve('');
 
     const startTimestamp = Date.now();
     
@@ -772,16 +814,26 @@ export default function WorkspaceLibrary({
         }
       }
 
+      const quickTitle = await quickTitlePromise;
+      const rawBestTitle =
+        (materialResult?.name && !isRawUrlOrPlaceholderTitle(materialResult.name))
+          ? materialResult.name
+          : (quickTitle && !isRawUrlOrPlaceholderTitle(quickTitle))
+          ? quickTitle
+          : name;
+      const finalNotebookName = cleanNotebookLMTitle(rawBestTitle, url, type);
+      setUploadFileName(finalNotebookName);
+
       const generatedTags2 = ['Indexed'];
       if (type === 'pdf' || type === 'doc') generatedTags2.push('Document', 'Text Analysis');
       if (type === 'video') generatedTags2.push('Video', 'Media');
       if (type === 'image') generatedTags2.push('Visual', 'Image');
       if (type === 'audio') generatedTags2.push('Audio', 'Transcript');
-      if ((name || url || '').toLowerCase().includes('math')) generatedTags2.push('Mathematics');
+      if ((finalNotebookName || name || url || '').toLowerCase().includes('math')) generatedTags2.push('Mathematics');
 
       const fileData: WorkspaceFile = {
         id: materialResult?.id || `file-${Date.now()}`,
-        name: materialResult?.name || name || url || 'Study Resource',
+        name: finalNotebookName,
         type,
         size: materialResult?.size || size,
         uploadDate: materialResult?.uploadDate || new Date().toISOString().split('T')[0],
@@ -789,9 +841,9 @@ export default function WorkspaceLibrary({
         url: (url && !url.startsWith('data:')) ? url : (dataUrl || materialResult?.url || url),
         fileBase64: fileBase64 || undefined,
         fileMimeType: fileMimeType || undefined,
-        summary: materialResult?.summary || `${materialResult?.name || name || 'Material'} uploaded and indexed into your workspace.`,
+        summary: materialResult?.summary || `${finalNotebookName} uploaded and indexed into your workspace.`,
         highlights: (materialResult?.highlights && materialResult.highlights.length > 0) ? materialResult.highlights : [
-          `Uploaded ${materialResult?.name || name || 'material'} ready for study questions.`
+          `Uploaded ${finalNotebookName} ready for study questions.`
         ],
         tags: (materialResult?.tags && materialResult.tags.length > 0) ? materialResult.tags : generatedTags2,
         transcription: materialResult?.transcription,
@@ -845,9 +897,16 @@ export default function WorkspaceLibrary({
       if (lowerName.includes('history')) generatedTags.push('History');
       if (generatedTags.length === 0) generatedTags.push('General');
 
+      const quickTitleFallback = await quickTitlePromise;
+      const fallbackNotebookName = cleanNotebookLMTitle(
+        !isRawUrlOrPlaceholderTitle(quickTitleFallback) ? quickTitleFallback : name,
+        url,
+        type
+      );
+
       const fileData = {
         id: 'file-' + Date.now(),
-        name: name || url || 'Untitled Resource',
+        name: fallbackNotebookName,
         type,
         size,
         uploadDate: new Date().toISOString(),
@@ -855,9 +914,9 @@ export default function WorkspaceLibrary({
         url: dataUrl || objectUrl,
         fileBase64: fileBase64 || undefined,
         fileMimeType: fileMimeType || undefined,
-        summary: `${name || url || 'Resource'} uploaded to workspace.`,
+        summary: `${fallbackNotebookName} uploaded to workspace.`,
         highlights: [
-          `Uploaded ${name || url || 'material'} ready for AI Tutor questions.`
+          `Uploaded ${fallbackNotebookName} ready for AI Tutor questions.`
         ],
         tags: generatedTags
       };
@@ -915,7 +974,7 @@ export default function WorkspaceLibrary({
           window.dispatchEvent(
             new CustomEvent('studyweb-toast', {
               detail: {
-                message: `🎉 Boom! "${name || url}" was uploaded to Supabase and added to your workspace!`,
+                message: `🎉 Boom! "${fileData.name}" was uploaded to Supabase and added to your workspace!`,
                 type: 'success'
               }
             })
@@ -1345,7 +1404,7 @@ export default function WorkspaceLibrary({
                     </div>
                     <div className="min-w-0 flex-1">
                       <h4 className="text-sm font-bold text-slate-900 line-clamp-1 group-hover:text-indigo-600 transition-colors">
-                        {file.name}
+                        {getNotebookLMDisplayTitle(file)}
                       </h4>
                       <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] font-medium text-slate-500">
                         <span className="font-bold uppercase text-slate-600">{file.type}</span>
@@ -1463,7 +1522,7 @@ export default function WorkspaceLibrary({
                     Remove Source Material?
                   </h3>
                   <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    Are you sure you want to remove <span className="font-bold text-slate-600">"{fileToRemove.name}"</span> from this workspace?
+                    Are you sure you want to remove <span className="font-bold text-slate-600">"{getNotebookLMDisplayTitle(fileToRemove)}"</span> from this workspace?
                   </p>
                   <p className="text-[11px] text-slate-400 mt-2 bg-slate-50 p-2.5 rounded-xl border border-slate-100/50">
                     This file's content will no longer be available for AI Tutor questioning or quiz compilation.
@@ -1581,7 +1640,7 @@ export default function WorkspaceLibrary({
                       Edit Material Tags
                     </h3>
                     <p className="text-xs text-slate-500 line-clamp-1 max-w-[260px]">
-                      {editingTagsFile.name}
+                      {getNotebookLMDisplayTitle(editingTagsFile)}
                     </p>
                   </div>
                 </div>
