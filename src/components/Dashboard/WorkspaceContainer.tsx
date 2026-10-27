@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../../lib/supabase';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
@@ -32,14 +32,15 @@ import {
 } from 'lucide-react';
 import { Workspace, WorkspaceFile, FlashcardItem, WorkspaceNote } from './WorkspaceTypes';
 
-// Subcomponents
+// Core Subcomponents
 import WorkspaceOverview from './WorkspaceOverview';
 import WorkspaceLibrary from './WorkspaceLibrary';
 import WorkspaceChat from './WorkspaceChat';
-import WorkspaceFlashcards from './WorkspaceFlashcards';
-import WorkspaceQuiz from './WorkspaceQuiz';
-import WorkspaceNotebook from './WorkspaceNotebook';
-import WorkspaceNavbar from './WorkspaceNavbar';
+
+// Lazy-loaded Secondary Subcomponents
+const WorkspaceFlashcards = lazy(() => import('./WorkspaceFlashcards'));
+const WorkspaceQuiz = lazy(() => import('./WorkspaceQuiz'));
+const WorkspaceNotebook = lazy(() => import('./WorkspaceNotebook'));
 
 interface WorkspaceContainerProps {
   workspace: Workspace;
@@ -54,7 +55,8 @@ interface WorkspaceContainerProps {
 type TabType = 'overview' | 'library' | 'chat' | 'flashcards' | 'quiz' | 'notes';
 
 export default function WorkspaceContainer({ workspace, workspaces = [], onSwitchWorkspace, onDeleteWorkspace, onBack, onUpdateWorkspace, initialTab }: WorkspaceContainerProps) {
-  const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const [activeTab, setActiveTab] = useState<TabType>(() => initialTab || 'overview');
+  const [hasVisitedChat, setHasVisitedChat] = useState<boolean>(() => initialTab === 'chat');
   const [isGlobalDragging, setIsGlobalDragging] = useState(false);
   const [isChangingCover, setIsChangingCover] = useState(false);
   const [coverUrlInput, setCoverUrlInput] = useState('');
@@ -110,8 +112,13 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
   useEffect(() => {
     if (initialTab) {
       setActiveTab(initialTab);
+      if (initialTab === 'chat') setHasVisitedChat(true);
     }
   }, [initialTab]);
+
+  useEffect(() => {
+    if (activeTab === 'chat') setHasVisitedChat(true);
+  }, [activeTab]);
 
   // Unified update helper
   const updateWorkspaceState = (changes: Partial<Workspace>) => {
@@ -307,7 +314,9 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
     window.dispatchEvent(
       new CustomEvent('studyweb-toast', {
         detail: {
-          message: 'File was deleted successfully.',
+          title: 'File Deleted Successfully',
+          badge: 'Workspace Updated',
+          message: 'The selected study material was permanently removed from your workspace.',
           type: 'success'
         }
       })
@@ -326,6 +335,8 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
     window.dispatchEvent(
       new CustomEvent('studyweb-toast', {
         detail: {
+          title: 'All Materials Cleared',
+          badge: 'Workspace Updated',
           message: 'All files in this workspace were deleted successfully.',
           type: 'success'
         }
@@ -407,7 +418,7 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
   const currentTheme = themeColors[workspace.colorTheme] || themeColors.indigo;
 
   return (
-    <div className={`max-w-7xl mx-auto w-full ${activeTab === 'chat' ? 'p-0 md:px-6 space-y-0 md:space-y-6 h-full flex-1 flex flex-col min-h-0' : 'space-y-6 px-4 md:px-6'} animate-fade-in relative`}>
+    <div className={`w-full ${activeTab === 'chat' ? 'h-full flex-1 flex flex-col min-h-0' : 'space-y-6'} relative`}>
       <AnimatePresence>
         {isGlobalDragging && (
           <motion.div
@@ -427,8 +438,8 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
         )}
       </AnimatePresence>
       {/* RENDER ACTIVE TAB COMPONENT CONTAINER */}
-      <div className={`transition-all ${activeTab === 'chat' ? 'h-full flex-1 flex flex-col min-h-0 bg-transparent rounded-none' : 'bg-white dark:bg-slate-900 rounded-[24px]'}`}>
-        <div className={activeTab === 'overview' ? 'block' : 'hidden'}>
+      <div className={activeTab === 'chat' ? 'h-full flex-1 flex flex-col min-h-0 bg-transparent rounded-none' : 'bg-white dark:bg-slate-900 rounded-[24px]'}>
+        {activeTab === 'overview' && (
           <WorkspaceOverview 
             workspace={workspace} 
             workspaces={workspaces}
@@ -439,9 +450,9 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
             onBack={onBack}
             onUpdateWorkspace={onUpdateWorkspace}
           />
-        </div>
+        )}
 
-        <div className={activeTab === 'library' ? 'block' : 'hidden'}>
+        {activeTab === 'library' && (
           <WorkspaceLibrary 
             workspace={workspace} 
             onAddFile={handleAddFile}
@@ -450,41 +461,45 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
             onClearAllFiles={handleClearAllFiles}
             onUpdateWorkspace={onUpdateWorkspace}
           />
-        </div>
+        )}
 
-        <div className={activeTab === 'chat' ? 'h-full flex-1 flex flex-col min-h-0 w-full' : 'hidden'}>
-          <WorkspaceChat 
-            workspace={workspace} 
-            workspaces={workspaces}
-            onSelectWorkspace={onSwitchWorkspace}
-            onUpdateWorkspace={onUpdateWorkspace}
-          />
-        </div>
+        {(activeTab === 'chat' || hasVisitedChat) && (
+          <div className={activeTab === 'chat' ? 'h-full flex-1 flex flex-col min-h-0 w-full' : 'hidden'}>
+            <WorkspaceChat 
+              workspace={workspace} 
+              workspaces={workspaces}
+              onSelectWorkspace={onSwitchWorkspace}
+              onUpdateWorkspace={onUpdateWorkspace}
+            />
+          </div>
+        )}
 
-        <div className={activeTab === 'flashcards' ? 'block' : 'hidden'}>
-          <WorkspaceFlashcards 
-            workspace={workspace} 
-            onAddFlashcard={handleAddFlashcard}
-            onToggleBookmark={handleToggleBookmark}
-            onBoxChange={handleBoxChange}
-            onUpdateWorkspace={updateWorkspaceState}
-          />
-        </div>
+        <Suspense fallback={null}>
+          {activeTab === 'flashcards' && (
+            <WorkspaceFlashcards 
+              workspace={workspace} 
+              onAddFlashcard={handleAddFlashcard}
+              onToggleBookmark={handleToggleBookmark}
+              onBoxChange={handleBoxChange}
+              onUpdateWorkspace={updateWorkspaceState}
+            />
+          )}
 
-        <div className={activeTab === 'quiz' ? 'block' : 'hidden'}>
-          <WorkspaceQuiz 
-            workspace={workspace} 
-            onUpdateWorkspace={onUpdateWorkspace}
-          />
-        </div>
+          {activeTab === 'quiz' && (
+            <WorkspaceQuiz 
+              workspace={workspace} 
+              onUpdateWorkspace={onUpdateWorkspace}
+            />
+          )}
 
-        <div className={activeTab === 'notes' ? 'block' : 'hidden'}>
-          <WorkspaceNotebook 
-            workspace={workspace} 
-            onAddNote={handleAddNote}
-            onRemoveNote={handleRemoveNote}
-          />
-        </div>
+          {activeTab === 'notes' && (
+            <WorkspaceNotebook 
+              workspace={workspace} 
+              onAddNote={handleAddNote}
+              onRemoveNote={handleRemoveNote}
+            />
+          )}
+        </Suspense>
       </div>
 
       {/* Cover Modal removed to prevent cover customizations */}

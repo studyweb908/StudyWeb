@@ -232,12 +232,27 @@ export function ProfileSettingsHub() {
     };
   }, [imageToCrop, cropPan.x, cropPan.y, cropZoom, cropRotation]);
 
-  // Toast Helper
+  // Centralized Full-Screen Notification Helper
   const triggerToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 3200);
+    setToastMessage(null);
+    const isWarn = msg.includes('⚠️');
+    const isSync = msg.includes('⟳') || msg.includes('ℹ️');
+    const cleanMsg = msg.replace(/^[✨🎯🖼️⚠️✅⟳ℹ️📥🧹🦉🎙️]+\s*/, '');
+    window.dispatchEvent(
+      new CustomEvent('studyweb-toast', {
+        detail: {
+          title: isWarn
+            ? 'Attention Needed'
+            : isSync
+            ? 'Cloud Synchronization'
+            : 'Profile & Settings Updated',
+          badge: isWarn ? 'Validation Notice' : 'Scholar Hub Synced',
+          message: cleanMsg,
+          type: isWarn ? 'warning' : isSync ? 'info' : 'success',
+          duration: 3200,
+        },
+      })
+    );
   };
 
   // Initial Supabase Profile Fetch
@@ -747,15 +762,40 @@ export function ProfileSettingsHub() {
     triggerToast('📥 Full scholar vault exported successfully!');
   };
 
-  // Safe Permanent Account Wipe
-  const handlePermanentAccountWipe = () => {
+  // Safe Permanent Account Wipe (cleans both cloud user records and local browser storage)
+  const handlePermanentAccountWipe = async () => {
     setIsDeleting(true);
-    triggerToast('🧹 Wiping all local data and preferences...');
-    setTimeout(() => {
-      localStorage.clear();
-      sessionStorage.clear();
-      window.location.reload();
-    }, 1500);
+    triggerToast('🧹 Wiping your cloud records, local data, and preferences...');
+    try {
+      if (supabase) {
+        const { data: { session } } = await supabase.auth.getSession();
+        const uid = session?.user?.id;
+        if (uid) {
+          await Promise.allSettled([
+            supabase.from('workspace_files').delete().eq('user_id', uid),
+            supabase.from('documents').delete().eq('user_id', uid),
+            supabase.from('retrieval_logs').delete().eq('user_id', uid),
+            supabase.from('workspaces').delete().eq('user_id', uid),
+            supabase.from('profiles').delete().eq('id', uid)
+          ]);
+          try {
+            const { data: userAvatars } = await supabase.storage.from('avatars').list(uid);
+            if (userAvatars && userAvatars.length > 0) {
+              await supabase.storage.from('avatars').remove(userAvatars.map(f => `${uid}/${f.name}`));
+            }
+          } catch {}
+        }
+        await supabase.auth.signOut();
+      }
+    } catch (err) {
+      console.warn('Cloud account wipe notice:', err);
+    } finally {
+      setTimeout(() => {
+        localStorage.clear();
+        sessionStorage.clear();
+        window.location.reload();
+      }, 1200);
+    }
   };
 
   // Calculate days remaining to exam
@@ -773,20 +813,7 @@ export function ProfileSettingsHub() {
   return (
     <div className="w-full max-w-5xl mx-auto space-y-8 text-left pb-16">
       
-      {/* FLOATING ACTION TOAST */}
-      <AnimatePresence>
-        {toastMessage && (
-          <motion.div
-            initial={{ opacity: 0, y: -24, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -24, scale: 0.96 }}
-            className="fixed top-6 right-6 z-[120] flex items-center gap-3 bg-white/95 dark:bg-slate-900/95 text-slate-800 dark:text-white border border-slate-200/80 dark:border-slate-700/60 shadow-2xl backdrop-blur-xl px-5 py-3.5 rounded-2xl max-w-md"
-          >
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-ping shrink-0" />
-            <span className="text-xs font-semibold tracking-wide text-slate-800 dark:text-slate-100">{toastMessage}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Notifications are handled globally by the full-screen ToastContainer overlay */}
 
       {/* 1. ULTRA-PREMIUM WHITE GLASSMORPHIC HERO COMMAND CARD */}
       <div className="relative overflow-hidden rounded-[32px] bg-white/85 dark:bg-slate-900/80 backdrop-blur-2xl border border-slate-200/80 dark:border-slate-800/80 p-6 sm:p-10 shadow-xl shadow-slate-200/40 dark:shadow-none transition-colors">

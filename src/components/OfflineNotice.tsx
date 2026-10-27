@@ -268,13 +268,22 @@ export default function OfflineNotice() {
 
   return (
     <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0, y: 50, x: '-50%' }}
-        animate={{ opacity: 1, y: 0, x: '-50%' }}
-        exit={{ opacity: 0, y: 50, x: '-50%' }}
-        transition={{ type: 'spring', stiffness: 350, damping: 26 }}
-        className="fixed bottom-6 left-1/2 z-[100] w-[92%] max-w-sm flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-2xl p-4 overflow-hidden text-xs"
-      >
+      <div className="fixed inset-0 w-screen h-screen z-[99995] flex items-center justify-center p-4 sm:p-6">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={() => !isReconciling && setDismissed(true)}
+          className="fixed inset-0 bg-slate-950/75 backdrop-blur-md cursor-pointer"
+        />
+        <motion.div
+          initial={{ opacity: 0, scale: 0.92, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.92, y: 20 }}
+          transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+          onClick={(e) => e.stopPropagation()}
+          className="relative z-10 w-full max-w-md flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-[32px] p-6 overflow-hidden text-xs"
+        >
         {/* HEADER SECTION */}
         <div className="flex items-start justify-between gap-3 pb-2.5 border-b border-slate-100 dark:border-slate-800/60">
           <div className="flex items-start gap-2.5">
@@ -429,7 +438,8 @@ export default function OfflineNotice() {
             </motion.div>
           )}
         </AnimatePresence>
-      </motion.div>
+        </motion.div>
+      </div>
     </AnimatePresence>
   );
 }

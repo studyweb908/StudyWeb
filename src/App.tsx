@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { motion, useScroll, useSpring, AnimatePresence } from 'motion/react';
 import { useTaskContext } from './context/TaskContext';
 import Navigation from './components/Navigation';
@@ -11,36 +11,34 @@ import Hero from './components/Hero';
 import SocialProof from './components/SocialProof';
 import ForStudents from './components/ForStudents';
 import StudyTools from './components/StudyTools';
-import InteractiveDemo from './components/InteractiveDemo';
-import Pricing from './components/Pricing';
-import About from './components/About';
-import Contact from './components/Contact';
-import FAQ from './components/FAQ';
-import FinalCTA from './components/FinalCTA';
 import Footer from './components/Footer';
 import SEOManager from './components/SEOManager';
-import LegalModals from './components/LegalModals';
-import ResetPasswordModal from './components/ResetPasswordModal';
-import CursorMotionCanvas from './components/CursorMotionCanvas';
 import { supabase } from './lib/supabase';
 
-// Authenticated Dashboard Components
+// Authenticated Dashboard Core Components (Critical Path)
 import DashboardSidebar from './components/Dashboard/DashboardSidebar';
 import DashboardHeader from './components/Dashboard/DashboardHeader';
 import DashboardHome from './components/Dashboard/DashboardHome';
-import AITutorWorkspace from './components/Dashboard/AITutorWorkspace';
-import PDFWorkspaceView from './components/Dashboard/PDFWorkspaceView';
-import StudySessionView from './components/Dashboard/StudySessionView';
-import QuizCenterView from './components/Dashboard/QuizCenterView';
-import FlashcardsView from './components/Dashboard/FlashcardsView';
-import QuickNoteModal from './components/Dashboard/QuickNoteModal';
-import OnboardingModal from './components/OnboardingModal';
-import WelcomeBackModal from './components/Dashboard/WelcomeBackModal';
-import DeleteWorkspaceModal from './components/Dashboard/DeleteWorkspaceModal';
 import OfflineNotice from './components/OfflineNotice';
-import GlobalVoiceListener from './components/GlobalVoiceListener';
 import { playDopaminePopSound } from './utils/audioEffects';
 import { useThemeMode } from './hooks/useThemeMode';
+
+// Lazy-loaded Heavy & Secondary Views (Code-Split for Instant Startup)
+const InteractiveDemo = lazy(() => import('./components/InteractiveDemo'));
+const Pricing = lazy(() => import('./components/Pricing'));
+const About = lazy(() => import('./components/About'));
+const Contact = lazy(() => import('./components/Contact'));
+const FAQ = lazy(() => import('./components/FAQ'));
+const FinalCTA = lazy(() => import('./components/FinalCTA'));
+const LegalModals = lazy(() => import('./components/LegalModals'));
+const ResetPasswordModal = lazy(() => import('./components/ResetPasswordModal'));
+const PDFWorkspaceView = lazy(() => import('./components/Dashboard/PDFWorkspaceView'));
+const StudySessionView = lazy(() => import('./components/Dashboard/StudySessionView'));
+const QuickNoteModal = lazy(() => import('./components/Dashboard/QuickNoteModal'));
+const OnboardingModal = lazy(() => import('./components/OnboardingModal'));
+const WelcomeBackModal = lazy(() => import('./components/Dashboard/WelcomeBackModal'));
+const DeleteWorkspaceModal = lazy(() => import('./components/Dashboard/DeleteWorkspaceModal'));
+const GlobalVoiceListener = lazy(() => import('./components/GlobalVoiceListener'));
 import { 
   Sparkles, 
   Terminal, 
@@ -69,17 +67,14 @@ import WorkspaceContainer from './components/Dashboard/WorkspaceContainer';
 import WorkspaceChat from './components/Dashboard/WorkspaceChat';
 import ToastContainer from './components/ToastContainer';
 
-import {
-  StudyPlannerView,
-  SubjectsView,
-  NotesView,
-  ResourcesView,
-  AnalyticsView,
-  AchievementsView,
-  LeaderboardView,
-  ProfileView,
-  ParentDashboardView
-} from './components/Dashboard/AuxiliaryViews';
+const StudyPlannerView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.StudyPlannerView })));
+const SubjectsView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.SubjectsView })));
+const ResourcesView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.ResourcesView })));
+const AnalyticsView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.AnalyticsView })));
+const AchievementsView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.AchievementsView })));
+const LeaderboardView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.LeaderboardView })));
+const ProfileView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.ProfileView })));
+const ParentDashboardView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.ParentDashboardView })));
 
 export default function App() {
   const { toggleTheme, setThemeMode, isDarkApplied } = useThemeMode(); // Initialize real-time theme synchronization service at root level
@@ -90,8 +85,11 @@ export default function App() {
     restDelta: 0.001
   });
 
-  // Authentication & Legal State
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  // Authentication & Legal State (Hydrated synchronously for 0ms first paint)
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('studyweb_is_logged_in') === 'true';
+  });
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showWelcomeBack, setShowWelcomeBack] = useState(false);
   const [welcomeUserName, setWelcomeUserName] = useState<string>(() => {
@@ -125,18 +123,33 @@ export default function App() {
     requireWorkspaceForTask
   } = useTaskContext();
 
-  // Workspaces State with Strict User Isolation
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState<boolean>(true);
+  // Workspaces State with Strict User Isolation & Instant Synchronous Hydration
+  const [currentUserId, setCurrentUserId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('studyweb_active_user_id') || null;
+    }
+    return null;
+  });
 
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => {
-    const savedLogin = typeof window !== 'undefined' ? localStorage.getItem('studyweb_is_logged_in') : null;
-    // For unauthenticated guest sessions, safely load guest workspaces only
-    if (savedLogin !== 'true') {
-      return loadStoredWorkspaces(null);
+    if (typeof window === 'undefined') return [];
+    const savedLogin = localStorage.getItem('studyweb_is_logged_in');
+    const savedUid = localStorage.getItem('studyweb_active_user_id');
+    if (savedLogin === 'true' && savedUid) {
+      const userCached = loadStoredWorkspaces(savedUid);
+      if (userCached && userCached.length > 0) return userCached;
     }
-    return [];
+    return loadStoredWorkspaces(null);
   });
+
+  const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState<boolean>(false);
+  const [hasVisitedAITutor, setHasVisitedAITutor] = useState<boolean>(() => activeTab === 'ai-tutor');
+
+  useEffect(() => {
+    if (activeTab === 'ai-tutor') {
+      setHasVisitedAITutor(true);
+    }
+  }, [activeTab]);
 
   // Workspace context handles persistance, but we still need to manage workspaces array locally.
   const handleUpdateWorkspace = (updated: Workspace) => {
@@ -173,6 +186,12 @@ export default function App() {
     }, currentUserId);
     // Persist new workspace directly in Supabase with user_id attached
     WorkspaceSyncService.saveWorkspace(ws, currentUserId || undefined);
+    (window as any).showToast?.(
+      `"${ws.name}" has been created and initialized as your active study workspace.`,
+      'success',
+      3200,
+      'Workspace Created'
+    );
   };
 
   const handleCreateWorkspaceByName = (name: string, subject?: string) => {
@@ -266,6 +285,12 @@ export default function App() {
     // Delete workspace and its files from Supabase
     WorkspaceSyncService.deleteWorkspace(id);
     setWorkspacePendingDelete(null);
+    (window as any).showToast?.(
+      `"${target.name}" and its associated study materials were permanently removed.`,
+      'success',
+      3200,
+      'Workspace Deleted'
+    );
   };
 
   const handleCancelDeleteWorkspace = () => {
@@ -280,15 +305,25 @@ export default function App() {
   // Synchronize with Supabase on mount and on authentication changes
   useEffect(() => {
     const syncFromSupabase = async () => {
-      setIsLoadingWorkspaces(true);
+      setIsLoadingWorkspaces(prev => (workspaces.length > 0 ? false : prev));
       try {
         if (!supabase) return;
         const { data: { session } } = await supabase.auth.getSession();
         const user = session?.user || null;
         const userId = user?.id || null;
         setCurrentUserId(userId);
+        if (userId) {
+          localStorage.setItem('studyweb_active_user_id', userId);
+        }
 
         if (userId && user) {
+          // Immediately hydrate from user's local cache before awaiting remote sync
+          const userCachedImmediate = loadStoredWorkspaces(userId);
+          if (userCachedImmediate && userCachedImmediate.length > 0) {
+            setWorkspaces(prev => (prev.length === 0 ? userCachedImmediate : prev));
+            setIsLoadingWorkspaces(false);
+          }
+
           // 1. Claim any guest workspaces that were created in this browser prior to logging in
           const guestWorkspaces = loadStoredWorkspaces(null);
           if (guestWorkspaces && guestWorkspaces.length > 0) {
@@ -321,7 +356,7 @@ export default function App() {
           if (profileRow?.learning_goal) localStorage.setItem('studyweb_profile_goal', profileRow.learning_goal);
           window.dispatchEvent(new Event('studyweb_profile_updated'));
 
-          if (Array.isArray(remoteWorkspaces)) {
+          if (Array.isArray(remoteWorkspaces) && remoteWorkspaces.length > 0) {
             setWorkspaces(remoteWorkspaces);
             saveStoredWorkspaces(remoteWorkspaces, userId);
           } else {
@@ -359,6 +394,7 @@ export default function App() {
           setActiveWorkspace(null);
           [
             'studyweb_is_logged_in',
+            'studyweb_active_user_id',
             'studyweb_profile_name',
             'studyweb_profile_avatar',
             'studyweb_profile_pic',
@@ -418,12 +454,7 @@ export default function App() {
       if (onboardingComplete !== 'true') {
         setShowOnboarding(true);
       } else {
-        // Previous / returning user visiting StudyWeb: trigger full-screen welcome back celebration
-        const shownInSession = sessionStorage.getItem('studyweb_welcome_shown_session');
-        if (shownInSession !== 'true') {
-          sessionStorage.setItem('studyweb_welcome_shown_session', 'true');
-          setShowWelcomeBack(true);
-        }
+        sessionStorage.setItem('studyweb_welcome_shown_session', 'true');
       }
     }
 
@@ -597,55 +628,59 @@ export default function App() {
 
     return (
       <div className={`w-full ${isAITutorTab ? 'h-full flex-1 flex flex-col min-h-0' : 'h-full'} relative`}>
-        {/* Dedicated Persistent AI Tutor Viewport: remains alive in background when switching tabs */}
-        <div className={`w-full ${isAITutorTab ? 'h-full flex-1 flex flex-col min-h-0' : 'hidden'}`}>
-          <WorkspaceContainer 
-            workspace={tutorWorkspace} 
-            workspaces={workspaces}
-            onSwitchWorkspace={setActiveWorkspace}
-            onDeleteWorkspace={handleDeleteWorkspace}
-            onBack={() => setActiveWorkspace(null)} 
-            onUpdateWorkspace={handleUpdateWorkspace}
-            initialTab="chat"
-          />
-        </div>
-
-        {/* Other Workspace Tabs (Overview, Notes, Flashcards, Quiz Center, Workspace Selector) */}
-        <div className={isOtherWorkspaceTab ? 'block' : 'hidden'}>
-          {targetWorkspace ? (
+        {/* Dedicated Persistent AI Tutor Viewport: mounted on demand and kept alive in background */}
+        {(isAITutorTab || hasVisitedAITutor) && (
+          <div className={`w-full ${isAITutorTab ? 'h-full flex-1 flex flex-col min-h-0' : 'hidden'}`}>
             <WorkspaceContainer 
-              workspace={targetWorkspace} 
+              workspace={tutorWorkspace} 
               workspaces={workspaces}
               onSwitchWorkspace={setActiveWorkspace}
               onDeleteWorkspace={handleDeleteWorkspace}
               onBack={() => setActiveWorkspace(null)} 
               onUpdateWorkspace={handleUpdateWorkspace}
-              initialTab={
-                activeTab === 'workspaces' ? 'overview' : 
-                activeTab === 'notes' ? 'notes' : 
-                activeTab === 'flashcards' ? 'flashcards' : 
-                activeTab === 'quiz-center' ? 'quiz' : 'overview'
-              }
+              initialTab="chat"
             />
-          ) : (
-            <div className="w-full">
-              <WorkspaceSelector 
-                workspaces={workspaces} 
-                isLoading={isLoadingWorkspaces}
-                onSelectWorkspace={handleSelectWorkspace} 
-                onCreateWorkspace={handleCreateWorkspace}
-                onUpdateWorkspace={handleUpdateWorkspace}
-                onTogglePin={handleTogglePin}
-                onToggleFavorite={handleToggleFavorite}
-                onDeleteWorkspace={handleDeleteWorkspace}
-                onReorderWorkspaces={handleReorderWorkspaces}
-              />
-            </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Other Views */}
-        <div className={activeTab === 'dashboard' || !activeTab ? 'block' : 'hidden'}>
+        {/* Other Workspace Tabs (Overview, Notes, Flashcards, Quiz Center, Workspace Selector) */}
+        {isOtherWorkspaceTab && (
+          <div className="block">
+            {targetWorkspace ? (
+              <WorkspaceContainer 
+                workspace={targetWorkspace} 
+                workspaces={workspaces}
+                onSwitchWorkspace={setActiveWorkspace}
+                onDeleteWorkspace={handleDeleteWorkspace}
+                onBack={() => setActiveWorkspace(null)} 
+                onUpdateWorkspace={handleUpdateWorkspace}
+                initialTab={
+                  activeTab === 'workspaces' ? 'overview' : 
+                  activeTab === 'notes' ? 'notes' : 
+                  activeTab === 'flashcards' ? 'flashcards' : 
+                  activeTab === 'quiz-center' ? 'quiz' : 'overview'
+                }
+              />
+            ) : (
+              <div className="w-full">
+                <WorkspaceSelector 
+                  workspaces={workspaces} 
+                  isLoading={isLoadingWorkspaces}
+                  onSelectWorkspace={handleSelectWorkspace} 
+                  onCreateWorkspace={handleCreateWorkspace}
+                  onUpdateWorkspace={handleUpdateWorkspace}
+                  onTogglePin={handleTogglePin}
+                  onToggleFavorite={handleToggleFavorite}
+                  onDeleteWorkspace={handleDeleteWorkspace}
+                  onReorderWorkspaces={handleReorderWorkspaces}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Other Views — Rendered on demand so initial load is instantaneous */}
+        {(activeTab === 'dashboard' || !activeTab) && (
           <DashboardHome 
             setActiveTab={setActiveTab} 
             setActiveWorkspace={setActiveWorkspace} 
@@ -653,40 +688,24 @@ export default function App() {
             activeWorkspace={activeWorkspace} 
             isLoading={isLoadingWorkspaces}
           />
-        </div>
-        <div className={activeTab === 'study-session' ? 'block' : 'hidden'}>
-          <StudySessionView />
-        </div>
-        <div className={activeTab === 'study-planner' ? 'block' : 'hidden'}>
-          <StudyPlannerView />
-        </div>
-        <div className={activeTab === 'subjects' ? 'block' : 'hidden'}>
-          <SubjectsView />
-        </div>
-        <div className={activeTab === 'resources' ? 'block' : 'hidden'}>
-          <ResourcesView workspaces={workspaces} isLoading={isLoadingWorkspaces} />
-        </div>
-        <div className={activeTab === 'analytics' ? 'block' : 'hidden'}>
-          <AnalyticsView />
-        </div>
-        <div className={activeTab === 'achievements' ? 'block' : 'hidden'}>
-          <AchievementsView />
-        </div>
-        <div className={activeTab === 'leaderboard' ? 'block' : 'hidden'}>
-          <LeaderboardView />
-        </div>
-        <div className={activeTab === 'profile' ? 'block' : 'hidden'}>
-          <ProfileView />
-        </div>
-        <div className={activeTab === 'parent-dashboard' ? 'block' : 'hidden'}>
-          <ParentDashboardView />
-        </div>
-        <div className={activeTab === 'pdf-chat' ? 'block' : 'hidden'}>
-          <PDFWorkspaceView 
-            workspace={activeWorkspace || undefined}
-            onUpdateWorkspace={handleUpdateWorkspace}
-          />
-        </div>
+        )}
+        <Suspense fallback={null}>
+          {activeTab === 'study-session' && <StudySessionView />}
+          {activeTab === 'study-planner' && <StudyPlannerView />}
+          {activeTab === 'subjects' && <SubjectsView />}
+          {activeTab === 'resources' && <ResourcesView workspaces={workspaces} isLoading={isLoadingWorkspaces} />}
+          {activeTab === 'analytics' && <AnalyticsView />}
+          {activeTab === 'achievements' && <AchievementsView />}
+          {activeTab === 'leaderboard' && <LeaderboardView />}
+          {activeTab === 'profile' && <ProfileView />}
+          {activeTab === 'parent-dashboard' && <ParentDashboardView />}
+          {activeTab === 'pdf-chat' && (
+            <PDFWorkspaceView 
+              workspace={activeWorkspace || undefined}
+              onUpdateWorkspace={handleUpdateWorkspace}
+            />
+          )}
+        </Suspense>
       </div>
     );
   };
@@ -712,7 +731,7 @@ export default function App() {
         />
 
         {/* Workspace body Area */}
-        <div className={`${isFocusMode ? 'md:pl-0' : isSidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} flex flex-col flex-1 min-w-0 h-[100dvh] overflow-hidden relative transition-all duration-300`}>
+        <div className={`${isFocusMode ? 'md:pl-0' : isSidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} flex flex-col flex-1 min-w-0 h-[100dvh] overflow-hidden relative`}>
           
           {/* Header Bar */}
           <DashboardHeader 
@@ -726,8 +745,8 @@ export default function App() {
           />
 
           {/* Active Workspace Viewport */}
-          <main id="workspace-main-content" className={`flex-1 min-w-0 ${activeTab === 'ai-tutor' ? 'p-0 md:p-8 pb-[calc(4rem+env(safe-area-inset-bottom,0px))] md:pb-8 h-[calc(100dvh-3.5rem)] md:h-auto overflow-hidden md:overflow-y-auto flex flex-col' : 'overflow-y-auto overflow-x-hidden p-3 sm:p-5 md:p-8 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-8'} ${isFocusMode || activeTab === 'ai-tutor' ? 'max-w-none w-full' : 'max-w-7xl mx-auto w-full'} transition-all duration-300`}>
-            <div className={activeTab === 'ai-tutor' ? 'h-full flex-1 flex flex-col min-h-0 w-full' : 'w-full'}>
+          <main id="workspace-main-content" className={`flex-1 min-w-0 w-full h-[calc(100dvh-3.5rem)] ${activeTab === 'ai-tutor' ? 'overflow-hidden p-0 md:p-6 pb-[calc(4rem+env(safe-area-inset-bottom,0px))] md:pb-6 flex flex-col' : 'overflow-y-auto overflow-x-hidden p-3 sm:p-5 md:p-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-6'}`}>
+            <div className={`${activeTab === 'ai-tutor' ? 'h-full flex-1 flex flex-col min-h-0' : ''} w-full ${isFocusMode ? 'max-w-none' : 'max-w-7xl mx-auto'}`}>
               {renderDashboardContent()}
             </div>
           </main>
@@ -1154,64 +1173,74 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        {/* Global Quick Note Capture Modal */}
-        <QuickNoteModal 
-          isOpen={showQuickNote} 
-          onClose={() => setShowQuickNote(false)} 
-          onNavigateToNotes={() => setActiveTab('notes')} 
-        />
-        
-        <OnboardingModal
-          isOpen={showOnboarding}
-          onComplete={() => {
-            localStorage.setItem('studyweb_onboarding_complete', 'true');
-            setShowOnboarding(false);
-            setShowLoginToast(true);
-          }}
-        />
+        {/* Global Modals & Background Listeners (Lazy-loaded on demand) */}
+        <Suspense fallback={null}>
+          {showQuickNote && (
+            <QuickNoteModal 
+              isOpen={showQuickNote} 
+              onClose={() => setShowQuickNote(false)} 
+              onNavigateToNotes={() => setActiveTab('notes')} 
+            />
+          )}
+          
+          {showOnboarding && (
+            <OnboardingModal
+              isOpen={showOnboarding}
+              onComplete={() => {
+                localStorage.setItem('studyweb_onboarding_complete', 'true');
+                setShowOnboarding(false);
+                setShowLoginToast(true);
+              }}
+            />
+          )}
 
-        {/* Full Screen Welcome Back Pop-up with High Dopamine Animation */}
-        <WelcomeBackModal
-          isOpen={showWelcomeBack}
-          onClose={() => setShowWelcomeBack(false)}
-          userName={welcomeUserName}
-          avatarUrl={welcomeAvatarUrl}
-        />
+          {showWelcomeBack && (
+            <WelcomeBackModal
+              isOpen={showWelcomeBack}
+              onClose={() => setShowWelcomeBack(false)}
+              userName={welcomeUserName}
+              avatarUrl={welcomeAvatarUrl}
+            />
+          )}
 
-        {/* Full Screen Delete Workspace Confirmation Notification */}
-        <DeleteWorkspaceModal
-          isOpen={workspacePendingDelete !== null}
-          workspace={workspacePendingDelete}
-          onConfirm={handleConfirmDeleteWorkspace}
-          onCancel={handleCancelDeleteWorkspace}
-        />
+          {workspacePendingDelete !== null && (
+            <DeleteWorkspaceModal
+              isOpen={workspacePendingDelete !== null}
+              workspace={workspacePendingDelete}
+              onConfirm={handleConfirmDeleteWorkspace}
+              onCancel={handleCancelDeleteWorkspace}
+            />
+          )}
 
+          <GlobalVoiceListener 
+            activeTab={activeTab}
+            setActiveTab={setActiveTab} 
+            setActiveWorkspace={handleSelectWorkspace} 
+            onToggleFocusMode={() => setIsFocusMode(!isFocusMode)}
+            onLogout={handleLogout}
+            onSetDarkMode={(isDark) => setThemeMode(isDark ? 'dark' : 'light')}
+            onToggleTheme={toggleTheme}
+            isDarkMode={isDarkApplied}
+            onCreateWorkspace={handleCreateWorkspaceByName}
+            workspaces={workspaces}
+            activeWorkspace={activeWorkspace}
+          />
+          <ResetPasswordModal />
+          {legalModalType !== null && (
+            <LegalModals 
+              isOpen={legalModalType !== null} 
+              type={legalModalType} 
+              onClose={() => {
+                setLegalModalType(null);
+                if (window.location.hash === '#privacy' || window.location.hash === '#terms') {
+                  window.history.pushState(null, '', '#');
+                }
+              }} 
+            />
+          )}
+        </Suspense>
         <OfflineNotice />
-        <GlobalVoiceListener 
-          activeTab={activeTab}
-          setActiveTab={setActiveTab} 
-          setActiveWorkspace={handleSelectWorkspace} 
-          onToggleFocusMode={() => setIsFocusMode(!isFocusMode)}
-          onLogout={handleLogout}
-          onSetDarkMode={(isDark) => setThemeMode(isDark ? 'dark' : 'light')}
-          onToggleTheme={toggleTheme}
-          isDarkMode={isDarkApplied}
-          onCreateWorkspace={handleCreateWorkspaceByName}
-          workspaces={workspaces}
-          activeWorkspace={activeWorkspace}
-        />
         <ToastContainer />
-        <ResetPasswordModal />
-        <LegalModals 
-          isOpen={legalModalType !== null} 
-          type={legalModalType} 
-          onClose={() => {
-            setLegalModalType(null);
-            if (window.location.hash === '#privacy' || window.location.hash === '#terms') {
-              window.history.pushState(null, '', '#');
-            }
-          }} 
-        />
         <SEOManager activeTask={activeTab} isLoggedIn={isLoggedIn} />
       </div>
     );
@@ -1234,28 +1263,34 @@ export default function App() {
         <SocialProof />
         <ForStudents />
         <StudyTools />
-        <InteractiveDemo />
-        <Pricing />
-        <About />
-        <Contact />
-        <FAQ />
-        <FinalCTA />
+        <Suspense fallback={null}>
+          <InteractiveDemo />
+          <Pricing />
+          <About />
+          <Contact />
+          <FAQ />
+          <FinalCTA />
+        </Suspense>
       </main>
 
       <Footer />
       <OfflineNotice />
       <ToastContainer />
-      <ResetPasswordModal />
-      <LegalModals 
-        isOpen={legalModalType !== null} 
-        type={legalModalType} 
-        onClose={() => {
-          setLegalModalType(null);
-          if (window.location.hash === '#privacy' || window.location.hash === '#terms') {
-            window.history.pushState(null, '', '#');
-          }
-        }} 
-      />
+      <Suspense fallback={null}>
+        <ResetPasswordModal />
+        {legalModalType !== null && (
+          <LegalModals 
+            isOpen={legalModalType !== null} 
+            type={legalModalType} 
+            onClose={() => {
+              setLegalModalType(null);
+              if (window.location.hash === '#privacy' || window.location.hash === '#terms') {
+                window.history.pushState(null, '', '#');
+              }
+            }} 
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

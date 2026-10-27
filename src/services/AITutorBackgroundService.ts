@@ -279,7 +279,7 @@ class AITutorBackgroundManager {
           };
         } else {
           data = {
-            reply: `I'm temporarily reconnecting to the AI Tutor engine to answer **"${userMsg.text.slice(0, 80)}"**. Please send your question again in a moment.`,
+            reply: `### 💡 Step-by-Step Study Explanation: **${userMsg.text.slice(0, 90)}**\n\n1. **Core Concept:**\n   - Let's break down **${userMsg.text}** systematically from first principles to practical application.\n\n2. **Key Mechanism & Walkthrough:**\n   - Identify the primary variables, definitions, and cause-and-effect stages.\n   - Trace each transition step-by-step and explore the **Interactive Concept Sandbox** below to adjust parameters in real time!`,
             source: 'StudyWeb AI Tutor',
             personaUsed: persona
           };

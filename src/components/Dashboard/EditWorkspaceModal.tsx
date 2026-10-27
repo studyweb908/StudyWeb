@@ -143,7 +143,12 @@ export default function EditWorkspaceModal({
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      alert('Please upload a valid image file (PNG, JPG, WEBP).');
+      (window as any).showToast?.(
+        'Please upload a valid image file (PNG, JPG, WEBP).',
+        'warning',
+        3200,
+        'Unsupported Image Format'
+      );
       return;
     }
 
@@ -168,7 +173,12 @@ export default function EditWorkspaceModal({
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      alert('Please upload a valid image file (PNG, JPG, SVG, WEBP).');
+      (window as any).showToast?.(
+        'Please upload a valid image file (PNG, JPG, SVG, WEBP).',
+        'warning',
+        3200,
+        'Unsupported Image Format'
+      );
       return;
     }
 

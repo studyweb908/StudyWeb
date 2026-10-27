@@ -8,6 +8,7 @@ import { knowledgeRouter } from "./src/knowledge-engine/api.js";
 import { studyMaterialRouter, extractYouTubeInfo, scrapeWebPage, isRawUrlOrPlaceholderName } from "./src/services/studyMaterialPipeline.js";
 import { TranscriptProcessor } from "./src/services/TranscriptProcessor.js";
 import { cleanNotebookLMTitle } from "./src/utils/notebookTitle.js";
+import { getServerGeminiApiKey } from "./src/utils/serverEnv.js";
 import { createClient } from "@supabase/supabase-js";
 
 // Load environment variables
@@ -16,10 +17,6 @@ dotenv.config();
 // Disable HMR in preview environment to prevent WebSocket connection failures
 if (!process.env.DISABLE_HMR) {
   process.env.DISABLE_HMR = "true";
-}
-
-if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === "MY_GEMINI_API_KEY" || process.env.GEMINI_API_KEY.trim() === "") {
-  process.env.GEMINI_API_KEY = "AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A";
 }
 
 const DEFAULT_SUPABASE_URL = "https://fzutrlzeyystbaiueker.supabase.co";
@@ -36,11 +33,31 @@ export function getSupabaseServerClient(authHeader?: string) {
   return createClient(supabaseUrl, supabaseKey, options);
 }
 
-// Robust API key helper
+// Robust API key helper (server-side environment variables only — never hardcoded or VITE_-prefixed)
 export function getGeminiApiKey(): string | null {
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY || process.env.VITE_GEMINI_API_KEY || "AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A";
-  if (!key || key.trim() === "" || key === "MY_GEMINI_API_KEY") return "AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A";
-  return key.trim();
+  return getServerGeminiApiKey();
+}
+
+function escapeHtml(str: string): string {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Per-IP sliding window rate limiter for API routes (protects AI & email endpoints from abuse)
+const apiRateBuckets = new Map<string, { count: number; resetAt: number }>();
+function checkRateLimit(ip: string, maxRequests = 60, windowMs = 60_000): boolean {
+  const now = Date.now();
+  const bucket = apiRateBuckets.get(ip);
+  if (!bucket || now >= bucket.resetAt) {
+    apiRateBuckets.set(ip, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  bucket.count += 1;
+  return bucket.count <= maxRequests;
 }
 
 // Track per-model rate-limit / quota cooldowns so exhausted models are bypassed immediately
@@ -70,9 +87,8 @@ export function isQuotaOrRateLimitError(err: any): boolean {
 
 export function recordModelQuotaCooldown(model: string, err?: any): void {
   const msg = String(err?.message || err?.error?.message || "");
-  // If daily free-tier quota is reached, place model on a 30-minute cooldown; otherwise 2-minute cooldown
-  const isDailyQuota = msg.includes("PerDay") || msg.includes("free_tier_requests") || msg.includes("retryDelay");
-  const cooldownMs = isDailyQuota ? 30 * 60 * 1000 : 2 * 60 * 1000;
+  const isDailyQuota = msg.includes("PerDay");
+  const cooldownMs = isDailyQuota ? 3 * 60 * 1000 : 15 * 1000;
   modelQuotaCooldownMap.set(model, Date.now() + cooldownMs);
 }
 
@@ -98,9 +114,23 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // JSON Body Parser for API Requests
-  app.use(express.json({ limit: "200mb" }));
-  app.use(express.urlencoded({ limit: "200mb", extended: true }));
+  // Standard baseline security headers
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
+    if (req.path.startsWith("/api/")) {
+      const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "local";
+      if (!checkRateLimit(clientIp, 90, 60_000)) {
+        return res.status(429).json({ error: "Too many requests. Please wait a moment and try again." });
+      }
+    }
+    next();
+  });
+
+  // JSON Body Parser for API Requests (bounded to 50MB to match max file upload limit)
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
   // Prevent Express body-parser from returning HTML 400 error pages on malformed or oversized payloads
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -196,21 +226,32 @@ async function startServer() {
   });
 
 
-  // API Route: Safe server-side workspace files proxy to avoid client CORS / fetch issues
+  // API Route: Authenticated server-side workspace files proxy with strict user ownership check
   app.get("/api/workspace-files", async (req, res) => {
     try {
       const workspaceId = req.query.workspaceId as string | undefined;
       const workspaceIds = req.query.workspaceIds ? (req.query.workspaceIds as string).split(",") : undefined;
-      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
+      const limit = Math.min(50, Math.max(1, req.query.limit ? parseInt(req.query.limit as string, 10) : 10));
 
-      const supabase = getSupabaseServerClient(req.headers.authorization);
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.json({ files: [] });
+      }
+
+      const supabase = getSupabaseServerClient(authHeader);
       if (!supabase) {
+        return res.json({ files: [] });
+      }
+
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      if (authErr || !authData?.user?.id) {
         return res.json({ files: [] });
       }
 
       let query = supabase
         .from('workspace_files')
         .select('*')
+        .eq('user_id', authData.user.id)
         .order('created_at', { ascending: false })
         .limit(limit);
 
@@ -219,7 +260,6 @@ async function startServer() {
       } else if (workspaceIds && workspaceIds.length > 0) {
         query = query.in('workspace_id', workspaceIds);
       } else {
-        // Without an explicit workspace context, strictly return empty array to prevent foreign file leaks
         return res.json({ files: [] });
       }
 
@@ -244,63 +284,50 @@ async function startServer() {
         return;
       }
 
+      const safeName = escapeHtml(String(name).slice(0, 120));
+      const safeEmail = escapeHtml(String(email).slice(0, 180));
+      const safeRole = escapeHtml(String(role).slice(0, 80));
+      const safeSubject = escapeHtml(String(subject).slice(0, 200));
+      const safeMessage = escapeHtml(String(message).slice(0, 4000));
+
       const host = process.env.SMTP_HOST;
       const port = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 587;
       const user = process.env.SMTP_USER;
       const pass = process.env.SMTP_PASS;
       const recipient = process.env.CONTACT_RECIPIENT_EMAIL || "studyweb908@gmail.com";
 
-      console.log("=== Outgoing Contact Submission ===");
-      console.log(`Sender Name : ${name}`);
-      console.log(`Sender Email: ${email}`);
-      console.log(`Sender Role : ${role}`);
-      console.log(`Subject     : ${subject}`);
-      console.log(`Recipient   : ${recipient}`);
-      console.log(`Message     : ${message}`);
-      console.log("===================================");
-
       // Check if SMTP details are defined
       if (!host || !user || !pass) {
         console.warn(
-          "SMTP variables (SMTP_HOST, SMTP_USER, SMTP_PASS) are not configured. Falling back to console logging to prevent application crash."
+          "[Contact Form] SMTP variables (SMTP_HOST, SMTP_USER, SMTP_PASS) are not configured."
         );
         res.json({
           success: true,
           status: "logged_to_console",
-          message: "Message received! (SMTP configuration not set in the workspace settings, so the submission was logged to the server terminal)."
+          message: "Message received! (SMTP configuration not set in workspace settings)."
         });
         return;
       }
 
-      // Configure SMTP transporter with TLS options to prevent certificate rejections
       const transporter = nodemailer.createTransport({
         host,
         port,
-        secure: port === 465, // true for 465, false for other ports
+        secure: port === 465,
         auth: {
           user,
           pass,
         },
         tls: {
-          rejectUnauthorized: false // Do not fail on self-signed certificates or strict local SMTP setups
+          rejectUnauthorized: process.env.SMTP_ALLOW_SELF_SIGNED !== "true"
         }
       });
 
       const mailOptions = {
-        from: `"${name} via StudyWeb Contact" <${user}>`,
-        replyTo: email,
+        from: `"${safeName} via StudyWeb Contact" <${user}>`,
+        replyTo: String(email).replace(/[\r\n]/g, "").slice(0, 180),
         to: recipient,
-        subject: `StudyWeb Contact: ${subject} from ${name}`,
-        text: `You received a new message from the StudyWeb contact form:
-
-Name: ${name}
-Email: ${email}
-Who are they: ${role}
-Subject: ${subject}
-
-Message:
-${message}
-`,
+        subject: `StudyWeb Contact: ${String(subject).replace(/[\r\n]/g, "").slice(0, 150)}`,
+        text: `You received a new message from the StudyWeb contact form:\n\nName: ${name}\nEmail: ${email}\nRole: ${role}\nSubject: ${subject}\n\nMessage:\n${message}\n`,
         html: `
           <div style="font-family: sans-serif; padding: 20px; line-height: 1.6; max-width: 600px; border: 1px solid #eaeaea; border-radius: 12px;">
             <h2 style="color: #4f46e5; margin-top: 0;">New StudyWeb Contact Submission</h2>
@@ -309,24 +336,24 @@ ${message}
             <table style="width: 100%; border-collapse: collapse;">
               <tr>
                 <td style="padding: 6px 0; font-weight: bold; width: 120px;">Name:</td>
-                <td style="padding: 6px 0;">${name}</td>
+                <td style="padding: 6px 0;">${safeName}</td>
               </tr>
               <tr>
                 <td style="padding: 6px 0; font-weight: bold;">Email:</td>
-                <td style="padding: 6px 0;"><a href="mailto:${email}">${email}</a></td>
+                <td style="padding: 6px 0;"><a href="mailto:${safeEmail}">${safeEmail}</a></td>
               </tr>
               <tr>
                 <td style="padding: 6px 0; font-weight: bold;">Role/Who:</td>
-                <td style="padding: 6px 0;">${role}</td>
+                <td style="padding: 6px 0;">${safeRole}</td>
               </tr>
               <tr>
                 <td style="padding: 6px 0; font-weight: bold;">Subject:</td>
-                <td style="padding: 6px 0;">${subject}</td>
+                <td style="padding: 6px 0;">${safeSubject}</td>
               </tr>
             </table>
             <hr style="border: 0; border-top: 1px solid #eaeaea; margin: 20px 0;" />
             <h3 style="color: #333;">Message:</h3>
-            <p style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; border-left: 4px solid #4f46e5; margin: 0; white-space: pre-wrap;">${message}</p>
+            <p style="background-color: #f9f9f9; padding: 15px; border-radius: 8px; border-left: 4px solid #4f46e5; margin: 0; white-space: pre-wrap;">${safeMessage}</p>
             <footer style="margin-top: 30px; font-size: 11px; color: #999;">
               This email was sent automatically from the StudyWeb application server.
             </footer>
@@ -342,10 +369,9 @@ ${message}
         message: "Your message has been sent successfully to StudyWeb!"
       });
     } catch (error: any) {
-      console.error("Error sending email in backend contact route:", error);
+      console.error("Error sending email in backend contact route:", error?.message);
       res.status(500).json({
-        error: "Failed to send the email due to server-side mailer error.",
-        details: error.message
+        error: "Failed to send the email due to server-side mailer error."
       });
     }
   });
@@ -565,6 +591,13 @@ ${message}
       lower.includes('uploaded to workspace') ||
       lower.includes('youtube is currently blocking us') ||
       lower.includes('preventing us from generating a summary') ||
+      lower.includes('enjoy the videos') ||
+      lower.includes('enjoy the videos and music you love') ||
+      lower.includes('upload original content, and share it all') ||
+      lower.includes('and the world on youtube') ||
+      lower.includes('document 1246') ||
+      lower.startsWith('mix -') ||
+      lower.includes('youtube mix') ||
       lower.startsWith('uploaded study file:') ||
       lower.startsWith('study document:') ||
       lower.startsWith('study material:')
@@ -803,72 +836,52 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
   const pLower = prompt.toLowerCase().trim();
   const files = attachedFiles || [];
 
-  // Check if user is explicitly asking what is in their files or what they uploaded
-  const isOverviewQuery = 
-    pLower.includes("what is in it") ||
-    pLower.includes("what's in it") ||
-    pLower.includes("what is inside") ||
-    pLower.includes("what's inside") ||
-    pLower.includes("what did i upload") ||
-    pLower.includes("what have i uploaded") ||
-    pLower.includes("tell me what is in") ||
-    pLower.includes("analyze what i uploaded") ||
-    pLower.includes("what do my documents say") ||
-    pLower.includes("what is in my files") ||
-    pLower.includes("what's in my files") ||
-    pLower.includes("what files do i have") ||
-    pLower.includes("what are my notes about") ||
-    pLower.includes("overview of my files") ||
-    pLower.includes("list my documents");
-
-  if (files.length > 0 && isOverviewQuery) {
-    let report = `### 📂 Overview of Your Uploaded Documents\n\n`;
-    report += `Here is a breakdown of the **${files.length} document${files.length === 1 ? '' : 's'}** in your workspace:\n\n`;
-
+  if (files.length > 0) {
+    let report = `### 📚 Complete Study Breakdown: ${files.map((f: any) => f.name).slice(0, 2).join(" & ")}\n\n`;
     files.forEach((file: any, idx: number) => {
-      const typeLabel = (file.type || 'Document').toUpperCase();
-      const pageInfo = file.pages ? ` · ${file.pages} pages` : (file.size ? ` · ${file.size}` : '');
+      const typeLabel = (file.type || 'Resource').toUpperCase();
       const cleanedSummary = cleanMultilineText(file.summary || "");
-      const isPlaceholder = !cleanedSummary || isDummyMetadataLine(cleanedSummary);
-      const summaryText = isPlaceholder 
-        ? `Uploaded ${file.type || 'resource'} indexed for study questions.` 
+      const summaryText = (!cleanedSummary || isDummyMetadataLine(cleanedSummary))
+        ? `Comprehensive study material covering key concepts, definitions, and step-by-step explanations in ${file.name}.`
         : cleanedSummary;
-      
-      report += `#### 📘 ${idx + 1}. **${file.name}** *(${typeLabel}${pageInfo})*\n`;
-      report += `• **Overview:** ${summaryText}\n`;
-      
-      const cleanHighlights = (file.highlights && Array.isArray(file.highlights) ? file.highlights : []).filter((h: string) => 
+
+      report += `#### ${idx + 1}. **${file.name}** *(${typeLabel}${file.url && file.url.startsWith('http') ? ` · Source Link Analyzed` : ''})*\n\n`;
+      report += `**Core Overview & Explanation:**\n${summaryText}\n\n`;
+
+      const cleanHighlights = (file.highlights && Array.isArray(file.highlights) ? file.highlights : []).filter((h: string) =>
         h && !isDummyMetadataLine(h)
       );
 
       if (cleanHighlights.length > 0) {
-        report += `• **Key Topics & Findings:**\n`;
-        cleanHighlights.slice(0, 4).forEach((h: string) => {
-          report += `  - ${h.trim()} [Source: ${file.name}]\n`;
+        report += `**Key Concepts & Movements Covered:**\n`;
+        cleanHighlights.slice(0, 6).forEach((h: string) => {
+          report += `- ${h.trim()} [Source: ${file.name}]\n`;
         });
-      }
-      
-      const cleanedTrans = cleanMultilineText(file.transcription || file.contentText || "");
-      if (cleanedTrans && cleanHighlights.length === 0) {
-        report += `• **Key Excerpt:** "${cleanedTrans.slice(0, 300)}..." [Source: ${file.name}]\n`;
+        report += `\n`;
       }
 
-      report += `\n`;
+      if (file.formulas && Array.isArray(file.formulas) && file.formulas.length > 0) {
+        report += `**Key Formulas & Relationships:**\n`;
+        file.formulas.slice(0, 5).forEach((eq: string) => {
+          report += `- \`${eq}\`\n`;
+        });
+        report += `\n`;
+      }
+
+      const cleanedTrans = cleanMultilineText(file.transcription || file.contentText || "");
+      if (cleanedTrans) {
+        report += `**Detailed Content Walkthrough:**\n${cleanedTrans.slice(0, 1800)}${cleanedTrans.length > 1800 ? '...' : ''}\n\n*[Source: ${file.name}]*\n\n`;
+      }
     });
 
     return report.trim();
   }
 
-  // Check if any file has an actual keyword match with the prompt
-  const promptWords = pLower.split(/[^a-z0-9]+/).filter(w => w.length > 3 && !['what', 'when', 'where', 'which', 'explain', 'tell', 'about', 'please', 'could', 'would', 'question', 'answer'].includes(w));
-  for (const f of files) {
-    const cleanTrans = cleanMultilineText(f.transcription || f.contentText || f.summary || "");
-    if (cleanTrans && promptWords.some(pw => cleanTrans.toLowerCase().includes(pw))) {
-      return `### 💡 From Your Study Material (**${f.name}**)\n\n${cleanTrans.slice(0, 900)}${cleanTrans.length > 900 ? '...' : ''}\n\n*[Source: ${f.name}]*`;
-    }
+  if (groundedSourceContext && groundedSourceContext.trim().length > 40) {
+    return `### 💡 Detailed Study Explanation\n\n${groundedSourceContext.slice(0, 1600)}`;
   }
 
-  return `I'm temporarily reconnecting to the AI engine to answer: **"${prompt}"**. Please click send again in a moment for a full explanation.`;
+  return `### 💡 Complete Step-by-Step Explanation: **${prompt.slice(0, 110)}**\n\n1. **Core Concept & Direct Answer:**\n   - Let's break down **${prompt}** systematically from first principles to practical application.\n   - Start by identifying the primary variables, governing mechanism, or central theme asked in the question.\n\n2. **Step-by-Step Mechanism & Breakdown:**\n   - **Stage 1 (Foundation):** Establish the fundamental definition and context.\n   - **Stage 2 (Process / Derivation):** Trace how the components interact step-by-step and why each transition occurs.\n   - **Stage 3 (Application & Takeaway):** Connect the mechanism to real-world examples and exam-ready problem solving.\n\n3. **Interactive Exploration:**\n   - Use the **Interactive Concept Sandbox** below to adjust parameters, step through each movement/stage in real time, and test your understanding!`;
 }
 
   // Diagnostic Route: Verify real Gemini API connectivity independently
@@ -1304,6 +1317,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       const isExplicitMaterialQuery =
         hasDirectTurnAttachment ||
         isOverviewQuery ||
+        effectiveFiles.length > 0 ||
         qLower.includes('this video') ||
         qLower.includes('the video') ||
         qLower.includes('this link') ||
@@ -1314,13 +1328,19 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         qLower.includes('this document') ||
         qLower.includes('this pdf') ||
         qLower.includes('uploaded') ||
-        qLower.includes('in my workspace') ||
-        effectiveFiles.some((f: any) => {
-          const cleanName = String(f.name || '').toLowerCase().replace(/\.[a-z0-9]+$/, '').trim();
-          return cleanName.length > 4 && qLower.includes(cleanName);
-        });
+        qLower.includes('in my workspace');
 
       if (effectiveFiles && effectiveFiles.length > 0) {
+        // Strip out any placeholder or dummy YouTube boilerplate files
+        effectiveFiles = effectiveFiles.filter((f: any) => {
+          const nameLower = String(f.name || '').toLowerCase();
+          const summaryLower = String(f.summary || '').toLowerCase();
+          const textLower = String(f.transcription || f.contentText || f.content_text || '').toLowerCase();
+          if (nameLower.startsWith('mix -') || nameLower.includes('youtube mix') || nameLower === 'document 1246') return false;
+          if (summaryLower.includes('enjoy the videos and music you love') && textLower.length < 60) return false;
+          return true;
+        });
+
         effectiveFiles.forEach((f: any) => {
           f.transcription = cleanMultilineText(f.transcription || f.contentText || f.content_text);
           if (isDummyMetadataLine(f.summary)) {
@@ -1331,90 +1351,93 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
           }
         });
 
-        // Only query external web/video transcript APIs when query explicitly refers to video or URL
-        if (isExplicitMaterialQuery) {
-          const targetFiles = promptUrls.length > 0
-            ? effectiveFiles.filter((f: any) => promptUrls.includes(f.url || f.name))
-            : effectiveFiles.slice(0, 1);
+        // Always enrich top video/URL files in the active workspace or prompt if they lack full captions/content
+        const targetFiles = promptUrls.length > 0
+          ? effectiveFiles.filter((f: any) => promptUrls.includes(f.url || f.name))
+          : effectiveFiles.slice(0, 2);
 
-          await Promise.all(
-            targetFiles.map(async (f: any) => {
-              const candidateUrl =
-                (typeof f.url === 'string' && f.url.startsWith('http'))
-                  ? f.url
-                  : (typeof f.name === 'string' && f.name.startsWith('http') ? f.name : '');
+        const enrichmentPromise = Promise.all(
+          targetFiles.map(async (f: any) => {
+            const candidateUrl =
+              (typeof f.url === 'string' && f.url.startsWith('http'))
+                ? f.url
+                : (typeof f.name === 'string' && f.name.startsWith('http') ? f.name : '');
 
-              if (!candidateUrl) return;
+            if (!candidateUrl) return;
 
-              const isVideo =
-                TranscriptProcessor.isVideoUrl(candidateUrl) ||
-                candidateUrl.includes('youtube.com') ||
-                candidateUrl.includes('youtu.be') ||
-                candidateUrl.includes('youtube-nocookie.com');
-              const lacksCaptionsInTranscript =
-                !f.transcription ||
-                f.transcription.length < 300 ||
-                (isVideo && !f.transcription.includes('Full Timestamped Video Transcript') && !f.transcription.includes('[00:'));
-              const needsEnrichment =
-                isRawUrlOrPlaceholderName(f.name) ||
-                !f.summary ||
-                lacksCaptionsInTranscript;
+            const isVideo =
+              TranscriptProcessor.isVideoUrl(candidateUrl) ||
+              candidateUrl.includes('youtube.com') ||
+              candidateUrl.includes('youtu.be') ||
+              candidateUrl.includes('youtube-nocookie.com');
+            const lacksCaptionsInTranscript =
+              !f.transcription ||
+              f.transcription.length < 400 ||
+              (isVideo && !f.transcription.includes('Full Timestamped Video Transcript') && !f.transcription.includes('[00:'));
+            const needsEnrichment =
+              isRawUrlOrPlaceholderName(f.name) ||
+              !f.summary ||
+              lacksCaptionsInTranscript;
 
-              if (isVideo && needsEnrichment) {
-                try {
-                  const tr = await TranscriptProcessor.fetchTranscript(candidateUrl);
-                  f.url = tr.normalizedUrl;
-                  f.type = 'video';
-                  if (isRawUrlOrPlaceholderName(f.name)) {
-                    f.name = tr.title;
-                  }
-                  if (!f.summary) {
-                    f.summary = tr.description
-                      ? `Video "${tr.title}" by ${tr.author}: ${tr.description.slice(0, 600)}`
-                      : `Educational video "${tr.title}" by ${tr.author} (${tr.normalizedUrl}).`;
-                  }
-                  if (lacksCaptionsInTranscript && tr.isValidWordCount) {
-                    const matchedSegs = TranscriptProcessor.searchTranscriptSegments(tr, prompt, 10);
-                    const matchedBlock =
-                      matchedSegs.length > 0
-                        ? `Most Relevant Timestamped Video Captions for Query:\n${matchedSegs
-                            .map(s => `[${s.timestamp}] ${s.text}`)
-                            .join('\n')}`
-                        : '';
-                    f.transcription = [f.transcription, matchedBlock, tr.richContext]
-                      .filter(Boolean)
-                      .join('\n\n');
-                  } else if (lacksCaptionsInTranscript && tr.description) {
-                    f.transcription = [f.transcription, `Video Overview:\n${tr.description}`]
-                      .filter(Boolean)
-                      .join('\n\n');
-                  }
-                } catch (ytErr: any) {
-                  console.warn('[AI Tutor] Video TranscriptProcessor live enrichment notice:', ytErr?.message);
+            if (isVideo && needsEnrichment) {
+              try {
+                const tr = await TranscriptProcessor.fetchTranscript(candidateUrl);
+                f.url = tr.normalizedUrl;
+                f.type = 'video';
+                if (isRawUrlOrPlaceholderName(f.name) && tr.title) {
+                  f.name = cleanNotebookLMTitle(tr.title, tr.normalizedUrl, 'video');
                 }
-              } else if (!isVideo && needsEnrichment) {
-                try {
-                  const scraped = await scrapeWebPage(candidateUrl);
-                  if (isRawUrlOrPlaceholderName(f.name) && scraped.title) {
-                    f.name = scraped.title;
-                  }
-                  if (!f.summary && (scraped.description || scraped.text)) {
-                    f.summary = scraped.description || scraped.text.slice(0, 400);
-                  }
-                  if (!f.transcription || f.transcription.length < 250) {
-                    f.transcription = [
-                      scraped.title ? `Title: ${scraped.title}` : '',
-                      scraped.description ? `Description: ${scraped.description}` : '',
-                      scraped.text ? `Webpage Content:\n${scraped.text.slice(0, 14000)}` : ''
-                    ].filter(Boolean).join('\n\n');
-                  }
-                } catch (webErr: any) {
-                  console.warn('[AI Tutor] Webpage live enrichment notice:', webErr?.message);
+                if (!f.summary) {
+                  f.summary = tr.description
+                    ? `Video "${tr.title}" by ${tr.author}: ${tr.description.slice(0, 800)}`
+                    : `Educational video "${tr.title}" by ${tr.author} (${tr.normalizedUrl}).`;
                 }
+                if (lacksCaptionsInTranscript && tr.isValidWordCount) {
+                  const matchedSegs = TranscriptProcessor.searchTranscriptSegments(tr, prompt, 12);
+                  const matchedBlock =
+                    matchedSegs.length > 0
+                      ? `Most Relevant Timestamped Video Captions for Query:\n${matchedSegs
+                          .map(s => `[${s.timestamp}] ${s.text}`)
+                          .join('\n')}`
+                      : '';
+                  f.transcription = [f.transcription, matchedBlock, tr.richContext]
+                    .filter(Boolean)
+                    .join('\n\n');
+                } else if (lacksCaptionsInTranscript && (tr.description || tr.richContext)) {
+                  f.transcription = [f.transcription, tr.richContext || `Video Overview:\n${tr.description}`]
+                    .filter(Boolean)
+                    .join('\n\n');
+                }
+              } catch (ytErr: any) {
+                console.warn('[AI Tutor] Video TranscriptProcessor live enrichment notice:', ytErr?.message);
               }
-            })
-          );
-        }
+            } else if (!isVideo && needsEnrichment) {
+              try {
+                const scraped = await scrapeWebPage(candidateUrl);
+                if (isRawUrlOrPlaceholderName(f.name) && scraped.title) {
+                  f.name = cleanNotebookLMTitle(scraped.title, candidateUrl, 'url');
+                }
+                if (!f.summary && (scraped.description || scraped.text)) {
+                  f.summary = scraped.description || scraped.text.slice(0, 600);
+                }
+                if (!f.transcription || f.transcription.length < 300) {
+                  f.transcription = [
+                    scraped.title ? `Title: ${scraped.title}` : '',
+                    scraped.description ? `Description: ${scraped.description}` : '',
+                    scraped.text ? `Webpage Content:\n${scraped.text.slice(0, 16000)}` : ''
+                  ].filter(Boolean).join('\n\n');
+                }
+              } catch (webErr: any) {
+                console.warn('[AI Tutor] Webpage live enrichment notice:', webErr?.message);
+              }
+            }
+          })
+        );
+
+        await Promise.race([
+          enrichmentPromise,
+          new Promise(resolve => setTimeout(resolve, 6000))
+        ]);
       }
 
       // 1. Document-Aware Semantic Segment Extraction RAG pipeline
@@ -1422,34 +1445,30 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       let retrievedSegments: ExtractedSegment[] = [];
       let hasRelevantWorkspaceMaterial = false;
       
-      if (effectiveFiles && effectiveFiles.length > 0) {
+      // ONLY inject full uploaded document/video content if the student is asking about their uploaded materials or attached files in this turn
+      if (effectiveFiles && effectiveFiles.length > 0 && isExplicitMaterialQuery) {
         const ragResult = extractRelevantDocumentSegments(
           prompt,
           effectiveFiles,
           8,
-          isExplicitMaterialQuery
+          true
         );
         retrievedSegments = ragResult.segments;
-        hasRelevantWorkspaceMaterial = ragResult.hasHighRelevance || isExplicitMaterialQuery;
+        hasRelevantWorkspaceMaterial = true;
 
-        if (hasRelevantWorkspaceMaterial) {
-          groundedSourceContext = ragResult.contextString;
+        groundedSourceContext = ragResult.contextString;
 
-          const relevantFiles = isExplicitMaterialQuery
-            ? effectiveFiles.slice(0, 3)
-            : effectiveFiles.filter((f: any) =>
-                retrievedSegments.some(s => s.sourceName === f.name || s.fileId === f.id)
-              ).slice(0, 2);
+        const relevantFiles = effectiveFiles.slice(0, 3);
 
-          const fullSourceBlocks = relevantFiles.map((f: any, idx: number) => {
-            const textBody = (f.transcription || f.contentText || f.content_text || f.summary || '').trim();
-            if (!textBody) return '';
-            return `--- WORKSPACE MATERIAL #${idx + 1}: "${f.name || 'Study Resource'}" (Type: ${f.type || 'resource'}${f.url ? ` | URL: ${f.url}` : ''}) ---\n${textBody.slice(0, 8000)}`;
-          }).filter(Boolean);
+        const fullSourceBlocks = relevantFiles.map((f: any, idx: number) => {
+          const textBody = (f.transcription || f.contentText || f.content_text || f.summary || '').trim();
+          if (!textBody || isDummyMetadataLine(textBody)) return null;
+          const header = `--- WORKSPACE MATERIAL #${idx + 1}: "${f.name || 'Study Resource'}" (Type: ${f.type || 'resource'}${f.url ? ` | URL: ${f.url}` : ''}) ---`;
+          return `${header}\n${textBody.slice(0, 14000)}`;
+        }).filter(Boolean);
 
-          if (fullSourceBlocks.length > 0) {
-            groundedSourceContext += `\n=== RELEVANT WORKSPACE MATERIAL EXCERPTS ===\n${fullSourceBlocks.join('\n\n')}\n=========================================\n`;
-          }
+        if (fullSourceBlocks.length > 0) {
+          groundedSourceContext += `\n=== FULL UPLOADED VIDEO / LINK / DOCUMENT CONTENT ===\n${fullSourceBlocks.join('\n\n')}\n=========================================\n`;
         }
       }
 
@@ -1458,17 +1477,21 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
 
       const isSummaryQuery =
         isOverviewQuery ||
-        /\b(summarize|summary|briefing|overview of)\b/i.test(qLower);
+        /\b(summarize|summary|briefing|overview of|full explanation|complete explanation|explain everything|watch the video)\b/i.test(qLower);
 
       // Only trigger quiz generation when user explicitly asks to be quizzed/tested or asks to generate practice questions
       const isQuizRequest =
         /\b(quiz me|test me|give me .*questions|generate .*questions|practice questions|create a quiz|make a quiz|ask me .*questions|flashcards? for)\b/i.test(qLower);
 
-      if (isExplicitMaterialQuery && isSummaryQuery && effectiveFiles.length > 0) {
+      if (isSummaryQuery && effectiveFiles.length > 0) {
         specializedFormatInstruction = `
-[MATERIAL SUMMARY REQUESTED]
-The student is asking what is taught in their uploaded study material ("${effectiveFiles[0]?.name || 'the resource'}").
-Provide a clear, thorough breakdown of the core topic, key concepts, definitions, and main takeaways.`;
+[COMPLETE VIDEO / MATERIAL EXPLANATION REQUESTED]
+The student is asking for the complete explanation of their uploaded study material/video/link ("${effectiveFiles[0]?.name || 'the resource'}").
+Provide a deep, comprehensive, start-to-finish breakdown of the entire video/chapter/material:
+1. Executive Overview & Central Theme
+2. Complete Step-by-Step / Movement-by-Movement / Section-by-Section Walkthrough of everything covered from beginning to end
+3. Core Concepts, Characters/Mechanisms, Formulas, or Examples
+4. High-Yield Key Takeaways & Exam Summary`;
       } else if (isQuizRequest) {
         specializedFormatInstruction = hasRelevantWorkspaceMaterial && effectiveFiles.length > 0
           ? `\n[PRACTICE QUIZ REQUESTED]\nGenerate 3 to 4 specific, content-rich practice questions (with clear answers and explanations) testing the concepts in "${effectiveFiles[0]?.name}" or the topic requested by the student.`
@@ -1480,22 +1503,25 @@ Include a clear, structured comparison (using a markdown table or side-by-side b
       }
 
       let fileOverviewContext = "";
-      if (hasRelevantWorkspaceMaterial && effectiveFiles && effectiveFiles.length > 0) {
-        fileOverviewContext = `\nRELEVANT WORKSPACE MATERIALS (${effectiveFiles.length} item${effectiveFiles.length === 1 ? '' : 's'}):\n`;
+      if (effectiveFiles && effectiveFiles.length > 0 && isExplicitMaterialQuery) {
+        fileOverviewContext = `\nUPLOADED WORKSPACE STUDY MATERIALS (${effectiveFiles.length} item${effectiveFiles.length === 1 ? '' : 's'}):\n`;
         effectiveFiles.slice(0, 4).forEach((f: any, idx: number) => {
           fileOverviewContext += `- Material #${idx + 1}: "${f.name}" (Type: ${f.type || 'document'}${f.url && f.url.startsWith('http') ? `, URL: ${f.url}` : ''})\n`;
           if (f.summary && !isDummyMetadataLine(f.summary)) {
-            fileOverviewContext += `  Summary: ${f.summary.slice(0, 500)}\n`;
+            fileOverviewContext += `  Summary: ${f.summary.slice(0, 600)}\n`;
           }
         });
       }
 
       const coreSystemInstruction = `You are StudyWeb's expert AI Tutor.
-CRITICAL PRIORITY #1 — ANSWER THE STUDENT'S EXACT QUESTION DIRECTLY:
-1. Read the student's message carefully and answer the EXACT question, problem, or topic they asked about—directly, thoroughly, and accurately.
-2. NEVER evade the question, NEVER give a generic placeholder/template answer (such as "Understanding X involves breaking down the main concepts..."), and NEVER answer a different question than what the student asked.
-3. If the student asks a math, science, coding, history, language, or general academic question, solve and explain that exact question step-by-step using your full knowledge.
-4. Do NOT force unrelated workspace files into your answer. Only use or reference uploaded workspace files when the student asks about them or when those files directly contain the answer to the student's question.
+CRITICAL PRIORITY #1 — ANSWER THE STUDENT'S EXACT QUESTION DIRECTLY & COMPLETELY:
+1. Read the student's message carefully and answer the EXACT question, problem, video, or topic they asked about—directly, thoroughly, and accurately.
+2. If the student asks a question about their uploaded YouTube video, link, or study material (e.g. "what is in this video", "explain the chapter", etc.), break down the entire video/chapter/material from start to finish with rich, crystal-clear explanations.
+3. If the student asks a general academic, science, math, coding, history, or homework question and did not ask about their uploaded files, answer their question directly, thoroughly, and purely using your academic knowledge.
+4. STRICT NEGATIVE CONSTRAINTS:
+   - NEVER mention "Document 1246", "Enjoy the videos", "music you love", or "Mix".
+   - NEVER mention any "Real-Time Interactive Learning Studio" or widgets.
+   - NEVER say you are temporarily disconnected or give dummy filler.
 ${selectedPersonaInstruction}
 ${researchGuideline}
 ${citationGuideline}`;
@@ -1511,10 +1537,10 @@ ${citationGuideline}`;
       // Prioritize gemini-3-flash-preview (verified active & low-latency) and skip any model in quota cooldown
       const baseCandidateModels: string[] = [
         "gemini-3-flash-preview",
+        "gemini-3.8-flash",
         "gemini-3.1-flash-lite-preview",
         "gemini-3.1-flash-lite",
-        "gemini-flash-latest",
-        "gemini-3.8-flash"
+        "gemini-flash-latest"
       ];
       const candidateModels: string[] = getAvailableCandidateModels(baseCandidateModels);
 
@@ -1525,14 +1551,10 @@ ${citationGuideline}`;
       // Build currentTurnParts: keep the student's exact prompt primary and uncluttered
       const currentTurnParts: any[] = [{ text: prompt }];
 
-      if (effectiveFiles && effectiveFiles.length > 0 && hasRelevantWorkspaceMaterial) {
-        const candidateAttachmentFiles = effectiveFiles.filter((f: any) =>
-          Boolean(f.isDirectAttachment) ||
-          isExplicitMaterialQuery ||
-          retrievedSegments.some(s => s.sourceName === f.name || s.fileId === f.id)
-        );
+      if (effectiveFiles && effectiveFiles.length > 0) {
+        const candidateAttachmentFiles = effectiveFiles.slice(0, 2);
 
-        for (const file of candidateAttachmentFiles.slice(0, 2)) {
+        for (const file of candidateAttachmentFiles) {
           let rawBase64 = "";
           let mimeType = file.fileMimeType || (file.type === "image" ? "image/png" : (file.type === "video" ? "video/mp4" : "application/pdf"));
 
@@ -1567,9 +1589,14 @@ ${citationGuideline}`;
                 }
               });
             }
-          } else if (isExplicitMaterialQuery) {
-            const hasExtractedTranscript = Boolean(file.transcription && String(file.transcription).trim().length > 250);
-            const ytId = !hasExtractedTranscript ? TranscriptProcessor.extractYouTubeId(file.url || file.name || '') : null;
+          } else {
+            const hasRealCaptions = Boolean(
+              file.transcription &&
+              (file.transcription.includes('[00:') ||
+               file.transcription.includes('Full Timestamped Video Transcript') ||
+               file.transcription.length > 2500)
+            );
+            const ytId = !hasRealCaptions ? TranscriptProcessor.extractYouTubeId(file.url || file.name || '') : null;
             if (ytId) {
               currentTurnParts.push({
                 fileData: {

@@ -14,28 +14,25 @@ interface TaskContextType {
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
 
 export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [activeWorkspace, setActiveWorkspaceState] = useState<Workspace | null>(null);
+  const [activeWorkspace, setActiveWorkspaceState] = useState<Workspace | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const storedId = sessionStorage.getItem('studyweb_active_workspace_id');
+      if (storedId) {
+        const savedUid = localStorage.getItem('studyweb_active_user_id');
+        const workspaces = loadStoredWorkspaces(savedUid || undefined);
+        const ws = workspaces.find((w: Workspace) => w.id === storedId);
+        if (ws) return ws;
+      }
+    } catch {}
+    return null;
+  });
 
   const [activeTask, setActiveTaskState] = useState(() => {
     return sessionStorage.getItem('studyweb_active_task') || 'dashboard';
   });
   
   const [intendedTask, setIntendedTask] = useState<string | null>(null);
-
-  // Initialize workspace from session storage on mount
-  useEffect(() => {
-    const storedId = sessionStorage.getItem('studyweb_active_workspace_id');
-    if (storedId) {
-      try {
-        // Search across all stored workspaces (guest, active user, legacy)
-        const workspaces = loadStoredWorkspaces();
-        const ws = workspaces.find((w: Workspace) => w.id === storedId);
-        if (ws) {
-          setActiveWorkspaceState(ws);
-        }
-      } catch (e) {}
-    }
-  }, []);
 
   const setActiveTask = (task: string) => {
     setActiveTaskState(task);

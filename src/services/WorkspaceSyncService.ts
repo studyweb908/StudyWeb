@@ -165,16 +165,21 @@ export class WorkspaceSyncService {
 
   /**
    * Updates tags for a specific workspace file in Supabase.
+   * Enforces user_id ownership.
    */
   public static async updateWorkspaceFileTags(workspaceId: string, fileId: string, tags: string[]): Promise<boolean> {
     if (!supabase) return false;
 
     try {
+      const userId = await this.getUserId();
+      if (!userId) return false;
+
       const validFileId = toValidUuid(fileId);
       const { error } = await supabase
         .from('workspace_files')
         .update({ tags, updated_at: new Date().toISOString() })
-        .eq('id', validFileId);
+        .eq('id', validFileId)
+        .eq('user_id', userId);
 
       if (error) {
         console.debug('Failed to update tags in Supabase workspace_files:', error.message);
@@ -188,17 +193,21 @@ export class WorkspaceSyncService {
   }
 
   /**
-   * Deletes a file from Supabase 'workspace_files'.
+   * Deletes a file from Supabase 'workspace_files' strictly owned by the current user.
    */
   public static async deleteWorkspaceFile(fileId: string): Promise<boolean> {
     if (!supabase) return false;
 
     try {
+      const userId = await this.getUserId();
+      if (!userId) return false;
+
       const validFileId = toValidUuid(fileId);
       const { error } = await supabase
         .from('workspace_files')
         .delete()
-        .eq('id', validFileId);
+        .eq('id', validFileId)
+        .eq('user_id', userId);
 
       return !error;
     } catch {
@@ -207,25 +216,30 @@ export class WorkspaceSyncService {
   }
 
   /**
-   * Deletes a workspace and its associated files from Supabase.
+   * Deletes a workspace and its associated files from Supabase strictly owned by the current user.
    */
   public static async deleteWorkspace(workspaceId: string): Promise<boolean> {
     if (!supabase) return false;
 
     try {
+      const userId = await this.getUserId();
+      if (!userId) return false;
+
       const validWsId = toValidUuid(workspaceId);
 
-      // Delete child files first
+      // Delete child files owned by user first
       await supabase
         .from('workspace_files')
         .delete()
-        .eq('workspace_id', validWsId);
+        .eq('workspace_id', validWsId)
+        .eq('user_id', userId);
 
-      // Delete workspace
+      // Delete workspace owned by user
       const { error } = await supabase
         .from('workspaces')
         .delete()
-        .eq('id', validWsId);
+        .eq('id', validWsId)
+        .eq('user_id', userId);
 
       return !error;
     } catch {
@@ -261,18 +275,19 @@ export class WorkspaceSyncService {
         return [];
       }
 
-      // Fetch all files, notes, and flashcards for these workspaces in parallel
+      // Fetch all files for these workspaces strictly belonging to the authenticated user
+      // (notes and flashcards are persisted in the workspaces JSONB columns)
       const wsIds = rows.map((r: any) => r.id);
       const fileMap: Record<string, WorkspaceFile[]> = {};
       const noteMap: Record<string, any[]> = {};
       const flashcardMap: Record<string, any[]> = {};
 
       try {
-        const [filesRes, notesRes, flashcardsRes] = await Promise.all([
-          supabase.from('workspace_files').select('*').in('workspace_id', wsIds),
-          supabase.from('study_notes').select('*').in('workspace_id', wsIds),
-          supabase.from('flashcards').select('*').in('workspace_id', wsIds)
-        ]);
+        const filesRes = await supabase
+          .from('workspace_files')
+          .select('*')
+          .eq('user_id', userId)
+          .in('workspace_id', wsIds);
 
         if (filesRes.data) {
           filesRes.data.forEach((f: any) => {
@@ -296,36 +311,6 @@ export class WorkspaceSyncService {
               extractedDiagrams: f.extracted_diagrams || undefined,
               contentText: f.content_text || undefined,
               pages: typeof f.pages === 'number' ? f.pages : undefined
-            });
-          });
-        }
-
-        if (notesRes.data) {
-          notesRes.data.forEach((n: any) => {
-            if (!noteMap[n.workspace_id]) {
-              noteMap[n.workspace_id] = [];
-            }
-            noteMap[n.workspace_id].push({
-              id: n.id,
-              title: n.title || 'Untitled Note',
-              content: n.content || '',
-              tags: Array.isArray(n.tags) ? n.tags : [],
-              updatedAt: n.updated_at || n.created_at || new Date().toISOString()
-            });
-          });
-        }
-
-        if (flashcardsRes.data) {
-          flashcardsRes.data.forEach((fc: any) => {
-            if (!flashcardMap[fc.workspace_id]) {
-              flashcardMap[fc.workspace_id] = [];
-            }
-            flashcardMap[fc.workspace_id].push({
-              id: fc.id,
-              front: fc.front || fc.question || '',
-              back: fc.back || fc.answer || '',
-              difficulty: fc.difficulty || 'medium',
-              lastReviewed: fc.last_reviewed || undefined
             });
           });
         }
@@ -426,16 +411,21 @@ export class WorkspaceSyncService {
    * Automatically pushes any local workspaces that are not in Supabase yet.
    */
   /**
-   * Fetches all files for a specific workspace directly from Supabase workspace_files table.
+   * Fetches all files for a specific workspace directly from Supabase workspace_files table,
+   * strictly scoped to the authenticated user.
    */
   public static async fetchWorkspaceFiles(workspaceId: string): Promise<WorkspaceFile[]> {
     if (!supabase) return [];
     try {
+      const userId = await this.getUserId();
+      if (!userId) return [];
+
       const validWsId = toValidUuid(workspaceId);
       const { data: rows, error } = await supabase
         .from('workspace_files')
         .select('*')
         .eq('workspace_id', validWsId)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
       if (error || !rows) return [];
@@ -464,30 +454,31 @@ export class WorkspaceSyncService {
   }
 
   /**
-   * Saves a workspace note to the Supabase 'study_notes' table.
+   * Saves a workspace note into the parent workspace's `notes` JSONB array in Supabase.
    */
   public static async saveWorkspaceNote(workspaceId: string, note: any, explicitUserId?: string): Promise<boolean> {
     if (!supabase || !note) return false;
     try {
-      const validNoteId = toValidUuid(note.id || `note-${Date.now()}`);
       const validWsId = toValidUuid(workspaceId);
       const userId = explicitUserId || await this.getUserId();
+      if (!userId) return false;
 
-      const row: Record<string, any> = {
-        id: validNoteId,
-        workspace_id: validWsId,
-        title: note.title || 'Research Synthesis Note',
-        content: note.content || '',
-        tags: Array.isArray(note.tags) ? note.tags : ['Web Research'],
-        updated_at: new Date().toISOString()
-      };
-      if (userId) {
-        row.user_id = userId;
-      }
+      const { data: wsRow } = await supabase
+        .from('workspaces')
+        .select('notes')
+        .eq('id', validWsId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      const existingNotes = Array.isArray(wsRow?.notes) ? wsRow.notes : [];
+      const filtered = existingNotes.filter((n: any) => n?.id !== note.id);
+      const updatedNotes = [note, ...filtered];
 
       const { error } = await supabase
-        .from('study_notes')
-        .upsert(row, { onConflict: 'id' });
+        .from('workspaces')
+        .update({ notes: updatedNotes, updated_at: new Date().toISOString() })
+        .eq('id', validWsId)
+        .eq('user_id', userId);
 
       return !error;
     } catch {

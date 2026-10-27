@@ -47,8 +47,7 @@ function getGeminiApiKey(): string | null {
   const key =
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_API_KEY ||
-    process.env.API_KEY ||
-    process.env.VITE_GEMINI_API_KEY;
+    process.env.API_KEY;
 
   if (!key || key.trim() === '' || key === 'MY_GEMINI_API_KEY') {
     return null;

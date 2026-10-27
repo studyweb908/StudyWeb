@@ -5,6 +5,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { toValidUuid, isValidUuid, generateUuid } from '../utils/uuid';
 import { TranscriptProcessor, TranscriptResult, TranscriptValidationStatus, TranscriptValidationResult } from './TranscriptProcessor';
 import { cleanNotebookLMTitle, isRawUrlOrPlaceholderTitle } from '../utils/notebookTitle';
+import { getServerGeminiApiKey } from '../utils/serverEnv';
 
 export const studyMaterialRouter = express.Router();
 
@@ -22,11 +23,7 @@ export function getSupabaseServer(authHeader?: string) {
 dotenv.config();
 
 export function getGeminiApiKey(): string {
-  const rawKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY || process.env.VITE_GEMINI_API_KEY;
-  if (rawKey && rawKey.trim() !== '' && rawKey !== 'MY_GEMINI_API_KEY') {
-    return rawKey.trim();
-  }
-  return 'AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A';
+  return getServerGeminiApiKey() || '';
 }
 
 export function getGeminiClient(): GoogleGenAI | null {

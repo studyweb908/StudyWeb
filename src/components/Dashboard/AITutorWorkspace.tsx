@@ -206,10 +206,10 @@ export default function AITutorWorkspace() {
   const { activeWorkspace } = useTaskContext();
   const targetWsId = activeWorkspace?.id || 'local-workspace';
 
-  // Workspace Logo helper (supports custom image/data-url, emoji, and theme accents)
-  const workspaceLogo = (activeWorkspace as any)?.logo || (activeWorkspace as any)?.icon || (activeWorkspace as any)?.logoUrl || activeWorkspace?.emoji || '🧬';
-  const isWorkspaceImageLogo = typeof workspaceLogo === 'string' &&
-    (workspaceLogo.startsWith('data:') || workspaceLogo.startsWith('http://') || workspaceLogo.startsWith('https://') || (workspaceLogo.startsWith('/') && !workspaceLogo.includes('logo-inner.png')));
+  // Workspace Logo & Icon helper: renders the workspace's actual icon/emoji or custom image with its theme accent
+  const workspaceIcon = (activeWorkspace as any)?.logo || (activeWorkspace as any)?.icon || (activeWorkspace as any)?.logoUrl || activeWorkspace?.emoji || '🧬';
+  const isWorkspaceImageLogo = typeof workspaceIcon === 'string' &&
+    (workspaceIcon.startsWith('data:') || workspaceIcon.startsWith('http://') || workspaceIcon.startsWith('https://') || (workspaceIcon.startsWith('/') && !workspaceIcon.includes('logo-inner.png')));
 
   const renderWorkspaceLogo = (sizeClass = 'w-7 h-7 sm:w-9 sm:h-9', textClass = 'text-base sm:text-lg') => {
     const themeBg: Record<string, string> = {
@@ -229,13 +229,13 @@ export default function AITutorWorkspace() {
       >
         {isWorkspaceImageLogo ? (
           <img 
-            src={workspaceLogo} 
+            src={workspaceIcon} 
             alt={`${activeWorkspace?.name || 'Workspace'} Logo`} 
             className="w-full h-full object-cover select-none" 
           />
         ) : (
           <span className={`${textClass} leading-none select-none`}>
-            {workspaceLogo}
+            {workspaceIcon}
           </span>
         )}
       </div>
@@ -571,7 +571,12 @@ export default function AITutorWorkspace() {
     AITutorBackgroundService.resetWorkspaceChat(targetWsId, null, [freshMsg] as any);
     setMessages([freshMsg]);
     if (showNotification) {
-      (window as any).showToast?.('Chat history cleared — ready for a new topic!', 'info');
+      (window as any).showToast?.(
+        'Your conversation history has been wiped clean while keeping your active workspace open for a new topic.',
+        'info',
+        3400,
+        'Chat History Cleared'
+      );
     }
   };
 
@@ -746,6 +751,7 @@ export default function AITutorWorkspace() {
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, fileCategory: 'document' | 'image') => {
     if (!e.target.files) return;
     const filesArray = Array.from(e.target.files) as File[];
+    if (filesArray.length === 0) return;
     
     for (const file of filesArray) {
       const processed = await processUploadedFile(file);
@@ -754,6 +760,13 @@ export default function AITutorWorkspace() {
         return [...prev, processed];
       });
     }
+
+    (window as any).showToast?.(
+      `"${filesArray.map(f => f.name).join(', ')}" was uploaded and attached to your AI Tutor session.`,
+      'success',
+      3200,
+      'Material Uploaded & Ready'
+    );
 
     e.target.value = '';
   };
@@ -773,6 +786,7 @@ export default function AITutorWorkspace() {
     setIsDragging(false);
     if (!e.dataTransfer.files) return;
     const filesArray = Array.from(e.dataTransfer.files) as File[];
+    if (filesArray.length === 0) return;
     
     for (const file of filesArray) {
       const processed = await processUploadedFile(file);
@@ -781,6 +795,13 @@ export default function AITutorWorkspace() {
         return [...prev, processed];
       });
     }
+
+    (window as any).showToast?.(
+      `"${filesArray.map(f => f.name).join(', ')}" was uploaded and attached to your AI Tutor session.`,
+      'success',
+      3200,
+      'Material Uploaded & Ready'
+    );
   };
 
   const startSpeechRecognition = async () => {

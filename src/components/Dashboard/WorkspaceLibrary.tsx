@@ -864,7 +864,9 @@ export default function WorkspaceLibrary({
         window.dispatchEvent(
           new CustomEvent('studyweb-toast', {
             detail: {
-              message: `🎉 Incredible! "${fileData.name}" was analyzed at lightning speed and indexed into your study notes! 🧠⚡`,
+              title: 'Material Analyzed & Indexed',
+              badge: 'Library Synchronized',
+              message: `"${fileData.name}" was analyzed and indexed into your study workspace!`,
               type: 'success'
             }
           })
@@ -974,7 +976,9 @@ export default function WorkspaceLibrary({
           window.dispatchEvent(
             new CustomEvent('studyweb-toast', {
               detail: {
-                message: `🎉 Boom! "${fileData.name}" was uploaded to Supabase and added to your workspace!`,
+                title: 'Material Analyzed & Indexed',
+                badge: 'Library Synchronized',
+                message: `"${fileData.name}" was uploaded and added to your study workspace!`,
                 type: 'success'
               }
             })

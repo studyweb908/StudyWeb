@@ -1702,12 +1702,12 @@ Include all specific examples, stories, facts, definitions, formulas, and conclu
 
     // Proceed to initiate AI summary with verified real transcript content
     try {
-      const apiKey =
-        process.env.GEMINI_API_KEY ||
-        process.env.GOOGLE_API_KEY ||
-        process.env.API_KEY ||
-        process.env.VITE_GEMINI_API_KEY ||
-        'AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A';
+      const rawCandidates = [
+        process.env.GEMINI_API_KEY,
+        process.env.GOOGLE_API_KEY,
+        process.env.API_KEY
+      ];
+      const apiKey = rawCandidates.find(k => k && k.trim() !== '' && k.trim() !== 'MY_GEMINI_API_KEY') || '';
 
       if (!apiKey) {
         return {

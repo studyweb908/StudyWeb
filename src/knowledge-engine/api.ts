@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type } from '@google/genai';
 import { generateEmbedding } from './utils/embeddings.js';
 import { toValidUuid, isValidUuid, generateUuid } from '../utils/uuid.js';
+import { getServerGeminiApiKey } from '../utils/serverEnv.js';
 
 export const knowledgeRouter = express.Router();
 
@@ -23,11 +24,7 @@ function getSupabaseClient(authHeader?: string) {
 }
 
 function getGeminiApiKey(): string | null {
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY || process.env.VITE_GEMINI_API_KEY;
-  if (!key || key === "MY_GEMINI_API_KEY" || key.trim() === "") {
-    return "AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A";
-  }
-  return key.trim();
+  return getServerGeminiApiKey();
 }
 
 
@@ -661,9 +658,11 @@ knowledgeRouter.post('/search', async (req, res) => {
       }
     }
 
-    // In-memory chunks search fallback
+    // In-memory chunks search fallback (strictly scoped to caller's workspace & user)
     const memChunks = Array.from(memoryStore.documentChunks.values()).filter(
-      (c: any) => c.workspace_id === workspaceId || c.workspace_id === normWsId || c.normalized_workspace_id === normWsId
+      (c: any) =>
+        (c.workspace_id === workspaceId || c.workspace_id === normWsId || c.normalized_workspace_id === normWsId) &&
+        (!userId || !c.user_id || c.user_id === userId || c.user_id === normUserId)
     );
     const scored = memChunks.map((row: any) => {
       const setA = new Set(query.toLowerCase().split(' '));
@@ -719,28 +718,35 @@ knowledgeRouter.post('/delete', async (req, res) => {
 
     const normDocId = toValidUuid(documentId);
 
-    // Clean up memory store
-    memoryStore.documents.delete(documentId);
-    memoryStore.documents.delete(normDocId);
-    memoryStore.processingJobs.delete(documentId);
-    memoryStore.processingJobs.delete(normDocId);
+    // Clean up memory store only if owned by caller
+    const existingDoc = memoryStore.documents.get(documentId) || memoryStore.documents.get(normDocId);
+    if (!existingDoc || !userId || existingDoc.user_id === userId || existingDoc.user_id === 'local-user') {
+      memoryStore.documents.delete(documentId);
+      memoryStore.documents.delete(normDocId);
+      memoryStore.processingJobs.delete(documentId);
+      memoryStore.processingJobs.delete(normDocId);
 
-    for (const [chunkId, chunk] of memoryStore.documentChunks.entries()) {
-      if (chunk.document_id === documentId || chunk.document_id === normDocId) {
-        memoryStore.documentChunks.delete(chunkId);
+      for (const [chunkId, chunk] of memoryStore.documentChunks.entries()) {
+        if (chunk.document_id === documentId || chunk.document_id === normDocId) {
+          memoryStore.documentChunks.delete(chunkId);
+        }
       }
     }
 
-    // Clean up Supabase
+    // Clean up Supabase strictly for the authenticated user
     const hasAuthToken = Boolean(authHeader && authHeader.startsWith('Bearer ') && authHeader.length > 20);
     if (hasAuthToken) {
       try {
         const supabase = getSupabaseClient(authHeader);
-        await supabase.from('embeddings').delete().eq('document_id', normDocId);
-        await supabase.from('document_chunks').delete().eq('document_id', normDocId);
-        await supabase.from('processing_jobs').delete().eq('document_id', normDocId);
-        await supabase.from('documents').delete().eq('id', normDocId);
-        await supabase.from('workspace_files').delete().eq('id', normDocId);
+        const { data: authData } = await supabase.auth.getUser();
+        const verifiedUserId = authData?.user?.id;
+        if (verifiedUserId) {
+          await supabase.from('embeddings').delete().eq('document_id', normDocId).eq('user_id', verifiedUserId);
+          await supabase.from('document_chunks').delete().eq('document_id', normDocId).eq('user_id', verifiedUserId);
+          await supabase.from('processing_jobs').delete().eq('document_id', normDocId).eq('user_id', verifiedUserId);
+          await supabase.from('documents').delete().eq('id', normDocId).eq('user_id', verifiedUserId);
+          await supabase.from('workspace_files').delete().eq('id', normDocId).eq('user_id', verifiedUserId);
+        }
       } catch (e: any) {
         console.warn("Notice: Supabase file deletion cleanup warning:", e?.message || e);
       }
