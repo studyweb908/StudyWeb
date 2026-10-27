@@ -158,6 +158,17 @@ class AITutorBackgroundManager {
     WorkspaceChatCache.clearMessages(workspaceId, userId, initialMessages as any);
     this.notifyListeners();
 
+    // Notify backend server to clear session memory
+    if (typeof fetch !== 'undefined') {
+      try {
+        fetch('/api/ai-tutor-clear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspaceId, userId })
+        }).catch(() => {});
+      } catch {}
+    }
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('studyweb-tutor-chat-reset', {
         detail: {

@@ -570,6 +570,18 @@ export default function AITutorWorkspace() {
     };
     AITutorBackgroundService.resetWorkspaceChat(targetWsId, null, [freshMsg] as any);
     setMessages([freshMsg]);
+
+    // Explicitly notify backend server to clear conversation history in Gemini API session
+    try {
+      fetch('/api/ai-tutor-clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: targetWsId
+        })
+      }).catch(() => {});
+    } catch {}
+
     if (showNotification) {
       (window as any).showToast?.(
         'Your conversation history has been wiped clean while keeping your active workspace open for a new topic.',
@@ -604,10 +616,14 @@ export default function AITutorWorkspace() {
       iconType: 'tutor'
     });
 
-    const history = messages.slice(-8).map(m => ({
-      role: m.sender === 'ai' ? 'model' : 'user',
-      content: m.text
-    }));
+    // Exclude welcome messages so history sent to backend is 100% clean conversation turns
+    const history = messages
+      .filter(m => !m.isError && !m.id.startsWith('welcome-') && m.id !== 'welcome-msg')
+      .slice(-8)
+      .map(m => ({
+        role: m.sender === 'ai' ? 'model' : 'user',
+        content: m.text
+      }));
 
     try {
       const response = await fetch("/api/ai-tutor", {

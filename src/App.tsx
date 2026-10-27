@@ -60,6 +60,7 @@ import {
 import { Workspace, INITIAL_WORKSPACES } from './components/Dashboard/WorkspaceTypes';
 import { toValidUuid } from './utils/uuid.ts';
 import { WorkspaceSyncService } from './services/WorkspaceSyncService.ts';
+import { StudyTrackerService } from './services/StudyTrackerService';
 import { loadStoredWorkspaces, saveStoredWorkspaces, clearGuestWorkspaces } from './utils/workspaceStorage';
 import { recordUserActivity } from './utils/userActivity';
 import WorkspaceSelector from './components/Dashboard/WorkspaceSelector';
@@ -110,6 +111,7 @@ export default function App() {
       }
     };
     handleHashChange();
+    StudyTrackerService.init();
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);

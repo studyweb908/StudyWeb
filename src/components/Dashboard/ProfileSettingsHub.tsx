@@ -50,6 +50,7 @@ import {
   Eye
 } from 'lucide-react';
 import { useThemeMode } from '../../hooks/useThemeMode';
+import { useStudyStats } from '../../hooks/useStudyStats';
 
 // High-fidelity preset avatars
 const PRESET_AVATARS = [
@@ -120,6 +121,7 @@ type SettingsTab = 'overview' | 'personal' | 'curriculum' | 'security';
 
 export function ProfileSettingsHub() {
   const { themeMode, setThemeMode } = useThemeMode();
+  const { currentStreak, studyHoursFormatted, todayMinutes, isStudyingLive, activeToday, streakBadgeText } = useStudyStats();
 
   // Navigation State
   const [activeTab, setActiveTab] = useState<SettingsTab>('overview');
@@ -899,28 +901,51 @@ export function ProfileSettingsHub() {
           </div>
         </div>
 
-        {/* METRIC STRIP: Tabular figures with zero-pill rule */}
+        {/* METRIC STRIP: Real-Time Tabular Figures with Zero-Pill Discipline */}
         <div className="mt-8 pt-6 border-t border-slate-100 dark:border-white/10 grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="p-3.5 rounded-2xl bg-white/70 dark:bg-white/5 border border-slate-200/70 dark:border-white/5 shadow-xs hover:border-amber-500/30 transition-all">
-            <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs font-medium mb-1">
-              <Flame className="w-4 h-4 text-amber-500" />
-              <span>Current Streak</span>
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs font-medium">
+                <Flame className="w-4 h-4 text-amber-500 animate-pulse" />
+                <span>Current Streak</span>
+              </div>
+              {activeToday && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                  Active Today
+                </span>
+              )}
             </div>
-            <div className="text-xl sm:text-2xl font-mono font-bold tabular-nums text-slate-900 dark:text-white">
-              14 <span className="text-xs font-sans text-slate-500 dark:text-slate-400 font-normal">Days</span>
+            <div className="text-xl sm:text-2xl font-mono font-bold tabular-nums text-slate-900 dark:text-white flex items-baseline gap-1.5">
+              <span>{currentStreak}</span>
+              <span className="text-xs font-sans text-slate-500 dark:text-slate-400 font-normal">
+                {currentStreak === 1 ? 'Day' : 'Days'}
+              </span>
             </div>
-            <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5">Top 5% of Scholars</p>
+            <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5">
+              {streakBadgeText} · +1 streak every day
+            </p>
           </div>
 
           <div className="p-3.5 rounded-2xl bg-white/70 dark:bg-white/5 border border-slate-200/70 dark:border-white/5 shadow-xs hover:border-sky-500/30 transition-all">
-            <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs font-medium mb-1">
-              <Clock className="w-4 h-4 text-sky-500" />
-              <span>Logged Study</span>
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs font-medium">
+                <Clock className="w-4 h-4 text-sky-500" />
+                <span>Logged Study</span>
+              </div>
+              {isStudyingLive && (
+                <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Live Active
+                </span>
+              )}
             </div>
-            <div className="text-xl sm:text-2xl font-mono font-bold tabular-nums text-slate-900 dark:text-white">
-              48.5 <span className="text-xs font-sans text-slate-500 dark:text-slate-400 font-normal">Hours</span>
+            <div className="text-xl sm:text-2xl font-mono font-bold tabular-nums text-slate-900 dark:text-white flex items-baseline gap-1.5">
+              <span>{studyHoursFormatted}</span>
+              <span className="text-xs font-sans text-slate-500 dark:text-slate-400 font-normal">Hours</span>
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">This Academic Term</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+              {todayMinutes}m logged today in StudyWeb (Real-Time)
+            </p>
           </div>
 
           <div className="p-3.5 rounded-2xl bg-white/70 dark:bg-white/5 border border-slate-200/70 dark:border-white/5 shadow-xs hover:border-purple-500/30 transition-all">

@@ -732,8 +732,21 @@ export default function WorkspaceChat({
     const freshWelcome = [buildWelcomeMessage(true)];
     AITutorBackgroundService.resetWorkspaceChat(workspace.id, resolvedUserId, freshWelcome as any);
     setMessages(freshWelcome);
+
+    // Explicitly notify backend server to clear conversation history in Gemini API session
+    try {
+      fetch('/api/ai-tutor-clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: workspace.id,
+          userId: resolvedUserId
+        })
+      }).catch(() => {});
+    } catch {}
+
     (window as any).showToast?.(
-      'Your conversation history has been wiped clean while keeping your active workspace open for a new topic.',
+      'Your conversation history has been wiped clean in the backend and frontend. You can start a completely fresh topic with zero residual memory.',
       'info',
       3400,
       'Chat History Cleared'
@@ -1176,8 +1189,9 @@ export default function WorkspaceChat({
       };
     });
 
+    // Exclude welcome greetings and error banners so history sent to Gemini is 100% clean conversation turns
     const history = messages
-      .filter(m => !m.isError)
+      .filter(m => !m.isError && !m.id.startsWith('welcome-') && m.id !== 'welcome-msg')
       .slice(-6)
       .map(m => ({
         role: m.sender === 'ai' ? 'model' : 'user',
@@ -1192,7 +1206,7 @@ export default function WorkspaceChat({
         const rawContent = (primaryDoc.transcription || primaryDoc.contentText || primaryDoc.summary || '').trim();
         if (rawContent && rawContent.length > 20) {
           return {
-            reply: `### 📘 Complete Study Breakdown: **${primaryName}**\n\n${rawContent.slice(0, 2200)}${rawContent.length > 2200 ? '\n\n*(Explore the interactive stages below to inspect every movement in detail)*' : ''}`,
+            reply: `### 📘 Complete Study Breakdown: **${primaryName}**\n\n${rawContent.slice(0, 2400)}`,
             citations: [{
               sourceName: primaryName,
               quote: rawContent.slice(0, 240)

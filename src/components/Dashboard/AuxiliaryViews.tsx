@@ -64,6 +64,7 @@ import { useThemeMode } from '../../hooks/useThemeMode';
 import AutoSavingToast from '../AutoSavingToast';
 import { ProfileSettingsHub } from './ProfileSettingsHub';
 import { ResourceCardSkeleton } from './DashboardSkeletons';
+import { useStudyStats } from '../../hooks/useStudyStats';
 
 // ==========================================
 // 1. STUDY PLANNER VIEW
@@ -1421,6 +1422,8 @@ export function ResourcesView({ workspaces = [], isLoading: externalLoading }: {
 // 6. ANALYTICS VIEW
 // ==========================================
 export function AnalyticsView() {
+  const { currentStreak, studyHoursFormatted, isStudyingLive, todayMinutes, activeToday } = useStudyStats();
+
   return (
     <div className="space-y-6 text-left text-xs sm:text-sm">
       <div>
@@ -1434,15 +1437,27 @@ export function AnalyticsView() {
       {/* Grid of micro cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
-          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Weekly Focus</span>
-          <p className="font-black text-2xl text-slate-900 dark:text-white mt-1">14.5 hrs</p>
-          <span className="text-[10px] text-emerald-500 font-bold mt-1 block">&uarr; 15% from last week</span>
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Logged Study</span>
+            {isStudyingLive && (
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Live session active" />
+            )}
+          </div>
+          <p className="font-black text-2xl text-slate-900 dark:text-white mt-1 tabular-nums">{studyHoursFormatted} hrs</p>
+          <span className="text-[10px] text-emerald-500 font-bold mt-1 block">{todayMinutes}m logged today</span>
         </div>
 
         <div className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
-          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Quiz Accuracy</span>
-          <p className="font-black text-2xl text-slate-900 dark:text-white mt-1">82.4%</p>
-          <span className="text-[10px] text-emerald-500 font-bold mt-1 block">&uarr; 2.1% from last week</span>
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Current Streak</span>
+            <Flame className="w-3.5 h-3.5 text-amber-500" />
+          </div>
+          <p className="font-black text-2xl text-slate-900 dark:text-white mt-1 tabular-nums">
+            {currentStreak} {currentStreak === 1 ? 'day' : 'days'}
+          </p>
+          <span className="text-[10px] text-amber-500 font-bold mt-1 block">
+            {activeToday ? 'Active Today · +1 daily' : 'Study today to extend'}
+          </span>
         </div>
 
         <div className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
