@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, lazy, Suspense, type ComponentType, type LazyExoticComponent } from 'react';
 import { motion, useScroll, useSpring, AnimatePresence } from 'motion/react';
 import { useTaskContext } from './context/TaskContext';
 import Navigation from './components/Navigation';
@@ -20,25 +20,44 @@ import DashboardSidebar from './components/Dashboard/DashboardSidebar';
 import DashboardHeader from './components/Dashboard/DashboardHeader';
 import DashboardHome from './components/Dashboard/DashboardHome';
 import OfflineNotice from './components/OfflineNotice';
+import GlobalVoiceListener from './components/GlobalVoiceListener';
 import { playDopaminePopSound } from './utils/audioEffects';
 import { useThemeMode } from './hooks/useThemeMode';
 
-// Lazy-loaded Heavy & Secondary Views (Code-Split for Instant Startup)
-const InteractiveDemo = lazy(() => import('./components/InteractiveDemo'));
-const Pricing = lazy(() => import('./components/Pricing'));
-const About = lazy(() => import('./components/About'));
-const Contact = lazy(() => import('./components/Contact'));
-const FAQ = lazy(() => import('./components/FAQ'));
-const FinalCTA = lazy(() => import('./components/FinalCTA'));
-const LegalModals = lazy(() => import('./components/LegalModals'));
-const ResetPasswordModal = lazy(() => import('./components/ResetPasswordModal'));
-const PDFWorkspaceView = lazy(() => import('./components/Dashboard/PDFWorkspaceView'));
-const StudySessionView = lazy(() => import('./components/Dashboard/StudySessionView'));
-const QuickNoteModal = lazy(() => import('./components/Dashboard/QuickNoteModal'));
-const OnboardingModal = lazy(() => import('./components/OnboardingModal'));
-const WelcomeBackModal = lazy(() => import('./components/Dashboard/WelcomeBackModal'));
-const DeleteWorkspaceModal = lazy(() => import('./components/Dashboard/DeleteWorkspaceModal'));
-const GlobalVoiceListener = lazy(() => import('./components/GlobalVoiceListener'));
+// Resilient lazy import helper that retries transient network failures and prevents uncaught dynamic import errors
+function lazyWithRetry<T extends ComponentType<any>>(
+  factory: () => Promise<{ default: T }>
+): LazyExoticComponent<T> {
+  return lazy(async () => {
+    let lastErr: any;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await factory();
+      } catch (err) {
+        lastErr = err;
+        await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+      }
+    }
+    console.warn('Lazy module load fallback activated:', lastErr);
+    return { default: (() => null) as unknown as T };
+  });
+}
+
+// Lazy-loaded Heavy & Secondary Views (Code-Split with Automatic Retry)
+const InteractiveDemo = lazyWithRetry(() => import('./components/InteractiveDemo'));
+const Pricing = lazyWithRetry(() => import('./components/Pricing'));
+const About = lazyWithRetry(() => import('./components/About'));
+const Contact = lazyWithRetry(() => import('./components/Contact'));
+const FAQ = lazyWithRetry(() => import('./components/FAQ'));
+const FinalCTA = lazyWithRetry(() => import('./components/FinalCTA'));
+const LegalModals = lazyWithRetry(() => import('./components/LegalModals'));
+const ResetPasswordModal = lazyWithRetry(() => import('./components/ResetPasswordModal'));
+const PDFWorkspaceView = lazyWithRetry(() => import('./components/Dashboard/PDFWorkspaceView'));
+const StudySessionView = lazyWithRetry(() => import('./components/Dashboard/StudySessionView'));
+const QuickNoteModal = lazyWithRetry(() => import('./components/Dashboard/QuickNoteModal'));
+const OnboardingModal = lazyWithRetry(() => import('./components/OnboardingModal'));
+const WelcomeBackModal = lazyWithRetry(() => import('./components/Dashboard/WelcomeBackModal'));
+const DeleteWorkspaceModal = lazyWithRetry(() => import('./components/Dashboard/DeleteWorkspaceModal'));
 import { 
   Sparkles, 
   Terminal, 
@@ -68,14 +87,14 @@ import WorkspaceContainer from './components/Dashboard/WorkspaceContainer';
 import WorkspaceChat from './components/Dashboard/WorkspaceChat';
 import ToastContainer from './components/ToastContainer';
 
-const StudyPlannerView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.StudyPlannerView })));
-const SubjectsView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.SubjectsView })));
-const ResourcesView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.ResourcesView })));
-const AnalyticsView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.AnalyticsView })));
-const AchievementsView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.AchievementsView })));
-const LeaderboardView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.LeaderboardView })));
-const ProfileView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.ProfileView })));
-const ParentDashboardView = lazy(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.ParentDashboardView })));
+const StudyPlannerView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.StudyPlannerView })));
+const SubjectsView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.SubjectsView })));
+const ResourcesView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.ResourcesView })));
+const AnalyticsView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.AnalyticsView })));
+const AchievementsView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.AchievementsView })));
+const LeaderboardView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.LeaderboardView })));
+const ProfileView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.ProfileView })));
+const ParentDashboardView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.ParentDashboardView })));
 
 export default function App() {
   const { toggleTheme, setThemeMode, isDarkApplied } = useThemeMode(); // Initialize real-time theme synchronization service at root level

@@ -99,19 +99,8 @@ export function recordUserActivity(
     const updated = [item, ...list].slice(0, 50);
     localStorage.setItem(key, JSON.stringify(updated));
 
-    // Dispatch event to allow real-time widget refresh
+    // Dispatch event to allow real-time widget refresh and study time tracking
     window.dispatchEvent(new CustomEvent('studyweb-activity-updated', { detail: item }));
-
-    // Seamlessly credit active study time and guarantee daily streak registration
-    try {
-      import('../services/StudyTrackerService').then(m => {
-        m.StudyTrackerService.recordStudyAction(
-          activity.iconType === 'tutor' ? 'tutor' :
-          activity.iconType === 'quiz' ? 'quiz' :
-          activity.iconType === 'note' ? 'note' : 'workspace'
-        );
-      }).catch(() => {});
-    } catch {}
   } catch (err) {
     console.debug('Failed to record user activity:', err);
   }

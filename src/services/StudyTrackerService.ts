@@ -116,6 +116,9 @@ class StudyTrackerManager {
     window.addEventListener('click', onActivity, { passive: true });
     window.addEventListener('scroll', onActivity, { passive: true });
     window.addEventListener('touchstart', onActivity, { passive: true });
+    window.addEventListener('studyweb-activity-updated', () => {
+      this.recordStudyAction('workspace');
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         onActivity();

@@ -87,14 +87,14 @@ export function isQuotaOrRateLimitError(err: any): boolean {
 
 export function recordModelQuotaCooldown(model: string, err?: any): void {
   const msg = String(err?.message || err?.error?.message || "");
-  const isDailyQuota = msg.includes("PerDay") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("quota") || msg.includes("429");
-  const cooldownMs = isDailyQuota ? 2 * 60 * 60 * 1000 : 60 * 1000;
+  const isDailyQuota = msg.includes("PerDay");
+  const cooldownMs = isDailyQuota ? 5 * 60 * 1000 : 20 * 1000;
   modelQuotaCooldownMap.set(model, Date.now() + cooldownMs);
 }
 
 export function getAvailableCandidateModels(preferredModels: string[]): string[] {
   const available = preferredModels.filter((m) => !isModelOnCooldown(m));
-  return available.length > 0 ? available : ["gemini-3.1-flash-lite-preview", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+  return available.length > 0 ? available : ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-flash-latest"];
 }
 
 export function summarizeModelError(err: any): string {
@@ -653,7 +653,19 @@ async function startServer() {
       "what", "is", "the", "are", "tell", "me", "about", "how", "why", "does", "do",
       "explain", "please", "can", "you", "in", "my", "notes", "files", "document", "documents",
       "this", "that", "there", "and", "or", "for", "with", "from", "into", "give", "question",
-      "answer", "help", "understand", "solve", "find", "show", "write", "make"
+      "answer", "help", "understand", "solve", "find", "show", "write", "make", "like", "work",
+      "works", "working", "mean", "means", "meaning", "define", "definition", "describe",
+      "description", "example", "examples", "image", "images", "picture", "pictures", "diagram",
+      "diagrams", "draw", "drawing", "create", "generate", "illustrate", "illustration", "photo",
+      "visual", "concept", "concepts", "topic", "topics", "thing", "things", "something",
+      "anything", "everything", "someone", "suppose", "imagine", "detail", "details", "simple",
+      "words", "short", "long", "full", "complete", "step", "steps", "way", "ways", "part",
+      "parts", "type", "types", "kind", "kinds", "use", "used", "using", "have", "has", "had",
+      "was", "were", "been", "being", "will", "would", "could", "should", "may", "might", "must",
+      "need", "want", "know", "think", "good", "best", "better", "first", "second", "also",
+      "very", "much", "more", "most", "some", "any", "all", "other", "another", "such", "only",
+      "own", "same", "than", "too", "just", "now", "here", "where", "when", "who", "whom",
+      "whose", "which", "workspace", "workspaces", "uploaded", "upload", "study", "tutor", "bro"
     ]);
 
     const rawTokens = qLower.split(/[^a-z0-9_-]+/).filter(w => w.length > 2 && !stopWords.has(w));
@@ -716,6 +728,11 @@ async function startServer() {
         rawUnits.push({ text: cleanMultilineText(file.summary.trim()), approxPage: 1, type: 'Overview' });
       }
 
+      // 6. Ensure at least file title unit exists so title-level topic matching works
+      if (rawUnits.length === 0 && fileName) {
+        rawUnits.push({ text: `Study Material: ${fileName}`, approxPage: 1, type: 'Title' });
+      }
+
       // Score each unit
       rawUnits.forEach((unit, uIdx) => {
         const uText = unit.text;
@@ -723,11 +740,10 @@ async function startServer() {
         let score = 0;
 
         queryTokens.forEach(t => {
-          if (uLower.includes(t)) {
+          if (new RegExp(`\\b${t}\\b`, 'i').test(uText)) {
+            score += 5;
+          } else if (t.length >= 5 && uLower.includes(t)) {
             score += 3;
-            if (new RegExp(`\\b${t}\\b`, 'i').test(uText)) {
-              score += 2;
-            }
           }
         });
 
@@ -739,10 +755,10 @@ async function startServer() {
           }
         }
 
-        // Bonus if user query explicitly mentions file name
-        const fnWords = fileName.toLowerCase().split(/[^a-z0-9]+/);
-        if (fnWords.some((w: string) => w.length > 3 && qLower.includes(w))) {
-          score += 5;
+        // Bonus if user query explicitly mentions file name keywords
+        const fnWords = fileName.toLowerCase().split(/[^a-z0-9]+/).filter((w: string) => w.length > 3 && !stopWords.has(w));
+        if (fnWords.some((w: string) => new RegExp(`\\b${w}\\b`, 'i').test(qLower))) {
+          score += 6;
         }
 
         // Snippet generation
@@ -779,11 +795,11 @@ async function startServer() {
 
     allSegments.sort((a, b) => b.score - a.score);
 
-    const hasHighRelevance = allSegments.length > 0 && allSegments[0].score > 0;
+    const hasHighRelevance = allSegments.length > 0 && allSegments[0].score >= 5;
     let selectedSegments: ExtractedSegment[] = [];
 
     if (hasHighRelevance) {
-      selectedSegments = allSegments.filter(s => s.score > 0).slice(0, topK);
+      selectedSegments = allSegments.filter(s => s.score >= 5).slice(0, topK);
     } else if (forceIncludeWhenZeroScore) {
       const fileSeen = new Map<string, number>();
       for (const seg of allSegments) {
@@ -810,7 +826,7 @@ async function startServer() {
     contextString += "Use these passages from the student's workspace documents ONLY if they are relevant to answering the student's exact question:\n\n";
 
     selectedSegments.forEach((seg, idx) => {
-      contextString += `[Segment ${idx + 1} | Source: "${seg.sourceName}" | Page ${seg.page} | Relevance: ${seg.score > 0 ? 'Matched' : 'Overview'}]\n`;
+      contextString += `[Segment ${idx + 1} | Source: "${seg.sourceName}" | Page ${seg.page} | Relevance: ${seg.score >= 5 ? 'Matched' : 'Overview'}]\n`;
       contextString += `"${seg.text}"\n\n`;
     });
 
@@ -832,7 +848,241 @@ async function startServer() {
     return await retrieveKnowledge(workspaceId, 'local-user', query, topK, ai, files, notes, authHeader);
   }
 
-function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], groundedSourceContext?: string): string {
+function isImageOrDiagramRequest(prompt: string): boolean {
+  const q = prompt.toLowerCase();
+  return /\b(generate\s+(an?\s+)?(image|picture|diagram|illustration|photo|drawing|visual|chart|sketch)|create\s+(an?\s+)?(image|picture|diagram|illustration|photo|drawing|visual|chart|sketch)|make\s+(an?\s+)?(image|picture|diagram|illustration|drawing|visual)|draw\s+(an?\s+|me\s+(an?\s+)?)?(image|picture|diagram|illustration|chart|sketch|process|cycle|cell|plant|structure|model|photosynthesis|atom|heart|circuit|map|graph)|show\s+(me\s+)?(an?\s+)?(image|picture|diagram|illustration|drawing)|illustrate\s+|image\s+of\s+|diagram\s+of\s+|picture\s+of\s+|illustration\s+of\s+)\b/i.test(q);
+}
+
+function extractCleanTopicLabel(prompt: string): string {
+  let cleaned = prompt
+    .replace(/https?:\/\/[^\s]+/gi, "")
+    .replace(/^(hi|hello|hey|bro|please|can you|could you|will you|tell me|explain to me|explain|what is|what's|what are|how does|how do|define|describe|generate an? image of|create an? image of|make an? image of|draw a? diagram of|draw an? image of|generate a? diagram of|create a? diagram of|illustrate|show me an? image of|show me a? diagram of|give me an? explanation of|about)\s+/i, "")
+    .replace(/^(what|how|why|the|a|an)\s+/i, "")
+    .replace(/\s+(is like|works|work|in detail|in simple words|for me|please|and generate an? image|with a? diagram|with an? image)\??$/i, "")
+    .replace(/[?!.]+$/g, "")
+    .trim();
+  if (!cleaned || cleaned.length < 2) {
+    cleaned = prompt.trim().slice(0, 60);
+  }
+  if (cleaned.length > 60) {
+    cleaned = cleaned.slice(0, 57).trim() + "...";
+  }
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+function escapeSvgText(str: string): string {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function generateEducationalDiagramDataUrl(prompt: string, topicLabel: string): { imageUrl: string; caption: string } {
+  const pLower = prompt.toLowerCase();
+  const safeTopic = escapeSvgText(topicLabel.slice(0, 48));
+
+  if (pLower.includes("photosynthesis") || pLower.includes("chloroplast") || pLower.includes("plant")) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="960" height="540">
+      <defs>
+        <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#0f172a"/>
+          <stop offset="55%" stop-color="#1e293b"/>
+          <stop offset="100%" stop-color="#064e3b"/>
+        </linearGradient>
+        <linearGradient id="sunGrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#fde047"/>
+          <stop offset="100%" stop-color="#f59e0b"/>
+        </linearGradient>
+        <linearGradient id="leafGrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#10b981"/>
+          <stop offset="100%" stop-color="#047857"/>
+        </linearGradient>
+      </defs>
+      <rect width="960" height="540" rx="24" fill="url(#sky)"/>
+      <!-- Header -->
+      <text x="48" y="52" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="24" font-weight="800">Photosynthesis — Biological Energy Conversion Diagram</text>
+      <text x="48" y="80" fill="#94a3b8" font-family="monospace" font-size="15" font-weight="600">Equation: 6CO₂ + 6H₂O + Light Energy (Chlorophyll) → C₆H₁₂O₆ (Glucose) + 6O₂ ↑</text>
+
+      <!-- Sun Node -->
+      <circle cx="145" cy="185" r="52" fill="url(#sunGrad)" opacity="0.95"/>
+      <circle cx="145" cy="185" r="66" fill="none" stroke="#fde047" stroke-width="2" stroke-dasharray="6 6" opacity="0.6"/>
+      <text x="145" y="182" text-anchor="middle" fill="#0f172a" font-family="system-ui, sans-serif" font-size="14" font-weight="800">SUNLIGHT</text>
+      <text x="145" y="200" text-anchor="middle" fill="#0f172a" font-family="monospace" font-size="11" font-weight="700">Photons (hν)</text>
+      <path d="M 210 205 L 335 248" stroke="#fde047" stroke-width="4" stroke-dasharray="8 4"/>
+      <polygon points="335,248 322,238 326,252" fill="#fde047"/>
+
+      <!-- CO2 Input Node -->
+      <rect x="65" y="290" width="175" height="72" rx="14" fill="#1e293b" stroke="#38bdf8" stroke-width="2"/>
+      <text x="152" y="320" text-anchor="middle" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="14" font-weight="800">1. Carbon Dioxide (6CO₂)</text>
+      <text x="152" y="342" text-anchor="middle" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="12">Enters leaf via Stomata</text>
+      <path d="M 240 326 L 335 295" stroke="#38bdf8" stroke-width="3.5"/>
+      <polygon points="335,295 321,293 326,305" fill="#38bdf8"/>
+
+      <!-- H2O Input Node -->
+      <rect x="65" y="395" width="175" height="72" rx="14" fill="#1e293b" stroke="#60a5fa" stroke-width="2"/>
+      <text x="152" y="425" text-anchor="middle" fill="#60a5fa" font-family="system-ui, sans-serif" font-size="14" font-weight="800">2. Water (6H₂O)</text>
+      <text x="152" y="447" text-anchor="middle" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="12">Absorbed by Xylem / Roots</text>
+      <path d="M 240 425 L 345 340" stroke="#60a5fa" stroke-width="3.5"/>
+      <polygon points="345,340 331,344 339,354" fill="#60a5fa"/>
+
+      <!-- Central Chloroplast / Leaf Engine -->
+      <rect x="345" y="145" width="280" height="275" rx="26" fill="url(#leafGrad)" stroke="#34d399" stroke-width="3"/>
+      <text x="485" y="182" text-anchor="middle" fill="#ffffff" font-family="system-ui, sans-serif" font-size="18" font-weight="800">CHLOROPLAST</text>
+      <text x="485" y="202" text-anchor="middle" fill="#d1fae5" font-family="system-ui, sans-serif" font-size="12" font-weight="600">Chlorophyll Pigment Inside Leaf Cells</text>
+
+      <!-- Stage A: Light Reactions -->
+      <rect x="368" y="220" width="234" height="78" rx="12" fill="#064e3b" stroke="#6ee7b7" stroke-width="1.5"/>
+      <text x="485" y="246" text-anchor="middle" fill="#6ee7b7" font-family="system-ui, sans-serif" font-size="13" font-weight="800">Stage I: Light-Dependent</text>
+      <text x="485" y="266" text-anchor="middle" fill="#ecfdf5" font-family="system-ui, sans-serif" font-size="11">Thylakoid Membrane splits H₂O</text>
+      <text x="485" y="284" text-anchor="middle" fill="#fde047" font-family="monospace" font-size="11">Produces ATP + NADPH + O₂</text>
+
+      <!-- Stage B: Calvin Cycle -->
+      <rect x="368" y="316" width="234" height="82" rx="12" fill="#064e3b" stroke="#6ee7b7" stroke-width="1.5"/>
+      <text x="485" y="342" text-anchor="middle" fill="#6ee7b7" font-family="system-ui, sans-serif" font-size="13" font-weight="800">Stage II: Calvin Cycle</text>
+      <text x="485" y="362" text-anchor="middle" fill="#ecfdf5" font-family="system-ui, sans-serif" font-size="11">Stroma fixes CO₂ using ATP/NADPH</text>
+      <text x="485" y="380" text-anchor="middle" fill="#fde047" font-family="monospace" font-size="11">Synthesizes Glucose (C₆H₁₂O₆)</text>
+
+      <!-- Oxygen Output Node -->
+      <path d="M 625 255 L 710 215" stroke="#34d399" stroke-width="3.5"/>
+      <polygon points="710,215 696,215 702,226" fill="#34d399"/>
+      <rect x="715" y="168" width="190" height="88" rx="14" fill="#1e293b" stroke="#34d399" stroke-width="2"/>
+      <text x="810" y="198" text-anchor="middle" fill="#34d399" font-family="system-ui, sans-serif" font-size="15" font-weight="800">Oxygen Gas (6O₂ ↑)</text>
+      <text x="810" y="220" text-anchor="middle" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="12">Released into atmosphere</text>
+      <text x="810" y="238" text-anchor="middle" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Essential for respiration</text>
+
+      <!-- Glucose Output Node -->
+      <path d="M 625 352 L 710 368" stroke="#fbbf24" stroke-width="3.5"/>
+      <polygon points="710,368 697,360 699,373" fill="#fbbf24"/>
+      <rect x="715" y="325" width="190" height="92" rx="14" fill="#1e293b" stroke="#fbbf24" stroke-width="2"/>
+      <text x="810" y="355" text-anchor="middle" fill="#fbbf24" font-family="system-ui, sans-serif" font-size="15" font-weight="800">Glucose (C₆H₁₂O₆)</text>
+      <text x="810" y="377" text-anchor="middle" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="12">Chemical energy for plant</text>
+      <text x="810" y="396" text-anchor="middle" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="11">Stored as Starch / Cellulose</text>
+
+      <!-- Footer Summary Strip -->
+      <rect x="48" y="482" width="864" height="36" rx="10" fill="#0f172a" opacity="0.75"/>
+      <text x="480" y="505" text-anchor="middle" fill="#e2e8f0" font-family="system-ui, sans-serif" font-size="13" font-weight="600">StudyWeb Visual Tutor • Light Energy → Chemical Energy inside Chloroplasts (Thylakoid &amp; Stroma)</text>
+    </svg>`;
+    return {
+      imageUrl: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+      caption: "Scientific Diagram: Photosynthesis Light-Dependent Reactions & Calvin Cycle inside the Chloroplast"
+    };
+  }
+
+  // Dynamic multi-stage academic concept visual diagram for any topic
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" width="960" height="520">
+    <defs>
+      <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#0f172a"/>
+        <stop offset="50%" stop-color="#1e1b4b"/>
+        <stop offset="100%" stop-color="#0f172a"/>
+      </linearGradient>
+      <linearGradient id="coreGrad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#4f46e5"/>
+        <stop offset="100%" stop-color="#7c3aed"/>
+      </linearGradient>
+    </defs>
+    <rect width="960" height="520" rx="24" fill="url(#bgGrad)"/>
+    <text x="48" y="54" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="24" font-weight="800">Visual Concept Map: ${safeTopic}</text>
+    <text x="48" y="82" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="14" font-weight="600">Structured Academic Breakdown — Principles, Mechanism &amp; Real-World Application</text>
+
+    <!-- Left Node: Foundation -->
+    <rect x="52" y="165" width="230" height="190" rx="18" fill="#1e293b" stroke="#38bdf8" stroke-width="2"/>
+    <text x="167" y="205" text-anchor="middle" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="15" font-weight="800">1. Core Principles</text>
+    <text x="167" y="238" text-anchor="middle" fill="#e2e8f0" font-family="system-ui, sans-serif" font-size="13">Foundational Definition</text>
+    <text x="167" y="264" text-anchor="middle" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="12">Governing Inputs &amp; Conditions</text>
+    <text x="167" y="290" text-anchor="middle" fill="#94a3b8" font-family="monospace" font-size="11">Primary Variables</text>
+
+    <path d="M 282 260 L 355 260" stroke="#38bdf8" stroke-width="3.5"/>
+    <polygon points="355,260 342,253 342,267" fill="#38bdf8"/>
+
+    <!-- Center Node: Core Mechanism -->
+    <rect x="360" y="140" width="240" height="240" rx="24" fill="url(#coreGrad)" stroke="#a5b4fc" stroke-width="2.5"/>
+    <text x="480" y="195" text-anchor="middle" fill="#ffffff" font-family="system-ui, sans-serif" font-size="17" font-weight="800">${safeTopic.slice(0, 24)}</text>
+    <text x="480" y="225" text-anchor="middle" fill="#e0e7ff" font-family="system-ui, sans-serif" font-size="13" font-weight="700">2. Central Mechanism</text>
+    <rect x="384" y="245" width="192" height="48" rx="10" fill="#1e1b4b" opacity="0.65"/>
+    <text x="480" y="274" text-anchor="middle" fill="#c7d2fe" font-family="system-ui, sans-serif" font-size="12" font-weight="600">Step-by-Step Process Flow</text>
+    <rect x="384" y="305" width="192" height="48" rx="10" fill="#1e1b4b" opacity="0.65"/>
+    <text x="480" y="334" text-anchor="middle" fill="#fde047" font-family="monospace" font-size="12" font-weight="600">Key Rules &amp; Relationships</text>
+
+    <path d="M 600 260 L 673 260" stroke="#34d399" stroke-width="3.5"/>
+    <polygon points="673,260 660,253 660,267" fill="#34d399"/>
+
+    <!-- Right Node: Outcomes & Application -->
+    <rect x="678" y="165" width="230" height="190" rx="18" fill="#1e293b" stroke="#34d399" stroke-width="2"/>
+    <text x="793" y="205" text-anchor="middle" fill="#34d399" font-family="system-ui, sans-serif" font-size="15" font-weight="800">3. Key Outcomes</text>
+    <text x="793" y="238" text-anchor="middle" fill="#e2e8f0" font-family="system-ui, sans-serif" font-size="13">Resulting Effects &amp; Outputs</text>
+    <text x="793" y="264" text-anchor="middle" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="12">Real-World Examples</text>
+    <text x="793" y="290" text-anchor="middle" fill="#94a3b8" font-family="monospace" font-size="11">Exam Takeaways</text>
+
+    <rect x="48" y="450" width="864" height="38" rx="10" fill="#0f172a" opacity="0.8"/>
+    <text x="480" y="474" text-anchor="middle" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="13" font-weight="600">StudyWeb AI Visual Generator • ${safeTopic}</text>
+  </svg>`;
+
+  return {
+    imageUrl: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+    caption: `Educational Concept Diagram: ${topicLabel}`
+  };
+}
+
+async function generateTutorVisualIfNeeded(
+  prompt: string,
+  topicLabel: string,
+  apiKey: string | null
+): Promise<{ imageUrl: string; caption: string } | null> {
+  if (!isImageOrDiagramRequest(prompt)) return null;
+
+  if (apiKey && !isModelOnCooldown("gemini-3.1-flash-lite-image")) {
+    try {
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: { headers: { "User-Agent": "aistudio-build" } }
+      });
+
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      const imgPromise = ai.models.generateContent({
+        model: "gemini-3.1-flash-lite-image",
+        contents: {
+          parts: [
+            {
+              text: `Create a clean, clear, high-resolution educational textbook illustration or labeled scientific diagram explaining: ${prompt}. Clean academic style, legible labels, vibrant colors.`
+            }
+          ]
+        },
+        config: {
+          imageConfig: {
+            aspectRatio: "16:9"
+          }
+        }
+      });
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error("Image generation timeout")), 4500);
+      });
+
+      const imgRes: any = await Promise.race([imgPromise, timeoutPromise]);
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+
+      const parts = imgRes?.candidates?.[0]?.content?.parts || [];
+      for (const part of parts) {
+        if (part?.inlineData?.data) {
+          const mime = part.inlineData.mimeType || "image/png";
+          return {
+            imageUrl: `data:${mime};base64,${part.inlineData.data}`,
+            caption: `AI-Generated Educational Illustration: ${topicLabel}`
+          };
+        }
+      }
+    } catch (imgErr: any) {
+      recordModelQuotaCooldown("gemini-3.1-flash-lite-image", imgErr);
+    }
+  }
+
+  return generateEducationalDiagramDataUrl(prompt, topicLabel);
+}
+
+function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], groundedSourceContext?: string, workspaceNotice?: string): string {
   const pLower = prompt.toLowerCase().trim();
   const files = attachedFiles || [];
 
@@ -878,34 +1128,10 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
   }
 
   if (groundedSourceContext && groundedSourceContext.trim().length > 40) {
-    return `### 💡 Detailed Study Explanation\n\n${groundedSourceContext.slice(0, 1600)}`;
+    return `### 💡 Detailed Study Explanation\n\n${groundedSourceContext.slice(0, 2400)}`;
   }
 
-  // Handle specific well-known queries cleanly if offline
-  if (pLower.includes("happy prince")) {
-    return `### 📖 Oscar Wilde's "The Happy Prince" (Class 9 Literature Analysis)\n\n` +
-      `**Central Theme & Core Message:**\n` +
-      `Oscar Wilde's timeless story explores true beauty, selfless sacrifice, and empathy. The statue of the Happy Prince, once shielded from sadness in the Palace of Sans-Souci, now weeps witnessing the poverty and suffering across the city from his high pedestal.\n\n` +
-      `**Key Characters & Their Sacrifices:**\n` +
-      `1. **The Happy Prince:** Gives away his ruby sword-hilt, sapphire eyes, and gold-leaf coverings to succor the poor.\n` +
-      `2. **The Little Swallow:** Delays his migration to Egypt out of love and loyalty to the Prince, acting as his messenger of mercy until freezing to death at his feet.\n` +
-      `3. **The Beneficiaries:** The seamstress caring for her feverish son, the starving young playwright in the garret, and the crying match girl whose matches fell in the gutter.\n\n` +
-      `**Climax & Heavenly Resolution:**\n` +
-      `When the Mayor and Councillors tear down the stripped statue because it is "no longer beautiful or useful," they throw the statue's broken leaden heart and the dead swallow onto a dust heap. When God commands an angel to bring Him the two most precious things in the city, the angel chooses the dead bird and the leaden heart, which are given eternal life in Paradise.`;
-  }
-
-  if (pLower === "2+2" || pLower === "what is 2+2" || pLower === "what is 2+2?" || pLower.includes("2 + 2")) {
-    return `### 🔢 Mathematical Calculation\n\n` +
-      `**Direct Answer:** **2 + 2 = 4**\n\n` +
-      `**Explanation:** Adding two discrete units to two other discrete units yields a total quantity of four units ($2 + 2 = 4$).`;
-  }
-
-  return `### 💡 Study Explanation: **${prompt.slice(0, 90)}**\n\n` +
-    `Let's analyze **${prompt}** directly:\n\n` +
-    `- **Core Concept:** Addressing your question directly, the primary focus is understanding the underlying principles, governing rules, and direct relationships involved.\n` +
-    `- **Key Breakdown:** Every component interacts systematically. In study problems of this nature, establishing definitions first and identifying cause-and-effect transitions gives you exam-ready clarity.\n` +
-    `- **Practical Application:** Connect this concept to real-world scenarios or problem-solving methods to master the intuition behind it.\n\n` +
-    `Feel free to ask a follow-up or provide specific numbers, text passages, or homework questions to explore deeper!`;
+  return "";
 }
 
   // Diagnostic Route: Verify real Gemini API connectivity independently
@@ -1121,36 +1347,15 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       const userId = bodyObj.userId || queryObj.userId || undefined;
       const effectiveAuthHeader = req.headers.authorization || (bodyObj.supabaseToken ? `Bearer ${bodyObj.supabaseToken}` : undefined);
 
-      const activePersonaKey = ['socratic', 'exam_prep', 'plain_english', 'flashcard'].includes(persona) 
-        ? persona 
-        : 'plain_english';
-
-      const personaInstructions: Record<string, string> = {
-        socratic: `ROLE: Direct & Socratic Tutor
-- FIRST AND FOREMOST: Directly, clearly, and completely answer the exact question the student asked. Never withhold the answer or respond with only a riddle.
-- Structure your explanation step-by-step so the student immediately gets the exact answer and understands the underlying logic.
-- At the very end of your complete answer, ask 1 thoughtful follow-up question to help the student test or deepen their intuition.`,
-
-        exam_prep: `ROLE: Exam Preparation Coach
-- FIRST AND FOREMOST: Directly, accurately, and completely answer the exact question or problem the student asked.
-- Highlight key definitions, formulas, step-by-step derivations, and common exam pitfalls related to their specific question.
-- Conclude with a quick exam tip or checkpoint question on the same topic.`,
-
-        plain_english: `ROLE: Clear Plain-English Tutor
-- FIRST AND FOREMOST: Directly, accurately, and completely answer the exact question the student asked in clear, accessible language.
-- Explain both the direct answer and the "why" or "how" behind it using step-by-step clarity and concrete examples.
-- Avoid unnecessary jargon or filler; focus 100% on helping the student understand the exact topic they asked about.`,
-
-        flashcard: `ROLE: Active Recall & Q&A Coach
-- FIRST AND FOREMOST: If the student asks a question, answer their exact question directly and clearly first.
-- If they ask for flashcards or active recall practice (or after answering their question), provide 1 to 2 concise Q&A flashcards on the exact topic they asked about.`
-      };
-
-      const selectedPersonaInstruction = personaInstructions[activePersonaKey] || personaInstructions.plain_english;
+      const unifiedTutorStyleInstruction = `RESPONSE STYLE (COMPREHENSIVE GEMINI / CHATGPT / CLAUDE ACADEMIC EXPLANATION):
+- Directly, accurately, and thoroughly answer the exact question the student asked using real subject-matter knowledge.
+- Start immediately with a clear, authoritative definition or direct answer to the question.
+- Organize the response with clean Markdown headings (###), bulleted breakdowns of core structures/mechanisms/principles, and concrete examples.
+- Never output generic placeholder text or vague meta-commentary.`;
 
       const researchGuideline = deepResearch 
         ? "Provide a comprehensive, deeply analytical step-by-step explanation covering nuances, edge cases, and examples."
-        : "Be clear, well-structured, direct, and easy to follow.";
+        : "Be clear, well-structured, comprehensive, and easy to follow.";
 
       const citationGuideline = citationMode
         ? "If you use facts from the student's uploaded workspace files to answer their question, cite the file name in brackets (e.g., '[Source: File Name]'). If the question is answered using general academic knowledge, do NOT invent or force citations to unrelated workspace files."
@@ -1338,21 +1543,31 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         qLower.includes("overview of my files") ||
         qLower.includes("list my documents");
 
+      const isCasualGreeting =
+        /^(hi|hello|hey|yo|good morning|good afternoon|good evening|thanks|thank you|ok|okay|cool|great|bye)\b[!?.]*$/i.test(prompt.trim());
+
       const isExplicitMaterialQuery =
         hasDirectTurnAttachment ||
         isOverviewQuery ||
-        effectiveFiles.length > 0 ||
         qLower.includes('this video') ||
         qLower.includes('the video') ||
         qLower.includes('this link') ||
+        qLower.includes('this website') ||
+        qLower.includes('this webpage') ||
+        qLower.includes('this article') ||
         qLower.includes('my file') ||
         qLower.includes('my files') ||
         qLower.includes('my notes') ||
         qLower.includes('my document') ||
         qLower.includes('this document') ||
         qLower.includes('this pdf') ||
+        qLower.includes('this image') ||
+        qLower.includes('this picture') ||
+        qLower.includes('this photo') ||
         qLower.includes('uploaded') ||
-        qLower.includes('in my workspace');
+        qLower.includes('in my workspace') ||
+        qLower.includes('from my workspace') ||
+        qLower.includes('based on my');
 
       if (effectiveFiles && effectiveFiles.length > 0) {
         // Strip out any placeholder or dummy YouTube boilerplate files
@@ -1374,8 +1589,21 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
             f.highlights = f.highlights.filter((h: string) => !isDummyMetadataLine(h));
           }
         });
+      }
 
-        // Always enrich top video/URL files in the active workspace or prompt if they lack full captions/content
+      // Check initial semantic relevance against workspace files before deciding whether to run live URL/video enrichment
+      const initialRagCheck = (effectiveFiles && effectiveFiles.length > 0)
+        ? extractRelevantDocumentSegments(prompt, effectiveFiles, 8, isExplicitMaterialQuery)
+        : { segments: [], contextString: '', hasHighRelevance: false };
+
+      const shouldUseWorkspaceFiles = Boolean(
+        effectiveFiles &&
+        effectiveFiles.length > 0 &&
+        (isExplicitMaterialQuery || initialRagCheck.hasHighRelevance)
+      );
+
+      if (shouldUseWorkspaceFiles && effectiveFiles && effectiveFiles.length > 0) {
+        // Enrich top video/URL files ONLY when the query actually relates to workspace materials or direct URL attachments
         const targetFiles = promptUrls.length > 0
           ? effectiveFiles.filter((f: any) => promptUrls.includes(f.url || f.name))
           : effectiveFiles.slice(0, 2);
@@ -1458,57 +1686,82 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
           })
         );
 
-        const enrichmentTimeoutMs = hasDirectTurnAttachment || promptUrls.length > 0 ? 3000 : 800;
+        const enrichmentTimeoutMs = hasDirectTurnAttachment || promptUrls.length > 0 ? 2500 : 700;
         await Promise.race([
           enrichmentPromise,
           new Promise(resolve => setTimeout(resolve, enrichmentTimeoutMs))
         ]);
       }
 
-      // 1. Document-Aware Semantic Segment Extraction RAG pipeline
+      // 1. Document-Aware Semantic Segment Extraction RAG pipeline (Strictly gated by topic relevance)
       let groundedSourceContext = "";
       let retrievedSegments: ExtractedSegment[] = [];
       let hasRelevantWorkspaceMaterial = false;
-      
-      // ONLY inject full uploaded document/video content if the student is asking about their uploaded materials or attached files in this turn
-      if (effectiveFiles && effectiveFiles.length > 0 && isExplicitMaterialQuery) {
+      const topicLabel = extractCleanTopicLabel(prompt);
+      let workspaceNotice = "";
+      let outOfWorkspaceInstruction = "";
+
+      if (shouldUseWorkspaceFiles && effectiveFiles && effectiveFiles.length > 0) {
         const ragResult = extractRelevantDocumentSegments(
           prompt,
           effectiveFiles,
           8,
-          true
+          isExplicitMaterialQuery
         );
         retrievedSegments = ragResult.segments;
-        hasRelevantWorkspaceMaterial = true;
+        hasRelevantWorkspaceMaterial = isExplicitMaterialQuery || ragResult.hasHighRelevance;
 
-        groundedSourceContext = ragResult.contextString;
+        if (hasRelevantWorkspaceMaterial) {
+          groundedSourceContext = ragResult.contextString;
 
-        const relevantFiles = effectiveFiles.slice(0, 3);
+          const relevantFiles = effectiveFiles.slice(0, 3);
+          const fullSourceBlocks = relevantFiles.map((f: any, idx: number) => {
+            const textBody = (f.transcription || f.contentText || f.content_text || f.summary || '').trim();
+            if (!textBody || isDummyMetadataLine(textBody)) return null;
+            const header = `--- WORKSPACE MATERIAL #${idx + 1}: "${f.name || 'Study Resource'}" (Type: ${f.type || 'resource'}${f.url ? ` | URL: ${f.url}` : ''}) ---`;
+            return `${header}\n${textBody.slice(0, 14000)}`;
+          }).filter(Boolean);
 
-        const fullSourceBlocks = relevantFiles.map((f: any, idx: number) => {
-          const textBody = (f.transcription || f.contentText || f.content_text || f.summary || '').trim();
-          if (!textBody || isDummyMetadataLine(textBody)) return null;
-          const header = `--- WORKSPACE MATERIAL #${idx + 1}: "${f.name || 'Study Resource'}" (Type: ${f.type || 'resource'}${f.url ? ` | URL: ${f.url}` : ''}) ---`;
-          return `${header}\n${textBody.slice(0, 14000)}`;
-        }).filter(Boolean);
-
-        if (fullSourceBlocks.length > 0) {
-          groundedSourceContext += `\n=== FULL UPLOADED VIDEO / LINK / DOCUMENT CONTENT ===\n${fullSourceBlocks.join('\n\n')}\n=========================================\n`;
+          if (fullSourceBlocks.length > 0) {
+            groundedSourceContext += `\n=== FULL UPLOADED VIDEO / LINK / DOCUMENT CONTENT ===\n${fullSourceBlocks.join('\n\n')}\n=========================================\n`;
+          }
         }
       }
 
-      // 2. Precise Intent Detection (no false positives when user simply says "I have a question")
+      // When the student asks about a topic NOT in their uploaded workspace materials, build the notice banner & instruction
+      if (!hasRelevantWorkspaceMaterial && !isCasualGreeting && !isOverviewQuery && prompt.trim().length > 2) {
+        if (effectiveFiles && effectiveFiles.length > 0) {
+          const uploadedNames = effectiveFiles
+            .slice(0, 2)
+            .map((f: any) => f.name)
+            .filter(Boolean)
+            .join(', ');
+          workspaceNotice = `You have not uploaded study materials on "${topicLabel}" in this workspace${uploadedNames ? ` (uploaded: ${uploadedNames})` : ''}. Full explanation below:`;
+        } else {
+          workspaceNotice = `You have not uploaded study materials on "${topicLabel}" in your workspace. Full explanation below:`;
+        }
+
+        outOfWorkspaceInstruction = `
+[OUT-OF-WORKSPACE TOPIC NOTICE]
+The student is asking about "${topicLabel}", which is NOT present in their uploaded workspace files (the UI already displays a notice banner at the top of your message).
+1. Immediately provide a complete, thorough, crystal-clear academic explanation of "${topicLabel}" (including its definition, key components/structures, how it works, and concrete examples).
+2. Do NOT mention, summarize, or mix in any unrelated files from their workspace.`;
+      }
+
+      // Start automatic visual/diagram generation in parallel if the student requested an image or diagram
+      const visualPromise = generateTutorVisualIfNeeded(prompt, topicLabel, getGeminiApiKey());
+
+      // 2. Precise Intent Detection
       let specializedFormatInstruction = "";
 
       const isSummaryQuery =
         isOverviewQuery ||
         /\b(summarize|summary|briefing|overview of|full explanation|complete explanation|explain everything|watch the video)\b/i.test(qLower);
 
-      // Only trigger quiz generation when user explicitly asks to be quizzed/tested or asks to generate practice questions
       const isQuizRequest =
         /\b(quiz me|test me|give me .*questions|generate .*questions|practice questions|create a quiz|make a quiz|ask me .*questions|flashcards? for)\b/i.test(qLower);
 
-      if (isSummaryQuery && effectiveFiles.length > 0) {
+      if (isSummaryQuery && hasRelevantWorkspaceMaterial && effectiveFiles.length > 0) {
         specializedFormatInstruction = `
 [COMPLETE VIDEO / MATERIAL EXPLANATION REQUESTED]
 The student is asking for the complete explanation of their uploaded study material/video/link ("${effectiveFiles[0]?.name || 'the resource'}").
@@ -1528,7 +1781,7 @@ Include a clear, structured comparison (using a markdown table or side-by-side b
       }
 
       let fileOverviewContext = "";
-      if (effectiveFiles && effectiveFiles.length > 0 && isExplicitMaterialQuery) {
+      if (hasRelevantWorkspaceMaterial && effectiveFiles && effectiveFiles.length > 0) {
         fileOverviewContext = `\nUPLOADED WORKSPACE STUDY MATERIALS (${effectiveFiles.length} item${effectiveFiles.length === 1 ? '' : 's'}):\n`;
         effectiveFiles.slice(0, 4).forEach((f: any, idx: number) => {
           fileOverviewContext += `- Material #${idx + 1}: "${f.name}" (Type: ${f.type || 'document'}${f.url && f.url.startsWith('http') ? `, URL: ${f.url}` : ''})\n`;
@@ -1538,39 +1791,38 @@ Include a clear, structured comparison (using a markdown table or side-by-side b
         });
       }
 
-      const coreSystemInstruction = `You are StudyWeb's master AI Tutor, dedicated to providing students with the clearest, most engaging, and highest quality academic guidance.
+      const coreSystemInstruction = `You are StudyWeb's AI Tutor, providing students with clear, accurate, and comprehensive academic explanations across science, math, humanities, documents, videos, websites, and images.
 CRITICAL INSTRUCTION DIRECTIVES:
-1. DIRECT, PRECISE & COMPLETE: Read the student's question attentively and deliver the exact answer, derivation, literary analysis, or explanation directly.
-2. DYNAMIC & PROGRESSIVELY BETTER: Every answer must be authentically written for this specific query. Never use rigid generic templates (e.g. do NOT use "Stage 1 (Foundation)" or mention "Interactive Concept Sandbox"). Craft natural, rich, exam-ready explanations that adapt to the student's exact topic.
-3. FOR UPLOADED VIDEOS, CHAPTERS & MATERIALS (e.g. Class 9 "The Happy Prince", science chapters, homework sheets, or video lectures):
-   - Provide a complete, structured analysis of the material from beginning to end.
-   - For literature: thoroughly detail the plot, character motives, symbolic elements, central themes (such as true beauty, sacrifice, compassion), and important exam questions.
-   - For STEM: explain definitions, mathematical formulas, step-by-step physical/chemical mechanisms, and practical examples.
-4. FOR GENERAL HOMEWORK & CONCEPTS:
-   - Answer directly and accurately first, then explain the intuitive "why" and "how".
+1. DIRECT, PRECISE & COMPLETE: Read the student's question attentively and deliver the exact answer, definition, derivation, literary analysis, or scientific explanation directly.
+2. REAL KNOWLEDGE & EXAMPLES: Every answer must contain real, substantive academic content (definitions, mechanisms, structures, formulas, and examples) tailored to the exact topic asked. Never output generic filler templates.
+3. SMART WORKSPACE RELEVANCE:
+   - ONLY use uploaded workspace files when they are explicitly asked about or directly relevant to the student's question.
+   - If the student asks about a topic NOT in their uploaded workspace files (e.g. asking "What is a cell?" or "What is photosynthesis?"), provide a complete, well-structured explanation of that topic from general academic knowledge without mixing in unrelated workspace files.
+4. MULTIMODAL ANALYSIS (VIDEOS, WEBSITES, DOCUMENTS, IMAGES, TEXT):
+   - When analyzing an uploaded or linked video, website, PDF, document, or image, provide a thorough, structured breakdown of its contents, key concepts, formulas, arguments, and takeaways.
 5. STRICT AVOIDANCE:
    - NEVER mention "Document 1246", "Enjoy the videos", "music you love", or "Mix".
    - NEVER mention "Real-Time Interactive Learning Studio" or interactive widgets.
    - NEVER provide canned repetitive filler or say you are temporarily disconnected.
-${selectedPersonaInstruction}
+${unifiedTutorStyleInstruction}
 ${researchGuideline}
 ${citationGuideline}`;
 
       const systemInstruction = [
         coreSystemInstruction,
+        outOfWorkspaceInstruction,
         userDatabaseContext,
         specializedFormatInstruction,
         fileOverviewContext,
         groundedSourceContext
       ].filter(Boolean).join('\n\n');
 
-      // Prioritize ultra-fast, high-accuracy models first (gemini-3.1-flash-lite-preview ~1.2s response time)
+      // Verified active Gemini 3 Flash & Pro models for fast, reliable responses
       const baseCandidateModels: string[] = [
+        "gemini-3-flash-preview",
         "gemini-3.1-flash-lite-preview",
-        "gemini-3.1-flash-lite",
         "gemini-flash-latest",
-        "gemini-3.8-flash",
-        "gemini-3-flash-preview"
+        "gemini-3.1-pro-preview"
       ];
       const candidateModels: string[] = getAvailableCandidateModels(baseCandidateModels);
 
@@ -1578,10 +1830,10 @@ ${citationGuideline}`;
       let responseSource = "";
       let lastError: any = null;
 
-      // Build currentTurnParts: keep the student's exact prompt primary and uncluttered
+      // Build currentTurnParts: ONLY attach workspace binary/video parts when they are relevant to the student's question!
       const currentTurnParts: any[] = [{ text: prompt }];
 
-      if (effectiveFiles && effectiveFiles.length > 0) {
+      if (hasRelevantWorkspaceMaterial && effectiveFiles && effectiveFiles.length > 0) {
         const candidateAttachmentFiles = effectiveFiles.slice(0, 2);
 
         for (const file of candidateAttachmentFiles) {
@@ -1639,14 +1891,13 @@ ${citationGuideline}`;
         }
       }
 
-      const buildContentsPayload = (partsToUse: any[], maxHistoryTurns: number = 8) => {
+      const buildContentsPayload = (partsToUse: any[], maxHistoryTurns: number = 6) => {
         if (Array.isArray(history) && history.length > 0 && maxHistoryTurns > 0) {
           const multiTurnContents: any[] = [];
           for (const turn of history.slice(-maxHistoryTurns)) {
             const turnRole = (turn.role === 'model' || turn.role === 'ai' || turn.role === 'assistant') ? 'model' : 'user';
             const turnText = String(turn.content || turn.text || '').trim();
             if (turnText) {
-              // Skip old dummy/fallback messages in history so they don't pollute new answers
               if (turnRole === 'model' && (
                 turnText.includes('Understanding "') && turnText.includes('involves breaking down the main concepts') ||
                 turnText.includes('Focus on the central principle, cause-and-effect mechanisms')
@@ -1682,144 +1933,126 @@ ${citationGuideline}`;
         return partsToUse.length === 1 && partsToUse[0].text ? partsToUse[0].text : partsToUse;
       };
 
-      const textOnlyParts = [{ text: prompt }];
+      // Multi-pass auto-retry across active Gemini models so transient 503/429 spikes still return a real Gemini answer
+      const maxPasses = 3;
+      const allRetryModels = Array.from(new Set([...candidateModels, ...baseCandidateModels]));
 
-      for (const currentModel of candidateModels) {
-        const modelStartTime = Date.now();
-        try {
-          const apiKey = getGeminiApiKey();
-          if (!apiKey) {
-            const noKeyErr = new Error("GEMINI_API_KEY is not configured on the server.");
-            (noKeyErr as any).status = 500;
-            throw noKeyErr;
-          }
+      for (let pass = 0; pass < maxPasses && !responseText; pass++) {
+        if (pass > 0) {
+          await new Promise(resolve => setTimeout(resolve, pass * 700));
+        }
 
-          const ai = new GoogleGenAI({
-            apiKey,
-            httpOptions: {
-              headers: {
-                "User-Agent": "aistudio-build",
-              }
-            }
-          });
-
-          let response: any = null;
-          let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+        const modelsForPass = pass === 0 ? candidateModels : allRetryModels;
+        for (const currentModel of modelsForPass) {
+          const modelStartTime = Date.now();
           try {
-            const activeParts = currentTurnParts;
-            const contentsPayload = buildContentsPayload(activeParts, 6);
-            const timeoutMs = 8500;
+            const apiKey = getGeminiApiKey();
+            if (!apiKey) {
+              const noKeyErr = new Error("GEMINI_API_KEY is not configured on the server.");
+              (noKeyErr as any).status = 500;
+              throw noKeyErr;
+            }
 
-            const isLite = currentModel.includes("flash-lite");
-            const genPromise = ai.models.generateContent({
+            const ai = new GoogleGenAI({
+              apiKey,
+              httpOptions: {
+                headers: {
+                  "User-Agent": "aistudio-build",
+                }
+              }
+            });
+
+            let response: any = null;
+            let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+            try {
+              const activeParts = pass === 0 ? currentTurnParts : [{ text: prompt }];
+              const contentsPayload = pass === 0 ? buildContentsPayload(activeParts, 6) : prompt;
+              const timeoutMs = 18000;
+
+              const supportsMinimalThinking =
+                currentModel.includes("flash-lite") ||
+                currentModel.includes("gemini-3-flash") ||
+                currentModel.includes("gemini-flash");
+
+              const genPromise = ai.models.generateContent({
+                model: currentModel,
+                contents: contentsPayload,
+                config: {
+                  systemInstruction: pass <= 1
+                    ? systemInstruction
+                    : [coreSystemInstruction, outOfWorkspaceInstruction].filter(Boolean).join('\n\n'),
+                  temperature: 0.6,
+                  ...(supportsMinimalThinking
+                    ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
+                    : currentModel.includes("pro")
+                    ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+                    : {})
+                }
+              });
+
+              const modelTimeout = new Promise<never>((_, reject) => {
+                timeoutHandle = setTimeout(() => reject(new Error(`Model ${currentModel} timed out after ${timeoutMs}ms`)), timeoutMs);
+              });
+
+              response = await Promise.race([genPromise, modelTimeout]);
+              if (timeoutHandle) clearTimeout(timeoutHandle);
+            } catch (retryErr: any) {
+              if (timeoutHandle) clearTimeout(timeoutHandle);
+              if (isQuotaOrRateLimitError(retryErr)) {
+                recordModelQuotaCooldown(currentModel, retryErr);
+              }
+              throw retryErr;
+            }
+
+            if (response && response.text && response.text.trim()) {
+              responseText = response.text.trim();
+              responseSource = `Gemini (${currentModel})`;
+              console.log(`[AI Tutor][${correlationId}] Completed with ${currentModel} (pass ${pass + 1}) in ${Date.now() - modelStartTime}ms`);
+              break;
+            } else {
+              throw new Error("Empty response from model");
+            }
+          } catch (err: any) {
+            if (isQuotaOrRateLimitError(err)) {
+              recordModelQuotaCooldown(currentModel, err);
+            }
+            const cleanNote = summarizeModelError(err);
+            console.log(`[AI Tutor][${correlationId}] Pass ${pass + 1}: routing from ${currentModel} to next model (${cleanNote})`);
+            lastError = {
               model: currentModel,
-              contents: contentsPayload,
-              config: {
-                systemInstruction,
-                temperature: 0.65,
-                ...(isLite ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } } : {})
-              }
-            });
-
-            const modelTimeout = new Promise<never>((_, reject) => {
-              timeoutHandle = setTimeout(() => reject(new Error(`Model ${currentModel} timed out after ${timeoutMs}ms`)), timeoutMs);
-            });
-
-            response = await Promise.race([genPromise, modelTimeout]);
-            if (timeoutHandle) clearTimeout(timeoutHandle);
-          } catch (retryErr: any) {
-            if (timeoutHandle) clearTimeout(timeoutHandle);
-            if (isQuotaOrRateLimitError(retryErr)) {
-              recordModelQuotaCooldown(currentModel, retryErr);
-            }
-            throw retryErr;
+              status: err?.status || err?.statusCode || 500,
+              message: cleanNote
+            };
           }
-
-          if (response && response.text && response.text.trim()) {
-            responseText = response.text.trim();
-            responseSource = `Gemini (${currentModel})`;
-            console.log(`[AI Tutor][${correlationId}] Completed with ${currentModel} in ${Date.now() - modelStartTime}ms`);
-            break;
-          } else {
-            throw new Error("Empty response from model");
-          }
-        } catch (err: any) {
-          if (isQuotaOrRateLimitError(err)) {
-            recordModelQuotaCooldown(currentModel, err);
-          }
-          const cleanNote = summarizeModelError(err);
-          console.log(`[AI Tutor][${correlationId}] Routing from ${currentModel} to next available model (${cleanNote})`);
-          lastError = {
-            model: currentModel,
-            status: err?.status || err?.statusCode || 500,
-            message: cleanNote
-          };
         }
       }
 
-      // Fast direct recovery with gemini-3.1-flash-lite-preview on the bare prompt if all candidates failed
-      if (!responseText) {
-        try {
-          const apiKey = getGeminiApiKey();
-          if (apiKey) {
-            const ai = new GoogleGenAI({ apiKey });
-            const directModel = !isModelOnCooldown("gemini-3.1-flash-lite-preview")
-              ? "gemini-3.1-flash-lite-preview"
-              : "gemini-3.1-flash-lite";
-            const directRes = await ai.models.generateContent({
-              model: directModel,
-              contents: prompt,
-              config: {
-                systemInstruction: coreSystemInstruction,
-                temperature: 0.65,
-                thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }
-              }
-            });
-            if (directRes?.text?.trim()) {
-              responseText = directRes.text.trim();
-              responseSource = `Gemini (${directModel})`;
-            }
-          }
-        } catch (directErr: any) {
-          console.warn(`[AI Tutor][${correlationId}] Direct recovery attempt notice:`, directErr?.message);
-        }
-      }
-
-      // Only use workspace synthesis if Gemini was completely unreachable AND the question was about workspace files
+      // Only use workspace document synthesis if Gemini was completely unreachable AND the question was actually about workspace files
       if (!responseText && hasRelevantWorkspaceMaterial && effectiveFiles && effectiveFiles.length > 0) {
-        if (isOverviewQuery || isSummaryQuery) {
-          let synthesis = `### 📚 Detailed Breakdown & Summary of Your Study Material\n\n`;
-          effectiveFiles.forEach((f: any, i: number) => {
-            synthesis += `#### ${i + 1}. **${f.name}** *(${(f.type || 'Resource').toUpperCase()})*\n\n`;
-            if (f.summary) synthesis += `**Overview & Summary:**\n${f.summary}\n\n`;
-            if (f.highlights && f.highlights.length > 0) {
-              synthesis += `**Key Concepts & Takeaways:**\n${f.highlights.slice(0, 5).map((h: string) => `- ${h}`).join('\n')}\n\n`;
-            }
-            if (f.formulas && f.formulas.length > 0) {
-              synthesis += `**Key Formulas & Equations:** ${f.formulas.slice(0, 4).join(', ')}\n\n`;
-            }
-            if (f.transcription) {
-              synthesis += `**Content Walkthrough:**\n${f.transcription.slice(0, 1200)}\n\n`;
-            }
-          });
-          responseText = synthesis.trim();
+        const localDocSynthesis = generateLocalAITutorResponse(
+          prompt,
+          effectiveFiles,
+          groundedSourceContext,
+          workspaceNotice
+        );
+        if (localDocSynthesis) {
+          responseText = localDocSynthesis;
           responseSource = "Workspace Knowledge Engine";
-        } else if (retrievedSegments.length > 0) {
-          let synthesis = `Based on **${effectiveFiles[0]?.name || 'your study materials'}**:\n\n`;
-          retrievedSegments.slice(0, 3).forEach((seg) => {
-            synthesis += `- ${seg.text} *[Source: ${seg.sourceName}]*\n\n`;
-          });
-          responseText = synthesis.trim();
-          responseSource = "Workspace Grounding";
         }
       }
 
       if (!responseText) {
-        responseText = generateLocalAITutorResponse(prompt, hasRelevantWorkspaceMaterial ? effectiveFiles : [], groundedSourceContext);
-        responseSource = "StudyWeb AI Tutor";
+        return res.status(503).json({
+          error: lastError?.message || "Gemini AI models are temporarily busy. Please retry your question in a moment.",
+          workspaceNotice: workspaceNotice || undefined,
+          correlationId
+        });
       }
 
-      // Extract citations ONLY when workspace files were relevant or explicitly cited in the response
+      // Await parallel visual/diagram generation if triggered
+      const visualResult = await visualPromise;
+
+      // Extract citations ONLY when workspace files were relevant to this question
       const responseCitations: Array<{ sourceName: string; page?: number; quote: string; snippet?: string; fileId?: string }> = [];
 
       if (hasRelevantWorkspaceMaterial && retrievedSegments && retrievedSegments.length > 0) {
@@ -1851,35 +2084,31 @@ ${citationGuideline}`;
       }
 
       const totalEstimatedPages = effectiveFiles.reduce((acc: number, f: any) => acc + (f.pages || 1), 0);
-      const processedFileNames = effectiveFiles.map((f: any) => f.name);
+      const processedFileNames = hasRelevantWorkspaceMaterial ? effectiveFiles.map((f: any) => f.name) : [];
 
       res.status(200).json({ 
         reply: responseText,
         text: responseText, 
         source: responseSource || "Gemini AI",
         modelUsed: responseSource || "Gemini 3 Flash",
-        personaUsed: activePersonaKey,
-        documentCount: effectiveFiles.length,
+        documentCount: hasRelevantWorkspaceMaterial ? effectiveFiles.length : 0,
+        workspaceNotice: workspaceNotice || undefined,
+        generatedImageUrl: visualResult?.imageUrl,
+        generatedImageCaption: visualResult?.caption,
         citations: responseCitations.length > 0 ? responseCitations : undefined,
         extractionFeed: {
           filesProcessed: processedFileNames,
-          totalEstimatedPages,
-          chunksAnalyzed: effectiveFiles.length * 4 + (responseCitations.length * 2) + 3,
-          extractionMode: "deep_full_document",
+          totalEstimatedPages: hasRelevantWorkspaceMaterial ? totalEstimatedPages : 0,
+          chunksAnalyzed: hasRelevantWorkspaceMaterial ? (effectiveFiles.length * 4 + (responseCitations.length * 2) + 3) : 0,
+          extractionMode: hasRelevantWorkspaceMaterial ? "deep_full_document" : "general_knowledge",
           timestamp: new Date().toISOString()
         }
       });
     } catch (error: any) {
       const totalDuration = Date.now() - routeStartTime;
-      const fallbackPrompt = String(req.body?.prompt || req.query?.prompt || "your study question");
-      const fallbackFiles = Array.isArray(req.body?.attachedFiles) ? req.body.attachedFiles : [];
-      const fallbackReply = generateLocalAITutorResponse(fallbackPrompt, fallbackFiles);
-      console.warn(`[AI Tutor Recovery][${correlationId}] Handled exception in ${totalDuration}ms:`, error?.message || error);
-      res.status(200).json({
-        reply: fallbackReply,
-        text: fallbackReply,
-        source: "StudyWeb AI Tutor",
-        personaUsed: req.body?.persona || "plain_english",
+      console.warn(`[AI Tutor Error][${correlationId}] Exception in ${totalDuration}ms:`, error?.message || error);
+      res.status(503).json({
+        error: error?.message || "Unable to reach Gemini AI right now. Please retry.",
         correlationId
       });
     }

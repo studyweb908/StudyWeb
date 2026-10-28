@@ -230,6 +230,16 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
 
     // Save uploaded file directly to Supabase workspace_files
     WorkspaceSyncService.saveWorkspaceFile(workspace.id, newFile);
+
+    // Notify WorkspaceChat to show a compact File Ready badge without auto-summarizing
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('studyweb-workspace-file-ready', {
+        detail: {
+          workspaceId: workspace.id,
+          files: [newFile]
+        }
+      }));
+    }
   };
 
   const handleAddMultipleFiles = (newFiles: WorkspaceFile[], newNote?: WorkspaceNote) => {
@@ -282,6 +292,15 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
         detail: `Added to workspace ${workspace.name} (${uniqueNewFiles.map(f => f.name).slice(0, 2).join(', ')})`,
         iconType: 'upload'
       });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('studyweb-workspace-file-ready', {
+          detail: {
+            workspaceId: workspace.id,
+            files: uniqueNewFiles
+          }
+        }));
+      }
     }
 
     uniqueNewFiles.forEach(file => {

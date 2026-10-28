@@ -24,6 +24,12 @@ export interface TutorMessage {
   persona?: string;
   citations?: TutorCitation[];
   attachedFileNames?: string[];
+  workspaceNotice?: string;
+  generatedImageUrl?: string;
+  generatedImageCaption?: string;
+  isFileReadyBadge?: boolean;
+  readyFileName?: string;
+  readyFileType?: string;
   isError?: boolean;
   failedPrompt?: string;
   errorCode?: string | number;
@@ -35,12 +41,11 @@ export interface SendTutorRequestOptions {
   workspaceName?: string;
   userId?: string | null;
   prompt: string;
-  persona: string;
+  persona?: string;
   history: { role: string; content: string }[];
   compactAttachedFiles?: any[];
   accessToken?: string | null;
   userMsg: TutorMessage;
-  buildFallbackReply?: (prompt: string) => { reply: string; citations?: TutorCitation[] };
 }
 
 interface InFlightRequest {
@@ -186,7 +191,7 @@ class AITutorBackgroundManager {
    * performs network requests, and persists the resulting AI message to storage.
    */
   public async sendTutorMessage(options: SendTutorRequestOptions): Promise<TutorMessage> {
-    const { workspaceId, userId, prompt, persona, history, compactAttachedFiles = [], accessToken, userMsg, workspaceName, buildFallbackReply } = options;
+    const { workspaceId, userId, prompt, history, compactAttachedFiles = [], accessToken, userMsg, workspaceName } = options;
     const chatKey = getChatHistoryKey(userId, workspaceId);
     const requestGen = this.resetGeneration.get(workspaceId) || 0;
 
@@ -204,6 +209,7 @@ class AITutorBackgroundManager {
     // 3. Execution promise
     const executionPromise = (async (): Promise<TutorMessage> => {
       let data: any = null;
+      let lastErrorText = '';
 
       // Sanitize oversized browser cookies if service available
       try {
@@ -211,45 +217,52 @@ class AITutorBackgroundManager {
         FileUploadService.sanitizeBrowserCookies();
       } catch {}
 
-      // Attempt 1: POST to /api/ai-tutor
-      try {
-        const postRes = await fetch('/api/ai-tutor', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify({
-            prompt: userMsg.text,
-            history,
-            persona,
-            modelMode: 'auto',
-            workspaceId,
-            userId,
-            supabaseToken: accessToken || undefined,
-            attachedFiles: compactAttachedFiles,
-            citationMode: true
-          })
-        });
-
-        const contentType = postRes.headers.get('content-type') || '';
-        if (postRes.ok && contentType.includes('application/json')) {
-          const parsed = await postRes.json().catch(() => null);
-          if (parsed && (parsed.reply || parsed.text)) {
-            data = parsed;
-          }
+      // Multi-attempt POST to /api/ai-tutor
+      for (let attempt = 0; attempt < 2 && !data; attempt++) {
+        if (attempt > 0) {
+          await new Promise(resolve => setTimeout(resolve, 600));
         }
-      } catch (err) {
-        console.warn('[AITutorBackgroundService] Primary POST attempt failed:', err);
+        try {
+          const postRes = await fetch('/api/ai-tutor', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+              prompt: userMsg.text,
+              history,
+              modelMode: 'auto',
+              workspaceId,
+              userId,
+              supabaseToken: accessToken || undefined,
+              attachedFiles: compactAttachedFiles,
+              citationMode: true
+            })
+          });
+
+          const contentType = postRes.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const parsed = await postRes.json().catch(() => null);
+            if (postRes.ok && parsed && (parsed.reply || parsed.text)) {
+              data = parsed;
+              break;
+            } else if (parsed?.error) {
+              lastErrorText = parsed.error;
+            }
+          }
+        } catch (err: any) {
+          lastErrorText = err?.message || 'Network connection error';
+          console.warn(`[AITutorBackgroundService] POST attempt ${attempt + 1} failed:`, err);
+        }
       }
 
-      // Attempt 2: GET fallback with query params
+      // Secondary GET attempt with query params if POST failed
       if (!data) {
         try {
           const params = new URLSearchParams({
             prompt: userMsg.text.slice(0, 1200),
-            persona,
             workspaceId: workspaceId || 'general-study'
           });
           if (userId) params.set('userId', userId);
@@ -278,35 +291,27 @@ class AITutorBackgroundManager {
         }
       }
 
-      // Client Fallback if API was unreachable
-      if (!data || (!data.reply && !data.text)) {
-        if (buildFallbackReply) {
-          const fb = buildFallbackReply(userMsg.text);
-          data = {
-            reply: fb.reply,
-            citations: fb.citations,
-            source: 'StudyWeb AI Tutor',
-            personaUsed: persona
+      // Format AI Message (never fabricate dummy fallback text)
+      const aiMsg: TutorMessage = data && (data.reply || data.text)
+        ? {
+            id: `msg-ai-${Date.now()}`,
+            sender: 'ai',
+            text: data.reply || data.text,
+            citations: data.citations,
+            source: data.source || 'Gemini AI',
+            workspaceNotice: data.workspaceNotice,
+            generatedImageUrl: data.generatedImageUrl,
+            generatedImageCaption: data.generatedImageCaption,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }
+        : {
+            id: `msg-ai-${Date.now()}`,
+            sender: 'ai',
+            text: lastErrorText || 'Unable to reach Gemini AI right now. Please click Retry Question.',
+            isError: true,
+            failedPrompt: userMsg.text,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           };
-        } else {
-          data = {
-            reply: `### 💡 Step-by-Step Study Explanation: **${userMsg.text.slice(0, 90)}**\n\n1. **Core Concept:**\n   - Let's break down **${userMsg.text}** systematically from first principles to practical application.\n\n2. **Key Mechanism & Walkthrough:**\n   - Identify the primary variables, definitions, and cause-and-effect stages.\n   - Trace each transition step-by-step and explore the **Interactive Concept Sandbox** below to adjust parameters in real time!`,
-            source: 'StudyWeb AI Tutor',
-            personaUsed: persona
-          };
-        }
-      }
-
-      // Format AI Message
-      const aiMsg: TutorMessage = {
-        id: `msg-ai-${Date.now()}`,
-        sender: 'ai',
-        text: data.reply || data.text || 'I have analyzed your study question and prepared an explanation.',
-        citations: data.citations,
-        source: data.source || 'Gemini AI',
-        persona: data.personaUsed || persona,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
 
       // If the user started a New Chat while this older request was running, discard this older response!
       if ((this.resetGeneration.get(workspaceId) || 0) !== requestGen) {

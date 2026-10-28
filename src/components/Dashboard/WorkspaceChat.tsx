@@ -32,39 +32,7 @@ import { supabase } from '../../lib/supabase';
 import { AITutorBackgroundService, getChatHistoryKey } from '../../services/AITutorBackgroundService';
 import { WorkspaceChatCache } from '../../services/WorkspaceChatCache';
 
-export type TutorPersona = 'plain_english' | 'socratic' | 'exam_prep' | 'flashcard';
-
-export const TUTOR_PERSONAS: Record<TutorPersona, {
-  name: string;
-  icon: string;
-  shortDesc: string;
-  samplePrompt: string;
-}> = {
-  plain_english: {
-    name: 'Simple Explainer',
-    icon: '💡',
-    shortDesc: 'Everyday words and easy analogies',
-    samplePrompt: 'Explain this in super simple words with an everyday analogy.'
-  },
-  socratic: {
-    name: 'Socratic Guide',
-    icon: '🧭',
-    shortDesc: 'Step-by-step guided questions',
-    samplePrompt: 'Guide me step-by-step to understand this through easy questions.'
-  },
-  exam_prep: {
-    name: 'Quiz & Exam Coach',
-    icon: '🎯',
-    shortDesc: 'High-yield points and test practice',
-    samplePrompt: 'Give me 3 practice quiz questions from my notes with explanations.'
-  },
-  flashcard: {
-    name: 'Quick Flashcards',
-    icon: '⚡',
-    shortDesc: 'Active memory drill',
-    samplePrompt: 'Give me a rapid active-recall flashcard question to test my memory.'
-  }
-};
+export type TutorPersona = string;
 
 export type VoiceProfileId = 'female' | 'male' | 'neutral' | 'energetic';
 
@@ -137,6 +105,12 @@ interface Message {
   persona?: TutorPersona;
   citations?: Citation[];
   attachedFileNames?: string[];
+  workspaceNotice?: string;
+  generatedImageUrl?: string;
+  generatedImageCaption?: string;
+  isFileReadyBadge?: boolean;
+  readyFileName?: string;
+  readyFileType?: string;
   isError?: boolean;
   failedPrompt?: string;
   errorCode?: string | number;
@@ -191,7 +165,6 @@ export default function WorkspaceChat({
   const [isThinking, setIsThinking] = useState<boolean>(() => AITutorBackgroundService.isWorkspaceThinking(workspace.id));
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
-  const [showPersonaMenu, setShowPersonaMenu] = useState(false);
   const [showFilesList, setShowFilesList] = useState(false);
 
   // Attached files for the current pending draft message
@@ -200,15 +173,6 @@ export default function WorkspaceChat({
   const [linkInputUrl, setLinkInputUrl] = useState('');
   const [isAnalyzingLink, setIsAnalyzingLink] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Active tutor persona (default: Simple Explainer)
-  const [activePersona, setActivePersona] = useState<TutorPersona>(() => {
-    try {
-      const saved = localStorage.getItem(`study_persona_${workspace.id}`);
-      if (saved && (saved in TUTOR_PERSONAS)) return saved as TutorPersona;
-    } catch {}
-    return 'plain_english';
-  });
 
   // Voice dictation state
   const [isListening, setIsListening] = useState(false);
@@ -409,7 +373,6 @@ export default function WorkspaceChat({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: cleanText,
-          persona: persona || activePersona,
           voiceName: activeProfile.geminiVoice
         }),
         signal: controller.signal
@@ -449,7 +412,7 @@ export default function WorkspaceChat({
     } catch {
       speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
     }
-  }, [speakingMessageId, stopSpeech, activePersona, selectedVoiceProfile, speechRate, speakWithBrowserSynthesis]);
+  }, [speakingMessageId, stopSpeech, selectedVoiceProfile, speechRate, speakWithBrowserSynthesis]);
 
   // Preview a voice profile sample phrase
   const handlePreviewVoice = (vProfile: VoiceProfile) => {
@@ -547,27 +510,35 @@ export default function WorkspaceChat({
   const buildWelcomeMessage = useCallback((isReset = false): Message => {
     const hasDocs = activeFiles.length > 0;
     if (isReset) {
-      const p = TUTOR_PERSONAS[activePersona];
       return {
         id: `welcome-${Date.now()}`,
         sender: 'ai',
         text: hasDocs
-          ? `✨ **Fresh Conversation Started!**\n\nI'm ready in **${p.icon} ${p.name}** mode (*${p.shortDesc}*).\n\nI have **${activeFiles.length} study document${activeFiles.length === 1 ? '' : 's'}** loaded. What would you like to explore or ask about today?`
-          : `✨ **Fresh Conversation Started!**\n\nI'm ready in **${p.icon} ${p.name}** mode (*${p.shortDesc}*).\n\nWhat would you like to learn, solve, or practice right now?`,
-        time: 'Just now',
-        persona: activePersona
+          ? `✨ **Fresh Conversation Started!**\n\nI have **${activeFiles.length} study document${activeFiles.length === 1 ? '' : 's'}** ready in your workspace. What would you like to explore or ask about today?`
+          : `✨ **Fresh Conversation Started!**\n\nWhat would you like to learn, solve, or explore right now?`,
+        time: 'Just now'
       };
     }
     return {
       id: 'welcome-msg',
       sender: 'ai',
       text: hasDocs
-        ? `👋 **Hi! I'm your AI Study Tutor${workspace.id !== 'general-study' ? ` for ${workspace.name}` : ''}!**\n\nI have loaded your **${activeFiles.length} study document${activeFiles.length === 1 ? '' : 's'}** from your account. Ask me anything, speak using the **Voice** button, or attach documents with the **Attach** button!`
-        : `👋 **Hi! I'm your AI Study Tutor!**\n\nAsk me any question about your studies, homework, or concepts. You can type, speak using **Voice Input**, or attach notes using **Attach** to get started!`,
-      time: 'Just now',
-      persona: 'plain_english'
+        ? `👋 **Hi! I'm your AI Study Tutor${workspace.id !== 'general-study' ? ` for ${workspace.name}` : ''}!**\n\nI have your **${activeFiles.length} study document${activeFiles.length === 1 ? '' : 's'}** ready in this workspace. Ask me any question, speak using the **Voice** button, or attach documents with the **Attach** button!`
+        : `👋 **Hi! I'm your AI Study Tutor!**\n\nAsk me any question about your studies, homework, or concepts. You can type, speak using **Voice Input**, or attach study materials using **Attach** to get started!`,
+      time: 'Just now'
     };
-  }, [activeFiles.length, activePersona, workspace.id, workspace.name]);
+  }, [activeFiles.length, workspace.id, workspace.name]);
+
+  const isLegacyDummyMessage = (m: Message): boolean => {
+    const t = String(m.text || '');
+    return (
+      t.includes('Addressing your question directly, the primary focus is understanding the underlying principles') ||
+      t.includes('Every component interacts systematically. In study problems of this nature') ||
+      t.includes('Identify the key relationship or concept asked in') ||
+      t.includes('Interactive Concept Sandbox') ||
+      t.includes("I'm ready in **")
+    );
+  };
 
   // Persistent conversation messages
   const [messages, setMessages] = useState<Message[]>(() => {
@@ -576,7 +547,7 @@ export default function WorkspaceChat({
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) {
-          const cleanMsgs = parsed.filter((m: Message) => !m.isError);
+          const cleanMsgs = parsed.filter((m: Message) => !m.isError && !isLegacyDummyMessage(m));
           if (cleanMsgs.length > 0) return cleanMsgs;
         }
       }
@@ -587,10 +558,9 @@ export default function WorkspaceChat({
       id: 'welcome-msg',
       sender: 'ai',
       text: hasDocs
-        ? `👋 **Hi! I'm your AI Study Tutor${workspace.id !== 'general-study' ? ` for ${workspace.name}` : ''}!**\n\nI have loaded your **${activeFiles.length} study document${activeFiles.length === 1 ? '' : 's'}** from your account. Ask me anything, speak using the **Voice** button, or attach documents with the **Attach** button!`
-        : `👋 **Hi! I'm your AI Study Tutor!**\n\nAsk me any question about your studies, homework, or concepts. You can type, speak using **Voice Input**, or attach notes using **Attach** to get started!`,
-      time: 'Just now',
-      persona: 'plain_english'
+        ? `👋 **Hi! I'm your AI Study Tutor${workspace.id !== 'general-study' ? ` for ${workspace.name}` : ''}!**\n\nI have your **${activeFiles.length} study document${activeFiles.length === 1 ? '' : 's'}** ready in this workspace. Ask me any question, speak using the **Voice** button, or attach documents with the **Attach** button!`
+        : `👋 **Hi! I'm your AI Study Tutor!**\n\nAsk me any question about your studies, homework, or concepts. You can type, speak using **Voice Input**, or attach study materials using **Attach** to get started!`,
+      time: 'Just now'
     }];
   });
 
@@ -616,7 +586,7 @@ export default function WorkspaceChat({
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) {
-          const cleanMsgs = parsed.filter((m: Message) => !m.isError);
+          const cleanMsgs = parsed.filter((m: Message) => !m.isError && !isLegacyDummyMessage(m));
           if (cleanMsgs.length > 0) {
             setMessages(cleanMsgs);
             return;
@@ -646,8 +616,8 @@ export default function WorkspaceChat({
         return [...prev, newMsg];
       });
 
-      if (autoSpeak) {
-        handleSpeakMessage(newMsg.id, newMsg.text, newMsg.persona);
+      if (autoSpeak && !newMsg.isError) {
+        handleSpeakMessage(newMsg.id, newMsg.text);
       }
     };
 
@@ -668,16 +638,37 @@ export default function WorkspaceChat({
         if (stored) {
           const parsed = JSON.parse(stored);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            setMessages(parsed);
+            const cleanMsgs = parsed.filter((m: Message) => !m.isError && !isLegacyDummyMessage(m));
+            if (cleanMsgs.length > 0) setMessages(cleanMsgs);
           }
         }
       } catch {}
       setIsThinking(AITutorBackgroundService.isWorkspaceThinking(workspace.id));
     };
 
+    const handleFileReadyEvent = (e: any) => {
+      const detail = e.detail;
+      if (!detail || detail.workspaceId !== workspace.id) return;
+      const readyFiles = Array.isArray(detail.files) ? detail.files : [];
+      if (readyFiles.length === 0) return;
+
+      const badgeMessages: Message[] = readyFiles.map((f: any, idx: number) => ({
+        id: `file-ready-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+        sender: 'ai',
+        text: `File ready: ${f.name || 'Study Material'}`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isFileReadyBadge: true,
+        readyFileName: f.name || 'Study Material',
+        readyFileType: f.type || 'doc'
+      }));
+
+      setMessages(prev => [...prev, ...badgeMessages]);
+    };
+
     window.addEventListener('studyweb-tutor-status-change', handleStatusChange);
     window.addEventListener('studyweb-tutor-message-completed', handleMessageCompleted);
     window.addEventListener('studyweb-tutor-chat-reset', handleChatReset);
+    window.addEventListener('studyweb-workspace-file-ready', handleFileReadyEvent);
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
 
@@ -688,17 +679,11 @@ export default function WorkspaceChat({
       window.removeEventListener('studyweb-tutor-status-change', handleStatusChange);
       window.removeEventListener('studyweb-tutor-message-completed', handleMessageCompleted);
       window.removeEventListener('studyweb-tutor-chat-reset', handleChatReset);
+      window.removeEventListener('studyweb-workspace-file-ready', handleFileReadyEvent);
       window.removeEventListener('focus', handleVisibilityOrFocus);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
     };
   }, [workspace.id, chatHistoryKey, autoSpeak, handleSpeakMessage, buildWelcomeMessage]);
-
-  // Save persona preference
-  useEffect(() => {
-    try {
-      localStorage.setItem(`study_persona_${workspace.id}`, activePersona);
-    } catch {}
-  }, [activePersona, workspace.id]);
 
   // Keep WorkspaceChatCache and localStorage synchronized with current messages
   useEffect(() => {
@@ -811,11 +796,56 @@ export default function WorkspaceChat({
 
     setAttachedDrafts(prev => [...prev, ...newDrafts]);
     if (newDrafts.length > 0) {
+      // Also index uploaded files into workspace and display a compact File Ready badge in chat without summarizing
+      const convertedForWorkspace: WorkspaceFile[] = newDrafts.map(d => {
+        const lower = d.name.toLowerCase();
+        const fileType: WorkspaceFile['type'] = lower.endsWith('.pdf')
+          ? 'pdf'
+          : lower.match(/\.(png|jpg|jpeg|webp|gif|svg)$/)
+          ? 'image'
+          : lower.match(/\.(mp4|webm|mov|mkv)$/)
+          ? 'video'
+          : 'doc';
+        return {
+          id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          name: d.name,
+          size: d.size,
+          type: fileType,
+          uploadDate: new Date().toISOString(),
+          status: 'indexed',
+          tags: ['Chat Upload'],
+          summary: d.content ? d.content.slice(0, 1000) : `Uploaded study material: ${d.name}`,
+          transcription: d.content,
+          url: d.dataUrl,
+          fileBase64: d.base64,
+          fileMimeType: d.mimeType,
+          highlights: [d.content ? d.content.slice(0, 300) : `Study document: ${d.name}`]
+        };
+      });
+
+      if (onUpdateWorkspace) {
+        onUpdateWorkspace({
+          ...workspace,
+          files: [...convertedForWorkspace, ...(workspace.files || [])]
+        });
+      }
+
+      const readyBadges: Message[] = newDrafts.map((d, idx) => ({
+        id: `file-ready-${Date.now()}-${idx}`,
+        sender: 'ai',
+        text: `File ready: ${d.name}`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isFileReadyBadge: true,
+        readyFileName: d.name,
+        readyFileType: d.type
+      }));
+      setMessages(prev => [...prev, ...readyBadges]);
+
       (window as any).showToast?.(
-        `"${newDrafts.map(f => f.name).join(', ')}" was uploaded and attached to your AI Tutor session.`,
+        `"${newDrafts.map(f => f.name).join(', ')}" is indexed & ready in your workspace.`,
         'success',
         3200,
-        'Material Uploaded & Ready'
+        'Material Ready'
       );
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -890,11 +920,45 @@ export default function WorkspaceChat({
       setLinkInputUrl('');
       setShowLinkInput(false);
 
+      // Save analyzed link into workspace and show compact File Ready badge in chat without summarizing
+      if (onUpdateWorkspace) {
+        const wsLinkFile: WorkspaceFile = {
+          id: `file-link-${Date.now()}`,
+          name: analyzedTitle,
+          size: newDraft.size,
+          type: isYt ? 'video' : 'doc',
+          uploadDate: new Date().toISOString(),
+          status: 'indexed',
+          tags: [isYt ? 'Video Study Guide' : 'Web Resource'],
+          summary: newDraft.summary,
+          transcription: newDraft.content,
+          url: normalizedUrl,
+          highlights: highlightsList
+        };
+        onUpdateWorkspace({
+          ...workspace,
+          files: [wsLinkFile, ...(workspace.files || [])]
+        });
+      }
+
+      setMessages(prev => [
+        ...prev,
+        {
+          id: `file-ready-link-${Date.now()}`,
+          sender: 'ai',
+          text: `Link ready: ${analyzedTitle}`,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isFileReadyBadge: true,
+          readyFileName: analyzedTitle,
+          readyFileType: isYt ? 'video' : 'url'
+        }
+      ]);
+
       (window as any).showToast?.(
-        `"${analyzedTitle}" was analyzed and attached to your AI Tutor session.`,
+        `"${analyzedTitle}" is indexed & ready in your workspace.`,
         'success',
         3200,
-        'Video / Link Analyzed & Ready'
+        'Video / Link Ready'
       );
     } catch (err) {
       console.warn('Failed to analyze link:', err);
@@ -1189,36 +1253,14 @@ export default function WorkspaceChat({
       };
     });
 
-    // Exclude welcome greetings and error banners so history sent to Gemini is 100% clean conversation turns
+    // Exclude welcome greetings, file-ready badges, and error banners so history sent to Gemini is 100% clean conversation turns
     const history = messages
-      .filter(m => !m.isError && !m.id.startsWith('welcome-') && m.id !== 'welcome-msg')
+      .filter(m => !m.isError && !m.isFileReadyBadge && !m.id.startsWith('welcome-') && m.id !== 'welcome-msg')
       .slice(-6)
       .map(m => ({
         role: m.sender === 'ai' ? 'model' : 'user',
         content: String(m.text || '').slice(0, 1500)
       }));
-
-    const buildClientFallbackReply = (promptText: string): { reply: string; citations?: Citation[] } => {
-      const allSourceDocs = [...newlyConvertedFiles, ...activeFiles];
-      if (allSourceDocs.length > 0) {
-        const primaryDoc = allSourceDocs[0];
-        const primaryName = (primaryDoc.name && !primaryDoc.name.startsWith('http')) ? primaryDoc.name : 'Your Uploaded Material';
-        const rawContent = (primaryDoc.transcription || primaryDoc.contentText || primaryDoc.summary || '').trim();
-        if (rawContent && rawContent.length > 20) {
-          return {
-            reply: `### 📘 Complete Study Breakdown: **${primaryName}**\n\n${rawContent.slice(0, 2400)}`,
-            citations: [{
-              sourceName: primaryName,
-              quote: rawContent.slice(0, 240)
-            }]
-          };
-        }
-      }
-
-      return {
-        reply: `### 🎓 Explanation: **${promptText.slice(0, 90)}**\n\n- **Core Principle**: Identify the key relationship or concept asked in "${promptText.slice(0, 80)}".\n- **Step-by-Step Breakdown**: Work through each part of the explanation systematically.\n- **Key Takeaway**: Apply this insight directly to solve your problem or prepare for exams.`
-      };
-    };
 
     try {
       const aiMsg = await AITutorBackgroundService.sendTutorMessage({
@@ -1226,12 +1268,10 @@ export default function WorkspaceChat({
         workspaceName: workspace.name,
         userId: resolvedUserId,
         prompt: userMsg.text,
-        persona: activePersona,
         history,
         compactAttachedFiles,
         accessToken,
-        userMsg,
-        buildFallbackReply: buildClientFallbackReply
+        userMsg
       });
 
       setMessages(prev => {
@@ -1239,8 +1279,8 @@ export default function WorkspaceChat({
         return [...prev, aiMsg as Message];
       });
 
-      if (autoSpeak) {
-        handleSpeakMessage(aiMsg.id, aiMsg.text, aiMsg.persona as TutorPersona);
+      if (autoSpeak && !aiMsg.isError) {
+        handleSpeakMessage(aiMsg.id, aiMsg.text);
       }
     } catch (err) {
       console.error('[WorkspaceChat] Error sending message to background tutor:', err);
@@ -1267,7 +1307,6 @@ export default function WorkspaceChat({
             sender: 'ai',
             text: answer,
             source: 'Gemini AI Tutor (Voice)',
-            persona: activePersona,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           };
           setMessages(prev => [...prev, userMsg, aiMsg]);
@@ -1278,7 +1317,7 @@ export default function WorkspaceChat({
     };
     window.addEventListener('studyweb_ask_ai_tutor', handleVoiceAsk);
     return () => window.removeEventListener('studyweb_ask_ai_tutor', handleVoiceAsk);
-  }, [handleSend, activePersona]);
+  }, [handleSend]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1487,58 +1526,8 @@ export default function WorkspaceChat({
           </div>
         </div>
 
-        {/* Right: Tutor Style Toggle & New Chat Button */}
+        {/* Right: Voice Settings & Clear Chat Button */}
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          
-          {/* Persona Style Dropdown / Toggle */}
-          <div className="relative">
-            <button
-              onClick={() => setShowPersonaMenu(prev => !prev)}
-              className="px-2 sm:px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1 sm:gap-1.5 cursor-pointer transition-colors border border-slate-200/80 dark:border-slate-750/80 active:scale-95"
-              title={`Tutor Persona: ${TUTOR_PERSONAS[activePersona].name}`}
-            >
-              <span>{TUTOR_PERSONAS[activePersona].icon}</span>
-              <span className="hidden xs:inline">{TUTOR_PERSONAS[activePersona].name}</span>
-              <ChevronDown className="w-2.5 h-2.5 text-slate-400" />
-            </button>
-
-            {showPersonaMenu && (
-              <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl p-1.5 z-50 space-y-1">
-                <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
-                  Tutor Teaching Style
-                </div>
-                {(Object.keys(TUTOR_PERSONAS) as TutorPersona[]).map(key => {
-                  const p = TUTOR_PERSONAS[key];
-                  const isCur = activePersona === key;
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => {
-                        setActivePersona(key);
-                        setShowPersonaMenu(false);
-                      }}
-                      className={`w-full text-left p-2.5 rounded-xl transition-all flex items-start gap-2.5 text-xs cursor-pointer ${
-                        isCur
-                          ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-900 dark:text-indigo-200 font-bold'
-                          : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      <span className="text-base mt-0.5">{p.icon}</span>
-                      <div className="min-w-0 flex-1">
-                        <div className="font-bold flex items-center justify-between">
-                          <span>{p.name}</span>
-                          {isCur && <span className="text-[10px] text-indigo-600 font-bold">Active</span>}
-                        </div>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400 font-normal leading-tight mt-0.5">
-                          {p.shortDesc}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
 
           {/* AI Tutor Voice Settings Popover */}
           <div className="relative" ref={voiceSettingsRef}>
@@ -1784,7 +1773,24 @@ export default function WorkspaceChat({
           
 
           {/* Conversation Stream */}
-          {messages.map((msg) => (
+          {messages.map((msg) => {
+            if (msg.isFileReadyBadge) {
+              return (
+                <div key={msg.id} className="flex items-center justify-center my-1">
+                  <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-800/60 text-xs text-emerald-800 dark:text-emerald-300 shadow-2xs">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <span className="font-bold truncate max-w-[200px] sm:max-w-[300px]">
+                      {msg.readyFileName || 'Study Material'}
+                    </span>
+                    <span className="text-emerald-700/80 dark:text-emerald-300/80 font-medium">
+                      ready in workspace — ask about it anytime
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
             <div
               key={msg.id}
               className={`flex gap-2.5 sm:gap-3.5 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -1813,15 +1819,21 @@ export default function WorkspaceChat({
                         <span className="font-bold text-indigo-600 dark:text-indigo-400">
                           AI Tutor
                         </span>
-                        {msg.persona && TUTOR_PERSONAS[msg.persona] && (
-                          <span className="text-[11px] text-slate-400">
-                            · {TUTOR_PERSONAS[msg.persona].icon} {TUTOR_PERSONAS[msg.persona].name}
-                          </span>
-                        )}
                       </div>
                       <span className="text-[11px] text-slate-400">
                         {msg.time}
                       </span>
+                    </div>
+                  )}
+
+                  {/* Out-of-Workspace Topic Notice Banner */}
+                  {msg.sender === 'ai' && msg.workspaceNotice && !msg.isError && (
+                    <div className="mb-3 px-3 py-2 rounded-xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 flex items-start gap-2 text-xs text-amber-900 dark:text-amber-200">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <div className="leading-snug">
+                        <span className="font-bold">Topic not in uploaded workspace files: </span>
+                        <span>{msg.workspaceNotice}</span>
+                      </div>
                     </div>
                   )}
 
@@ -1868,6 +1880,29 @@ export default function WorkspaceChat({
                     </div>
                   ) : (
                     renderMessageContent(msg.text)
+                  )}
+
+                  {/* Automatically Generated Image / Educational Diagram */}
+                  {msg.sender === 'ai' && msg.generatedImageUrl && (
+                    <div className="mt-4 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950 shadow-sm">
+                      <img
+                        src={msg.generatedImageUrl}
+                        alt={msg.generatedImageCaption || 'Generated educational diagram'}
+                        className="w-full h-auto max-h-[380px] object-contain bg-slate-950"
+                      />
+                      <div className="px-3.5 py-2 bg-slate-900 border-t border-slate-800 flex items-center justify-between gap-2 text-xs text-slate-300">
+                        <span className="font-semibold truncate">
+                          {msg.generatedImageCaption || 'AI Tutor Generated Visual Diagram'}
+                        </span>
+                        <a
+                          href={msg.generatedImageUrl}
+                          download={`studyweb-diagram-${msg.id}.svg`}
+                          className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] shrink-0 transition-colors"
+                        >
+                          Download Visual
+                        </a>
+                      </div>
+                    </div>
                   )}
 
                   {/* Clean Citation Footnotes */}
@@ -1954,7 +1989,8 @@ export default function WorkspaceChat({
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
 
           {/* Thinking Indicator */}
           {isThinking && (
@@ -1984,10 +2020,10 @@ export default function WorkspaceChat({
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
               <span className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider pl-1 shrink-0">Try:</span>
               {[
-                { label: "⚡ Explain concept simply", prompt: "Can you explain the main concept from this study material in simple, intuitive terms?" },
-                { label: "📝 Quiz me on key terms", prompt: "Create a 3-question quick quiz on key concepts from this topic to test my recall." },
-                { label: "💡 Step-by-step solver", prompt: "Help me solve a difficult study problem step-by-step with clear reasoning." },
-                { label: "🔍 High-yield summary", prompt: "Give me a high-yield study bullet-point summary of the core concepts." }
+                { label: "🌿 What is photosynthesis like?", prompt: "What is photosynthesis like? Explain it clearly." },
+                { label: "🎨 Generate diagram of Photosynthesis", prompt: "Generate a visual diagram of photosynthesis and explain how it works." },
+                { label: "⚡ Explain uploaded material", prompt: "Can you explain the main concepts from my uploaded workspace material?" },
+                { label: "📝 Quiz me on key terms", prompt: "Create a 3-question quick quiz on key concepts to test my recall." }
               ].map((item, i) => (
                 <button
                   key={i}

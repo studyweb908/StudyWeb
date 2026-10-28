@@ -24,6 +24,12 @@ export interface CachedChatMessage {
   persona?: string;
   citations?: CachedCitation[];
   attachedFileNames?: string[];
+  workspaceNotice?: string;
+  generatedImageUrl?: string;
+  generatedImageCaption?: string;
+  isFileReadyBadge?: boolean;
+  readyFileName?: string;
+  readyFileType?: string;
   isError?: boolean;
   failedPrompt?: string;
   errorCode?: string | number;
