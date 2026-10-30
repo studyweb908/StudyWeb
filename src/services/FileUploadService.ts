@@ -355,8 +355,8 @@ export class FileUploadService {
   public static sanitizeBrowserCookies(): void {
     if (typeof document === 'undefined' || !document.cookie) return;
     try {
-      // Only purge if total cookie length exceeds 2048 bytes
-      if (document.cookie.length < 2048) return;
+      // Proactively purge cookies if total cookie length exceeds 512 bytes so Nginx header limits are never reached
+      if (document.cookie.length < 512) return;
 
       const rawCookies = document.cookie.split(';');
       if (rawCookies.length === 0) return;
@@ -368,8 +368,8 @@ export class FileUploadService {
         const parts = cookie.split('=');
         const name = parts[0]?.trim();
         if (!name) continue;
-        // Do not clear primary active auth token
-        if (name === 'studyweb-auth') continue;
+        // Clear any oversized cookie or non-essential cookie
+        if (name === 'studyweb-auth' && cookie.length < 1000) continue;
 
         for (const path of paths) {
           const pathAttr = path ? `; path=${path}` : '';
@@ -482,7 +482,7 @@ export class FileUploadService {
     const headers: Record<string, string> = {};
 
     if (customToken) {
-      if (customToken.length < 3000) {
+      if (customToken.length < 1500) {
         headers['Authorization'] = `Bearer ${customToken}`;
       }
       return headers;
@@ -493,7 +493,7 @@ export class FileUploadService {
         const { data: sessionData, error } = await supabase.auth.getSession();
         if (!error && sessionData?.session?.access_token) {
           const token = sessionData.session.access_token;
-          if (token && token.length < 3000) {
+          if (token && token.length < 1500) {
             headers['Authorization'] = `Bearer ${token}`;
             this.log('debug', 'Attached Supabase user JWT bearer token to request.');
           }

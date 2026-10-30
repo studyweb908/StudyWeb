@@ -29,7 +29,8 @@ export function getSupabaseServerClient(authHeader?: string) {
   if (!supabaseUrl || !supabaseKey) {
     return null;
   }
-  const options = authHeader ? { global: { headers: { Authorization: authHeader } } } : {};
+  const safeAuth = authHeader && authHeader.length < 4000 ? authHeader : undefined;
+  const options = safeAuth ? { global: { headers: { Authorization: safeAuth } } } : {};
   return createClient(supabaseUrl, supabaseKey, options);
 }
 
@@ -2783,24 +2784,19 @@ ${citationGuideline}`;
   // API Route: Process Study Material (URL, YouTube, PDF, Document) with smart title resolution and content extraction
   app.post("/api/study-materials/process", async (req, res) => {
     try {
-      const { workspaceId, userId, name, type, size, url, fileBase64, fileMimeType } = req.body;
+      const { workspaceId, userId, name, type, size, url, fileBase64, fileMimeType } = req.body || {};
 
-      if (!name && !url && !fileBase64) {
-        res.status(400).json({ error: "Resource name, URL, or file content is required." });
-        return;
-      }
-
-      let resolvedTitle = name;
+      let resolvedTitle = name || "Study Material";
       let resourceType = type || 'url';
       let extractedContent = "";
       let summary = "";
       let tags: string[] = ['Indexed'];
       let highlights: string[] = [];
       let transcription = "";
-      let sourceUrl = url || '';
+      let sourceUrl = (url && !String(url).startsWith('data:')) ? url : '';
 
-      if (url) {
-        if (!isValidPublicUrl(url)) {
+      if (sourceUrl) {
+        if (!isValidPublicUrl(sourceUrl)) {
           res.status(400).json({ error: "Invalid or prohibited URL. Only public HTTP/HTTPS URLs are allowed." });
           return;
         }
@@ -3101,16 +3097,21 @@ Ensure the returned JSON is 100% accurate, educational, and has zero placeholder
         }
       };
 
-      if (fileBase64 && fileMimeType) {
+      if (fileBase64) {
         let cleanBase64 = String(fileBase64);
         if (cleanBase64.includes(";base64,")) {
           cleanBase64 = cleanBase64.split(";base64,")[1];
         }
         cleanBase64 = cleanBase64.replace(/[\r\n\s]/g, "");
 
+        let normalizedMime = (fileMimeType || (type === 'image' ? 'image/jpeg' : 'application/pdf')).toLowerCase().trim();
+        if (normalizedMime === 'image/jpg' || normalizedMime === 'image/pjpeg' || normalizedMime === 'image/jfif') {
+          normalizedMime = 'image/jpeg';
+        }
+
         contents = [
           {
-            text: `Carefully inspect and analyze this uploaded study resource "${resolvedName}" (${type || fileMimeType}). Perform complete OCR of all visible text, headings, UI elements, diagrams, and information inside the file/image. Extract:
+            text: `Carefully inspect and analyze this uploaded study resource "${resolvedName}" (${type || normalizedMime}). Perform complete OCR of all visible text, headings, UI elements, diagrams, and information inside the file/image. Extract:
 1. summary: A clear, accurate, and detailed summary explaining the exact contents of this image, video, or document (never guess or fabricate unrelated subjects).
 2. tags: 3-5 specific subject or topic tags matching the actual content.
 3. highlights: 4-6 specific takeaways, concepts, features, or facts directly shown in the file.
@@ -3121,7 +3122,7 @@ Return a valid JSON object matching the requested schema.`
           {
             inlineData: {
               data: cleanBase64,
-              mimeType: fileMimeType
+              mimeType: normalizedMime
             }
           }
         ];

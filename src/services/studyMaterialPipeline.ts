@@ -16,8 +16,23 @@ export function getSupabaseServer(authHeader?: string) {
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || DEFAULT_SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseKey) return null;
-  const options = authHeader ? { global: { headers: { Authorization: authHeader } } } : {};
+  const safeAuth = authHeader && authHeader.length < 4000 ? authHeader : undefined;
+  const options = safeAuth ? { global: { headers: { Authorization: safeAuth } } } : {};
   return createClient(supabaseUrl, supabaseKey, options);
+}
+
+function extractJwtUserId(token: string): string | null {
+  try {
+    const parts = token.replace(/^Bearer\s+/i, '').trim().split('.');
+    if (parts.length < 2) return null;
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    if (payload && typeof payload.sub === 'string' && isValidUuid(payload.sub)) {
+      return payload.sub;
+    }
+  } catch {
+    // Ignore decode errors
+  }
+  return null;
 }
 
 dotenv.config();
@@ -370,23 +385,30 @@ You must return a valid JSON object strictly matching this schema:
     temperature: 0.2
   };
 
-  if (fileBase64 && fileMimeType) {
+  if (fileBase64) {
     let cleanBase64 = String(fileBase64);
     if (cleanBase64.includes(';base64,')) {
       cleanBase64 = cleanBase64.split(';base64,')[1];
     }
     cleanBase64 = cleanBase64.replace(/[\r\n\s]/g, '');
 
+    let normalizedMime = (fileMimeType || (isImageFile ? 'image/jpeg' : 'application/pdf')).toLowerCase().trim();
+    if (normalizedMime === 'image/jpg' || normalizedMime === 'image/pjpeg' || normalizedMime === 'image/jfif') {
+      normalizedMime = 'image/jpeg';
+    } else if (isImageFile && !['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'].includes(normalizedMime)) {
+      normalizedMime = 'image/jpeg';
+    }
+
     const mediaPrompt = isVideoFile
-      ? `Watch and analyze this uploaded video file "${name}" (MIME: ${fileMimeType}).
+      ? `Watch and analyze this uploaded video file "${name}" (MIME: ${normalizedMime}).
 Carefully inspect both the visual frames/slides/demonstrations and the audio/spoken explanations.
 Tell the student exactly what is in this video, what it is about, summarize its full content, extract all key concepts and takeaways, transcribe the spoken lecture/explanations, and create 5 practice questions with answers based on the video.`
       : isImageFile
-      ? `Carefully inspect and analyze this uploaded image "${name}" (MIME: ${fileMimeType}).
+      ? `Carefully inspect and analyze this uploaded image "${name}" (MIME: ${normalizedMime}).
 1. Perform complete, word-for-word OCR of all visible text, headings, labels, bullet points, UI elements, logos, captions, and numbers in the image.
 2. Describe the exact subject matter shown in the image (for example, if it shows an AI tool, software interface, infographic, architecture diagram, chart, or handwritten notes, explain its exact name, purpose, features, and workflow).
 3. Base the "title", "summary", "detailedNotes", "keyTakeaways", "conceptsAndDefinitions", "practiceQuestions", and "transcription" 100% on what is actually visible inside this image. Do NOT invent unrelated subjects.`
-      : `Analyze this uploaded document/file "${name}" (${type}, MIME: ${fileMimeType}). 
+      : `Analyze this uploaded document/file "${name}" (${type}, MIME: ${normalizedMime}). 
 Perform OCR and deep conceptual extraction on all text, diagrams, formulas, tables, and questions.
 Extract complete study notes, flashcards, practice questions, and definitions as specified in the schema.`;
 
@@ -395,7 +417,7 @@ Extract complete study notes, flashcards, practice questions, and definitions as
       {
         inlineData: {
           data: cleanBase64,
-          mimeType: fileMimeType
+          mimeType: normalizedMime
         }
       }
     ];
@@ -462,10 +484,7 @@ Instructions:
             ? contents[1].text
             : contents;
 
-        const supportsMinimalThinking =
-          model.includes('gemini-3-flash') ||
-          model.includes('flash-lite') ||
-          model.includes('gemini-flash');
+        const supportsMinimalThinking = model.startsWith('gemini-3');
 
         const response = await ai.models.generateContent({
           model,
@@ -581,9 +600,8 @@ export function generateReliableStudyFallback(
  * Complete end-to-end processing and Supabase persistence
  */
 studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
-  const authHeader = req.headers.authorization;
   const {
-    workspaceId,
+    workspaceId: rawWorkspaceId,
     userId: clientUserId,
     materialId: clientMaterialId,
     name: clientName,
@@ -593,14 +611,16 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
     content: pastedText,
     storagePath,
     fileBase64,
-    fileMimeType
-  } = req.body;
+    fileMimeType,
+    supabaseToken
+  } = req.body || {};
 
-  if (!workspaceId) {
-    res.status(400).json({ error: 'workspaceId is required.' });
-    return;
-  }
+  const rawToken = typeof supabaseToken === 'string' && supabaseToken.trim()
+    ? supabaseToken.trim().replace(/^Bearer\s+/i, '')
+    : (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, '').trim() : '');
+  const authHeader = rawToken ? `Bearer ${rawToken}` : undefined;
 
+  const workspaceId = rawWorkspaceId || 'general-study';
   const normWsId = toValidUuid(workspaceId);
   const materialId = clientMaterialId && isValidUuid(clientMaterialId) ? clientMaterialId : generateUuid();
 
@@ -608,16 +628,23 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
 
   // Authenticate user via Supabase token when present
   let authenticatedUserId: string | null = null;
-  if (supabase && authHeader && authHeader.startsWith('Bearer ')) {
-    try {
-      const token = authHeader.replace(/^Bearer\s+/i, '');
-      const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
-      if (!authErr && user?.id) {
-        authenticatedUserId = user.id;
+  if (rawToken) {
+    if (supabase && rawToken.length < 4000) {
+      try {
+        const { data: { user }, error: authErr } = await supabase.auth.getUser(rawToken);
+        if (!authErr && user?.id) {
+          authenticatedUserId = user.id;
+        }
+      } catch {
+        // Fallback to JWT sub extraction
       }
-    } catch {
-      // Fallback
     }
+    if (!authenticatedUserId) {
+      authenticatedUserId = extractJwtUserId(rawToken);
+    }
+  }
+  if (!authenticatedUserId && clientUserId && isValidUuid(String(clientUserId))) {
+    authenticatedUserId = String(clientUserId);
   }
 
   // Only assign authenticated Supabase user ID to prevent FK constraint failures on auth.users
@@ -1024,11 +1051,15 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
  * Reuses existing material ID and saved source content without creating duplicate rows (RULE 5)
  */
 studyMaterialRouter.post('/retry', async (req: Request, res: Response) => {
-  const authHeader = req.headers.authorization;
-  const { materialId, workspaceId } = req.body;
+  const { materialId, workspaceId: rawWorkspaceId, supabaseToken } = req.body || {};
+  const rawToken = typeof supabaseToken === 'string' && supabaseToken.trim()
+    ? supabaseToken.trim().replace(/^Bearer\s+/i, '')
+    : (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, '').trim() : '');
+  const authHeader = rawToken ? `Bearer ${rawToken}` : undefined;
+  const workspaceId = rawWorkspaceId || 'general-study';
 
-  if (!materialId || !workspaceId) {
-    res.status(400).json({ error: 'materialId and workspaceId are required for retry.' });
+  if (!materialId) {
+    res.status(400).json({ error: 'materialId is required for retry.' });
     return;
   }
 

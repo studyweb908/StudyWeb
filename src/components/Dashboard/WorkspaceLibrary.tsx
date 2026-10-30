@@ -114,23 +114,36 @@ export default function WorkspaceLibrary({
             ? await resolveQuickLinkTitleClient(targetFile.url, targetFile.type)
             : cleanNotebookLMTitle(targetFile.name, targetFile.url, targetFile.type);
 
-          const res = await fetch('/api/study-materials/process', {
+          FileUploadService.sanitizeBrowserCookies();
+          const repairBody = JSON.stringify({
+            workspaceId: toValidUuid(workspace.id),
+            userId: userId || undefined,
+            supabaseToken: token || undefined,
+            materialId: targetFile.id,
+            name: !isRawUrlOrPlaceholderTitle(quickTitle) ? quickTitle : targetFile.name,
+            type: targetFile.type,
+            size: targetFile.size || 'Web Link',
+            url: targetFile.url
+          });
+          let res = await fetch('/api/study-materials/process', {
             method: 'POST',
             credentials: 'same-origin',
             headers: {
-              'Content-Type': 'application/json',
-              ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+              'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-              workspaceId: toValidUuid(workspace.id),
-              userId: userId || undefined,
-              materialId: targetFile.id,
-              name: !isRawUrlOrPlaceholderTitle(quickTitle) ? quickTitle : targetFile.name,
-              type: targetFile.type,
-              size: targetFile.size || 'Web Link',
-              url: targetFile.url
-            })
+            body: repairBody
           });
+          if (res.status === 400) {
+            FileUploadService.sanitizeBrowserCookies();
+            res = await fetch('/api/study-materials/process', {
+              method: 'POST',
+              credentials: 'omit',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: repairBody
+            });
+          }
           if (res.ok && !cancelled) {
             const data = await res.json();
             const mat = data?.material;
@@ -371,26 +384,40 @@ export default function WorkspaceLibrary({
     libraryProgressRef.current = progress;
 
     try {
+      FileUploadService.sanitizeBrowserCookies();
       const { token, userId } = await getAuthInfo();
       const abortCtrl = new AbortController();
-      const timeoutId = setTimeout(() => abortCtrl.abort(), 3200);
-      const processRes = await fetch('/api/study-materials/process', {
+      const timeoutId = setTimeout(() => abortCtrl.abort(), 15000);
+      const pasteBody = JSON.stringify({
+        workspaceId: toValidUuid(workspace.id),
+        userId: userId || undefined,
+        supabaseToken: token || undefined,
+        name: title,
+        type: 'doc',
+        size: `${Math.ceil(driveCopyText.length / 1024)} KB`,
+        content: driveCopyText
+      });
+      let processRes = await fetch('/api/study-materials/process', {
         method: 'POST',
         credentials: 'same-origin',
         signal: abortCtrl.signal,
         headers: { 
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          workspaceId: toValidUuid(workspace.id),
-          userId: userId || undefined,
-          name: title,
-          type: 'doc',
-          size: `${Math.ceil(driveCopyText.length / 1024)} KB`,
-          content: driveCopyText
-        })
+        body: pasteBody
       });
+      if (processRes.status === 400) {
+        FileUploadService.sanitizeBrowserCookies();
+        processRes = await fetch('/api/study-materials/process', {
+          method: 'POST',
+          credentials: 'omit',
+          signal: abortCtrl.signal,
+          headers: { 
+            'Content-Type': 'application/json'
+          },
+          body: pasteBody
+        });
+      }
       clearTimeout(timeoutId);
 
       let materialResult: any = null;
@@ -619,22 +646,28 @@ export default function WorkspaceLibrary({
   };
 
   const compressImageForSupabaseAndAI = async (rawDataUrl: string, rawMime: string): Promise<{ dataUrl: string; base64: string; mimeType: string }> => {
-    if (!rawDataUrl || !rawDataUrl.startsWith('data:image/') || rawMime === 'image/svg+xml') {
-      const b64 = rawDataUrl.split(',')[1] || '';
-      return { dataUrl: rawDataUrl, base64: b64, mimeType: rawMime || 'image/png' };
+    const cleanMime = (rawMime || '').toLowerCase().trim() === 'image/jpg'
+      ? 'image/jpeg'
+      : (rawMime && ['image/jpeg', 'image/png', 'image/webp'].includes(rawMime.toLowerCase().trim())
+          ? rawMime.toLowerCase().trim()
+          : 'image/jpeg');
+
+    if (!rawDataUrl || rawMime === 'image/svg+xml') {
+      const b64 = rawDataUrl ? (rawDataUrl.split(',')[1] || '') : '';
+      return { dataUrl: rawDataUrl, base64: b64, mimeType: cleanMime };
     }
-    if (rawDataUrl.length <= 320_000) {
+    if (rawDataUrl.length <= 240_000 && (rawDataUrl.startsWith('data:image/jpeg') || rawDataUrl.startsWith('data:image/png') || rawDataUrl.startsWith('data:image/webp'))) {
       return {
         dataUrl: rawDataUrl,
         base64: rawDataUrl.split(',')[1] || '',
-        mimeType: rawMime || 'image/jpeg'
+        mimeType: cleanMime
       };
     }
     try {
       return await new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
-          const maxDim = 1500;
+          const maxDim = 1280;
           let w = img.width || 1200;
           let h = img.height || 900;
           if (w > maxDim || h > maxDim) {
@@ -651,16 +684,16 @@ export default function WorkspaceLibrary({
           canvas.height = h;
           const ctx = canvas.getContext('2d');
           if (!ctx) {
-            resolve({ dataUrl: rawDataUrl, base64: rawDataUrl.split(',')[1] || '', mimeType: rawMime });
+            resolve({ dataUrl: rawDataUrl, base64: rawDataUrl.split(',')[1] || '', mimeType: cleanMime });
             return;
           }
           ctx.fillStyle = '#FFFFFF';
           ctx.fillRect(0, 0, w, h);
           ctx.drawImage(img, 0, 0, w, h);
           const outMime = 'image/jpeg';
-          let compressedUrl = canvas.toDataURL(outMime, 0.82);
-          if (compressedUrl.length > 420_000) {
-            compressedUrl = canvas.toDataURL(outMime, 0.65);
+          let compressedUrl = canvas.toDataURL(outMime, 0.78);
+          if (compressedUrl.length > 280_000) {
+            compressedUrl = canvas.toDataURL(outMime, 0.62);
           }
           resolve({
             dataUrl: compressedUrl,
@@ -669,12 +702,12 @@ export default function WorkspaceLibrary({
           });
         };
         img.onerror = () => {
-          resolve({ dataUrl: rawDataUrl, base64: rawDataUrl.split(',')[1] || '', mimeType: rawMime });
+          resolve({ dataUrl: rawDataUrl, base64: rawDataUrl.split(',')[1] || '', mimeType: cleanMime });
         };
         img.src = rawDataUrl;
       });
     } catch {
-      return { dataUrl: rawDataUrl, base64: rawDataUrl.split(',')[1] || '', mimeType: rawMime };
+      return { dataUrl: rawDataUrl, base64: rawDataUrl.split(',')[1] || '', mimeType: cleanMime };
     }
   };
 
@@ -857,29 +890,45 @@ export default function WorkspaceLibrary({
       // Process resource through Study Material AI Pipeline and Supabase persistence
       let materialResult: any = null;
       try {
+        FileUploadService.sanitizeBrowserCookies();
         const { token, userId } = await getAuthInfo();
         const abortCtrl = new AbortController();
         const timeoutId = setTimeout(() => abortCtrl.abort(), 45000);
-        const processRes = await fetch('/api/study-materials/process', {
+        const processPayload = JSON.stringify({
+          workspaceId: toValidUuid(workspace.id),
+          userId: userId || undefined,
+          supabaseToken: token || undefined,
+          name,
+          type,
+          size,
+          content: rawTextContent || undefined,
+          url: (url && !url.startsWith('data:')) ? url : undefined,
+          fileBase64: fileBase64 || undefined,
+          fileMimeType: fileMimeType || undefined
+        });
+
+        let processRes = await fetch('/api/study-materials/process', {
           method: 'POST',
           credentials: 'same-origin',
           signal: abortCtrl.signal,
           headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            'Content-Type': 'application/json'
           },
-          body: JSON.stringify({
-            workspaceId: toValidUuid(workspace.id),
-            userId: userId || undefined,
-            name,
-            type,
-            size,
-            content: rawTextContent || undefined,
-            url: (url && !url.startsWith('data:')) ? url : (dataUrl && dataUrl.length < 420_000 ? dataUrl : ''),
-            fileBase64: fileBase64 || undefined,
-            fileMimeType: fileMimeType || undefined
-          })
+          body: processPayload
         });
+
+        if (processRes.status === 400) {
+          FileUploadService.sanitizeBrowserCookies();
+          processRes = await fetch('/api/study-materials/process', {
+            method: 'POST',
+            credentials: 'omit',
+            signal: abortCtrl.signal,
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: processPayload
+          });
+        }
         clearTimeout(timeoutId);
 
         if (processRes.ok) {

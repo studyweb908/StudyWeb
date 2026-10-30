@@ -892,11 +892,20 @@ export default function WorkspaceChat({
           reader.readAsDataURL(file);
         });
 
-        if (fileType === 'image' && rawDataUrl.startsWith('data:image/') && rawDataUrl.length > 320_000) {
+        if (fileType === 'image' && rawDataUrl) {
           const compressed = await new Promise<{ dataUrl: string; base64: string; mimeType: string }>((resolve) => {
+            const cleanMime = (mimeType || '').toLowerCase().trim() === 'image/jpg'
+              ? 'image/jpeg'
+              : (['image/jpeg', 'image/png', 'image/webp'].includes((mimeType || '').toLowerCase().trim())
+                  ? mimeType.toLowerCase().trim()
+                  : 'image/jpeg');
+            if (rawDataUrl.length <= 240_000 && (rawDataUrl.startsWith('data:image/jpeg') || rawDataUrl.startsWith('data:image/png') || rawDataUrl.startsWith('data:image/webp'))) {
+              resolve({ dataUrl: rawDataUrl, base64: rawDataUrl.split(';base64,')[1] || '', mimeType: cleanMime });
+              return;
+            }
             const img = new Image();
             img.onload = () => {
-              const maxDim = 1500;
+              const maxDim = 1280;
               let w = img.width || 1200;
               let h = img.height || 900;
               if (w > maxDim || h > maxDim) {
@@ -913,19 +922,19 @@ export default function WorkspaceChat({
               canvas.height = h;
               const ctx = canvas.getContext('2d');
               if (!ctx) {
-                resolve({ dataUrl: rawDataUrl, base64: rawDataUrl.split(';base64,')[1] || '', mimeType });
+                resolve({ dataUrl: rawDataUrl, base64: rawDataUrl.split(';base64,')[1] || '', mimeType: cleanMime });
                 return;
               }
               ctx.fillStyle = '#FFFFFF';
               ctx.fillRect(0, 0, w, h);
               ctx.drawImage(img, 0, 0, w, h);
-              let outUrl = canvas.toDataURL('image/jpeg', 0.82);
-              if (outUrl.length > 420_000) {
-                outUrl = canvas.toDataURL('image/jpeg', 0.65);
+              let outUrl = canvas.toDataURL('image/jpeg', 0.78);
+              if (outUrl.length > 280_000) {
+                outUrl = canvas.toDataURL('image/jpeg', 0.62);
               }
               resolve({ dataUrl: outUrl, base64: outUrl.split(';base64,')[1] || '', mimeType: 'image/jpeg' });
             };
-            img.onerror = () => resolve({ dataUrl: rawDataUrl, base64: rawDataUrl.split(';base64,')[1] || '', mimeType });
+            img.onerror = () => resolve({ dataUrl: rawDataUrl, base64: rawDataUrl.split(';base64,')[1] || '', mimeType: cleanMime });
             img.src = rawDataUrl;
           });
           dataUrl = compressed.dataUrl;
@@ -970,26 +979,37 @@ export default function WorkspaceChat({
       try {
         const abortCtrl = new AbortController();
         const tId = setTimeout(() => abortCtrl.abort(), 45000);
-        const procRes = await fetch('/api/study-materials/process', {
+        const procBody = JSON.stringify({
+          workspaceId: toValidUuid(workspace.id),
+          userId: resolvedUserId || undefined,
+          supabaseToken: accessToken || undefined,
+          name: file.name,
+          type: fileType,
+          size: formattedSize,
+          content: content || undefined,
+          fileBase64: base64 || undefined,
+          fileMimeType: mimeType || undefined
+        });
+        let procRes = await fetch('/api/study-materials/process', {
           method: 'POST',
           credentials: 'same-origin',
           signal: abortCtrl.signal,
           headers: {
-            'Content-Type': 'application/json',
-            ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {})
+            'Content-Type': 'application/json'
           },
-          body: JSON.stringify({
-            workspaceId: toValidUuid(workspace.id),
-            userId: resolvedUserId || undefined,
-            name: file.name,
-            type: fileType,
-            size: formattedSize,
-            content: content || undefined,
-            url: dataUrl && dataUrl.length < 420_000 ? dataUrl : undefined,
-            fileBase64: base64 || undefined,
-            fileMimeType: mimeType || undefined
-          })
+          body: procBody
         });
+        if (procRes.status === 400) {
+          procRes = await fetch('/api/study-materials/process', {
+            method: 'POST',
+            credentials: 'omit',
+            signal: abortCtrl.signal,
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: procBody
+          });
+        }
         clearTimeout(tId);
 
         if (procRes.ok) {

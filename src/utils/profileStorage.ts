@@ -401,6 +401,17 @@ export async function fetchAndReconcileSupabaseProfile(forceRefresh = false): Pr
       const user = session.user;
       const meta = user.user_metadata || {};
 
+      // Auto-heal bloated JWT user_metadata if a large data-URI avatar was previously stored in auth.users
+      if (
+        (typeof meta.avatar_url === 'string' && meta.avatar_url.length > 450) ||
+        (typeof meta.picture === 'string' && meta.picture.length > 450)
+      ) {
+        supabase.auth
+          .updateUser({ data: { avatar_url: null, picture: null } })
+          .then(() => supabase.auth.refreshSession())
+          .catch(() => {});
+      }
+
       // Read user-scoped cache now that we definitely have user.id
       let scopedCache: Partial<ScholarProfileData> = {};
       try {
@@ -643,11 +654,17 @@ export async function saveProfileToSupabase(
       merged.email = session.user.email || merged.email;
       writeLocalProfileCache(merged);
 
-      // 2. Persist ALL fields into Supabase Auth user_metadata (JSONB — schema-proof across all projects)
+      // 2. Persist compact metadata into Supabase Auth user_metadata (never store large data: URLs in JWT)
+      const compactAvatarForJwt =
+        merged.avatarUrl && !merged.avatarUrl.startsWith('data:') && merged.avatarUrl.length <= 450
+          ? merged.avatarUrl
+          : null;
+
       const metaPayload = {
         full_name: merged.fullName,
         name: merged.fullName,
-        avatar_url: merged.avatarUrl,
+        avatar_url: compactAvatarForJwt,
+        picture: compactAvatarForJwt,
         school_name: merged.schoolName,
         academic_institution: merged.schoolName,
         school: merged.schoolName,
@@ -657,8 +674,8 @@ export async function saveProfileToSupabase(
         target_aim: merged.targetAim,
         primary_goal: merged.targetAim,
         learning_goal: merged.targetAim,
-        scholar_bio: merged.studentBio,
-        bio: merged.studentBio,
+        scholar_bio: merged.studentBio ? merged.studentBio.slice(0, 500) : '',
+        bio: merged.studentBio ? merged.studentBio.slice(0, 500) : '',
         daily_goal_minutes: merged.dailyGoalMinutes,
         exam_name: merged.examName,
         exam_date: merged.examDate,
