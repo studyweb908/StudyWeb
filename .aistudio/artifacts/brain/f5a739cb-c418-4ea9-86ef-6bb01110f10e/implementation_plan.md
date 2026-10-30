@@ -1,37 +1,43 @@
-# Implementation Plan: Full-Screen Onboarding, Workspace Studio & Context-First AI Tutor
+# Implementation Plan: AI Tutor Image Analysis, Supabase Persistence, Customize Workspace Redesign & Error Logging
 
-## 1. Full-Screen Onboarding Experience (`src/components/OnboardingModal.tsx`)
-- **Full-Viewport Canvas**: Replace the centered `max-w-xl` modal box with an immersive `fixed inset-0 w-screen h-screen` full-screen layout styled in the brand's clean slate and indigo/violet palette.
-- **Top Progress Bar & Step Header**: Pin a sleek top navigation bar with a smooth animated progress bar (`Step X of 11`), step category label, and back button.
-- **Instant Slide & Selection Feedback**:
-  - Add crisp horizontal slide transitions (`x: 40 -> 0 -> -40`) and an instant selection confirmation state (brief loading/advancing indicator on the selected card) so clicking an answer feels responsive and fluid before advancing to the next question.
-  - Ensure large, high-contrast option cards with clear typography and keyboard/click accessibility across desktop and mobile viewports.
+## Goal & Overview
+Ensure that uploaded images and study materials in a workspace are accurately analyzed by Gemini Vision on upload, saved to Supabase, and used exclusively from the active workspace when answering AI Tutor questions—eliminating any cross-workspace contamination (such as unrelated "Cell" workspace content) or dummy fallback text. In addition, redesign the Customize Workspace screen into a clean, tabbed full-width card layout without the live workspace preview, and report any Supabase or AI errors via toast notifications alongside detailed browser console and server terminal logs.
 
-## 2. Workspace Action Bar Alignment (`src/components/Dashboard/WorkspaceOverview.tsx`)
-- **Balanced Single-Line Toolbar**: Redesign the workspace header action bar containing **All Workspaces**, **Upload Material**, **AI Tutor**, and **Delete** so all four buttons sit in a unified, well-proportioned control bar.
-- **Visual Hierarchy & Grouping**:
-  - Group navigation and primary actions (`All Workspaces`, `Upload Material`, `AI Tutor`) with consistent height (`h-10`), icon-to-label spacing, `whitespace-nowrap shrink-0`, and brand-aligned Indigo/Slate surfaces.
-  - Place `Delete` with a subtle vertical divider or clean right-aligned separation so destructive actions are visually distinct yet harmoniously aligned with the toolbar.
+---
 
-## 3. Full-Screen Split-Screen Customize Workspace Studio (`src/components/Dashboard/EditWorkspaceModal.tsx`)
-- **Full-Screen Split-Screen Layout**: Transform `EditWorkspaceModal` from a cramped centered dialog into a full-screen (`fixed inset-0 w-screen h-screen`) split-screen workspace studio.
-- **Crafted Brand Aesthetic (Zero AI-Slop)**:
-  - Remove all emoji-cluttered labels (`✨`, `🎨`, `🖼️`), thick left borders (`border-l-4`), and generic gradient text headers.
-  - **Left Column (Interactive Controls)**: Clean, structured sections for Workspace Identity (Title, Subject Category, Description, Brand Color Palette), Icon/Logo Selection (curated academic symbols + custom image upload/URL), and Cover Banner Gallery (curated photography + custom upload/URL).
-  - **Right Column (Live Interactive Workspace Preview)**: A real-time preview showing how the workspace header, subject badge, accent theme, icon, and cover artwork look inside the actual dashboard before saving.
+## Key Features & Changes
 
-## 4. Real-Time Workspace Uploads & Zero Dummy Data (`src/components/Dashboard/WorkspaceContainer.tsx`, `src/components/Dashboard/WorkspaceLibrary.tsx`, `src/services/FileUploadService.ts`)
-- **Real-Time File & Content Sync**:
-  - When a user uploads any document, image, audio, video, or web link, immediately persist and fetch the real extracted text, summary, highlights, and metadata from `/api/study-materials/process` and Supabase `workspace_files`.
-  - Refresh the active workspace state in real time (`WorkspaceSyncService.fetchWorkspaceFiles`) upon upload completion so `WorkspaceOverview`, `WorkspaceLibrary`, and `WorkspaceChat` immediately reflect the exact uploaded files.
-  - Strip any fallback dummy/mock strings so newly uploaded files only display authentic extracted content, real file sizes, and real timestamps.
+### 1. AI Image Analysis on Upload & Supabase Persistence
+- **Fast Gemini Vision Extraction on Upload**:
+  - Update the `/api/study-materials/process` and `/api/analyze-resource` pipelines to analyze uploaded images (`PNG`, `JPG`, `WEBP`, etc.) using `gemini-3-flash-preview` with `ThinkingLevel.MINIMAL` so visual OCR, UI/tool names, diagrams, and key concepts are extracted within seconds without timing out.
+  - Ensure drag-and-drop and file-picker uploads in both the **Workspace Library** and **AI Tutor Chat** properly classify `image/*` files and wait for the AI analysis response before completing indexing.
+- **Full Supabase Persistence**:
+  - Save the extracted `summary`, `transcription` / OCR text, `content_text`, `highlights`, `tags`, and optimized image preview URL into the Supabase `workspace_files` table and workspace state via `WorkspaceSyncService.saveWorkspaceFile`.
+  - Remove all hardcoded subject fallbacks (such as cell biology, calculus, or chemistry placeholder text) across backend and frontend pipelines so only genuine extracted content is ever stored or returned.
 
-## 5. AI Tutor Context Priority, Follow-Up Chips & Out-of-Workspace Research Confirmation (`server.ts`, `src/services/AITutorBackgroundService.ts`, `src/components/Dashboard/WorkspaceChat.tsx`)
-- **Workspace-First Context Attribution**:
-  - Prioritize uploaded files and notes in the active workspace (and across the user's workspaces when relevant).
-  - Display a clear **Active Context Badge** on AI Tutor responses showing exactly which workspace and uploaded file(s) are being referenced.
-- **Ambiguity & Out-of-Workspace Research Prompt**:
-  - When a user asks about a topic that is not found in their uploaded workspace materials or is ambiguous, the AI Tutor will clearly state that the topic is not in the current workspace files and ask if they want to research it outside their workspace.
-  - Render an interactive **"Research outside workspace"** action button on those responses that re-runs the query in general academic research mode with one click.
-- **Clickable Follow-Up Question Chips**:
-  - Return 2–3 contextual follow-up questions with every AI Tutor response and render them as interactive, clickable chips underneath the message so the user can continue exploring with a single click.
+### 2. Strict Active-Workspace Context in AI Tutor
+- **Isolate Active Workspace Materials**:
+  - Update `WorkspaceChat` and `AITutorWorkspace` so queries about uploaded materials (e.g., *"What is in my study material?"*) prioritize and use the **currently active workspace's files** rather than merging files from older or unrelated workspaces (like a previous "Cell" workspace).
+  - Pass both the persisted Supabase analysis (`summary`, `transcription`, `highlights`) and inline image data (`fileBase64` / `fileMimeType`) for active workspace images to `/api/ai-tutor` so Gemini can directly inspect the uploaded image as well as its indexed text.
+  - Retrieve persisted `workspace_files` from Supabase for the active `workspaceId` on the server if any file metadata is missing from the client payload.
+
+### 3. Customize Workspace Full-Width Tabbed Card Layout (No Live Preview)
+- **Remove Live Workspace Preview**:
+  - Remove the right-side "Live Workspace Preview" panel and its preview cards from `EditWorkspaceModal`.
+- **Tabbed Full-Width Card Studio**:
+  - Arrange the full-screen Customize Workspace page into a clean, centered full-width card layout featuring the three section tabs (**Identity & Emblem**, **Brand Theme**, and **Cover Artwork**) with spacious controls and instant save/reset actions in the header.
+
+### 4. Structured Error Logging & Toast Notifications
+- **Server Terminal & Browser Console Logging**:
+  - Log every Supabase database/storage error and Gemini API error with a structured prefix (`[Supabase Error]` / `[AI Tutor Error]`), operation name, HTTP/Postgres error code, and detailed message in both the server terminal and browser developer console.
+- **Toast Popup with Error Code & Message**:
+  - Trigger a toast notification (`window.showToast`) displaying the specific error code and message whenever a Supabase sync, material upload analysis, or AI Tutor request encounters an error.
+
+---
+
+## Architecture & File Touchpoints
+- `server/studyMaterialPipeline.ts` & `server.ts`: Fast multimodal image analysis (`ThinkingLevel.MINIMAL`), removal of static biology/math/chemistry fallback generators, active-workspace RAG filtering, and structured server terminal error logging.
+- `src/services/WorkspaceSyncService.ts`: Persist analyzed image summaries, transcriptions, highlights, and compressed image data to Supabase `workspace_files`, and surface Supabase error codes/messages via console logs and toast notifications.
+- `src/components/Dashboard/WorkspaceLibrary.tsx`: Fix drag-and-drop image type detection, extend upload analysis timeout for multimodal vision processing, and persist AI-extracted image content to Supabase.
+- `src/components/Dashboard/WorkspaceChat.tsx` & `src/components/Dashboard/AITutorWorkspace.tsx`: Scope study material context strictly to the active workspace, analyze images attached directly in chat, include active workspace image data in AI Tutor requests, and trigger toast notifications with error codes on failures.
+- `src/components/Dashboard/EditWorkspaceModal.tsx`: Remove the Live Workspace Preview column and implement the tabbed full-width card layout for Identity & Emblem, Brand Theme, and Cover Artwork.

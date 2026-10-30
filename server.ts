@@ -623,7 +623,11 @@ async function startServer() {
       lower.includes('youtube mix') ||
       lower.startsWith('uploaded study file:') ||
       lower.startsWith('study document:') ||
-      lower.startsWith('study material:')
+      lower.startsWith('study material:') ||
+      lower.includes('this biology resource explores cellular systems and functions') ||
+      lower.includes('educational summary of cell biology, its foundational') ||
+      lower.includes('high-quality study resource covering critical academic theories') ||
+      lower.includes('welcome to the studyweb audio summary series')
     );
   }
 
@@ -688,7 +692,9 @@ async function startServer() {
       "need", "want", "know", "think", "good", "best", "better", "first", "second", "also",
       "very", "much", "more", "most", "some", "any", "all", "other", "another", "such", "only",
       "own", "same", "than", "too", "just", "now", "here", "where", "when", "who", "whom",
-      "whose", "which", "workspace", "workspaces", "uploaded", "upload", "study", "tutor", "bro"
+      "whose", "which", "workspace", "workspaces", "uploaded", "upload", "study", "tutor", "bro",
+      "material", "materials", "file", "files", "document", "documents", "resource", "resources",
+      "note", "notes", "content", "contents", "breakdown", "summary", "summarize"
     ]);
 
     const rawTokens = qLower.split(/[^a-z0-9_-]+/).filter(w => w.length > 2 && !stopWords.has(w));
@@ -753,7 +759,7 @@ async function startServer() {
 
       // 6. Always include a title & workspace metadata unit so topic queries matching a file's title or subject always match
       rawUnits.push({
-        text: `Study Material: ${fileName}${file.workspaceName ? ` (Workspace: ${file.workspaceName})` : ''}${file.summary && !isDummyMetadataLine(file.summary) ? ` — ${file.summary.slice(0, 300)}` : ''}`,
+        text: `${fileName}${file.workspaceName ? ` (Workspace: ${file.workspaceName})` : ''}${file.summary && !isDummyMetadataLine(file.summary) ? ` — ${file.summary.slice(0, 300)}` : ''}`,
         approxPage: 1,
         type: 'Title & Overview'
       });
@@ -1413,22 +1419,33 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
           f => (f.id && fileObj.id && String(f.id) === String(fileObj.id)) ||
                (f.name && cleanName && String(f.name).trim().toLowerCase() === cleanName.toLowerCase())
         );
+        let hydratedBase64 = fileObj.fileBase64;
+        let hydratedMime = fileObj.fileMimeType;
+        if (!hydratedBase64 && typeof fileObj.url === 'string' && fileObj.url.startsWith('data:') && fileObj.url.includes(';base64,')) {
+          const [header, b64] = fileObj.url.split(';base64,');
+          if (b64 && b64.length < 2000000) {
+            hydratedBase64 = b64;
+            hydratedMime = hydratedMime || header.replace('data:', '');
+          }
+        }
         const normalized = {
           id: fileObj.id || `file-${list.length + 1}`,
           name: cleanName,
-          type: fileObj.type || 'doc',
+          type: fileObj.type || (hydratedMime?.startsWith('image/') ? 'image' : 'doc'),
           size: fileObj.size || 'Analyzed',
           pages: fileObj.pages,
           url: fileObj.url,
           workspaceId: fileObj.workspaceId || fileObj.workspace_id || defaultWsId || workspaceId,
           workspaceName: fileObj.workspaceName || defaultWsName || workspaceName || 'Main Workspace',
-          summary: fileObj.summary || '',
-          highlights: Array.isArray(fileObj.highlights) ? fileObj.highlights : (fileObj.highlights ? [fileObj.highlights] : []),
-          transcription: fileObj.transcription || fileObj.contentText || fileObj.content_text || '',
+          summary: !isDummyMetadataLine(fileObj.summary) ? (fileObj.summary || '') : '',
+          highlights: Array.isArray(fileObj.highlights) ? fileObj.highlights.filter((h: string) => !isDummyMetadataLine(h)) : (fileObj.highlights && !isDummyMetadataLine(fileObj.highlights) ? [fileObj.highlights] : []),
+          transcription: !isDummyMetadataLine(fileObj.transcription || fileObj.contentText || fileObj.content_text)
+            ? (fileObj.transcription || fileObj.contentText || fileObj.content_text || '')
+            : '',
           formulas: Array.isArray(fileObj.formulas) ? fileObj.formulas : [],
           isDirectAttachment: Boolean(fileObj.isDirectAttachment),
-          fileBase64: fileObj.fileBase64,
-          fileMimeType: fileObj.fileMimeType
+          fileBase64: hydratedBase64,
+          fileMimeType: hydratedMime
         };
 
         if (existingIdx >= 0) {
@@ -1450,14 +1467,19 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         }
       };
 
-      // Seed from clientAllWorkspaces first
+      const isRealWorkspaceId = Boolean(workspaceId && workspaceId !== 'general-study');
+
+      // Seed allWorkspacesMap from clientAllWorkspaces, but ONLY add files from the ACTIVE workspace into effectiveFiles!
       clientAllWorkspaces.forEach((cws: any) => {
         if (!cws || !cws.id) return;
         const wsName = cws.name || 'Workspace';
         const wsFiles: any[] = [];
+        const isCurrentWs = !isRealWorkspaceId || String(cws.id) === String(workspaceId);
         (Array.isArray(cws.files) ? cws.files : []).forEach((cf: any) => {
           upsertFileIntoList(wsFiles, cf, wsName, cws.id);
-          upsertFileIntoList(effectiveFiles, cf, wsName, cws.id);
+          if (isCurrentWs) {
+            upsertFileIntoList(effectiveFiles, cf, wsName, cws.id);
+          }
         });
         allWorkspacesMap.set(String(cws.id), {
           id: String(cws.id),
@@ -1470,12 +1492,11 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         });
       });
 
-      const isRealWorkspaceId = Boolean(workspaceId && workspaceId !== 'general-study');
       const supabase = getSupabaseServerClient(effectiveAuthHeader);
 
       if (supabase && (isRealWorkspaceId || userId || effectiveAuthHeader)) {
         try {
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Supabase timeout")), 950));
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Supabase query timeout (1500ms)")), 1500));
           const fetchPromise = (async () => {
             let resolvedUserId = userId;
             if (!resolvedUserId && effectiveAuthHeader) {
@@ -1508,6 +1529,19 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
                     : Promise.resolve({ data: null, error: null }))
             ]);
 
+            if (wsRes?.error) {
+              console.error('[Supabase Error][AI Tutor workspaces fetch]', {
+                code: wsRes.error.code || 'SUPABASE_WS_ERR',
+                message: wsRes.error.message
+              });
+            }
+            if (wsFilesRes?.error) {
+              console.error('[Supabase Error][AI Tutor workspace_files fetch]', {
+                code: wsFilesRes.error.code || 'SUPABASE_FILES_ERR',
+                message: wsFilesRes.error.message
+              });
+            }
+
             const profile = profileRes?.data;
             const dbWsRows = Array.isArray(wsRes?.data) ? wsRes.data : [];
             const fileRows = Array.isArray(wsFilesRes?.data) ? wsFilesRes.data : [];
@@ -1524,6 +1558,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
             dbWsRows.forEach((wsRow: any) => {
               const wsIdStr = String(wsRow.id);
               const wsTitle = wsRow.name || 'Workspace';
+              const isCurrentWs = !isRealWorkspaceId || wsIdStr === String(workspaceId);
               const existingWs = allWorkspacesMap.get(wsIdStr) || {
                 id: wsIdStr,
                 name: wsTitle,
@@ -1537,7 +1572,9 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
               if (Array.isArray(wsRow.files)) {
                 wsRow.files.forEach((sf: any) => {
                   upsertFileIntoList(existingWs.files, sf, wsTitle, wsIdStr);
-                  upsertFileIntoList(effectiveFiles, sf, wsTitle, wsIdStr);
+                  if (isCurrentWs) {
+                    upsertFileIntoList(effectiveFiles, sf, wsTitle, wsIdStr);
+                  }
                 });
               }
 
@@ -1558,10 +1595,14 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
               fileRows.forEach((sf: any) => {
                 const targetWsId = String(sf.workspace_id || workspaceId || 'general-study');
                 const targetWsName = wsIdToName.get(targetWsId) || workspaceName || 'Workspace';
-                upsertFileIntoList(effectiveFiles, {
-                  ...sf,
-                  transcription: sf.transcription || sf.content_text
-                }, targetWsName, targetWsId);
+                const isCurrentWs = !isRealWorkspaceId || targetWsId === String(workspaceId);
+
+                if (isCurrentWs) {
+                  upsertFileIntoList(effectiveFiles, {
+                    ...sf,
+                    transcription: sf.transcription || sf.content_text
+                  }, targetWsName, targetWsId);
+                }
 
                 const wsEntry = allWorkspacesMap.get(targetWsId);
                 if (wsEntry) {
@@ -1587,12 +1628,20 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
               }
             }
 
-            const allNotes = [
-              ...noteRows,
-              ...Array.from(allWorkspacesMap.values()).flatMap((w: any) => Array.isArray(w.notes) ? w.notes : [])
-            ];
-            if (allNotes.length > 0) {
-              const uniqueNotes = Array.from(new Map(allNotes.map((n: any) => [String(n.id || n.title).toLowerCase(), n])).values()).slice(0, 12);
+            // Scope study notes in contextParts to the active workspace when inside a specific workspace
+            const activeWsEntry = isRealWorkspaceId ? allWorkspacesMap.get(String(workspaceId)) : null;
+            const relevantNotes = isRealWorkspaceId
+              ? [
+                  ...noteRows.filter((n: any) => String(n.workspace_id) === String(workspaceId)),
+                  ...(Array.isArray(activeWsEntry?.notes) ? activeWsEntry.notes : [])
+                ]
+              : [
+                  ...noteRows,
+                  ...Array.from(allWorkspacesMap.values()).flatMap((w: any) => Array.isArray(w.notes) ? w.notes : [])
+                ];
+
+            if (relevantNotes.length > 0) {
+              const uniqueNotes = Array.from(new Map(relevantNotes.map((n: any) => [String(n.id || n.title).toLowerCase(), n])).values()).slice(0, 12);
               const noteSnippets = uniqueNotes.map((n: any) => `[Note: "${n.title || 'Study Note'}"] ${String(n.content || '').replace(/<[^>]+>/g, ' ').slice(0, 400)}`);
               contextParts.push(`WORKSPACE STUDY NOTES:\n${noteSnippets.join('\n')}`);
             }
@@ -1604,7 +1653,10 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
 
           await Promise.race([fetchPromise, timeoutPromise]);
         } catch (supaErr: any) {
-          console.warn("[AI Tutor] Notice: Supabase query notice:", supaErr?.message || supaErr);
+          console.error("[Supabase Error][AI Tutor Context Fetch]", {
+            code: supaErr?.code || 'SUPABASE_TIMEOUT',
+            message: supaErr?.message || String(supaErr)
+          });
         }
       }
 
@@ -1768,19 +1820,41 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         });
       }
 
-      // Combine files + cross-workspace notes for semantic search, prioritizing active workspace files first
-      const activeWsFilesFirst = [
-        ...effectiveFiles.filter((f: any) => String(f.workspaceId) === String(workspaceId)),
-        ...effectiveFiles.filter((f: any) => String(f.workspaceId) !== String(workspaceId))
-      ];
-      effectiveFiles = activeWsFilesFirst;
+      // Strictly filter effectiveFiles to the ACTIVE workspace (plus any direct turn attachments) so files from other workspaces never bleed in!
+      if (isRealWorkspaceId) {
+        effectiveFiles = effectiveFiles.filter(
+          (f: any) => Boolean(f.isDirectAttachment) || !f.workspaceId || String(f.workspaceId) === String(workspaceId)
+        );
+      }
+
+      const activeWorkspaceNotesOnly = isRealWorkspaceId
+        ? allCrossWorkspaceNotes.filter(n => String(n.workspaceId) === String(workspaceId))
+        : allCrossWorkspaceNotes;
 
       const searchableMaterials = [
         ...effectiveFiles,
-        ...allCrossWorkspaceNotes.filter(n => !effectiveFiles.some(ef => ef.name === n.name))
+        ...activeWorkspaceNotesOnly.filter(n => !effectiveFiles.some(ef => ef.name === n.name))
       ];
 
-      // Check initial semantic relevance against all workspace materials
+      // Detect if the student is specifically asking for an inventory list across ALL workspaces vs analyzing their active workspace's study material
+      const isAllWorkspacesListRequest =
+        /\b(all\s+(my\s+|our\s+|the\s+|of\s+the\s+)?workspaces|what\s+workspaces\s+do\s+(i|we)\s+have|list\s+(all\s+)?(my\s+|our\s+)?workspaces|every\s+workspace)\b/i.test(qLower);
+
+      const isDeepStudyMaterialAnalysisQuery =
+        /\b(study\s+materials?|this\s+image|the\s+image|this\s+picture|this\s+photo|this\s+diagram|this\s+screenshot|explain|analyze|breakdown|break\s+down|summarize|tell\s+me\s+about)\b/i.test(qLower);
+
+      // Check if any file in the active workspace has an image binary (`fileBase64` or `data:image/` URL)
+      const hasInlineImageInActiveWorkspace = effectiveFiles.some((f: any) => {
+        const isImg =
+          String(f.type || '').toLowerCase().includes('image') ||
+          String(f.fileMimeType || '').toLowerCase().startsWith('image/') ||
+          (typeof f.url === 'string' && f.url.startsWith('data:image/')) ||
+          /\.(png|jpg|jpeg|webp|gif|svg|bmp)$/i.test(String(f.name || ''));
+        const hasBinary = Boolean(f.fileBase64 || (typeof f.url === 'string' && f.url.startsWith('data:image/')));
+        return isImg && hasBinary;
+      });
+
+      // Check initial semantic relevance against active workspace materials
       const initialRagCheck = (searchableMaterials.length > 0)
         ? extractRelevantDocumentSegments(prompt, searchableMaterials, 10, isExplicitMaterialQuery)
         : { segments: [], contextString: '', hasHighRelevance: false };
@@ -1788,7 +1862,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       const shouldUseWorkspaceFiles = Boolean(
         !allowOutsideResearch &&
         searchableMaterials.length > 0 &&
-        (isExplicitMaterialQuery || initialRagCheck.hasHighRelevance)
+        (isExplicitMaterialQuery || initialRagCheck.hasHighRelevance || hasInlineImageInActiveWorkspace)
       );
 
       if (shouldUseWorkspaceFiles && effectiveFiles && effectiveFiles.length > 0) {
@@ -1882,7 +1956,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         ]);
       }
 
-      // 1. Document-Aware Semantic Segment Extraction RAG pipeline across all workspace materials
+      // 1. Document-Aware Semantic Segment Extraction RAG pipeline across active workspace materials
       let groundedSourceContext = "";
       let retrievedSegments: ExtractedSegment[] = [];
       let hasRelevantWorkspaceMaterial = false;
@@ -1895,15 +1969,15 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
           prompt,
           searchableMaterials,
           10,
-          isExplicitMaterialQuery
+          isExplicitMaterialQuery || hasInlineImageInActiveWorkspace
         );
         retrievedSegments = ragResult.segments;
-        hasRelevantWorkspaceMaterial = isExplicitMaterialQuery || ragResult.hasHighRelevance;
+        hasRelevantWorkspaceMaterial = isExplicitMaterialQuery || ragResult.hasHighRelevance || hasInlineImageInActiveWorkspace;
 
         if (hasRelevantWorkspaceMaterial) {
           groundedSourceContext = ragResult.contextString;
 
-          // Prioritize files that matched in retrievedSegments first, then remaining files
+          // Prioritize files that matched in retrievedSegments first, then remaining files in the active workspace
           const matchedNames = new Set(retrievedSegments.map(s => s.sourceName));
           const prioritizedFiles = [
             ...searchableMaterials.filter((f: any) => matchedNames.has(f.name)),
@@ -1914,25 +1988,37 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
             const textBody = (f.transcription || f.contentText || f.content_text || f.summary || '').trim();
             const fallbackBody = textBody && !isDummyMetadataLine(textBody)
               ? textBody
-              : `Uploaded study material titled "${f.name}" in workspace "${f.workspaceName || 'Workspace'}" (Type: ${f.type || 'document'}).`;
-            const header = `--- WORKSPACE MATERIAL #${idx + 1}: "${f.name || 'Study Resource'}" (Workspace: "${f.workspaceName || 'Workspace'}" | Type: ${f.type || 'resource'}${f.url && !String(f.url).startsWith('data:') ? ` | URL: ${f.url}` : ''}) ---`;
+              : `Uploaded study material titled "${f.name}" in workspace "${f.workspaceName || workspaceName || 'Active Workspace'}" (Type: ${f.type || 'document'}). Inspect the attached image/file inlineData directly to answer the student's question.`;
+            const header = `--- ACTIVE WORKSPACE MATERIAL #${idx + 1}: "${f.name || 'Study Resource'}" (Workspace: "${f.workspaceName || workspaceName || 'Active Workspace'}" | Type: ${f.type || 'resource'}${f.url && !String(f.url).startsWith('data:') ? ` | URL: ${f.url}` : ''}) ---`;
             return `${header}\n${fallbackBody.slice(0, 12000)}`;
           }).filter(Boolean);
 
           if (fullSourceBlocks.length > 0) {
-            groundedSourceContext += `\n=== FULL UPLOADED WORKSPACE MATERIALS & NOTES ===\n${fullSourceBlocks.join('\n\n')}\n=========================================\n`;
+            groundedSourceContext += `\n=== FULL UPLOADED WORKSPACE MATERIALS & NOTES (WORKSPACE: "${workspaceName || 'Active Workspace'}") ===\n${fullSourceBlocks.join('\n\n')}\n=========================================\n`;
           }
         }
       }
 
-      // Fast-Path: Complete Cross-Workspace Inventory grouped by File Type across all Workspaces
-      if (isWorkspaceInventoryQuery) {
+      // Fast-Path Inventory: ONLY use when the user asks for an inventory list AND is NOT asking to analyze/explain their study material or an inline image
+      const shouldRunStaticInventoryFastPath =
+        isWorkspaceInventoryQuery &&
+        !isDeepStudyMaterialAnalysisQuery &&
+        !(hasInlineImageInActiveWorkspace && effectiveFiles.some((f: any) => !f.summary || f.summary.length < 80));
+
+      if (shouldRunStaticInventoryFastPath) {
         const allWsList = Array.from(allWorkspacesMap.values()).filter(w => w.id !== 'general-study' || w.files.length > 0 || w.notes.length > 0);
-        const totalFilesCount = effectiveFiles.length;
-        const totalNotesCount = allCrossWorkspaceNotes.length;
+        // If user asked about "all workspaces", show all workspaces; if they asked "what is in my workspace" inside a specific workspace, show the active workspace's files first!
+        const filesToDisplay = isAllWorkspacesListRequest
+          ? Array.from(allWorkspacesMap.values()).flatMap(w => w.files || [])
+          : effectiveFiles;
+        const notesToDisplay = isAllWorkspacesListRequest
+          ? allCrossWorkspaceNotes
+          : activeWorkspaceNotesOnly;
+        const totalFilesCount = filesToDisplay.length;
+        const totalNotesCount = notesToDisplay.length;
         const totalItemsCount = totalFilesCount + totalNotesCount;
 
-        if (totalItemsCount > 0 || allWsList.length > 0) {
+        if (totalItemsCount > 0 || (isAllWorkspacesListRequest && allWsList.length > 0)) {
           const describeFile = (f: any, idx: number) => {
             const wsTag = f.workspaceName ? ` *[Workspace: **${f.workspaceName}**]*` : '';
             const sizeTag = f.size ? ` · ${f.size}` : '';
@@ -1940,7 +2026,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
               .replace(/\s+/g, ' ')
               .trim();
             const brief = cleanSummary && !isDummyMetadataLine(cleanSummary)
-              ? `\n  ↳ *Summary:* ${cleanSummary.slice(0, 180)}${cleanSummary.length > 180 ? '...' : ''}`
+              ? `\n  ↳ *Content Summary:* ${cleanSummary.slice(0, 420)}${cleanSummary.length > 420 ? '...' : ''}`
               : '';
             return `- **${idx + 1}. ${f.name || 'Study Material'}** (\`${String(f.type || 'DOC').toUpperCase()}\`${sizeTag})${wsTag}${brief}`;
           };
@@ -1949,7 +2035,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
           const imagesAndDiagrams: any[] = [];
           const videosAudioLinks: any[] = [];
 
-          effectiveFiles.forEach((f: any) => {
+          filesToDisplay.forEach((f: any) => {
             const t = String(f.type || '').toLowerCase();
             const n = String(f.name || '').toLowerCase();
             if (t.includes('image') || t === 'img' || /\.(png|jpg|jpeg|webp|gif|svg)$/.test(n)) {
@@ -1963,8 +2049,8 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
 
           const sections: string[] = [];
 
-          // 1. Workspaces Overview
-          if (allWsList.length > 0) {
+          // 1. Workspaces Overview (only show other workspaces when user asks for all workspaces)
+          if (isAllWorkspacesListRequest && allWsList.length > 0) {
             const wsLines = allWsList.map((ws, i) => {
               const fCount = (ws.files || []).length;
               const nCount = (ws.notes || []).length;
@@ -1981,7 +2067,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
             sections.push(`#### 🗂️ Your Workspaces (${allWsList.length} ${allWsList.length === 1 ? 'Workspace' : 'Workspaces'})\n${wsLines}`);
           }
 
-          // 2. Grouped by File Type Across Workspaces
+          // 2. Grouped by File Type
           if (pdfAndDocs.length > 0) {
             sections.push(
               `#### 📄 PDFs & Study Documents (${pdfAndDocs.length})\n` +
@@ -2003,27 +2089,31 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
             );
           }
 
-          if (allCrossWorkspaceNotes.length > 0) {
-            const noteLines = allCrossWorkspaceNotes.map((n, i) => {
+          if (notesToDisplay.length > 0) {
+            const noteLines = notesToDisplay.map((n, i) => {
               const wsTag = n.workspaceName ? ` *[Workspace: **${n.workspaceName}**]*` : '';
               const cleanNote = (n.summary || '').replace(/\s+/g, ' ').trim();
               const brief = cleanNote ? `\n  ↳ *Preview:* ${cleanNote.slice(0, 160)}${cleanNote.length > 160 ? '...' : ''}` : '';
               return `- **${i + 1}. ${n.name.replace(/ \(Note\)$/, '')}** (\`STUDY NOTE\`)${wsTag}${brief}`;
             }).join('\n');
-            sections.push(`#### 📝 Study Notes (${allCrossWorkspaceNotes.length})\n${noteLines}`);
+            sections.push(`#### 📝 Study Notes (${notesToDisplay.length})\n${noteLines}`);
           }
 
+          const scopeHeader = isAllWorkspacesListRequest
+            ? `Across ${Math.max(1, allWsList.length)} ${allWsList.length === 1 ? 'Workspace' : 'Workspaces'}`
+            : `in Workspace "${workspaceName || 'Active Workspace'}"`;
+
           const inventoryReply =
-            `### 📂 Complete Workspace Inventory (${totalFilesCount} ${totalFilesCount === 1 ? 'File' : 'Files'}${totalNotesCount > 0 ? ` & ${totalNotesCount} ${totalNotesCount === 1 ? 'Note' : 'Notes'}` : ''} Across ${Math.max(1, allWsList.length)} ${allWsList.length === 1 ? 'Workspace' : 'Workspaces'})\n\n` +
-            `Here is everything uploaded and indexed across your workspaces, grouped by file type:\n\n` +
+            `### 📂 Workspace Inventory (${totalFilesCount} ${totalFilesCount === 1 ? 'File' : 'Files'}${totalNotesCount > 0 ? ` & ${totalNotesCount} ${totalNotesCount === 1 ? 'Note' : 'Notes'}` : ''} ${scopeHeader})\n\n` +
+            `Here is everything uploaded and indexed ${scopeHeader}, grouped by file type:\n\n` +
             `${sections.join('\n\n')}\n\n` +
             `---\n` +
             `💡 **How would you like to use these materials?**\n` +
             `- Ask me **"Tell me about [any file or topic above]"** for a complete step-by-step explanation\n` +
             `- Ask me to **summarize**, **compare**, or **create practice quiz questions** from any of your uploaded files!`;
 
-          const inventoryFollowUps = effectiveFiles.slice(0, 3).map((f: any) =>
-            `Summarize "${f.name}" and explain its key concepts`
+          const inventoryFollowUps = filesToDisplay.slice(0, 3).map((f: any) =>
+            `Explain the full contents of "${f.name}" in detail`
           );
           if (inventoryFollowUps.length < 3) {
             inventoryFollowUps.push(`Create practice quiz questions from my uploaded workspace materials`);
@@ -2406,7 +2496,13 @@ ${citationGuideline}`;
       }
 
       if (!responseText) {
+        const errCode = lastError?.status === 429 ? 'AI_QUOTA_EXCEEDED' : 'AI_MODEL_UNAVAILABLE';
+        console.error(`[AI Tutor Error][${correlationId}] All models failed:`, {
+          code: errCode,
+          lastError
+        });
         return res.status(503).json({
+          errorCode: errCode,
           error: lastError?.message || "Gemini AI models are temporarily busy. Please retry your question in a moment.",
           workspaceNotice: workspaceNotice || undefined,
           correlationId
@@ -2981,6 +3077,7 @@ Ensure the returned JSON is 100% accurate, educational, and has zero placeholder
       let config: any = {
         systemInstruction,
         temperature: 0.2,
+        thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -3013,12 +3110,12 @@ Ensure the returned JSON is 100% accurate, educational, and has zero placeholder
 
         contents = [
           {
-            text: `Carefully inspect and analyze this uploaded study resource "${resolvedName}" (${type || fileMimeType}). Extract:
-1. summary: A clear, accurate, and detailed summary explaining what is inside this video, document, or image.
-2. tags: 3-5 specific subject or topic tags.
-3. highlights: 4-6 specific educational takeaways, concepts, or facts directly taught in the file.
-4. transcription: Comprehensive study notes and readable text/transcript from the resource.
-5. formulas: Any equations, formulas, or key rules taught.
+            text: `Carefully inspect and analyze this uploaded study resource "${resolvedName}" (${type || fileMimeType}). Perform complete OCR of all visible text, headings, UI elements, diagrams, and information inside the file/image. Extract:
+1. summary: A clear, accurate, and detailed summary explaining the exact contents of this image, video, or document (never guess or fabricate unrelated subjects).
+2. tags: 3-5 specific subject or topic tags matching the actual content.
+3. highlights: 4-6 specific takeaways, concepts, features, or facts directly shown in the file.
+4. transcription: Complete verbatim OCR text and detailed visual breakdown of everything shown in the resource.
+5. formulas: Any equations, formulas, or key rules shown.
 Return a valid JSON object matching the requested schema.`
           },
           {
@@ -3041,7 +3138,10 @@ Return a valid JSON object matching the requested schema.`
           });
           if (response && response.text) break;
         } catch (modelErr: any) {
-          console.warn(`[Analyze Resource] Model ${m} warning:`, modelErr?.status || modelErr?.message);
+          console.error(`[Analyze Resource Error] Model ${m} failed:`, {
+            code: modelErr?.status || 'GEMINI_ANALYZE_ERR',
+            message: modelErr?.message || String(modelErr)
+          });
         }
       }
 
@@ -3090,7 +3190,10 @@ Return a valid JSON object matching the requested schema.`
         throw new Error("No response text received from Gemini API.");
       }
     } catch (error: any) {
-      console.error("Error in /api/analyze-resource:", error);
+      console.error("[Analyze Resource Error] /api/analyze-resource failed:", {
+        code: error?.status || 'ANALYZE_RESOURCE_ERR',
+        message: error?.message || String(error)
+      });
       const fallbackResult = generateLocalResourceAnalysis(req.body.name || req.body.url, req.body.type, req.body.size, req.body.url);
       res.json(fallbackResult);
     }
@@ -3098,96 +3201,35 @@ Return a valid JSON object matching the requested schema.`
 
   function generateLocalResourceAnalysis(name: string, type: string, size: string, url?: string) {
     const targetName = cleanNotebookLMTitle(name, url, type);
-    const lowerName = targetName.toLowerCase();
-    
-    let summary = "";
-    let tags: string[] = [];
-    let highlights: string[] = [];
-    let transcription = "";
-    let formulas: string[] = [];
+    const cleanKeywords = targetName
+      .replace(/\.[^/.]+$/, "")
+      .split(/[-_\s]+/)
+      .filter(Boolean)
+      .slice(0, 4);
 
-    if (lowerName.includes("bio") || lowerName.includes("cell") || lowerName.includes("mitosis") || lowerName.includes("dna") || lowerName.includes("biology")) {
-      summary = `This biology resource explores cellular systems and functions in depth. It synthesizes key regulatory processes, metabolic pathways, and critical genetic concepts crucial for AP/College Biology preparation.`;
-      tags = ["Biology", "Cell Structure", "AP Prep"];
-      highlights = [
-        "The mitochondria generates ATP molecules through a specialized proton gradient across its inner membrane.",
-        "DNA replication is highly coordinated, utilizing helicase, DNA polymerase, and ligase to ensure structural fidelity.",
-        "The active transport mechanism moves molecules against their concentration gradient using cellular energy."
-      ];
-      transcription = "[00:05] Today we're breaking down cellular structures and mitochondria...\n[02:15] Let's look at the Krebs Cycle where pyruvate is oxidized and carbon dioxide is released...\n[05:40] And finally, the electron transport chain uses the high-energy electrons to pump protons into the intermembrane space.";
-      formulas = [
-        "C_6H_{12}O_6 + 6O_2 \\rightarrow 6CO_2 + 6H_2O + ATP",
-        "\\Delta G = \\Delta H - T\\Delta S"
-      ];
-    } else if (lowerName.includes("math") || lowerName.includes("calc") || lowerName.includes("integ") || lowerName.includes("deriv") || lowerName.includes("calculus") || lowerName.includes("algebra")) {
-      summary = `An advanced mathematical study guide highlighting core calculus methodologies, step-by-step problem-solving limits, derivatives, and integral properties. Perfect for STEM students.`;
-      tags = ["Calculus", "Mathematics", "STEM"];
-      highlights = [
-        "Limits define the foundational behavior of functions as they approach infinite or localized bounds.",
-        "Integrals represent the summation of infinite infinitesimal regions, measuring total area under any curved function.",
-        "Using integration by parts allows the decomposition of product integrals into solvable terms."
-      ];
-      transcription = "[00:10] Hello everyone. In this lecture, we're going to dive deep into integration by parts...\n[01:55] First, let's recall the product rule for derivatives...\n[04:20] Now, if we integrate both sides, we arrive at our elegant formula for integration by parts.";
-      formulas = [
-        "\\int u \\, dv = u v - \\int v \\, du",
-        "\\lim_{x \\to 0} \\frac{\\sin x}{x} = 1",
-        "f'(x) = \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h}"
-      ];
-    } else if (lowerName.includes("chem") || lowerName.includes("atom") || lowerName.includes("molec") || lowerName.includes("chemistry")) {
-      summary = `A structured study overview of chemical bonding, thermodynamics, and molecular reactions. Guides students through standard stoichiometry, valence electrons, and balanced equations.`;
-      tags = ["Chemistry", "Molecular Bonding", "STEM"];
-      highlights = [
-        "Covalent bonds involve the mutual sharing of valence electrons between non-metal atoms.",
-        "Le Chatelier's Principle dictates that any stress applied to a chemical system at equilibrium shifts the reaction to relieve stress.",
-        "The ideal gas law establishes a relational constant between pressure, volume, temperature, and substance quantity."
-      ];
-      transcription = "[00:15] Chemistry revolves around how valence electrons interact between atoms...\n[02:30] If we add heat to an endothermic reaction at equilibrium, Le Chatelier's principle tells us it shifts right...\n[06:12] Let's compute the ideal gas constant under STP conditions.";
-      formulas = [
-        "P V = n R T",
-        "pH = -\\log[H^+]"
-      ];
-    } else {
-      summary = `A high-quality study resource covering critical academic theories and subject structures. It synthesizes core conceptual notes, vocabulary lists, and logical outlines for maximum classroom comprehension.`;
-      tags = ["Academic Prep", "StudyWeb", "Revision Guide"];
-      highlights = [
-        "Establishing logical structures and visual connections boosts active retrieval during testing.",
-        "Consolidating lecture audio and transcribed notes fills visual and verbal learning channels.",
-        "Synthesizing references enables deep academic grounding of primary concepts."
-      ];
-      transcription = `[00:02] Welcome to the StudyWeb audio summary series...\n[01:22] We are exploring key thematic constructs and structural relations in this lesson...\n[03:45] Let's summarize: memory consolidation is enhanced by combining visual layout files with spoken lectures.`;
-      formulas = [
-        "E = m c^2",
-        "a^2 + b^2 = c^2"
-      ];
-    }
-
-    if (type === 'url' && url) {
-      if (url.includes("youtube.com") || url.includes("youtu.be")) {
-        summary = `[YouTube Lecture Video Analysis] ${summary}`;
-        tags.push("YouTube Video");
-      } else {
-        summary = `[Web Article Synthesis] ${summary}`;
-        tags.push("Web URL");
-      }
-    }
+    const summary = `Uploaded ${type || 'study'} resource "${targetName}" (${size || 'Analyzed'}). Ready for multimodal AI Tutor inspection.`;
+    const tags = cleanKeywords.length > 0 ? cleanKeywords : ["Study Material"];
+    const highlights = [
+      `Primary resource: "${targetName}"`,
+      `Ask the AI Tutor to inspect and explain any section, diagram, or concept from "${targetName}".`
+    ];
+    const transcription = summary;
 
     const result: any = {
       id: `file-${Date.now()}`,
       name: targetName,
       type,
-      size: size || (type === 'url' ? 'Web Link' : '2.4 MB'),
+      size: size || (type === 'url' ? 'Web Link' : 'Analyzed'),
       uploadDate: "Just Now",
       status: "indexed",
-      pages: type === 'pdf' ? Math.floor(Math.random() * 12) + 3 : undefined,
+      pages: type === 'pdf' ? 1 : undefined,
       tags,
       summary,
       highlights,
-      transcription: (type === 'audio' || type === 'video' || url) ? transcription : undefined,
-      formulas: formulas.length > 0 ? formulas : undefined,
+      transcription,
       chunks: [] as any[]
     };
 
-    // Pre-process local chunk texts
     try {
       const chunkTexts = chunkFileContent(result);
       result.chunks = chunkTexts.map(text => ({ text, embedding: null }));

@@ -487,23 +487,28 @@ export default function WorkspaceLibrary({
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
-    useEffect(() => {
+  useEffect(() => {
     const handleGlobalDropEvent = (e: any) => {
       const customEvent = e;
       if (customEvent.detail?.files && customEvent.detail.files.length > 0) {
         const file = customEvent.detail.files[0];
-        
+        const lowerName = (file.name || '').toLowerCase();
+
         let type: any = 'pdf';
-        if (file.type.startsWith('audio/')) {
+        if (file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg|bmp)$/i.test(lowerName)) {
+          type = 'image';
+        } else if (file.type.startsWith('audio/') || /\.(mp3|wav|m4a|ogg|aac|flac)$/i.test(lowerName)) {
           type = 'audio';
-        } else if (file.type.startsWith('video/')) {
+        } else if (file.type.startsWith('video/') || /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(lowerName)) {
           type = 'video';
-        } else if (file.type.includes('pdf')) {
+        } else if (file.type.includes('pdf') || lowerName.endsWith('.pdf')) {
           type = 'pdf';
-        } else {
-          if (file.name.endsWith('.pdf')) type = 'pdf';
-          else if (file.name.endsWith('.mp3') || file.name.endsWith('.wav') || file.name.endsWith('.m4a')) type = 'audio';
-          else if (file.name.endsWith('.mp4') || file.name.endsWith('.mkv') || file.name.endsWith('.avi')) type = 'video';
+        } else if (lowerName.endsWith('.pptx') || lowerName.endsWith('.ppt')) {
+          type = 'ppt';
+        } else if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls') || lowerName.endsWith('.csv')) {
+          type = 'excel';
+        } else if (/\.(doc|docx|txt|md|rtf)$/i.test(lowerName)) {
+          type = 'doc';
         }
 
         const formattedSize = formatFileSize(file.size);
@@ -541,18 +546,23 @@ export default function WorkspaceLibrary({
     setIsDraggingLocal(false);
     if (!e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
     const file = e.dataTransfer.files[0];
-    
+    const lowerName = (file.name || '').toLowerCase();
+
     let type: any = 'pdf';
-    if (file.type.startsWith('audio/')) {
+    if (file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg|bmp)$/i.test(lowerName)) {
+      type = 'image';
+    } else if (file.type.startsWith('audio/') || /\.(mp3|wav|m4a|ogg|aac|flac)$/i.test(lowerName)) {
       type = 'audio';
-    } else if (file.type.startsWith('video/')) {
+    } else if (file.type.startsWith('video/') || /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(lowerName)) {
       type = 'video';
-    } else if (file.type.includes('pdf')) {
+    } else if (file.type.includes('pdf') || lowerName.endsWith('.pdf')) {
       type = 'pdf';
-    } else {
-      if (file.name.endsWith('.pdf')) type = 'pdf';
-      else if (file.name.endsWith('.mp3') || file.name.endsWith('.wav') || file.name.endsWith('.m4a')) type = 'audio';
-      else if (file.name.endsWith('.mp4') || file.name.endsWith('.mkv') || file.name.endsWith('.avi')) type = 'video';
+    } else if (lowerName.endsWith('.pptx') || lowerName.endsWith('.ppt')) {
+      type = 'ppt';
+    } else if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls') || lowerName.endsWith('.csv')) {
+      type = 'excel';
+    } else if (/\.(doc|docx|txt|md|rtf)$/i.test(lowerName)) {
+      type = 'doc';
     }
 
     const formattedSize = formatFileSize(file.size);
@@ -578,7 +588,7 @@ export default function WorkspaceLibrary({
       type = 'audio';
     } else if (file.type.startsWith('video/') || lowerName.match(/\.(mp4|webm|mov|mkv|avi|m4v)$/)) {
       type = 'video';
-    } else if (file.type.startsWith('image/') || lowerName.match(/\.(png|jpg|jpeg|webp|gif|svg)$/)) {
+    } else if (file.type.startsWith('image/') || lowerName.match(/\.(png|jpg|jpeg|webp|gif|svg|bmp)$/)) {
       type = 'image';
     } else if (file.type.includes('pdf') || lowerName.endsWith('.pdf')) {
       type = 'pdf';
@@ -608,6 +618,66 @@ export default function WorkspaceLibrary({
     setShowUrlInput(false);
   };
 
+  const compressImageForSupabaseAndAI = async (rawDataUrl: string, rawMime: string): Promise<{ dataUrl: string; base64: string; mimeType: string }> => {
+    if (!rawDataUrl || !rawDataUrl.startsWith('data:image/') || rawMime === 'image/svg+xml') {
+      const b64 = rawDataUrl.split(',')[1] || '';
+      return { dataUrl: rawDataUrl, base64: b64, mimeType: rawMime || 'image/png' };
+    }
+    if (rawDataUrl.length <= 320_000) {
+      return {
+        dataUrl: rawDataUrl,
+        base64: rawDataUrl.split(',')[1] || '',
+        mimeType: rawMime || 'image/jpeg'
+      };
+    }
+    try {
+      return await new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 1500;
+          let w = img.width || 1200;
+          let h = img.height || 900;
+          if (w > maxDim || h > maxDim) {
+            if (w >= h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve({ dataUrl: rawDataUrl, base64: rawDataUrl.split(',')[1] || '', mimeType: rawMime });
+            return;
+          }
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          const outMime = 'image/jpeg';
+          let compressedUrl = canvas.toDataURL(outMime, 0.82);
+          if (compressedUrl.length > 420_000) {
+            compressedUrl = canvas.toDataURL(outMime, 0.65);
+          }
+          resolve({
+            dataUrl: compressedUrl,
+            base64: compressedUrl.split(',')[1] || '',
+            mimeType: outMime
+          });
+        };
+        img.onerror = () => {
+          resolve({ dataUrl: rawDataUrl, base64: rawDataUrl.split(',')[1] || '', mimeType: rawMime });
+        };
+        img.src = rawDataUrl;
+      });
+    } catch {
+      return { dataUrl: rawDataUrl, base64: rawDataUrl.split(',')[1] || '', mimeType: rawMime };
+    }
+  };
+
   const analyzeAndAddResource = async (
     name: string, 
     type: 'pdf' | 'doc' | 'ppt' | 'excel' | 'image' | 'audio' | 'video' | 'url', 
@@ -627,6 +697,15 @@ export default function WorkspaceLibrary({
         'Indexing math formulas, conceptual structures, and quotes...',
         'Connecting video topics to StudyWeb Knowledge Graph...',
         'Video resource indexed successfully!'
+      ];
+    } else if (type === 'image') {
+      steps = [
+        'Reading high-resolution image binary...',
+        'Running Gemini Vision OCR and visual layout inspection...',
+        'Extracting visible text, UI elements, diagrams, and key concepts...',
+        'Synthesizing structured study notes and takeaways...',
+        'Saving analyzed image and notes to Supabase...',
+        'Image analyzed and indexed successfully!'
       ];
     } else if (type === 'pdf' || type === 'doc' || type === 'ppt') {
       steps = [
@@ -672,14 +751,10 @@ export default function WorkspaceLibrary({
     if (file) {
       const validation = fileUploadService.validate(file);
       if (!validation.valid) {
-        window.dispatchEvent(
-          new CustomEvent('studyweb-toast', {
-            detail: {
-              message: `⚠️ ${validation.error}`,
-              type: 'warning'
-            }
-          })
-        );
+        console.error('[Upload Validation Error] [UPLOAD_VALIDATION_ERR]', validation.error);
+        if (typeof (window as any).showToast === 'function') {
+          (window as any).showToast(`[UPLOAD_VALIDATION_ERR] ${validation.error}`, 'error', 5000, 'Upload Error');
+        }
         return;
       }
     }
@@ -742,7 +817,7 @@ export default function WorkspaceLibrary({
 
       let rawTextContent = "";
       if (file) {
-        fileMimeType = file.type || 'application/pdf';
+        fileMimeType = file.type || (type === 'image' ? 'image/jpeg' : 'application/pdf');
         const lowerFileName = file.name.toLowerCase();
         if (
           file.type.startsWith('text/') ||
@@ -763,9 +838,19 @@ export default function WorkspaceLibrary({
               reader.onerror = error => reject(error);
             });
             reader.readAsDataURL(file);
-            dataUrl = await promise;
-            fileBase64 = dataUrl.split(',')[1] || '';
-          } catch {}
+            const rawReadUrl = await promise;
+            if (type === 'image' || fileMimeType.startsWith('image/')) {
+              const compressed = await compressImageForSupabaseAndAI(rawReadUrl, fileMimeType);
+              dataUrl = compressed.dataUrl;
+              fileBase64 = compressed.base64;
+              fileMimeType = compressed.mimeType;
+            } else {
+              dataUrl = rawReadUrl;
+              fileBase64 = rawReadUrl.split(',')[1] || '';
+            }
+          } catch (readErr: any) {
+            console.error('[File Read Error] [FILE_READ_ERR]', readErr?.message || readErr);
+          }
         }
       }
 
@@ -774,7 +859,7 @@ export default function WorkspaceLibrary({
       try {
         const { token, userId } = await getAuthInfo();
         const abortCtrl = new AbortController();
-        const timeoutId = setTimeout(() => abortCtrl.abort(), 12000);
+        const timeoutId = setTimeout(() => abortCtrl.abort(), 45000);
         const processRes = await fetch('/api/study-materials/process', {
           method: 'POST',
           credentials: 'same-origin',
@@ -790,7 +875,7 @@ export default function WorkspaceLibrary({
             type,
             size,
             content: rawTextContent || undefined,
-            url: (url && !url.startsWith('data:')) ? url : (dataUrl && dataUrl.length < 2000 ? dataUrl : ''),
+            url: (url && !url.startsWith('data:')) ? url : (dataUrl && dataUrl.length < 420_000 ? dataUrl : ''),
             fileBase64: fileBase64 || undefined,
             fileMimeType: fileMimeType || undefined
           })
@@ -800,9 +885,18 @@ export default function WorkspaceLibrary({
         if (processRes.ok) {
           const resData = await processRes.json();
           materialResult = resData.material;
+        } else {
+          const errPayload = await processRes.json().catch(() => ({}));
+          const errCode = errPayload?.errorCode || `HTTP_${processRes.status}`;
+          const errMsg = errPayload?.error || `Failed to analyze "${name}" (status ${processRes.status})`;
+          console.error(`[Study Material Pipeline Error] [${errCode}] ${errMsg}`, errPayload);
+          (window as any).showToast?.(`[${errCode}] ${errMsg}`, 'error', 5500, 'AI Analysis Error');
         }
-      } catch (pipelineErr) {
-        console.warn("Pipeline processing warning:", pipelineErr);
+      } catch (pipelineErr: any) {
+        const errCode = pipelineErr?.name === 'AbortError' ? 'AI_PIPELINE_TIMEOUT' : (pipelineErr?.code || 'AI_PIPELINE_ERR');
+        const errMsg = pipelineErr?.message || 'Could not complete server AI analysis.';
+        console.error(`[Study Material Pipeline Error] [${errCode}] ${errMsg}`, pipelineErr);
+        (window as any).showToast?.(`[${errCode}] ${errMsg}`, 'error', 5500, 'AI Analysis Error');
       }
 
       // If uploading a video URL and materialResult did not return a full transcript, fetch captions via TranscriptProcessor
@@ -864,10 +958,10 @@ export default function WorkspaceLibrary({
         url: (url && !url.startsWith('data:')) ? url : (dataUrl || materialResult?.url || url),
         fileBase64: fileBase64 || undefined,
         fileMimeType: fileMimeType || undefined,
-        summary: materialResult?.summary || (rawTextContent ? rawTextContent.slice(0, 450) : `${finalNotebookName} uploaded and indexed into your workspace.`),
-        highlights: (materialResult?.highlights && materialResult.highlights.length > 0) ? materialResult.highlights : [
-          rawTextContent ? rawTextContent.slice(0, 220) : `Uploaded ${finalNotebookName} ready for study questions.`
-        ],
+        summary: materialResult?.summary || (rawTextContent ? rawTextContent.slice(0, 450) : ''),
+        highlights: (materialResult?.highlights && materialResult.highlights.length > 0)
+          ? materialResult.highlights
+          : (rawTextContent ? [rawTextContent.slice(0, 220)] : []),
         tags: (materialResult?.tags && materialResult.tags.length > 0) ? materialResult.tags : generatedTags2,
         transcription: materialResult?.transcription || rawTextContent || undefined,
         contentText: materialResult?.contentText || materialResult?.transcription || rawTextContent || undefined,
@@ -889,7 +983,7 @@ export default function WorkspaceLibrary({
             detail: {
               title: 'Material Analyzed & Indexed',
               badge: 'Library Synchronized',
-              message: `"${fileData.name}" was analyzed and indexed into your study workspace!`,
+              message: `"${fileData.name}" was analyzed and saved to your study workspace!`,
               type: 'success'
             }
           })
@@ -902,6 +996,8 @@ export default function WorkspaceLibrary({
 
     } catch (err: any) {
       const parsedError = FileUploadError.fromError(err, `Upload of ${name || url}`);
+      console.error(`[Upload Error] [${parsedError.code}] ${parsedError.message}`, parsedError);
+      (window as any).showToast?.(`[${parsedError.code}] ${parsedError.message}`, 'error', 5500, 'Upload Error');
       fileUploadService.log('warn', `Upload analysis encountered error: [${parsedError.code}] ${parsedError.message}`, parsedError);
       
       let objectUrl = dataUrl || url;
@@ -939,10 +1035,8 @@ export default function WorkspaceLibrary({
         url: dataUrl || objectUrl,
         fileBase64: fileBase64 || undefined,
         fileMimeType: fileMimeType || undefined,
-        summary: `${fallbackNotebookName} uploaded to workspace.`,
-        highlights: [
-          `Uploaded ${fallbackNotebookName} ready for AI Tutor questions.`
-        ],
+        summary: '',
+        highlights: [],
         tags: generatedTags
       };
       

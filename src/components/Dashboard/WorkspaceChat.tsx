@@ -33,6 +33,8 @@ import { AITutorBackgroundService, getChatHistoryKey } from '../../services/AITu
 import { WorkspaceChatCache } from '../../services/WorkspaceChatCache';
 import { FullScreenUploadOverlay } from './FullScreenUploadOverlay';
 import { loadStoredWorkspaces } from '../../utils/workspaceStorage';
+import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
+import { toValidUuid } from '../../utils/uuid';
 
 export type TutorPersona = string;
 
@@ -499,7 +501,7 @@ export default function WorkspaceChat({
     return Array.from(wsMap.values());
   }, [workspace, workspaces, resolvedUserId]);
 
-  // Clean files list for grounding across active workspace and all user workspaces
+  // Clean files list strictly scoped to the ACTIVE workspace so other workspaces (e.g. biology/cell) never bleed in
   const activeFiles = useMemo(() => {
     const seenKeys = new Set<string>();
     const rawFiles: Array<WorkspaceFile & { workspaceId?: string; workspaceName?: string }> = [];
@@ -518,13 +520,14 @@ export default function WorkspaceChat({
       });
     };
 
-    // Prioritize current active workspace first, then all other workspaces
-    if (workspace) pushFilesFromWorkspace(workspace);
-    allUserWorkspaces.forEach(ws => {
-      if (!workspace || ws.id !== workspace.id) {
-        pushFilesFromWorkspace(ws);
+    // Only include files belonging to the current active workspace
+    if (workspace) {
+      pushFilesFromWorkspace(workspace);
+      const matchingSyncedWs = allUserWorkspaces.find(ws => ws.id === workspace.id);
+      if (matchingSyncedWs) {
+        pushFilesFromWorkspace(matchingSyncedWs);
       }
-    });
+    }
 
     const isDummyStr = (s?: string) => {
       if (!s) return true;
@@ -571,13 +574,26 @@ export default function WorkspaceChat({
 
     return rawFiles.map(f => {
       const cleanSummary = isDummyStr(f.summary)
-        ? (f.name ? `Study material: ${f.name}` : "Study material in workspace")
+        ? undefined
         : cleanMultiline(f.summary);
       const cleanHighlights = (f.highlights || []).filter((h: string) => h && !isDummyStr(h));
       const cleanTranscription = cleanMultiline(f.transcription || f.contentText);
+
+      let hydratedBase64 = f.fileBase64;
+      let hydratedMime = f.fileMimeType;
+      if (!hydratedBase64 && typeof f.url === 'string' && f.url.startsWith('data:')) {
+        const m = f.url.match(/^data:([^;]+);base64,(.+)$/);
+        if (m) {
+          hydratedMime = hydratedMime || m[1];
+          hydratedBase64 = m[2];
+        }
+      }
+
       return {
         ...f,
-        summary: cleanSummary,
+        fileBase64: hydratedBase64,
+        fileMimeType: hydratedMime,
+        summary: cleanSummary || '',
         highlights: cleanHighlights,
         transcription: cleanTranscription
       };
@@ -818,7 +834,7 @@ export default function WorkspaceChat({
     );
   };
 
-  // File Attachment Handlers with deep binary & text reading + full-screen circular upload ring
+  // File Attachment Handlers with deep binary & text reading, AI Vision analysis, and Supabase persistence
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -827,7 +843,7 @@ export default function WorkspaceChat({
     const lowerFirst = firstFile.name.toLowerCase();
     const detectedType = lowerFirst.endsWith('.pdf')
       ? 'pdf'
-      : lowerFirst.match(/\.(png|jpg|jpeg|webp|gif|svg)$/)
+      : lowerFirst.match(/\.(png|jpg|jpeg|webp|gif|svg|bmp)$/)
       ? 'image'
       : lowerFirst.match(/\.(mp4|webm|mov|mkv)$/)
       ? 'video'
@@ -842,32 +858,88 @@ export default function WorkspaceChat({
     });
 
     const newDrafts: AttachedDraftFile[] = [];
+    const analyzedWorkspaceFiles: WorkspaceFile[] = [];
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       let content: string | undefined = undefined;
       let dataUrl: string | undefined = undefined;
       let base64: string | undefined = undefined;
+      let mimeType = file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+
+      const lower = file.name.toLowerCase();
+      const fileType: WorkspaceFile['type'] = lower.endsWith('.pdf')
+        ? 'pdf'
+        : (file.type.startsWith('image/') || lower.match(/\.(png|jpg|jpeg|webp|gif|svg|bmp)$/))
+        ? 'image'
+        : (file.type.startsWith('video/') || lower.match(/\.(mp4|webm|mov|mkv)$/))
+        ? 'video'
+        : 'doc';
 
       setChatUploadOverlay(prev => ({
         ...prev,
-        progress: Math.min(75, Math.round(((i + 0.4) / files.length) * 70) + 15),
+        progress: Math.min(55, Math.round(((i + 0.3) / files.length) * 50) + 15),
         fileName: file.name,
-        stepText: `Extracting content from ${file.name}...`
+        stepText: `Reading ${file.name}...`
       }));
 
-      // 1. Read as Data URL (base64) so Gemini can natively inspect PDF, images, audio, etc.
+      // 1. Read as Data URL (base64) and compress images so they persist cleanly to Supabase
       try {
-        dataUrl = await new Promise<string>((resolve, reject) => {
+        const rawDataUrl = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(reader.result as string);
           reader.onerror = () => reject(reader.error);
           reader.readAsDataURL(file);
         });
-        if (dataUrl && dataUrl.includes(';base64,')) {
-          base64 = dataUrl.split(';base64,')[1];
+
+        if (fileType === 'image' && rawDataUrl.startsWith('data:image/') && rawDataUrl.length > 320_000) {
+          const compressed = await new Promise<{ dataUrl: string; base64: string; mimeType: string }>((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+              const maxDim = 1500;
+              let w = img.width || 1200;
+              let h = img.height || 900;
+              if (w > maxDim || h > maxDim) {
+                if (w >= h) {
+                  h = Math.round((h * maxDim) / w);
+                  w = maxDim;
+                } else {
+                  w = Math.round((w * maxDim) / h);
+                  h = maxDim;
+                }
+              }
+              const canvas = document.createElement('canvas');
+              canvas.width = w;
+              canvas.height = h;
+              const ctx = canvas.getContext('2d');
+              if (!ctx) {
+                resolve({ dataUrl: rawDataUrl, base64: rawDataUrl.split(';base64,')[1] || '', mimeType });
+                return;
+              }
+              ctx.fillStyle = '#FFFFFF';
+              ctx.fillRect(0, 0, w, h);
+              ctx.drawImage(img, 0, 0, w, h);
+              let outUrl = canvas.toDataURL('image/jpeg', 0.82);
+              if (outUrl.length > 420_000) {
+                outUrl = canvas.toDataURL('image/jpeg', 0.65);
+              }
+              resolve({ dataUrl: outUrl, base64: outUrl.split(';base64,')[1] || '', mimeType: 'image/jpeg' });
+            };
+            img.onerror = () => resolve({ dataUrl: rawDataUrl, base64: rawDataUrl.split(';base64,')[1] || '', mimeType });
+            img.src = rawDataUrl;
+          });
+          dataUrl = compressed.dataUrl;
+          base64 = compressed.base64;
+          mimeType = compressed.mimeType;
+        } else {
+          dataUrl = rawDataUrl;
+          if (dataUrl && dataUrl.includes(';base64,')) {
+            base64 = dataUrl.split(';base64,')[1];
+          }
         }
-      } catch (err) {
-        console.warn('Could not read file as dataUrl:', err);
+      } catch (err: any) {
+        console.error('[Chat File Read Error] [CHAT_FILE_READ_ERR]', err);
+        (window as any).showToast?.(`[CHAT_FILE_READ_ERR] ${err?.message || 'Could not read file'}`, 'error', 5000, 'File Read Error');
       }
 
       // 2. Read text content for common textual formats
@@ -884,66 +956,126 @@ export default function WorkspaceChat({
         } catch {}
       }
 
-      const mimeType = file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+      const formattedSize = `${Math.max(1, Math.round(file.size / 1024))} KB`;
+
+      // 3. Analyze with Gemini Vision / Study Material Pipeline and persist to Supabase immediately
+      setChatUploadOverlay(prev => ({
+        ...prev,
+        progress: Math.min(88, Math.round(((i + 0.7) / files.length) * 75) + 15),
+        fileName: file.name,
+        stepText: `Analyzing ${file.name} with AI & saving to Supabase...`
+      }));
+
+      let analyzedMaterial: any = null;
+      try {
+        const abortCtrl = new AbortController();
+        const tId = setTimeout(() => abortCtrl.abort(), 45000);
+        const procRes = await fetch('/api/study-materials/process', {
+          method: 'POST',
+          credentials: 'same-origin',
+          signal: abortCtrl.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {})
+          },
+          body: JSON.stringify({
+            workspaceId: toValidUuid(workspace.id),
+            userId: resolvedUserId || undefined,
+            name: file.name,
+            type: fileType,
+            size: formattedSize,
+            content: content || undefined,
+            url: dataUrl && dataUrl.length < 420_000 ? dataUrl : undefined,
+            fileBase64: base64 || undefined,
+            fileMimeType: mimeType || undefined
+          })
+        });
+        clearTimeout(tId);
+
+        if (procRes.ok) {
+          const procData = await procRes.json();
+          analyzedMaterial = procData.material;
+        } else {
+          const errJson = await procRes.json().catch(() => ({}));
+          const errCode = errJson?.errorCode || `HTTP_${procRes.status}`;
+          const errMsg = errJson?.error || `Failed to analyze ${file.name}`;
+          console.error(`[Chat Upload Pipeline Error] [${errCode}] ${errMsg}`, errJson);
+          (window as any).showToast?.(`[${errCode}] ${errMsg}`, 'error', 5500, 'AI Upload Error');
+        }
+      } catch (procErr: any) {
+        const errCode = procErr?.name === 'AbortError' ? 'AI_UPLOAD_TIMEOUT' : 'AI_UPLOAD_ERR';
+        console.error(`[Chat Upload Pipeline Error] [${errCode}]`, procErr);
+        (window as any).showToast?.(`[${errCode}] ${procErr?.message || 'AI analysis error'}`, 'error', 5500, 'AI Upload Error');
+      }
+
+      const extractedSummary = analyzedMaterial?.summary || (content ? content.slice(0, 1000) : '');
+      const extractedTranscript = analyzedMaterial?.transcription || analyzedMaterial?.contentText || content;
+      const extractedHighlights = Array.isArray(analyzedMaterial?.highlights) && analyzedMaterial.highlights.length > 0
+        ? analyzedMaterial.highlights
+        : (content ? [content.slice(0, 300)] : []);
+      const resolvedName = analyzedMaterial?.name || file.name;
 
       newDrafts.push({
-        id: `draft-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 4)}`,
-        name: file.name,
-        size: `${Math.max(1, Math.round(file.size / 1024))} KB`,
-        type: file.type || 'document',
-        content,
+        id: analyzedMaterial?.id || `draft-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 4)}`,
+        name: resolvedName,
+        size: formattedSize,
+        type: fileType,
+        content: extractedTranscript,
+        summary: extractedSummary,
+        highlights: extractedHighlights,
         dataUrl,
         base64,
         mimeType,
         fileObj: file
       });
+
+      const wsFileObj: WorkspaceFile = {
+        id: analyzedMaterial?.id || toValidUuid(`file-${Date.now()}-${i}`),
+        name: resolvedName,
+        size: formattedSize,
+        type: fileType,
+        uploadDate: new Date().toISOString(),
+        status: 'indexed',
+        tags: Array.isArray(analyzedMaterial?.tags) && analyzedMaterial.tags.length > 0 ? analyzedMaterial.tags : ['Chat Upload'],
+        summary: extractedSummary,
+        transcription: extractedTranscript,
+        contentText: extractedTranscript,
+        url: dataUrl || analyzedMaterial?.url,
+        fileBase64: base64,
+        fileMimeType: mimeType,
+        highlights: extractedHighlights,
+        formulas: analyzedMaterial?.formulas
+      };
+
+      analyzedWorkspaceFiles.push(wsFileObj);
+      WorkspaceSyncService.saveWorkspaceFile(workspace.id, wsFileObj, resolvedUserId || undefined).catch((syncErr) => {
+        console.error('[Supabase Error][ChatUploadSync]', syncErr);
+      });
     }
 
     setChatUploadOverlay(prev => ({
       ...prev,
-      progress: 92,
+      progress: 96,
       stepText: 'Indexing into active workspace knowledge graph...'
     }));
 
-    await new Promise(resolve => setTimeout(resolve, 140));
+    await new Promise(resolve => setTimeout(resolve, 120));
 
     setAttachedDrafts(prev => [...prev, ...newDrafts]);
-    if (newDrafts.length > 0) {
-      // Also index uploaded files into workspace and display a compact File Ready badge in chat without summarizing
-      const convertedForWorkspace: WorkspaceFile[] = newDrafts.map(d => {
-        const lower = d.name.toLowerCase();
-        const fileType: WorkspaceFile['type'] = lower.endsWith('.pdf')
-          ? 'pdf'
-          : lower.match(/\.(png|jpg|jpeg|webp|gif|svg)$/)
-          ? 'image'
-          : lower.match(/\.(mp4|webm|mov|mkv)$/)
-          ? 'video'
-          : 'doc';
-        return {
-          id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          name: d.name,
-          size: d.size,
-          type: fileType,
-          uploadDate: new Date().toISOString(),
-          status: 'indexed',
-          tags: ['Chat Upload'],
-          summary: d.content ? d.content.slice(0, 1000) : `Uploaded study material: ${d.name}`,
-          transcription: d.content,
-          url: d.dataUrl,
-          fileBase64: d.base64,
-          fileMimeType: d.mimeType,
-          highlights: [d.content ? d.content.slice(0, 300) : `Study document: ${d.name}`]
-        };
-      });
-
+    if (analyzedWorkspaceFiles.length > 0) {
       if (onUpdateWorkspace) {
-        onUpdateWorkspace({
+        const updatedWs = {
           ...workspace,
-          files: [...convertedForWorkspace, ...(workspace.files || [])]
-        });
+          files: [
+            ...analyzedWorkspaceFiles,
+            ...(workspace.files || []).filter(ef => !analyzedWorkspaceFiles.some(af => af.id === ef.id || af.name === ef.name))
+          ]
+        };
+        onUpdateWorkspace(updatedWs);
+        WorkspaceSyncService.saveWorkspace(updatedWs, resolvedUserId || undefined).catch(() => {});
       }
 
-      const readyBadges: Message[] = newDrafts.map((d, idx) => ({
+      const readyBadges: Message[] = analyzedWorkspaceFiles.map((d, idx) => ({
         id: `file-ready-${Date.now()}-${idx}`,
         sender: 'ai',
         text: `File ready: ${d.name}`,
@@ -957,18 +1089,18 @@ export default function WorkspaceChat({
       setChatUploadOverlay(prev => ({
         ...prev,
         progress: 100,
-        stepText: 'Workspace knowledge base updated!'
+        stepText: 'Analyzed & saved to Supabase!'
       }));
 
       setTimeout(() => {
         setChatUploadOverlay(prev => ({ ...prev, isOpen: false }));
-      }, 280);
+      }, 240);
 
       (window as any).showToast?.(
-        `"${newDrafts.map(f => f.name).join(', ')}" is indexed & ready in your workspace.`,
+        `"${analyzedWorkspaceFiles.map(f => f.name).join(', ')}" was analyzed with AI and saved to Supabase.`,
         'success',
         3200,
-        'Material Ready'
+        'Material Analyzed & Saved'
       );
     } else {
       setChatUploadOverlay(prev => ({ ...prev, isOpen: false }));
@@ -1382,20 +1514,30 @@ export default function WorkspaceChat({
     ];
     const newFileIds = new Set(newlyConvertedFiles.map(f => f.id));
 
-    // Create a compact, proxy-safe payload for attachedFiles across all workspaces (up to 50 files)
+    // Create a compact, proxy-safe payload for attachedFiles in the ACTIVE workspace (including image base64 for all active workspace images)
     let includedBinaryCount = 0;
-    const compactAttachedFiles = effectiveFiles.slice(0, 50).map((f: any) => {
+    const compactAttachedFiles = effectiveFiles.slice(0, 30).map((f: any) => {
       const isNewAttachment = newFileIds.has(f.id);
       const safeUrl = (typeof f.url === 'string' && !f.url.startsWith('data:')) ? f.url.slice(0, 1000) : undefined;
-      const needsBinaryInspection = isNewAttachment;
+      let candidateB64 = typeof f.fileBase64 === 'string' ? f.fileBase64 : undefined;
+      let candidateMime = f.fileMimeType;
+      if (!candidateB64 && typeof f.url === 'string' && f.url.startsWith('data:')) {
+        const m = f.url.match(/^data:([^;]+);base64,(.+)$/);
+        if (m) {
+          candidateMime = candidateMime || m[1];
+          candidateB64 = m[2];
+        }
+      }
+      const isActiveWorkspaceFile = !f.workspaceId || String(f.workspaceId) === String(workspace.id);
+      const needsBinaryInspection = isNewAttachment || (isActiveWorkspaceFile && (f.type === 'image' || candidateMime?.startsWith('image/') || !f.transcription));
       let safeBase64: string | undefined = undefined;
-      if (needsBinaryInspection && includedBinaryCount < 2 && typeof f.fileBase64 === 'string' && f.fileBase64.length < 8000000) {
-        safeBase64 = f.fileBase64;
+      if (needsBinaryInspection && includedBinaryCount < 3 && typeof candidateB64 === 'string' && candidateB64.length < 6000000) {
+        safeBase64 = candidateB64;
         includedBinaryCount++;
       }
 
       const fullTranscript = f.transcription || f.contentText;
-      const defaultMimeType = f.fileMimeType || (f.type === 'video' ? 'video/mp4' : f.type === 'pdf' ? 'application/pdf' : f.type === 'image' ? 'image/png' : undefined);
+      const defaultMimeType = candidateMime || (f.type === 'video' ? 'video/mp4' : f.type === 'pdf' ? 'application/pdf' : f.type === 'image' ? 'image/jpeg' : undefined);
 
       return {
         id: f.id,
@@ -2271,20 +2413,65 @@ export default function WorkspaceChat({
       </div>
 
       {/* ============================================================== */}
-      {/* 3. MINIMALIST FULL-WIDTH CHAT INPUT DOCK                       */}
+      {/* 3. MINIMALIST FULL-WIDTH CHAT INPUT DOCK + CLAUDE FOLLOW-UPS   */}
       {/* ============================================================== */}
       <footer className="p-2 sm:p-4 border-t border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md shrink-0">
-        <div className="max-w-3xl mx-auto space-y-2">
+        <div className="max-w-3xl mx-auto space-y-2.5">
           
+          {/* Claude-Style Bottom Follow-Up Questions Bar (anchored at bottom of screen above input) */}
+          {(() => {
+            const latestAiMsg = [...messages].reverse().find(m => m.sender === 'ai' && !m.isError && !m.isFileReadyBadge && m.id !== 'welcome-msg' && !m.id.startsWith('welcome-'));
+            if (!isThinking && latestAiMsg && latestAiMsg.followUpQuestions && latestAiMsg.followUpQuestions.length > 0) {
+              return (
+                <div className="p-2.5 rounded-2xl bg-slate-50/90 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 space-y-1.5 animate-fade-in">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
+                      <Sparkles className="w-3 h-3 text-indigo-500" />
+                      <span>Follow-up questions</span>
+                    </span>
+                    {latestAiMsg.suggestOutsideResearch && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleSend(
+                            latestAiMsg.originalQuery || 'Research this topic in depth outside my workspace',
+                            { allowOutsideResearch: true }
+                          )
+                        }
+                        className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Globe className="w-3 h-3" />
+                        <span>Research outside workspace</span>
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                    {latestAiMsg.followUpQuestions.slice(0, 3).map((qText, qIdx) => (
+                      <button
+                        key={qIdx}
+                        type="button"
+                        onClick={() => handleSend(qText)}
+                        className="text-left px-3 py-2 rounded-xl bg-white hover:bg-indigo-50/80 dark:bg-slate-950 dark:hover:bg-indigo-950/40 border border-slate-200/80 hover:border-indigo-300 dark:border-slate-800 dark:hover:border-indigo-700 text-xs font-semibold text-slate-700 hover:text-indigo-700 dark:text-slate-200 dark:hover:text-indigo-300 flex items-center justify-between gap-2 transition-all cursor-pointer group shadow-2xs"
+                      >
+                        <span className="line-clamp-1">{qText}</span>
+                        <Send className="w-3 h-3 text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          })()}
+
           {/* Quick Prompt Suggestions when chat is fresh */}
           {messages.length <= 1 && (
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
               <span className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider pl-1 shrink-0">Try:</span>
               {[
-                { label: "🌿 What is photosynthesis like?", prompt: "What is photosynthesis like? Explain it clearly." },
-                { label: "🎨 Generate diagram of Photosynthesis", prompt: "Generate a visual diagram of photosynthesis and explain how it works." },
-                { label: "⚡ Explain uploaded material", prompt: "Can you explain the main concepts from my uploaded workspace material?" },
-                { label: "📝 Quiz me on key terms", prompt: "Create a 3-question quick quiz on key concepts to test my recall." }
+                { label: "📂 What is in my study material?", prompt: "What is in my study material? Explain everything uploaded in this workspace." },
+                { label: "⚡ Summarize uploaded material", prompt: "Can you explain the main concepts and details from my uploaded workspace material?" },
+                { label: "📝 Quiz me on key terms", prompt: "Create a 3-question quick quiz based on my workspace study material." }
               ].map((item, i) => (
                 <button
                   key={i}

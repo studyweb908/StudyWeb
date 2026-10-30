@@ -6,6 +6,40 @@ import { cleanNotebookLMTitle } from '../utils/notebookTitle';
 const workspacesCacheByUser = new Map<string, { data: Workspace[]; timestamp: number }>();
 const inflightFetchByUser = new Map<string, Promise<Workspace[]>>();
 const WORKSPACES_CACHE_TTL_MS = 15_000;
+let lastSupabaseToastTime = 0;
+
+function reportSupabaseError(context: string, err: any, notifyToast = true): void {
+  const code = err?.code || err?.status || err?.statusCode || 'SUPABASE_ERR';
+  const message = err?.message || err?.error_description || String(err || 'Database operation failed');
+  console.error(`[Supabase Error][${context}] [${code}] ${message}`, {
+    code,
+    message,
+    details: err?.details,
+    hint: err?.hint,
+    context
+  });
+
+  if (notifyToast && typeof window !== 'undefined') {
+    const now = Date.now();
+    if (now - lastSupabaseToastTime > 3000) {
+      lastSupabaseToastTime = now;
+      const toastText = `[${code}] ${message}`;
+      if (typeof (window as any).showToast === 'function') {
+        (window as any).showToast(toastText, 'error', 5500, `Supabase Error (${context})`);
+      } else {
+        window.dispatchEvent(
+          new CustomEvent('studyweb-toast', {
+            detail: {
+              title: `Supabase Error (${code})`,
+              message: `${context}: ${message}`,
+              type: 'error'
+            }
+          })
+        );
+      }
+    }
+  }
+}
 
 export class WorkspaceSyncService {
   public static clearCache(userId?: string | null): void {
@@ -24,12 +58,16 @@ export class WorkspaceSyncService {
   public static async getUserId(): Promise<string | null> {
     if (!supabase) return null;
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr) {
+        reportSupabaseError('auth.getSession', sessionErr, false);
+      }
       if (session?.user?.id) return session.user.id;
       const { data: { user } } = await supabase.auth.getUser();
       if (user?.id) return user.id;
       return null;
-    } catch {
+    } catch (err) {
+      reportSupabaseError('getUserId', err, false);
       return null;
     }
   }
@@ -53,11 +91,11 @@ export class WorkspaceSyncService {
 
     const sanitizedFilesForJsonb = (workspace.files || []).map((f: WorkspaceFile) => {
       const copy: any = { ...f };
-      // Prevent oversized base64 or data URL payloads from exceeding PostgREST JSONB row limits
-      if (typeof copy.fileBase64 === 'string' && copy.fileBase64.length > 80_000) {
+      // Keep compact image data URLs in JSONB up to 180KB; full 450KB image URLs are stored in workspace_files
+      if (typeof copy.fileBase64 === 'string' && copy.fileBase64.length > 180_000) {
         delete copy.fileBase64;
       }
-      if (typeof copy.url === 'string' && copy.url.startsWith('data:') && copy.url.length > 80_000) {
+      if (typeof copy.url === 'string' && copy.url.startsWith('data:') && copy.url.length > 180_000) {
         delete copy.url;
       }
       return copy;
@@ -97,7 +135,7 @@ export class WorkspaceSyncService {
         .upsert(row, { onConflict: 'id' });
 
       if (error) {
-        console.debug('Workspace sync notice (workspaces upsert):', error.message);
+        reportSupabaseError('saveWorkspace', error, true);
         return false;
       }
 
@@ -109,7 +147,7 @@ export class WorkspaceSyncService {
 
       return true;
     } catch (err: any) {
-      console.debug('Failed to sync workspace to Supabase:', err.message);
+      reportSupabaseError('saveWorkspace', err, true);
       return false;
     }
   }
@@ -129,9 +167,15 @@ export class WorkspaceSyncService {
     }
 
     const cleanName = cleanNotebookLMTitle(file.name, file.url, file.type);
-    const safeUrl = (typeof file.url === 'string' && file.url.startsWith('data:') && file.url.length > 80_000)
+    let candidateUrl = file.url || null;
+    if (!candidateUrl && file.fileBase64 && (file.type === 'image' || file.fileMimeType?.startsWith('image/'))) {
+      const cleanB64 = file.fileBase64.includes(';base64,') ? file.fileBase64.split(';base64,')[1] : file.fileBase64;
+      candidateUrl = `data:${file.fileMimeType || 'image/jpeg'};base64,${cleanB64}`;
+    }
+    const safeUrl = (typeof candidateUrl === 'string' && candidateUrl.startsWith('data:') && candidateUrl.length > 450_000)
       ? null
-      : (file.url || null);
+      : candidateUrl;
+
     const fileRow: Record<string, any> = {
       id: validFileId,
       workspace_id: validWsId,
@@ -141,7 +185,7 @@ export class WorkspaceSyncService {
       url: safeUrl,
       storage_path: file.storagePath || null,
       summary: file.summary || '',
-      transcription: file.transcription || null,
+      transcription: file.transcription || file.contentText || null,
       tags: Array.isArray(file.tags) && file.tags.length > 0 ? file.tags : ['Document'],
       highlights: Array.isArray(file.highlights) ? file.highlights : [],
       formulas: Array.isArray(file.formulas) ? file.formulas : [],
@@ -174,8 +218,8 @@ export class WorkspaceSyncService {
             updated_at: new Date().toISOString()
           }, { onConflict: 'id', ignoreDuplicates: true });
       }
-    } catch {
-      // Non-fatal workspace check
+    } catch (wsEnsureErr) {
+      reportSupabaseError('saveWorkspaceFile:ensureWorkspace', wsEnsureErr, false);
     }
 
     try {
@@ -184,12 +228,12 @@ export class WorkspaceSyncService {
         .upsert(fileRow, { onConflict: 'id' });
 
       if (error) {
-        console.debug('Workspace file sync notice:', error.message);
+        reportSupabaseError('saveWorkspaceFile', error, true);
         return false;
       }
       return true;
     } catch (err: any) {
-      console.debug('Failed to sync file to Supabase workspace_files:', err.message);
+      reportSupabaseError('saveWorkspaceFile', err, true);
       return false;
     }
   }
@@ -214,12 +258,12 @@ export class WorkspaceSyncService {
         .eq('user_id', userId);
 
       if (error) {
-        console.debug('Failed to update tags in Supabase workspace_files:', error.message);
+        reportSupabaseError('updateWorkspaceFileTags', error, true);
         return false;
       }
       return true;
     } catch (err: any) {
-      console.debug('Error updating tags:', err.message);
+      reportSupabaseError('updateWorkspaceFileTags', err, true);
       return false;
     }
   }
@@ -242,8 +286,13 @@ export class WorkspaceSyncService {
         .eq('id', validFileId)
         .eq('user_id', userId);
 
-      return !error;
-    } catch {
+      if (error) {
+        reportSupabaseError('deleteWorkspaceFile', error, true);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      reportSupabaseError('deleteWorkspaceFile', err, true);
       return false;
     }
   }
@@ -273,8 +322,13 @@ export class WorkspaceSyncService {
         .eq('id', validWsId)
         .eq('user_id', userId);
 
-      return !error;
-    } catch {
+      if (error) {
+        reportSupabaseError('deleteWorkspace', error, true);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      reportSupabaseError('deleteWorkspace', err, true);
       return false;
     }
   }
@@ -311,7 +365,13 @@ export class WorkspaceSyncService {
             .eq('user_id', userId)
             .order('created_at', { ascending: false });
 
-          if (error || !rows || rows.length === 0) {
+          if (error) {
+            reportSupabaseError('fetchWorkspaces', error, true);
+            workspacesCacheByUser.set(userId, { data: [], timestamp: Date.now() });
+            return [];
+          }
+
+          if (!rows || rows.length === 0) {
             workspacesCacheByUser.set(userId, { data: [], timestamp: Date.now() });
             return [];
           }
@@ -326,10 +386,23 @@ export class WorkspaceSyncService {
               .eq('user_id', userId)
               .in('workspace_id', wsIds);
 
+            if (filesRes.error) {
+              reportSupabaseError('fetchWorkspaces:workspace_files', filesRes.error, false);
+            }
+
             if (filesRes.data) {
               filesRes.data.forEach((f: any) => {
                 if (!fileMap[f.workspace_id]) {
                   fileMap[f.workspace_id] = [];
+                }
+                let hydratedBase64: string | undefined = undefined;
+                let hydratedMime: string | undefined = undefined;
+                if (typeof f.url === 'string' && f.url.startsWith('data:')) {
+                  const m = f.url.match(/^data:([^;]+);base64,(.+)$/);
+                  if (m) {
+                    hydratedMime = m[1];
+                    hydratedBase64 = m[2];
+                  }
                 }
                 fileMap[f.workspace_id].push({
                   id: f.id,
@@ -339,20 +412,22 @@ export class WorkspaceSyncService {
                   uploadDate: f.upload_date || f.created_at || new Date().toISOString(),
                   status: (f.status as any) || 'indexed',
                   url: f.url || undefined,
+                  fileBase64: hydratedBase64,
+                  fileMimeType: hydratedMime,
                   storagePath: f.storage_path || undefined,
                   summary: f.summary || '',
                   highlights: Array.isArray(f.highlights) ? f.highlights : [],
                   tags: Array.isArray(f.tags) && f.tags.length > 0 ? f.tags : ['Document'],
-                  transcription: f.transcription || undefined,
+                  transcription: f.transcription || f.content_text || undefined,
                   formulas: Array.isArray(f.formulas) ? f.formulas : [],
                   extractedDiagrams: f.extracted_diagrams || undefined,
-                  contentText: f.content_text || undefined,
+                  contentText: f.content_text || f.transcription || undefined,
                   pages: typeof f.pages === 'number' ? f.pages : undefined
                 });
               });
             }
-          } catch {
-            // Non-fatal if child tables fetch fails
+          } catch (childErr) {
+            reportSupabaseError('fetchWorkspaces:childTables', childErr, false);
           }
 
           const mappedWorkspaces = rows.map((row: any): Workspace => {
@@ -379,7 +454,21 @@ export class WorkspaceSyncService {
               const targetKey = byNameKey || byIdKey || getFileKey(f);
               if (targetKey) {
                 const existing = fileMapByKey.get(targetKey);
-                fileMapByKey.set(targetKey, existing ? { ...existing, ...f, summary: f.summary || existing.summary, transcription: f.transcription || existing.transcription } : f);
+                fileMapByKey.set(
+                  targetKey,
+                  existing
+                    ? {
+                        ...existing,
+                        ...f,
+                        url: f.url || existing.url,
+                        fileBase64: f.fileBase64 || existing.fileBase64,
+                        fileMimeType: f.fileMimeType || existing.fileMimeType,
+                        summary: f.summary || existing.summary,
+                        transcription: f.transcription || existing.transcription,
+                        contentText: f.contentText || existing.contentText
+                      }
+                    : f
+                );
               }
             });
             const files = Array.from(fileMapByKey.values());
@@ -445,7 +534,7 @@ export class WorkspaceSyncService {
       inflightFetchByUser.set(userId, fetchPromise);
       return await fetchPromise;
     } catch (err: any) {
-      console.warn('Workspace fetch error:', err.message);
+      reportSupabaseError('fetchWorkspaces', err, true);
       return [];
     }
   }
@@ -462,7 +551,7 @@ export class WorkspaceSyncService {
       );
       return await this.fetchWorkspaces(userId, true);
     } catch (err: any) {
-      console.warn('Failed to claim local workspaces for user:', err.message);
+      reportSupabaseError('claimWorkspacesForUser', err, false);
       return localWorkspaces;
     }
   }
@@ -485,27 +574,45 @@ export class WorkspaceSyncService {
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
-      if (error || !rows) return [];
+      if (error) {
+        reportSupabaseError('fetchWorkspaceFiles', error, true);
+        return [];
+      }
+      if (!rows) return [];
 
-      return rows.map((f: any): WorkspaceFile => ({
-        id: f.id,
-        name: f.name || 'Untitled Document',
-        type: f.type || 'doc',
-        size: f.size || '1 KB',
-        uploadDate: f.upload_date || f.created_at || new Date().toISOString(),
-        status: (f.status as any) || 'indexed',
-        url: f.url || undefined,
-        storagePath: f.storage_path || undefined,
-        summary: f.summary || '',
-        highlights: Array.isArray(f.highlights) ? f.highlights : [],
-        tags: Array.isArray(f.tags) && f.tags.length > 0 ? f.tags : ['Document'],
-        transcription: f.transcription || undefined,
-        formulas: Array.isArray(f.formulas) ? f.formulas : [],
-        extractedDiagrams: f.extracted_diagrams || undefined,
-        contentText: f.content_text || undefined,
-        pages: typeof f.pages === 'number' ? f.pages : undefined
-      }));
-    } catch {
+      return rows.map((f: any): WorkspaceFile => {
+        let hydratedBase64: string | undefined = undefined;
+        let hydratedMime: string | undefined = undefined;
+        if (typeof f.url === 'string' && f.url.startsWith('data:')) {
+          const m = f.url.match(/^data:([^;]+);base64,(.+)$/);
+          if (m) {
+            hydratedMime = m[1];
+            hydratedBase64 = m[2];
+          }
+        }
+        return {
+          id: f.id,
+          name: f.name || 'Untitled Document',
+          type: f.type || 'doc',
+          size: f.size || '1 KB',
+          uploadDate: f.upload_date || f.created_at || new Date().toISOString(),
+          status: (f.status as any) || 'indexed',
+          url: f.url || undefined,
+          fileBase64: hydratedBase64,
+          fileMimeType: hydratedMime,
+          storagePath: f.storage_path || undefined,
+          summary: f.summary || '',
+          highlights: Array.isArray(f.highlights) ? f.highlights : [],
+          tags: Array.isArray(f.tags) && f.tags.length > 0 ? f.tags : ['Document'],
+          transcription: f.transcription || f.content_text || undefined,
+          formulas: Array.isArray(f.formulas) ? f.formulas : [],
+          extractedDiagrams: f.extracted_diagrams || undefined,
+          contentText: f.content_text || f.transcription || undefined,
+          pages: typeof f.pages === 'number' ? f.pages : undefined
+        };
+      });
+    } catch (err) {
+      reportSupabaseError('fetchWorkspaceFiles', err, true);
       return [];
     }
   }
@@ -538,8 +645,13 @@ export class WorkspaceSyncService {
         .eq('id', validWsId)
         .eq('user_id', userId);
 
-      return !error;
-    } catch {
+      if (error) {
+        reportSupabaseError('saveWorkspaceNote', error, true);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      reportSupabaseError('saveWorkspaceNote', err, true);
       return false;
     }
   }

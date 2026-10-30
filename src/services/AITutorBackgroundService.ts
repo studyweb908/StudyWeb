@@ -258,13 +258,33 @@ class AITutorBackgroundManager {
             if (postRes.ok && parsed && (parsed.reply || parsed.text)) {
               data = parsed;
               break;
-            } else if (parsed?.error) {
-              lastErrorText = parsed.error;
+            } else if (parsed?.error || !postRes.ok) {
+              const errCode = parsed?.errorCode || `HTTP_${postRes.status}`;
+              lastErrorText = parsed?.error
+                ? `[${errCode}] ${parsed.error}`
+                : `[${errCode}] Request failed with status ${postRes.status}`;
+              console.error('[AI Tutor Error][POST /api/ai-tutor]', {
+                code: errCode,
+                status: postRes.status,
+                message: parsed?.error || postRes.statusText
+              });
             }
+          } else if (!postRes.ok) {
+            const errCode = `HTTP_${postRes.status}`;
+            lastErrorText = `[${errCode}] Server returned status ${postRes.status}`;
+            console.error('[AI Tutor Error][POST /api/ai-tutor]', {
+              code: errCode,
+              status: postRes.status
+            });
           }
         } catch (err: any) {
-          lastErrorText = err?.message || 'Network connection error';
-          console.warn(`[AITutorBackgroundService] POST attempt ${attempt + 1} failed:`, err);
+          const errCode = err?.code || 'NETWORK_ERR';
+          lastErrorText = `[${errCode}] ${err?.message || 'Network connection error'}`;
+          console.error(`[AI Tutor Error] POST attempt ${attempt + 1} failed:`, {
+            code: errCode,
+            message: err?.message,
+            error: err
+          });
         }
       }
 
@@ -280,7 +300,7 @@ class AITutorBackgroundManager {
           const firstVideo = compactAttachedFiles.find(f => f.type === 'video' || (f.url && f.url.startsWith('http')));
           if (firstVideo && firstVideo.url) {
             params.set('fileUrl', firstVideo.url);
-            params.set('fileName', firstVideo.name);
+            params.set('fileName', firstVideo.url);
           }
 
           const getRes = await fetch(`/api/ai-tutor?${params.toString()}`, {
@@ -297,7 +317,20 @@ class AITutorBackgroundManager {
             }
           }
         } catch (err) {
-          console.warn('[AITutorBackgroundService] Secondary GET attempt failed:', err);
+          console.error('[AI Tutor Error] Secondary GET attempt failed:', err);
+        }
+      }
+
+      if (!data || (!data.reply && !data.text)) {
+        const displayError = lastErrorText || '[AI_TUTOR_UNAVAILABLE] Unable to reach Gemini AI right now.';
+        console.error('[AI Tutor Error] Final failure:', displayError);
+        if (typeof window !== 'undefined' && typeof (window as any).showToast === 'function') {
+          (window as any).showToast(
+            displayError,
+            'error',
+            5500,
+            'AI Tutor Error'
+          );
         }
       }
 
@@ -322,7 +355,7 @@ class AITutorBackgroundManager {
         : {
             id: `msg-ai-${Date.now()}`,
             sender: 'ai',
-            text: lastErrorText || 'Unable to reach Gemini AI right now. Please click Retry Question.',
+            text: lastErrorText || '[AI_TUTOR_UNAVAILABLE] Unable to reach Gemini AI right now. Please click Retry Question.',
             isError: true,
             failedPrompt: userMsg.text,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })

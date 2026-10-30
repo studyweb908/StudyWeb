@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 import { toValidUuid, isValidUuid, generateUuid } from '../utils/uuid';
 import { TranscriptProcessor, TranscriptResult, TranscriptValidationStatus, TranscriptValidationResult } from './TranscriptProcessor';
 import { cleanNotebookLMTitle, isRawUrlOrPlaceholderTitle } from '../utils/notebookTitle';
@@ -329,43 +329,45 @@ export async function runGeminiStructuredAnalysis(
 
   const isYouTube = Boolean(sourceUrl && (sourceUrl.includes('youtube.com') || sourceUrl.includes('youtu.be')));
   const isVideoFile = type === 'video' || Boolean(fileMimeType && fileMimeType.startsWith('video/'));
+  const isImageFile = type === 'image' || Boolean(fileMimeType && fileMimeType.startsWith('image/'));
 
-  const systemInstruction = `You are an elite academic AI tutor and study material analyst for StudyWeb.
-Your goal is to thoroughly analyze the provided educational material (whether it is a YouTube video, an uploaded video file, a web article/URL, or a document) and produce a comprehensive, deeply informative, structured study resource.
+  const systemInstruction = `You are an elite academic AI tutor and multimodal study material analyst for StudyWeb.
+Your goal is to thoroughly analyze the provided study material (whether it is an uploaded image/screenshot/infographic, a YouTube video, an uploaded video file, a web article/URL, or a document) and produce a comprehensive, deeply informative, structured study resource.
 CRITICAL RULES:
-1. Analyze the actual educational content, concepts, mechanisms, arguments, examples, and step-by-step explanations taught in the material.
-2. NEVER output useless metadata (such as channel links, video duration, or generic boilerplate) as the summary, highlights, or transcription.
-3. Explain clearly WHAT is in the video/link/document, WHAT it is about, break down all major concepts in detail, and generate high-yield practice questions and answers from the content.
+1. Analyze ONLY the actual visual/textual content present in the uploaded image, document, video, or link. NEVER guess or fabricate unrelated subjects (for example, NEVER output cell biology if the image is about an AI tool, software, technology, or another topic).
+2. If the input is an image (screenshot, infographic, slide, diagram, AI tool overview, chart, or photo of notes), perform 100% faithful visual inspection and complete OCR of every word, label, UI section, feature, diagram, and concept shown in the image.
+3. NEVER output useless metadata (such as channel links, video duration, or generic boilerplate) as the summary, highlights, or transcription.
+4. Explain clearly WHAT is in the image/video/link/document, WHAT it is about, break down all major concepts in detail, and generate high-yield practice questions and answers directly from the content.
 
 You must return a valid JSON object strictly matching this schema:
 {
-  "title": "Clean, concise, human-readable NotebookLM-style title of the material (e.g., 'The Happy Prince – Class 9th' or 'Cellular Respiration & ATP Synthesis'). NEVER output a raw URL (https://...), domain name, hashtag clutter, or file extension.",
-  "summary": "A comprehensive 4-6 sentence summary explaining clearly what this video/link/resource is about, what happens in it, and the main educational concepts taught",
-  "detailedNotes": "In-depth, structured study notes formatted with Markdown headings and bullet points covering every section, concept, example, and explanation in the material",
-  "tags": ["3 to 5 tags. Include at least one pedagogical tag from ['Lecture', 'Reading', 'Tutorial', 'Practice', 'Research', 'Reference'], followed by specific subject/topic tags"],
+  "title": "Clean, concise, human-readable NotebookLM-style title reflecting the exact topic of the material (e.g., if the image shows an AI tool, name that AI tool or topic). NEVER output a raw URL (https://...), domain name, generic filename like IMG_1234, or file extension.",
+  "summary": "A comprehensive 4-6 sentence summary explaining clearly what this image/video/link/resource is about, what is shown in it, and the main concepts or information presented",
+  "detailedNotes": "In-depth, structured study notes formatted with Markdown headings and bullet points covering every section, visual element, text block, feature, concept, example, and explanation in the material",
+  "tags": ["3 to 5 specific tags accurately describing the exact subject and topic of the material"],
   "mainTopics": [
     { "topic": "Topic Name", "subtopics": ["Subtopic A", "Subtopic B"] }
   ],
   "conceptsAndDefinitions": [
-    { "concept": "Key Concept", "definition": "Clear, detailed explanation or definition from the material" }
+    { "concept": "Key Concept or Term from the Material", "definition": "Clear, detailed explanation or definition directly from the material" }
   ],
-  "keyTakeaways": ["5 to 6 specific, factual key takeaways explaining the core lessons and insights from the material"],
+  "keyTakeaways": ["5 to 6 specific, factual key takeaways explaining the core facts, features, and insights from the material"],
   "practiceQuestions": [
-    { "question": "Content-specific question testing understanding of this material?", "answer": "Direct, accurate answer", "explanation": "Step-by-step explanation referencing the concepts in the material" }
+    { "question": "Content-specific question testing understanding of this material?", "answer": "Direct, accurate answer", "explanation": "Step-by-step explanation referencing the exact content in the material" }
   ],
   "flashcards": [
     { "front": "Flashcard question or term", "back": "Clear answer or definition", "topic": "Topic" }
   ],
   "revisionOutline": ["Step 1", "Step 2", "Step 3", "Step 4"],
-  "formulas": ["Key equations or formulas in LaTeX format if applicable, or empty array"],
-  "transcription": "Detailed lecture walkthrough, transcript of spoken concepts, or extracted article text explaining everything covered in the resource from start to finish"
+  "formulas": ["Key equations, syntax, or formulas if applicable, or empty array"],
+  "transcription": "Complete verbatim OCR text and detailed visual walkthrough of everything visible or spoken in the resource from start to finish"
 }`;
 
   let contents: any;
-  const config: any = {
+  const baseConfig: any = {
     systemInstruction,
     responseMimeType: 'application/json',
-    temperature: 0.25
+    temperature: 0.2
   };
 
   if (fileBase64 && fileMimeType) {
@@ -379,6 +381,11 @@ You must return a valid JSON object strictly matching this schema:
       ? `Watch and analyze this uploaded video file "${name}" (MIME: ${fileMimeType}).
 Carefully inspect both the visual frames/slides/demonstrations and the audio/spoken explanations.
 Tell the student exactly what is in this video, what it is about, summarize its full content, extract all key concepts and takeaways, transcribe the spoken lecture/explanations, and create 5 practice questions with answers based on the video.`
+      : isImageFile
+      ? `Carefully inspect and analyze this uploaded image "${name}" (MIME: ${fileMimeType}).
+1. Perform complete, word-for-word OCR of all visible text, headings, labels, bullet points, UI elements, logos, captions, and numbers in the image.
+2. Describe the exact subject matter shown in the image (for example, if it shows an AI tool, software interface, infographic, architecture diagram, chart, or handwritten notes, explain its exact name, purpose, features, and workflow).
+3. Base the "title", "summary", "detailedNotes", "keyTakeaways", "conceptsAndDefinitions", "practiceQuestions", and "transcription" 100% on what is actually visible inside this image. Do NOT invent unrelated subjects.`
       : `Analyze this uploaded document/file "${name}" (${type}, MIME: ${fileMimeType}). 
 Perform OCR and deep conceptual extraction on all text, diagrams, formulas, tables, and questions.
 Extract complete study notes, flashcards, practice questions, and definitions as specified in the schema.`;
@@ -438,27 +445,35 @@ Instructions:
 3. Extract 5-6 specific factual "keyTakeaways" and 4-5 content-based "practiceQuestions" with answers and explanations.`;
   }
 
-  // Active verified Gemini models with high quota availability
+  // Active verified Gemini models with high quota availability and fast minimal thinking
   const modelCandidates = [
     'gemini-3-flash-preview',
     'gemini-3.1-flash-lite-preview',
-    'gemini-3.1-flash-lite',
     'gemini-flash-latest'
   ];
+
+  let lastModelError: any = null;
 
   for (const model of modelCandidates) {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        // If first attempt with YouTube fileData failed, retry immediately with text-only prompt
         const effectiveContents =
           attempt === 2 && Array.isArray(contents) && contents[0]?.fileData && contents[1]?.text
             ? contents[1].text
             : contents;
 
+        const supportsMinimalThinking =
+          model.includes('gemini-3-flash') ||
+          model.includes('flash-lite') ||
+          model.includes('gemini-flash');
+
         const response = await ai.models.generateContent({
           model,
           contents: effectiveContents,
-          config
+          config: {
+            ...baseConfig,
+            ...(supportsMinimalThinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } } : {})
+          }
         });
 
         if (response && response.text) {
@@ -468,16 +483,17 @@ Instructions:
           }
           const parsed = JSON.parse(text) as StructuredStudyAnalysis;
           if (parsed && parsed.summary) {
-            const candidateTitle = !isRawUrlOrPlaceholderName(parsed.title)
+            const isGenericFileName = /^(img|image|screenshot|photo|pic|scan|untitled|document|file)[-_ ]?\d*/i.test(String(name || '').trim());
+            const candidateTitle = (!isRawUrlOrPlaceholderName(parsed.title) && parsed.title.trim().length > 2)
               ? parsed.title
-              : (!isRawUrlOrPlaceholderName(name) ? name : 'Analyzed Study Resource');
+              : (!isRawUrlOrPlaceholderName(name) && !isGenericFileName ? name : (parsed.title || name || 'Analyzed Study Resource'));
             const resolvedTitle = cleanNotebookLMTitle(candidateTitle, sourceUrl, type);
 
             const structuredResult: StructuredStudyAnalysis = {
               title: resolvedTitle,
               summary: parsed.summary,
               detailedNotes: parsed.detailedNotes || parsed.summary,
-              tags: Array.isArray(parsed.tags) && parsed.tags.length > 0 ? parsed.tags : ['Lecture', 'Study Material'],
+              tags: Array.isArray(parsed.tags) && parsed.tags.length > 0 ? parsed.tags : [isImageFile ? 'Visual Analysis' : 'Study Material'],
               mainTopics: Array.isArray(parsed.mainTopics) ? parsed.mainTopics : [],
               conceptsAndDefinitions: Array.isArray(parsed.conceptsAndDefinitions) ? parsed.conceptsAndDefinitions : [],
               keyTakeaways: Array.isArray(parsed.keyTakeaways) && parsed.keyTakeaways.length > 0 ? parsed.keyTakeaways : [parsed.summary],
@@ -488,7 +504,6 @@ Instructions:
               transcription: parsed.transcription || parsed.detailedNotes || (sourceText ? sourceText.substring(0, 4000) : parsed.summary)
             };
 
-            // Enrich transcription with full structured study document + raw timestamped transcript so AI Tutor and Preview Modal have all notes, Q&A, and spoken captions
             const baseStudyDoc = buildComprehensiveStudyDocument(structuredResult);
             if (sourceText && sourceText.includes('Full Timestamped Video Transcript') && !baseStudyDoc.includes('Full Timestamped Video Transcript')) {
               structuredResult.transcription = `${baseStudyDoc}\n\n## Verbatim Timestamped Video Captions\n${sourceText.slice(0, 20000)}`;
@@ -499,15 +514,16 @@ Instructions:
           }
         }
       } catch (err: any) {
-        const status = err?.status || err?.statusCode || err?.error?.code;
+        lastModelError = err;
+        const status = err?.status || err?.statusCode || err?.error?.code || 'AI_MODEL_ERR';
         const msg = String(err?.message || '');
+        console.error(`[Study Material Pipeline Error] Model ${model} (attempt ${attempt}) failed [${status}]:`, msg);
         const isQuota = status === 429 || msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED');
-        // If attempt 1 used YouTube fileData and failed for a non-quota reason, retry attempt 2 with text prompt
         if (!isQuota && attempt === 1 && Array.isArray(contents) && contents[0]?.fileData) {
           continue;
         }
         if (!isQuota && attempt === 1 && status === 503) {
-          await new Promise(r => setTimeout(r, 300));
+          await new Promise(r => setTimeout(r, 250));
           continue;
         }
         break;
@@ -515,7 +531,7 @@ Instructions:
     }
   }
 
-  console.log('[Study Material Pipeline] Using academic domain synthesis fallback.');
+  console.error('[Study Material Pipeline Error] All Gemini models failed during structured analysis:', lastModelError?.message || 'Unknown error');
   return generateReliableStudyFallback(name, type, sourceText, sourceUrl);
 }
 
@@ -526,83 +542,33 @@ export function generateReliableStudyFallback(
   sourceUrl?: string
 ): StructuredStudyAnalysis {
   const targetName = cleanNotebookLMTitle(name, sourceUrl, type);
-  const lowerName = (targetName + ' ' + (sourceText || '')).toLowerCase();
-
-  let subject = 'General Academics';
-  const pedagogicalTag = type === 'video' ? 'Lecture' : 'Reading';
-  let tags = [pedagogicalTag, 'Study Material'];
-  let formulas: string[] = [];
-
-  if (lowerName.includes('bio') || lowerName.includes('cell') || lowerName.includes('mitosis') || lowerName.includes('dna') || lowerName.includes('atp')) {
-    subject = 'Cellular Biology';
-    tags = ['Lecture', 'Biology', 'Cell Structure', 'Bioenergetics'];
-    formulas = [
-      'C_6H_{12}O_6 + 6O_2 \\rightarrow 6CO_2 + 6H_2O + 36-38 ATP',
-      '\\Delta G = \\Delta H - T\\Delta S'
-    ];
-  } else if (lowerName.includes('math') || lowerName.includes('calc') || lowerName.includes('deriv') || lowerName.includes('integral') || lowerName.includes('algebra')) {
-    subject = 'Calculus & Applied Mathematics';
-    tags = ['Lecture', 'Calculus', 'Mathematics', 'STEM'];
-    formulas = [
-      '\\int u \\, dv = uv - \\int v \\, du',
-      '\\frac{d}{dx}[f(g(x))] = f\'(g(x)) \\cdot g\'(x)',
-      '\\lim_{x \\to 0} \\frac{\\sin x}{x} = 1'
-    ];
-  } else if (lowerName.includes('chem') || lowerName.includes('reaction') || lowerName.includes('acid') || lowerName.includes('mole')) {
-    subject = 'Chemistry & Molecular Science';
-    tags = ['Lecture', 'Chemistry', 'Stoichiometry', 'Molecular Science'];
-    formulas = [
-      'PV = nRT',
-      'pH = -\\log[H^+]'
-    ];
-  } else if (lowerName.includes('physic') || lowerName.includes('force') || lowerName.includes('gravity') || lowerName.includes('energy')) {
-    subject = 'Physics & Classical Mechanics';
-    tags = ['Lecture', 'Physics', 'Mechanics', 'Energy Conservation'];
-    formulas = [
-      'F = ma',
-      'E_k = \\frac{1}{2}mv^2'
-    ];
-  }
-
-  const snippet = sourceText ? sourceText.slice(0, 800).trim() : '';
+  const pedagogicalTag = type === 'video' ? 'Lecture' : type === 'image' ? 'Image' : 'Reading';
+  const tags = [pedagogicalTag, 'Study Material'];
+  const snippet = sourceText ? sourceText.slice(0, 1200).trim() : '';
 
   const fallbackObj: StructuredStudyAnalysis = {
     title: targetName,
     summary: snippet
-      ? `Detailed study breakdown of "${targetName}" (${subject}): ${snippet.slice(0, 350)}`
-      : `Comprehensive academic study analysis of "${targetName}" (${subject}), covering core concepts, definitions, mechanisms, and practice questions.`,
+      ? `Extracted content from "${targetName}": ${snippet.slice(0, 400)}`
+      : `Uploaded ${type} resource "${targetName}" stored in workspace.`,
     detailedNotes: snippet
-      ? `### Content Breakdown: ${targetName}\n\n${snippet}`
-      : `### Core Overview: ${targetName}\n\nThis resource covers essential concepts in **${subject}**, focusing on foundational principles, step-by-step mechanisms, and applied problem solving.`,
+      ? `### Extracted Content: ${targetName}\n\n${snippet}`
+      : `### Uploaded Resource: ${targetName}\n\nThis ${type} file has been saved to your workspace. Ask the AI Tutor to inspect or explain specific sections of "${targetName}".`,
     tags,
     mainTopics: [
-      { topic: `${subject} Core Concepts`, subtopics: ['Foundational Principles', 'Key Mechanisms', 'Practical Examples'] }
+      { topic: targetName, subtopics: ['Source Content', 'Key Points'] }
     ],
-    conceptsAndDefinitions: [
-      { concept: targetName, definition: `Core topic in ${subject} explored in this study material.` }
-    ],
+    conceptsAndDefinitions: [],
     keyTakeaways: snippet
-      ? snippet.split(/(?<=[.!?])\s+/).filter(s => s.length > 25).slice(0, 4)
-      : [
-          `Explores the core mechanisms and foundational principles of ${targetName} in ${subject}.`,
-          `Connects theoretical definitions to step-by-step practical examples and problem-solving.`
-        ],
-    practiceQuestions: [
-      {
-        question: `What is the main concept explained in "${targetName}"?`,
-        answer: snippet ? snippet.slice(0, 200) : `The fundamental principles and mechanisms of ${targetName} in ${subject}.`,
-        explanation: `Understanding the core mechanism of ${targetName} helps explain how key processes operate in ${subject}.`
-      }
-    ],
-    flashcards: [
-      { front: `What is the main focus of ${targetName}?`, back: snippet ? snippet.slice(0, 180) : `Core principles and applications of ${targetName} (${subject}).`, topic: subject }
-    ],
+      ? snippet.split(/(?<=[.!?])\s+/).filter(s => s.length > 20).slice(0, 4)
+      : [`Uploaded ${type} resource "${targetName}" is available in this workspace.`],
+    practiceQuestions: [],
+    flashcards: [],
     revisionOutline: [
-      `1. Review the core summary and definitions of ${targetName}`,
-      `2. Study the step-by-step mechanisms and examples`,
-      `3. Test understanding using the practice questions`
+      `1. Review "${targetName}" in your workspace`,
+      `2. Ask the AI Tutor specific questions about "${targetName}"`
     ],
-    formulas,
+    formulas: [],
     transcription: snippet || undefined
   };
 
@@ -747,6 +713,18 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
 
   materialName = cleanNotebookLMTitle(materialName, sourceUrl, type);
 
+  let persistedUrl: string | null = sourceUrl || null;
+  if (!persistedUrl && fileBase64 && fileMimeType && (type === 'image' || fileMimeType.startsWith('image/'))) {
+    const cleanB64 = String(fileBase64).includes(';base64,')
+      ? String(fileBase64).split(';base64,')[1]
+      : String(fileBase64);
+    if (cleanB64.length > 0 && cleanB64.length < 450_000) {
+      persistedUrl = `data:${fileMimeType};base64,${cleanB64}`;
+    }
+  } else if (persistedUrl && persistedUrl.startsWith('data:') && persistedUrl.length > 450_000) {
+    persistedUrl = null;
+  }
+
   // Step 2: Save initial record to Supabase with status 'processing' BEFORE calling AI (RULE 5)
   const initialRow = {
     id: materialId,
@@ -755,7 +733,7 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
     name: materialName,
     type,
     size: size || (sourceText ? `${Math.ceil(sourceText.length / 1024)} KB` : '1 KB'),
-    url: sourceUrl || null,
+    url: persistedUrl,
     storage_path: storagePath || null,
     status: 'processing',
     content_text: sourceText || null,
@@ -771,14 +749,22 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
 
   if (supabase) {
     try {
-      const { data: wsRow } = await supabase
+      const { data: wsRow, error: wsCheckErr } = await supabase
         .from('workspaces')
         .select('id')
         .eq('id', normWsId)
         .maybeSingle();
 
+      if (wsCheckErr) {
+        console.error('[Supabase Error][studyMaterialPipeline:wsCheck]', {
+          code: wsCheckErr.code || 'SUPABASE_WS_CHECK_ERR',
+          message: wsCheckErr.message,
+          details: wsCheckErr.details
+        });
+      }
+
       if (!wsRow) {
-        await supabase
+        const { error: wsCreateErr } = await supabase
           .from('workspaces')
           .upsert({
             id: normWsId,
@@ -786,17 +772,39 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
             name: materialName ? `Workspace: ${materialName}` : 'Study Workspace',
             updated_at: new Date().toISOString()
           }, { onConflict: 'id', ignoreDuplicates: true });
+
+        if (wsCreateErr) {
+          console.error('[Supabase Error][studyMaterialPipeline:wsUpsert]', {
+            code: wsCreateErr.code || 'SUPABASE_WS_UPSERT_ERR',
+            message: wsCreateErr.message,
+            details: wsCreateErr.details
+          });
+        }
       }
     } catch (wsErr: any) {
-      console.warn('[Pipeline] Workspace ensure notice:', wsErr?.message);
+      console.error('[Supabase Error][studyMaterialPipeline:wsEnsure]', {
+        code: wsErr?.code || 'SUPABASE_WS_EXCEPTION',
+        message: wsErr?.message || String(wsErr)
+      });
     }
 
     try {
-      await supabase
+      const { error: preUpsertErr } = await supabase
         .from('workspace_files')
         .upsert(initialRow, { onConflict: 'id' });
+
+      if (preUpsertErr) {
+        console.error('[Supabase Error][studyMaterialPipeline:preUpsert]', {
+          code: preUpsertErr.code || 'SUPABASE_FILE_PREUPSERT_ERR',
+          message: preUpsertErr.message,
+          details: preUpsertErr.details
+        });
+      }
     } catch (dbPreErr: any) {
-      console.warn('[Pipeline] Pre-save database notice:', dbPreErr.message);
+      console.error('[Supabase Error][studyMaterialPipeline:preSave]', {
+        code: dbPreErr?.code || 'SUPABASE_PRE_SAVE_ERR',
+        message: dbPreErr?.message || String(dbPreErr)
+      });
     }
   }
 
@@ -804,13 +812,14 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
   const ai = getGeminiClient();
   if (!ai) {
     const errorMsg = 'Gemini AI API key is not configured on the server.';
+    console.error('[Study Material Pipeline Error] [AI_KEY_MISSING]', errorMsg);
     if (supabase) {
       await supabase
         .from('workspace_files')
         .update({ status: 'failed', summary: errorMsg, updated_at: new Date().toISOString() })
         .eq('id', materialId);
     }
-    res.status(503).json({ error: errorMsg, materialId, status: 'failed' });
+    res.status(503).json({ error: errorMsg, errorCode: 'AI_KEY_MISSING', materialId, status: 'failed' });
     return;
   }
 
@@ -836,6 +845,7 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
     const completedRow = {
       ...initialRow,
       name: finalNotebookTitle,
+      url: persistedUrl,
       status: 'completed',
       summary: analysis.summary,
       highlights: analysis.keyTakeaways || [],
@@ -856,34 +866,47 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
     };
 
     if (supabase) {
-      const { data: updatedData, error: updateErr } = await supabase
+      const { error: updateErr } = await supabase
         .from('workspace_files')
         .update({
           name: completedRow.name,
+          url: completedRow.url,
           status: 'completed',
           summary: completedRow.summary,
           highlights: completedRow.highlights,
           tags: completedRow.tags,
           formulas: completedRow.formulas,
           transcription: completedRow.transcription,
-          extracted_diagrams: Array.isArray(completedRow.extracted_diagrams) ? completedRow.extracted_diagrams : (completedRow.extracted_diagrams ? [JSON.stringify(completedRow.extracted_diagrams)] : []),
+          content_text: completedRow.content_text,
+          extracted_diagrams: Array.isArray(completedRow.extracted_diagrams)
+            ? completedRow.extracted_diagrams
+            : (completedRow.extracted_diagrams ? [JSON.stringify(completedRow.extracted_diagrams)] : []),
           updated_at: completedRow.updated_at
         })
-        .eq('id', materialId)
-        .select()
-        .single();
+        .eq('id', materialId);
 
       if (updateErr) {
-        console.warn('[Pipeline] Supabase update warning:', updateErr.message);
+        console.error('[Supabase Error][studyMaterialPipeline:fileUpdate]', {
+          code: updateErr.code || 'SUPABASE_FILE_UPDATE_ERR',
+          message: updateErr.message,
+          details: updateErr.details
+        });
       }
 
       // Also ensure workspace.files JSONB is refreshed with this completed file
       try {
-        const { data: wsRow } = await supabase
+        const { data: wsRow, error: wsSelectErr } = await supabase
           .from('workspaces')
           .select('files')
           .eq('id', normWsId)
           .maybeSingle();
+
+        if (wsSelectErr) {
+          console.error('[Supabase Error][studyMaterialPipeline:wsFilesSelect]', {
+            code: wsSelectErr.code || 'SUPABASE_WS_SELECT_ERR',
+            message: wsSelectErr.message
+          });
+        }
 
         if (wsRow) {
           const currentFiles = Array.isArray(wsRow.files) ? wsRow.files : [];
@@ -894,7 +917,7 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
             size: completedRow.size,
             uploadDate: completedRow.upload_date,
             status: 'completed',
-            url: completedRow.url,
+            url: completedRow.url && completedRow.url.length < 180_000 ? completedRow.url : undefined,
             storagePath: completedRow.storage_path,
             summary: completedRow.summary,
             highlights: completedRow.highlights,
@@ -906,13 +929,23 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
           };
 
           const nextFiles = [filePayload, ...currentFiles.filter((f: any) => f.id !== materialId)];
-          await supabase
+          const { error: wsUpdateErr } = await supabase
             .from('workspaces')
             .update({ files: nextFiles, updated_at: new Date().toISOString() })
             .eq('id', normWsId);
+
+          if (wsUpdateErr) {
+            console.error('[Supabase Error][studyMaterialPipeline:wsFilesUpdate]', {
+              code: wsUpdateErr.code || 'SUPABASE_WS_UPDATE_ERR',
+              message: wsUpdateErr.message
+            });
+          }
         }
       } catch (wsFileErr: any) {
-        console.warn('[Pipeline] Workspace files sync notice:', wsFileErr?.message);
+        console.error('[Supabase Error][studyMaterialPipeline:wsFilesSync]', {
+          code: wsFileErr?.code || 'SUPABASE_WS_SYNC_ERR',
+          message: wsFileErr?.message || String(wsFileErr)
+        });
       }
     }
 
@@ -939,9 +972,9 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
       }
     });
   } catch (aiErr: any) {
-    console.error('[Pipeline] Gemini Analysis error:', aiErr);
-
+    const errCode = aiErr?.status || aiErr?.code || 'AI_PIPELINE_ERR';
     const safeErrorMsg = aiErr?.message || 'AI processing encountered a temporary issue.';
+    console.error(`[Study Material Pipeline Error] [${errCode}] Gemini Analysis error:`, safeErrorMsg, aiErr);
 
     // Preserve original saved material in Supabase, set retryable error state (RULE 5)
     if (supabase) {
@@ -955,7 +988,10 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
           })
           .eq('id', materialId);
       } catch (updateFailErr: any) {
-        console.warn('[Pipeline] Error saving failed status:', updateFailErr.message);
+        console.error('[Supabase Error][studyMaterialPipeline:saveFailedState]', {
+          code: updateFailErr?.code || 'SUPABASE_FAIL_STATE_ERR',
+          message: updateFailErr?.message
+        });
       }
     }
 
@@ -963,6 +999,7 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
       success: false,
       materialId,
       status: 'failed',
+      errorCode: errCode,
       error: safeErrorMsg,
       material: {
         id: materialId,
@@ -971,7 +1008,7 @@ studyMaterialRouter.post('/process', async (req: Request, res: Response) => {
         size,
         uploadDate: initialRow.upload_date,
         status: 'failed',
-        url: sourceUrl,
+        url: persistedUrl,
         storagePath,
         summary: `Analysis failed: ${safeErrorMsg}`,
         highlights: [],

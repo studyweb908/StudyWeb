@@ -35,7 +35,8 @@ import { useTaskContext } from '../../context/TaskContext';
 import { recordUserActivity } from '../../utils/userActivity';
 import { AITutorBackgroundService } from '../../services/AITutorBackgroundService';
 import { FullScreenUploadOverlay } from './FullScreenUploadOverlay';
-import { loadStoredWorkspaces } from '../../utils/workspaceStorage';
+import { loadStoredWorkspaces, saveStoredWorkspaces } from '../../utils/workspaceStorage';
+import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 
 interface Message {
   id: string;
@@ -49,6 +50,9 @@ interface Message {
     quote: string;
   }>;
   source?: string;
+  followUpQuestions?: string[];
+  suggestOutsideResearch?: boolean;
+  originalQuery?: string;
   isError?: boolean;
   failedPrompt?: string;
 }
@@ -636,31 +640,42 @@ export default function AITutorWorkspace() {
       }
       const allWorkspacesList = Array.from(wsMap.values());
 
+      // Strictly scope workspaceFilesPayload to the ACTIVE workspace so files from other workspaces never bleed in
+      const currentWs = (activeWorkspace && wsMap.get(activeWorkspace.id)) || activeWorkspace;
       const seenNames = new Set<string>();
       const workspaceFilesPayload: any[] = [];
-      allWorkspacesList.forEach(ws => {
-        (ws.files || []).forEach((wf: any) => {
+      if (currentWs && Array.isArray(currentWs.files)) {
+        currentWs.files.forEach((wf: any) => {
           const key = String(wf.name || wf.id || '').trim().toLowerCase();
           if (!key || seenNames.has(key)) return;
           seenNames.add(key);
+          let extractedBase64 = wf.fileBase64;
+          let extractedMime = wf.fileMimeType;
+          if (!extractedBase64 && typeof wf.url === 'string' && wf.url.startsWith('data:') && wf.url.includes(';base64,')) {
+            const [header, b64] = wf.url.split(';base64,');
+            if (b64 && b64.length < 700000) {
+              extractedBase64 = b64;
+              extractedMime = extractedMime || header.replace('data:', '');
+            }
+          }
           workspaceFilesPayload.push({
             id: wf.id,
             name: wf.name,
             type: wf.type,
             size: wf.size,
             url: (typeof wf.url === 'string' && !wf.url.startsWith('data:')) ? wf.url : undefined,
-            workspaceId: ws.id,
-            workspaceName: ws.name || 'Workspace',
+            workspaceId: currentWs.id,
+            workspaceName: currentWs.name || 'Workspace',
             summary: wf.summary,
             transcription: wf.transcription || wf.contentText || wf.summary,
             contentText: wf.contentText || wf.transcription || wf.summary,
             highlights: wf.highlights,
-            fileBase64: wf.fileBase64,
-            fileMimeType: wf.fileMimeType,
+            fileBase64: extractedBase64,
+            fileMimeType: extractedMime,
             isDirectAttachment: false
           });
         });
-      });
+      }
 
       const directAttachedPayload = attachedFiles.map(f => ({
         ...f,
@@ -727,8 +742,11 @@ export default function AITutorWorkspace() {
       }
 
       if (!response.ok || !data) {
+        const errCode = data?.errorCode || `HTTP_${response.status}`;
         const errDetail = data?.error || data?.message || "Service unavailable. Please try again.";
-        throw new Error(errDetail);
+        const errorWithCode: any = new Error(`[${errCode}] ${errDetail}`);
+        errorWithCode.code = errCode;
+        throw errorWithCode;
       }
 
       const aiMsg: Message = {
@@ -738,15 +756,19 @@ export default function AITutorWorkspace() {
         workspaceNotice: data.workspaceNotice || undefined,
         citations: data.citations,
         source: data.source,
+        followUpQuestions: Array.isArray(data.followUpQuestions) ? data.followUpQuestions : [],
+        suggestOutsideResearch: Boolean(data.suggestOutsideResearch),
+        originalQuery: textToSend,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setMessages(prev => [...prev, aiMsg]);
     } catch (error: any) {
-      console.warn("AI Tutor error:", error?.message);
-      
+      const errCode = error?.code || 'AI_TUTOR_ERR';
       const cleanError = error?.message && !error.message.includes("<!doctype") && !error.message.includes("<html")
         ? error.message
-        : "Server connection issue";
+        : `[${errCode}] Server connection issue`;
+      console.error("[AI Tutor Error]", { code: errCode, message: cleanError, error });
+      (window as any).showToast?.(cleanError, 'error', 5500, 'AI Tutor Error');
 
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
@@ -792,21 +814,14 @@ export default function AITutorWorkspace() {
   };
 
   const processUploadedFile = async (file: File) => {
-    let typeLabel = 'Document';
-    if (file.type.startsWith('image/')) {
-      typeLabel = 'Image File';
-    } else if (file.type.includes('pdf')) {
-      typeLabel = 'PDF Document';
-    } else if (file.type.includes('word') || file.name.endsWith('.docx') || file.name.endsWith('.doc')) {
-      typeLabel = 'Word Document';
-    } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv')) {
-      typeLabel = 'Spreadsheet';
-    } else if (file.name.endsWith('.pptx') || file.name.endsWith('.ppt')) {
-      typeLabel = 'Presentation';
-    }
+    const lowerName = file.name.toLowerCase();
+    const isImg = file.type.startsWith('image/') || /\.(png|jpg|jpeg|webp|gif|svg|bmp)$/.test(lowerName);
+    let typeLabel = isImg ? 'image' : lowerName.endsWith('.pdf') ? 'pdf' : 'doc';
 
     let dataUrl: string | undefined = undefined;
     let fileBase64: string | undefined = undefined;
+    let mimeType = file.type || (lowerName.endsWith('.pdf') ? 'application/pdf' : isImg ? 'image/jpeg' : 'application/octet-stream');
+
     try {
       dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -820,23 +835,84 @@ export default function AITutorWorkspace() {
     } catch {}
 
     let transcription: string | undefined = undefined;
-    if (file.type.startsWith('text/') || file.name.endsWith('.md') || file.name.endsWith('.txt') || file.name.endsWith('.json') || file.name.endsWith('.csv')) {
+    if (file.type.startsWith('text/') || lowerName.endsWith('.md') || lowerName.endsWith('.txt') || lowerName.endsWith('.json') || lowerName.endsWith('.csv')) {
       try {
         transcription = await file.text();
       } catch {}
     }
 
-    const mimeType = file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+    let summary: string | undefined = undefined;
+    let contentText: string | undefined = transcription;
+    const activeUserId = typeof window !== 'undefined' ? localStorage.getItem('studyweb_active_user_id') : null;
+    const fileId = `file-tutor-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
-    return {
+    try {
+      const res = await fetch('/api/study-materials/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileId,
+          workspaceId: targetWsId,
+          userId: activeUserId || undefined,
+          fileName: file.name,
+          fileType: typeLabel,
+          fileSize: formatFileSize(file.size),
+          fileUrl: isImg ? dataUrl : undefined,
+          fileBase64: fileBase64 && fileBase64.length < 4000000 ? fileBase64 : undefined,
+          fileMimeType: mimeType,
+          rawText: transcription || ''
+        })
+      });
+      if (res.ok) {
+        const parsed = await res.json().catch(() => null);
+        if (parsed?.file) {
+          summary = parsed.file.summary || summary;
+          transcription = parsed.file.transcription || parsed.file.contentText || transcription;
+          contentText = parsed.file.contentText || parsed.file.transcription || contentText;
+        }
+      } else {
+        const errBody = await res.json().catch(() => ({}));
+        const errCode = errBody?.errorCode || `HTTP_${res.status}`;
+        console.error('[Study Material Upload Error]', { code: errCode, message: errBody?.error || res.statusText });
+      }
+    } catch (err: any) {
+      console.error('[Study Material Upload Error]', err);
+    }
+
+    const uploadedFileRecord: any = {
+      id: fileId,
       name: file.name,
       type: typeLabel,
       size: formatFileSize(file.size),
+      uploadDate: 'Just now',
+      status: 'ready',
       url: dataUrl,
       fileBase64,
       fileMimeType: mimeType,
-      transcription
+      summary,
+      transcription,
+      contentText
     };
+
+    // Persist to activeWorkspace & Supabase
+    try {
+      const stored = loadStoredWorkspaces(activeUserId) || [];
+      const updatedWorkspaces = stored.map((ws: any) => {
+        if (ws.id === targetWsId) {
+          const existingFiles = Array.isArray(ws.files) ? ws.files.filter((f: any) => f.name !== file.name) : [];
+          return { ...ws, files: [uploadedFileRecord, ...existingFiles] };
+        }
+        return ws;
+      });
+      saveStoredWorkspaces(updatedWorkspaces, activeUserId);
+      if (activeUserId && targetWsId) {
+        await WorkspaceSyncService.saveWorkspaceFile(activeUserId, targetWsId, uploadedFileRecord);
+      }
+    } catch (syncErr) {
+      console.error('[Supabase Error][AITutorWorkspace File Persist]', syncErr);
+    }
+
+    return uploadedFileRecord;
   };
 
   const [tutorUploadOverlay, setTutorUploadOverlay] = useState<{
@@ -1484,6 +1560,40 @@ export default function AITutorWorkspace() {
 
         {/* Message Input & Attachment Dock */}
         <div className="p-2.5 sm:p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 relative">
+          {/* Claude-Style Bottom Follow-Up Questions Dock */}
+          {(() => {
+            const lastAiMsg = [...messages]
+              .reverse()
+              .find(m => m.sender === 'ai' && !m.isError && !m.id.startsWith('welcome'));
+            if (!lastAiMsg) return null;
+            const followUps = Array.isArray(lastAiMsg.followUpQuestions) ? lastAiMsg.followUpQuestions : [];
+            if (followUps.length === 0) return null;
+
+            return (
+              <div className="mb-2.5 px-1 animate-fade-in">
+                <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/90 px-3 py-2">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">
+                    Suggested Follow-Ups
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {followUps.map((q: string, qIdx: number) => (
+                      <button
+                        key={qIdx}
+                        type="button"
+                        disabled={isThinking}
+                        onClick={() => handleSend(q)}
+                        className="text-left px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-slate-700 dark:text-slate-200 hover:text-indigo-700 dark:hover:text-indigo-300 border border-slate-200/90 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-500/40 text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
+                      >
+                        <ChevronRight className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                        <span>{q}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Render attached files summary inside input container */}
           <AnimatePresence>
             {attachedFiles.length > 0 && (
