@@ -1,87 +1,79 @@
 import React, { useState, useEffect } from 'react';
 import { z } from 'zod';
-import { supabase } from '../../lib/supabase';
 import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import {
+  readSyncProfileSnapshot,
+  fetchAndReconcileSupabaseProfile,
+  saveProfileToSupabase,
+  getMonogramAvatar
+} from '../../utils/profileStorage';
 
 const profileSchema = z.object({
   full_name: z.string().min(2, 'Full name must be at least 2 characters'),
-  avatar_url: z.string().url('Must be a valid URL').or(z.literal('')),
-  current_study: z.string().min(1, 'Academic level is required'),
+  avatar_url: z.string().optional(),
+  school_name: z.string().optional(),
+  class_name: z.string().optional(),
+  subject: z.string().optional(),
+  target_aim: z.string().optional(),
 });
 
 type ProfileFormData = z.infer<typeof profileSchema>;
 
 export function ProfileForm() {
+  const initial = readSyncProfileSnapshot();
   const [formData, setFormData] = useState<ProfileFormData>({
-    full_name: '',
-    avatar_url: '',
-    current_study: '',
+    full_name: initial.fullName,
+    avatar_url: initial.avatarUrl,
+    school_name: initial.schoolName,
+    class_name: initial.className,
+    subject: initial.subject,
+    target_aim: initial.targetAim,
   });
-  
+
   const [errors, setErrors] = useState<Partial<Record<keyof ProfileFormData, string>>>({});
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [fetchError, setFetchError] = useState('');
 
   useEffect(() => {
-    fetchProfile();
+    let isMounted = true;
+    fetchAndReconcileSupabaseProfile()
+      .then(({ profile }) => {
+        if (!isMounted) return;
+        setFormData({
+          full_name: profile.fullName,
+          avatar_url: profile.avatarUrl,
+          school_name: profile.schoolName,
+          class_name: profile.className,
+          subject: profile.subject,
+          target_aim: profile.targetAim,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  const fetchProfile = async () => {
-    setLoading(true);
-    setFetchError('');
-    try {
-      if (!supabase) throw new Error('Supabase client not initialized');
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session?.user) {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-
-        if (error && error.code !== 'PGRST116') {
-          throw error;
-        }
-
-        if (data) {
-          setFormData({
-            full_name: data.full_name || data.name || '',
-            avatar_url: data.avatar_url || '',
-            current_study: data.current_study || data.curriculum_board || '',
-          });
-        }
-      } else {
-        // If no user session, leave empty
-      }
-    } catch (err: any) {
-      console.error('Error fetching profile:', err);
-      setFetchError('Failed to load profile data.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
     if (errors[name as keyof ProfileFormData]) {
-      setErrors(prev => ({ ...prev, [name]: undefined }));
+      setErrors((prev) => ({ ...prev, [name]: undefined }));
     }
     setSuccess(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     const result = profileSchema.safeParse(formData);
     if (!result.success) {
-      const formattedErrors: any = {};
-      result.error.issues.forEach(err => {
-        if (err.path[0]) formattedErrors[err.path[0]] = err.message;
+      const formattedErrors: Partial<Record<keyof ProfileFormData, string>> = {};
+      result.error.issues.forEach((err) => {
+        const key = err.path[0] as keyof ProfileFormData;
+        if (key) formattedErrors[key] = err.message;
       });
       setErrors(formattedErrors);
       return;
@@ -90,31 +82,17 @@ export function ProfileForm() {
     setSaving(true);
     setFetchError('');
     setSuccess(false);
-    
+
     try {
-      if (!supabase) throw new Error('Supabase client not initialized');
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.user) throw new Error('You must be logged in to update your profile');
+      await saveProfileToSupabase({
+        fullName: formData.full_name.trim(),
+        avatarUrl: formData.avatar_url?.trim() || getMonogramAvatar(formData.full_name),
+        schoolName: formData.school_name?.trim() || '',
+        className: formData.class_name?.trim() || '',
+        subject: formData.subject?.trim() || '',
+        targetAim: formData.target_aim?.trim() || '',
+      });
 
-      const updates = {
-        id: session.user.id,
-        email: session.user.email,
-        full_name: formData.full_name,
-        name: formData.full_name,
-        avatar_url: formData.avatar_url,
-        current_study: formData.current_study,
-        curriculum_board: formData.current_study,
-        updated_at: new Date().toISOString(),
-      };
-
-      const { error } = await supabase.from('profiles').upsert(updates);
-      localStorage.setItem('studyweb_profile_name', formData.full_name);
-      localStorage.setItem('studyweb_profile_avatar', formData.avatar_url);
-      localStorage.setItem('studyweb_profile_class_board', formData.current_study);
-      window.dispatchEvent(new Event('studyweb_profile_updated'));
-      if (error) throw error;
-      
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (error: any) {
@@ -125,20 +103,12 @@ export function ProfileForm() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
-      </div>
-    );
-  }
-
   return (
     <div className="w-full max-w-xl bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8">
       <div className="mb-6">
         <h3 className="text-xl font-bold text-slate-900 dark:text-white">Profile Settings</h3>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          Manage your personal information and academic details.
+          Manage your personal information, school, and study goals in Supabase.
         </p>
       </div>
 
@@ -163,65 +133,56 @@ export function ProfileForm() {
             className={`w-full px-4 py-2.5 rounded-xl border bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-colors ${
               errors.full_name ? 'border-red-500 dark:border-red-500/50' : 'border-slate-200 dark:border-slate-800'
             }`}
-            placeholder="e.g. Alex Johnson"
+            placeholder="Enter your full name"
           />
-          {errors.full_name && (
-            <p className="text-xs text-red-500">{errors.full_name}</p>
-          )}
+          {errors.full_name && <p className="text-xs text-red-500">{errors.full_name}</p>}
         </div>
 
-        <div className="space-y-2">
-          <label htmlFor="current_study" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
-            Academic Level / Class Board
-          </label>
-          <input
-            id="current_study"
-            name="current_study"
-            type="text"
-            value={formData.current_study}
-            onChange={handleChange}
-            className={`w-full px-4 py-2.5 rounded-xl border bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-colors ${
-              errors.current_study ? 'border-red-500 dark:border-red-500/50' : 'border-slate-200 dark:border-slate-800'
-            }`}
-            placeholder="e.g. Advanced Placement AP US Curriculum"
-          />
-          {errors.current_study && (
-            <p className="text-xs text-red-500">{errors.current_study}</p>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <label htmlFor="avatar_url" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
-            Avatar URL (Optional)
-          </label>
-          <div className="flex gap-4 items-center">
-            {formData.avatar_url && !errors.avatar_url ? (
-              <img 
-                src={formData.avatar_url} 
-                alt="Avatar preview" 
-                className="w-12 h-12 rounded-full object-cover border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800"
-                onError={(e) => { (e.target as HTMLImageElement).src = 'https://ui-avatars.com/api/?name=' + encodeURIComponent(formData.full_name || 'User'); }}
-              />
-            ) : (
-              <div className="w-12 h-12 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center shrink-0 border border-slate-300 dark:border-slate-700">
-                 <span className="text-slate-500 text-xs font-bold">{formData.full_name ? formData.full_name.charAt(0).toUpperCase() : '?'}</span>
-              </div>
-            )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <label htmlFor="school_name" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
+              School / Institution
+            </label>
             <input
-              id="avatar_url"
-              name="avatar_url"
+              id="school_name"
+              name="school_name"
               type="text"
-              value={formData.avatar_url}
+              value={formData.school_name || ''}
               onChange={handleChange}
-              className={`w-full px-4 py-2.5 rounded-xl border bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-colors ${
-                errors.avatar_url ? 'border-red-500 dark:border-red-500/50' : 'border-slate-200 dark:border-slate-800'
-              }`}
-              placeholder="https://example.com/avatar.jpg"
+              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-colors"
+              placeholder="Enter school or university"
             />
           </div>
-          {errors.avatar_url && (
-            <p className="text-xs text-red-500">{errors.avatar_url}</p>
-          )}
+
+          <div className="space-y-2">
+            <label htmlFor="class_name" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
+              Class / Grade Level
+            </label>
+            <input
+              id="class_name"
+              name="class_name"
+              type="text"
+              value={formData.class_name || ''}
+              onChange={handleChange}
+              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-colors"
+              placeholder="e.g. Grade 12"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="target_aim" className="block text-sm font-semibold text-slate-700 dark:text-slate-300">
+            My Learning Aim & Goal
+          </label>
+          <input
+            id="target_aim"
+            name="target_aim"
+            type="text"
+            value={formData.target_aim || ''}
+            onChange={handleChange}
+            className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-colors"
+            placeholder="e.g. Ace Final Exams / Master Computer Science"
+          />
         </div>
 
         <div className="pt-4 flex items-center gap-4">
@@ -236,10 +197,10 @@ export function ProfileForm() {
                 Saving...
               </>
             ) : (
-              'Save Changes'
+              'Save Profile'
             )}
           </button>
-          
+
           <AnimatePresence>
             {success && (
               <motion.div
@@ -249,7 +210,7 @@ export function ProfileForm() {
                 className="flex items-center text-emerald-600 dark:text-emerald-400 text-sm font-medium"
               >
                 <CheckCircle2 className="w-4 h-4 mr-1.5" />
-                Profile updated successfully
+                Saved to Supabase
               </motion.div>
             )}
           </AnimatePresence>

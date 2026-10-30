@@ -14,6 +14,7 @@ import {
   resolveQuickLinkTitleClient
 } from '../../utils/notebookTitle';
 import QuickPreviewModal from './QuickPreviewModal';
+import { FullScreenUploadOverlay } from './FullScreenUploadOverlay';
 
 interface WorkspaceLibraryProps {
   workspace: Workspace;
@@ -364,16 +365,19 @@ export default function WorkspaceLibrary({
         step++;
         setCurrentStepIdx(step);
         setUploadStep(steps[step]);
-        setUploadPercent(prev => prev + 25);
+        setUploadPercent(prev => Math.min(92, prev + 22));
       }
-    }, 600);
+    }, 160);
     libraryProgressRef.current = progress;
 
     try {
       const { token, userId } = await getAuthInfo();
+      const abortCtrl = new AbortController();
+      const timeoutId = setTimeout(() => abortCtrl.abort(), 3200);
       const processRes = await fetch('/api/study-materials/process', {
         method: 'POST',
         credentials: 'same-origin',
+        signal: abortCtrl.signal,
         headers: { 
           'Content-Type': 'application/json',
           ...(token ? { 'Authorization': `Bearer ${token}` } : {})
@@ -387,6 +391,7 @@ export default function WorkspaceLibrary({
           content: driveCopyText
         })
       });
+      clearTimeout(timeoutId);
 
       let materialResult: any = null;
       if (processRes.ok) {
@@ -408,7 +413,7 @@ export default function WorkspaceLibrary({
         tags: materialResult?.tags && materialResult.tags.length > 0 
           ? materialResult.tags 
           : ['Document', 'Notes', 'Pasted'],
-        transcription: materialResult?.transcription,
+        transcription: materialResult?.transcription || driveCopyText,
         formulas: materialResult?.formulas,
         extractedDiagrams: materialResult?.extractedDiagrams
       };
@@ -421,7 +426,7 @@ export default function WorkspaceLibrary({
         window.dispatchEvent(
           new CustomEvent('studyweb-toast', {
             detail: {
-              message: `🎉 Boom! "${fileData.name}" was parsed, analyzed, and synthesized into your workspace! 🧠🔥`,
+              message: `🎉 "${fileData.name}" was parsed, analyzed, and indexed into your workspace!`,
               type: 'success'
             }
           })
@@ -432,7 +437,7 @@ export default function WorkspaceLibrary({
         setIsUploading(false);
         setDriveCopyText('');
         setDriveCopyTitle('');
-      }, 500);
+      }, 220);
 
     } catch (err) {
       clearInterval(progress);
@@ -712,9 +717,9 @@ export default function WorkspaceLibrary({
 
     const progressInterval = setInterval(() => {
       setUploadPercent((prev) => {
-        if (prev < 95) {
-          const increment = Math.max(1, Math.floor((100 - prev) / 12));
-          const next = prev + increment;
+        if (prev < 94) {
+          const increment = Math.max(4, Math.floor((100 - prev) / 6));
+          const next = Math.min(94, prev + increment);
           const calculatedStep = Math.min(steps.length - 2, Math.floor((next / 100) * steps.length));
           if (calculatedStep !== stepIdx) {
             stepIdx = calculatedStep;
@@ -725,7 +730,7 @@ export default function WorkspaceLibrary({
         }
         return prev;
       });
-    }, 400);
+    }, 130);
     progressIntervalRef.current = progressInterval;
 
     let dataUrl = "";
@@ -735,8 +740,21 @@ export default function WorkspaceLibrary({
     try {
       FileUploadService.sanitizeBrowserCookies();
 
+      let rawTextContent = "";
       if (file) {
         fileMimeType = file.type || 'application/pdf';
+        const lowerFileName = file.name.toLowerCase();
+        if (
+          file.type.startsWith('text/') ||
+          lowerFileName.endsWith('.txt') ||
+          lowerFileName.endsWith('.md') ||
+          lowerFileName.endsWith('.csv') ||
+          lowerFileName.endsWith('.json')
+        ) {
+          try {
+            rawTextContent = await file.text();
+          } catch {}
+        }
         if (file.size < 15 * 1024 * 1024) {
           try {
             const reader = new FileReader();
@@ -755,9 +773,12 @@ export default function WorkspaceLibrary({
       let materialResult: any = null;
       try {
         const { token, userId } = await getAuthInfo();
+        const abortCtrl = new AbortController();
+        const timeoutId = setTimeout(() => abortCtrl.abort(), 12000);
         const processRes = await fetch('/api/study-materials/process', {
           method: 'POST',
           credentials: 'same-origin',
+          signal: abortCtrl.signal,
           headers: {
             'Content-Type': 'application/json',
             ...(token ? { 'Authorization': `Bearer ${token}` } : {})
@@ -768,11 +789,13 @@ export default function WorkspaceLibrary({
             name,
             type,
             size,
+            content: rawTextContent || undefined,
             url: (url && !url.startsWith('data:')) ? url : (dataUrl && dataUrl.length < 2000 ? dataUrl : ''),
             fileBase64: fileBase64 || undefined,
             fileMimeType: fileMimeType || undefined
           })
         });
+        clearTimeout(timeoutId);
 
         if (processRes.ok) {
           const resData = await processRes.json();
@@ -841,13 +864,13 @@ export default function WorkspaceLibrary({
         url: (url && !url.startsWith('data:')) ? url : (dataUrl || materialResult?.url || url),
         fileBase64: fileBase64 || undefined,
         fileMimeType: fileMimeType || undefined,
-        summary: materialResult?.summary || `${finalNotebookName} uploaded and indexed into your workspace.`,
+        summary: materialResult?.summary || (rawTextContent ? rawTextContent.slice(0, 450) : `${finalNotebookName} uploaded and indexed into your workspace.`),
         highlights: (materialResult?.highlights && materialResult.highlights.length > 0) ? materialResult.highlights : [
-          `Uploaded ${finalNotebookName} ready for study questions.`
+          rawTextContent ? rawTextContent.slice(0, 220) : `Uploaded ${finalNotebookName} ready for study questions.`
         ],
         tags: (materialResult?.tags && materialResult.tags.length > 0) ? materialResult.tags : generatedTags2,
-        transcription: materialResult?.transcription,
-        contentText: materialResult?.contentText || materialResult?.transcription,
+        transcription: materialResult?.transcription || rawTextContent || undefined,
+        contentText: materialResult?.contentText || materialResult?.transcription || rawTextContent || undefined,
         formulas: materialResult?.formulas,
         extractedDiagrams: materialResult?.extractedDiagrams
       };
@@ -875,7 +898,7 @@ export default function WorkspaceLibrary({
         onAddFile(fileData);
         setPreviewFile(fileData);
         setIsUploading(false);
-      }, 600);
+      }, 220);
 
     } catch (err: any) {
       const parsedError = FileUploadError.fromError(err, `Upload of ${name || url}`);
@@ -1774,6 +1797,15 @@ export default function WorkspaceLibrary({
         )}
         
       </AnimatePresence>
+
+      <FullScreenUploadOverlay
+        isOpen={isUploading}
+        progress={uploadPercent}
+        fileName={uploadFileName}
+        stepText={uploadStep}
+        elapsedSeconds={uploadSeconds}
+        fileType={uploadType}
+      />
     </div>
   );
 }

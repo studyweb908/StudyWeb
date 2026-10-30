@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { Layout, Grid, ChevronLeft, ChevronRight, Sparkles, Brain, Bot, CheckSquare, Check, Circle, BookOpen, FileText, Image as ImageIcon, ArrowRight, Video, Music, Globe, AlertCircle, Trash2, HardDrive, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Layout, Grid, ChevronLeft, ChevronRight, Sparkles, Brain, Bot, CheckSquare, Check, Circle, BookOpen, FileText, Image as ImageIcon, ArrowRight, Video, Music, Globe, AlertCircle, Trash2, HardDrive, AlertTriangle, Database, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../../lib/supabase';
 import QuickPreviewModal from './QuickPreviewModal';
 import { StorageQuotaSkeleton } from './DashboardSkeletons';
+import { Workspace } from './WorkspaceTypes';
 
 // -----------------------------------------
 // 1. Interactive Mini Calendar
@@ -740,88 +741,277 @@ export function RecentStudyMaterials({
 }
 
 // -----------------------------------------
-// Storage Quota Widget
+// Real Supabase Knowledge Storage Widget
 // -----------------------------------------
+interface SupabaseStorageBreakdown {
+  filesBytes: number;
+  filesCount: number;
+  notesBytes: number;
+  notesCount: number;
+  vectorBytes: number;
+  vectorCount: number;
+  isLiveSynced: boolean;
+}
+
+const storageStatsMemoryCache = new Map<string, { data: SupabaseStorageBreakdown; timestamp: number }>();
+const STORAGE_CACHE_TTL_MS = 15_000;
+
+function parseSizeToBytes(sizeStr?: string | number | null): number {
+  if (typeof sizeStr === 'number' && Number.isFinite(sizeStr)) return Math.max(0, sizeStr);
+  if (!sizeStr || typeof sizeStr !== 'string') return 0;
+  const match = sizeStr.match(/([\d.]+)\s*(GB|MB|KB|Bytes|B)/i);
+  if (!match) return 0;
+  const val = parseFloat(match[1]);
+  if (!Number.isFinite(val) || val <= 0) return 0;
+  const unit = match[2].toUpperCase();
+  if (unit === 'GB') return Math.round(val * 1024 * 1024 * 1024);
+  if (unit === 'MB') return Math.round(val * 1024 * 1024);
+  if (unit === 'KB') return Math.round(val * 1024);
+  return Math.round(val);
+}
+
+function estimateJsonByteLength(obj: any): number {
+  if (!obj) return 0;
+  try {
+    const str = typeof obj === 'string' ? obj : JSON.stringify(obj);
+    return new Blob([str]).size;
+  } catch {
+    return 0;
+  }
+}
+
+export function formatStorageBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 KB';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) {
+    const kb = bytes / 1024;
+    return `${kb >= 100 ? kb.toFixed(0) : kb.toFixed(1)} KB`;
+  }
+  if (bytes < 1024 * 1024 * 1024) {
+    const mb = bytes / (1024 * 1024);
+    return `${mb >= 10 ? mb.toFixed(1) : mb.toFixed(2)} MB`;
+  }
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 export function StorageQuotaWidget({ workspaces = [], isLoading = false }: { workspaces?: Workspace[]; isLoading?: boolean }) {
-  if (isLoading) {
+  // 1. Instant local computation from workspaces prop (0ms initial render)
+  const localBreakdown = useMemo<SupabaseStorageBreakdown>(() => {
+    let filesBytes = 0;
+    let filesCount = 0;
+    let notesBytes = 0;
+    let notesCount = 0;
+    let estimatedVectorChunks = 0;
+    let estimatedVectorBytes = 0;
+
+    for (const ws of workspaces) {
+      const wsFiles = Array.isArray(ws.files) ? ws.files : [];
+      filesCount += wsFiles.length;
+      for (const file of wsFiles) {
+        const declaredSize = parseSizeToBytes(file.size);
+        const textBytes =
+          estimateJsonByteLength(file.contentText) +
+          estimateJsonByteLength(file.transcription) +
+          estimateJsonByteLength(file.summary) +
+          estimateJsonByteLength(file.highlights);
+        const actualFileBytes = Math.max(declaredSize, textBytes, 1024);
+        filesBytes += actualFileBytes;
+
+        if (file.status === 'indexed' || file.contentText || file.summary) {
+          const chunksForFile = Math.max(1, Math.ceil((textBytes || 2048) / 1200));
+          estimatedVectorChunks += chunksForFile;
+          // Each pgvector chunk row (~1.2KB content + 768*4B float32 vector + metadata = ~4.5KB)
+          estimatedVectorBytes += chunksForFile * 4608;
+        }
+      }
+
+      const wsNotes = Array.isArray(ws.notes) ? ws.notes : [];
+      const wsCards = Array.isArray(ws.flashcards) ? ws.flashcards : [];
+      const wsQuizzes = Array.isArray(ws.quizzes) ? ws.quizzes : [];
+      const wsNodes = Array.isArray(ws.nodes) ? ws.nodes : [];
+
+      notesCount += wsNotes.length + wsCards.length + wsQuizzes.length;
+      notesBytes +=
+        estimateJsonByteLength(wsNotes) +
+        estimateJsonByteLength(wsCards) +
+        estimateJsonByteLength(wsQuizzes) +
+        estimateJsonByteLength(wsNodes);
+    }
+
+    return {
+      filesBytes,
+      filesCount,
+      notesBytes,
+      notesCount,
+      vectorBytes: estimatedVectorBytes,
+      vectorCount: estimatedVectorChunks,
+      isLiveSynced: false,
+    };
+  }, [workspaces]);
+
+  const [remoteBreakdown, setRemoteBreakdown] = useState<SupabaseStorageBreakdown | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function fetchRealSupabaseStorage() {
+      if (!supabase) return;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const uid = session?.user?.id;
+        if (!uid) return;
+
+        const cacheKey = `${uid}:${workspaces.length}`;
+        const cached = storageStatsMemoryCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < STORAGE_CACHE_TTL_MS) {
+          if (isMounted) setRemoteBreakdown(cached.data);
+          return;
+        }
+
+        const wsIds = workspaces.map((w) => w.id).filter(Boolean);
+
+        // Fetch real user rows from workspace_files and documents in parallel
+        const [filesQueryRes, docsQueryRes, avatarListRes] = await Promise.allSettled([
+          supabase
+            .from('workspace_files')
+            .select('id, size, summary, content_text, transcription')
+            .eq('user_id', uid),
+          wsIds.length > 0
+            ? supabase
+                .from('documents')
+                .select('id, content, metadata')
+                .in('workspace_id', wsIds)
+            : supabase
+                .from('documents')
+                .select('id, content, metadata')
+                .eq('user_id', uid),
+          supabase.storage.from('avatars').list(uid)
+        ]);
+
+        let dbFilesBytes = 0;
+        let dbFilesCount = 0;
+        if (filesQueryRes.status === 'fulfilled' && Array.isArray(filesQueryRes.value.data)) {
+          const rows = filesQueryRes.value.data;
+          dbFilesCount = rows.length;
+          for (const r of rows) {
+            const declared = parseSizeToBytes(r.size);
+            const contentLen =
+              estimateJsonByteLength(r.content_text) +
+              estimateJsonByteLength(r.transcription) +
+              estimateJsonByteLength(r.summary);
+            dbFilesBytes += Math.max(declared, contentLen, 1024);
+          }
+        }
+
+        // Also include avatar storage bytes if present in Supabase Storage
+        if (avatarListRes.status === 'fulfilled' && Array.isArray(avatarListRes.value.data)) {
+          for (const obj of avatarListRes.value.data) {
+            const metaSize = Number((obj as any)?.metadata?.size || 0);
+            if (metaSize > 0) {
+              dbFilesBytes += metaSize;
+            }
+          }
+        }
+
+        let dbVectorCount = 0;
+        let dbVectorBytes = 0;
+        if (docsQueryRes.status === 'fulfilled' && Array.isArray(docsQueryRes.value.data)) {
+          const docRows = docsQueryRes.value.data;
+          dbVectorCount = docRows.length;
+          for (const d of docRows) {
+            const textLen = estimateJsonByteLength(d.content) + estimateJsonByteLength(d.metadata);
+            // pgvector embedding (768 float32 = 3072 bytes) + row text & index overhead
+            dbVectorBytes += textLen + 3584;
+          }
+        }
+
+        const mergedData: SupabaseStorageBreakdown = {
+          filesBytes: Math.max(localBreakdown.filesBytes, dbFilesBytes),
+          filesCount: Math.max(localBreakdown.filesCount, dbFilesCount),
+          notesBytes: localBreakdown.notesBytes,
+          notesCount: localBreakdown.notesCount,
+          vectorCount: Math.max(localBreakdown.vectorCount, dbVectorCount),
+          vectorBytes: Math.max(localBreakdown.vectorBytes, dbVectorBytes),
+          isLiveSynced: true,
+        };
+
+        storageStatsMemoryCache.set(cacheKey, { data: mergedData, timestamp: Date.now() });
+        if (isMounted) {
+          setRemoteBreakdown(mergedData);
+        }
+      } catch {
+        // Non-fatal fallback to localBreakdown
+      }
+    }
+
+    fetchRealSupabaseStorage();
+    return () => {
+      isMounted = false;
+    };
+  }, [workspaces, localBreakdown]);
+
+  if (isLoading && workspaces.length === 0) {
     return <StorageQuotaSkeleton />;
   }
 
-  const parseSize = (sizeStr: string) => {
-    if (!sizeStr) return 0;
-    const match = sizeStr.match(/([\d\.]+)\s*(MB|KB|GB|Bytes)/i);
-    if (!match) return 0;
-    const val = parseFloat(match[1]);
-    const unit = match[2].toUpperCase();
-    if (unit === 'GB') return val * 1024 * 1024 * 1024;
-    if (unit === 'MB') return val * 1024 * 1024;
-    if (unit === 'KB') return val * 1024;
-    return val;
-  };
+  const activeStats: SupabaseStorageBreakdown = remoteBreakdown
+    ? {
+        filesBytes: Math.max(localBreakdown.filesBytes, remoteBreakdown.filesBytes),
+        filesCount: Math.max(localBreakdown.filesCount, remoteBreakdown.filesCount),
+        notesBytes: Math.max(localBreakdown.notesBytes, remoteBreakdown.notesBytes),
+        notesCount: Math.max(localBreakdown.notesCount, remoteBreakdown.notesCount),
+        vectorBytes: Math.max(localBreakdown.vectorBytes, remoteBreakdown.vectorBytes),
+        vectorCount: Math.max(localBreakdown.vectorCount, remoteBreakdown.vectorCount),
+        isLiveSynced: remoteBreakdown.isLiveSynced,
+      }
+    : localBreakdown;
 
-  const totalBytes = workspaces.reduce((acc, ws) => {
-    return acc + (ws.files || []).reduce((fileAcc, file) => fileAcc + parseSize(file.size || '0 MB'), 0);
-  }, 0);
+  const usedBytes = activeStats.filesBytes + activeStats.notesBytes + activeStats.vectorBytes;
+  const limitBytes = 1024 * 1024 * 1024; // 1 GB Supabase Free Tier Quota
 
-  const usedBytes = totalBytes; // Real total bytes from user's actual files
-  const limitBytes = 1024 * 1024 * 1024; // 1 GB limit
-  
-  const percentage = Math.min(100, (usedBytes / limitBytes) * 100);
-  const isNearingLimit = percentage > 85;
-
-  const formatSize = (bytes: number) => {
-    if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-  };
+  // Ensure visual bar shows at least a subtle fill when data is stored (> 0 bytes)
+  const rawPercentage = (usedBytes / limitBytes) * 100;
+  const visualPercentage = usedBytes > 0 ? Math.min(100, Math.max(2.5, rawPercentage)) : 0;
+  const isNearingLimit = rawPercentage > 85;
 
   return (
     <div className="bg-white dark:bg-[#151D3B] border border-[#E8ECF6] dark:border-[#222E54] rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300 flex flex-col justify-between h-full group">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="font-bold text-base text-[#151D3B] dark:text-white tracking-tight">Knowledge Storage</h3>
-          <p className="text-[11px] text-[#69779C] font-medium">Free Tier Vector Indexing</p>
+          <h3 className="font-bold text-base text-[#151D3B] dark:text-white tracking-tight">
+            Knowledge Storage
+          </h3>
+          <p className="text-xs text-[#69779C] font-medium mt-0.5">
+            Your quota out of 1 GB
+          </p>
         </div>
         <div className="w-10 h-10 rounded-xl bg-[#EFEDFF] dark:bg-[#5145F5]/20 flex items-center justify-center shrink-0">
           <HardDrive className="w-5 h-5 text-[#5145F5]" />
         </div>
       </div>
-      
-      <div className="space-y-4">
-        <div>
-          <div className="flex items-end justify-between mb-2">
-            <span className="text-2xl font-black text-[#151D3B] dark:text-white tracking-tight leading-none">
-              {formatSize(usedBytes)}
-            </span>
-            <span className="text-xs font-bold text-[#69779C] mb-0.5">
-              / {formatSize(limitBytes)} (1 GB)
-            </span>
-          </div>
-          
-          <div className="h-2.5 w-full bg-[#F6F8FD] dark:bg-slate-800 rounded-full overflow-hidden border border-[#E8ECF6] dark:border-slate-700">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${percentage}%` }}
-              transition={{ duration: 1, ease: "easeOut" }}
-              className={`h-full rounded-full ${isNearingLimit ? 'bg-rose-500' : 'bg-gradient-to-r from-[#5145F5] to-[#7668FF]'}`}
-            />
-          </div>
+
+      <div className="space-y-3">
+        <div className="flex items-end justify-between">
+          <span className="text-2xl font-black font-mono tabular-nums text-[#151D3B] dark:text-white tracking-tight leading-none">
+            {formatStorageBytes(usedBytes)}
+          </span>
+          <span className="text-xs font-bold text-[#69779C] mb-0.5">
+            / 1 GB
+          </span>
         </div>
 
-        {isNearingLimit ? (
-          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-100 dark:border-rose-900/50">
-            <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 mt-0.5 shrink-0" />
-            <div>
-              <p className="text-xs font-bold text-rose-700 dark:text-rose-300 mb-0.5">Approaching Limit</p>
-              <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">You've used over 85% of your free storage.</p>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-[#19A974]" />
-            <p className="text-xs font-semibold text-[#69779C]">Plenty of space available for notes & books</p>
-          </div>
-        )}
+        <div className="h-2.5 w-full bg-[#F6F8FD] dark:bg-slate-800 rounded-full overflow-hidden border border-[#E8ECF6] dark:border-slate-700">
+          <motion.div
+            initial={{ width: 0 }}
+            animate={{ width: `${visualPercentage}%` }}
+            transition={{ duration: 0.6, ease: 'easeOut' }}
+            className={`h-full rounded-full ${
+              isNearingLimit ? 'bg-rose-500' : 'bg-gradient-to-r from-[#5145F5] via-indigo-500 to-emerald-500'
+            }`}
+          />
+        </div>
       </div>
     </div>
   );
 }
+

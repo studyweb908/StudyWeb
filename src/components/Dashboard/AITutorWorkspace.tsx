@@ -34,12 +34,15 @@ import { useMicrophoneWaveform } from '../../hooks/useMicrophoneWaveform';
 import { useTaskContext } from '../../context/TaskContext';
 import { recordUserActivity } from '../../utils/userActivity';
 import { AITutorBackgroundService } from '../../services/AITutorBackgroundService';
+import { FullScreenUploadOverlay } from './FullScreenUploadOverlay';
+import { loadStoredWorkspaces } from '../../utils/workspaceStorage';
 
 interface Message {
   id: string;
   sender: 'user' | 'ai';
   text: string;
   time: string;
+  workspaceNotice?: string;
   citations?: Array<{
     sourceName: string;
     page?: number;
@@ -318,14 +321,12 @@ export default function AITutorWorkspace() {
 
     try {
       setSpeakingMsgId(id);
-      const storedVoice = localStorage.getItem('study_tutor_voice_profile') || 'neutral';
+      const storedVoice = localStorage.getItem('study_tutor_voice_profile') || 'male';
       const geminiVoiceMap: Record<string, string> = {
-        female: 'Kore',
         male: 'Fenrir',
-        neutral: 'Zephyr',
-        energetic: 'Puck'
+        female: 'Kore'
       };
-      const resolvedVoice = geminiVoiceMap[storedVoice] || 'Zephyr';
+      const resolvedVoice = geminiVoiceMap[storedVoice] || 'Fenrir';
 
       const res = await fetch('/api/ai-tutor-tts', {
         method: 'POST',
@@ -626,6 +627,76 @@ export default function AITutorWorkspace() {
       }));
 
     try {
+      const activeUserId = typeof window !== 'undefined' ? localStorage.getItem('studyweb_active_user_id') : null;
+      const storedWorkspaces = loadStoredWorkspaces(activeUserId) || [];
+      const wsMap = new Map<string, any>();
+      storedWorkspaces.forEach(w => { if (w && w.id) wsMap.set(w.id, w); });
+      if (activeWorkspace && activeWorkspace.id) {
+        wsMap.set(activeWorkspace.id, activeWorkspace);
+      }
+      const allWorkspacesList = Array.from(wsMap.values());
+
+      const seenNames = new Set<string>();
+      const workspaceFilesPayload: any[] = [];
+      allWorkspacesList.forEach(ws => {
+        (ws.files || []).forEach((wf: any) => {
+          const key = String(wf.name || wf.id || '').trim().toLowerCase();
+          if (!key || seenNames.has(key)) return;
+          seenNames.add(key);
+          workspaceFilesPayload.push({
+            id: wf.id,
+            name: wf.name,
+            type: wf.type,
+            size: wf.size,
+            url: (typeof wf.url === 'string' && !wf.url.startsWith('data:')) ? wf.url : undefined,
+            workspaceId: ws.id,
+            workspaceName: ws.name || 'Workspace',
+            summary: wf.summary,
+            transcription: wf.transcription || wf.contentText || wf.summary,
+            contentText: wf.contentText || wf.transcription || wf.summary,
+            highlights: wf.highlights,
+            fileBase64: wf.fileBase64,
+            fileMimeType: wf.fileMimeType,
+            isDirectAttachment: false
+          });
+        });
+      });
+
+      const directAttachedPayload = attachedFiles.map(f => ({
+        ...f,
+        workspaceId: targetWsId,
+        workspaceName: activeWorkspace?.name || 'Workspace',
+        isDirectAttachment: true
+      }));
+
+      const combinedFiles = [
+        ...directAttachedPayload,
+        ...workspaceFilesPayload.filter(wf => !directAttachedPayload.some(df => df.name === wf.name))
+      ];
+
+      const compactAllWorkspaces = allWorkspacesList.map(ws => ({
+        id: ws.id,
+        name: ws.name || 'Workspace',
+        subject: ws.subject || 'General',
+        files: (ws.files || []).map((f: any) => ({
+          id: f.id,
+          name: f.name,
+          type: f.type || 'doc',
+          size: f.size,
+          pages: f.pages,
+          url: (typeof f.url === 'string' && !f.url.startsWith('data:')) ? f.url.slice(0, 500) : undefined,
+          summary: typeof f.summary === 'string' ? f.summary.slice(0, 1200) : undefined,
+          transcription: typeof (f.transcription || f.contentText) === 'string' ? String(f.transcription || f.contentText).slice(0, 6000) : undefined
+        })),
+        notes: (ws.notes || []).map((n: any) => ({
+          id: n.id,
+          title: n.title || 'Study Note',
+          content: typeof n.content === 'string' ? n.content.replace(/<[^>]+>/g, ' ').slice(0, 2500) : ''
+        })),
+        flashcardsCount: (ws.flashcards || []).length,
+        quizzesCount: (ws.quizzes || []).length
+      }));
+
       const response = await fetch("/api/ai-tutor", {
         method: "POST",
         credentials: "same-origin",
@@ -639,7 +710,10 @@ export default function AITutorWorkspace() {
           deepResearch,
           citationMode,
           workspaceId: targetWsId,
-          attachedFiles: attachedFiles.map(f => ({ ...f, isDirectAttachment: true })),
+          workspaceName: activeWorkspace?.name || 'Workspace',
+          userId: activeUserId || undefined,
+          attachedFiles: combinedFiles,
+          allWorkspaces: compactAllWorkspaces,
           model: selectedModel
         })
       });
@@ -661,6 +735,7 @@ export default function AITutorWorkspace() {
         id: (Date.now() + 1).toString(),
         sender: 'ai',
         text: data.reply || data.text || "No response text received.",
+        workspaceNotice: data.workspaceNotice || undefined,
         citations: data.citations,
         source: data.source,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -764,12 +839,46 @@ export default function AITutorWorkspace() {
     };
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, fileCategory: 'document' | 'image') => {
-    if (!e.target.files) return;
-    const filesArray = Array.from(e.target.files) as File[];
+  const [tutorUploadOverlay, setTutorUploadOverlay] = useState<{
+    isOpen: boolean;
+    progress: number;
+    fileName: string;
+    stepText: string;
+    fileType: string;
+  }>({
+    isOpen: false,
+    progress: 0,
+    fileName: '',
+    stepText: '',
+    fileType: 'doc'
+  });
+
+  const runFilesUploadWithOverlay = async (filesArray: File[]) => {
     if (filesArray.length === 0) return;
-    
-    for (const file of filesArray) {
+    const first = filesArray[0];
+    const lower = first.name.toLowerCase();
+    const fType = lower.endsWith('.pdf')
+      ? 'pdf'
+      : lower.match(/\.(png|jpg|jpeg|webp|gif|svg)$/)
+      ? 'image'
+      : 'doc';
+
+    setTutorUploadOverlay({
+      isOpen: true,
+      progress: 15,
+      fileName: filesArray.length > 1 ? `${first.name} (+${filesArray.length - 1} more)` : first.name,
+      stepText: 'Reading & parsing study file...',
+      fileType: fType
+    });
+
+    for (let i = 0; i < filesArray.length; i++) {
+      const file = filesArray[i];
+      setTutorUploadOverlay(prev => ({
+        ...prev,
+        progress: Math.min(85, Math.round(((i + 0.5) / filesArray.length) * 70) + 15),
+        fileName: file.name,
+        stepText: `Extracting content from ${file.name}...`
+      }));
       const processed = await processUploadedFile(file);
       setAttachedFiles(prev => {
         if (prev.some(f => f.name === file.name)) return prev;
@@ -777,13 +886,29 @@ export default function AITutorWorkspace() {
       });
     }
 
+    setTutorUploadOverlay(prev => ({
+      ...prev,
+      progress: 100,
+      stepText: 'Workspace knowledge base updated!'
+    }));
+
+    setTimeout(() => {
+      setTutorUploadOverlay(prev => ({ ...prev, isOpen: false }));
+    }, 260);
+
     (window as any).showToast?.(
       `"${filesArray.map(f => f.name).join(', ')}" was uploaded and attached to your AI Tutor session.`,
       'success',
       3200,
       'Material Uploaded & Ready'
     );
+  };
 
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, fileCategory: 'document' | 'image') => {
+    if (!e.target.files) return;
+    const filesArray = Array.from(e.target.files) as File[];
+    if (filesArray.length === 0) return;
+    await runFilesUploadWithOverlay(filesArray);
     e.target.value = '';
   };
 
@@ -803,21 +928,7 @@ export default function AITutorWorkspace() {
     if (!e.dataTransfer.files) return;
     const filesArray = Array.from(e.dataTransfer.files) as File[];
     if (filesArray.length === 0) return;
-    
-    for (const file of filesArray) {
-      const processed = await processUploadedFile(file);
-      setAttachedFiles(prev => {
-        if (prev.some(f => f.name === file.name)) return prev;
-        return [...prev, processed];
-      });
-    }
-
-    (window as any).showToast?.(
-      `"${filesArray.map(f => f.name).join(', ')}" was uploaded and attached to your AI Tutor session.`,
-      'success',
-      3200,
-      'Material Uploaded & Ready'
-    );
+    await runFilesUploadWithOverlay(filesArray);
   };
 
   const startSpeechRecognition = async () => {
@@ -1170,6 +1281,15 @@ export default function AITutorWorkspace() {
                     ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 rounded-tr-none shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)]'
                     : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-800/60 rounded-tl-none shadow-[0_2px_8px_-2px_rgba(0,0,0,0.04)]'
                 }`}>
+                  {msg.sender === 'ai' && msg.workspaceNotice && (
+                    <div className="mb-3 flex items-start gap-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200/80 dark:border-amber-800/60 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+                      <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold">Not in uploaded workspace files: </span>
+                        <span>{msg.workspaceNotice}</span>
+                      </div>
+                    </div>
+                  )}
                   {/* Simulated Markdown renderer */}
                   <div className="space-y-3 sm:space-y-4 whitespace-pre-wrap break-words">
                     {msg.text.split(/(?=\n\n###|\n\n```|\n\n- )/g).map((block, idx) => {
@@ -1877,6 +1997,14 @@ export default function AITutorWorkspace() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <FullScreenUploadOverlay
+        isOpen={tutorUploadOverlay.isOpen}
+        progress={tutorUploadOverlay.progress}
+        fileName={tutorUploadOverlay.fileName}
+        stepText={tutorUploadOverlay.stepText}
+        fileType={tutorUploadOverlay.fileType}
+      />
     </div>
   );
 }

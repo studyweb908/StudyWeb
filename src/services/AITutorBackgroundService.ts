@@ -25,6 +25,11 @@ export interface TutorMessage {
   citations?: TutorCitation[];
   attachedFileNames?: string[];
   workspaceNotice?: string;
+  activeWorkspaceContext?: string;
+  activeContextFiles?: string[];
+  followUpQuestions?: string[];
+  suggestOutsideResearch?: boolean;
+  originalQuery?: string;
   generatedImageUrl?: string;
   generatedImageCaption?: string;
   isFileReadyBadge?: boolean;
@@ -44,7 +49,9 @@ export interface SendTutorRequestOptions {
   persona?: string;
   history: { role: string; content: string }[];
   compactAttachedFiles?: any[];
+  allWorkspaces?: any[];
   accessToken?: string | null;
+  allowOutsideResearch?: boolean;
   userMsg: TutorMessage;
 }
 
@@ -191,7 +198,7 @@ class AITutorBackgroundManager {
    * performs network requests, and persists the resulting AI message to storage.
    */
   public async sendTutorMessage(options: SendTutorRequestOptions): Promise<TutorMessage> {
-    const { workspaceId, userId, prompt, history, compactAttachedFiles = [], accessToken, userMsg, workspaceName } = options;
+    const { workspaceId, userId, prompt, history, compactAttachedFiles = [], allWorkspaces = [], accessToken, allowOutsideResearch = false, userMsg, workspaceName } = options;
     const chatKey = getChatHistoryKey(userId, workspaceId);
     const requestGen = this.resetGeneration.get(workspaceId) || 0;
 
@@ -235,9 +242,12 @@ class AITutorBackgroundManager {
               history,
               modelMode: 'auto',
               workspaceId,
+              workspaceName,
               userId,
               supabaseToken: accessToken || undefined,
               attachedFiles: compactAttachedFiles,
+              allWorkspaces,
+              allowOutsideResearch,
               citationMode: true
             })
           });
@@ -300,6 +310,11 @@ class AITutorBackgroundManager {
             citations: data.citations,
             source: data.source || 'Gemini AI',
             workspaceNotice: data.workspaceNotice,
+            activeWorkspaceContext: data.activeWorkspaceContext || workspaceName,
+            activeContextFiles: Array.isArray(data.activeContextFiles) ? data.activeContextFiles : [],
+            followUpQuestions: Array.isArray(data.followUpQuestions) ? data.followUpQuestions : [],
+            suggestOutsideResearch: Boolean(data.suggestOutsideResearch),
+            originalQuery: userMsg.text,
             generatedImageUrl: data.generatedImageUrl,
             generatedImageCaption: data.generatedImageCaption,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })

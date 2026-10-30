@@ -31,62 +31,44 @@ import { recordUserActivity } from '../../utils/userActivity';
 import { supabase } from '../../lib/supabase';
 import { AITutorBackgroundService, getChatHistoryKey } from '../../services/AITutorBackgroundService';
 import { WorkspaceChatCache } from '../../services/WorkspaceChatCache';
+import { FullScreenUploadOverlay } from './FullScreenUploadOverlay';
+import { loadStoredWorkspaces } from '../../utils/workspaceStorage';
 
 export type TutorPersona = string;
 
-export type VoiceProfileId = 'female' | 'male' | 'neutral' | 'energetic';
+export type VoiceProfileId = 'male' | 'female';
 
 export interface VoiceProfile {
   id: VoiceProfileId;
   name: string;
   genderLabel: string;
-  gender: 'female' | 'male' | 'neutral';
-  geminiVoice: 'Kore' | 'Fenrir' | 'Zephyr' | 'Puck';
+  gender: 'male' | 'female';
+  geminiVoice: 'Fenrir' | 'Kore';
   description: string;
   icon: string;
   samplePhrase: string;
 }
 
 export const VOICE_PROFILES: Record<VoiceProfileId, VoiceProfile> = {
+  male: {
+    id: 'male',
+    name: 'Male Voice',
+    genderLabel: 'Male Voice',
+    gender: 'male',
+    geminiVoice: 'Fenrir',
+    description: 'Deep, confident, and authoritative academic mentor',
+    icon: '👨‍🏫',
+    samplePhrase: "Greetings. Let's break down this concept step-by-step to master it."
+  },
   female: {
     id: 'female',
-    name: 'Kore',
+    name: 'Female Voice',
     genderLabel: 'Female Voice',
     gender: 'female',
     geminiVoice: 'Kore',
     description: 'Warm, clear, and articulate academic guide',
     icon: '👩‍🏫',
     samplePhrase: "Hello! I'm your academic tutor. What questions or concepts shall we explore today?"
-  },
-  male: {
-    id: 'male',
-    name: 'Fenrir',
-    genderLabel: 'Male Voice',
-    gender: 'male',
-    geminiVoice: 'Fenrir',
-    description: 'Deep, confident, and authoritative mentor',
-    icon: '👨‍🏫',
-    samplePhrase: "Greetings. Let's break down this concept step-by-step to master it."
-  },
-  neutral: {
-    id: 'neutral',
-    name: 'Zephyr',
-    genderLabel: 'Neutral Voice',
-    gender: 'neutral',
-    geminiVoice: 'Zephyr',
-    description: 'Calm, thoughtful, and balanced Socratic philosopher',
-    icon: '🧭',
-    samplePhrase: "Welcome. What fundamental principles lie behind the question you are thinking about?"
-  },
-  energetic: {
-    id: 'energetic',
-    name: 'Puck',
-    genderLabel: 'Dynamic Voice',
-    gender: 'male',
-    geminiVoice: 'Puck',
-    description: 'Upbeat, high-energy, and enthusiastic active recall coach',
-    icon: '⚡',
-    samplePhrase: "Ready for an active recall challenge? Let's test your memory and level up!"
   }
 };
 
@@ -106,6 +88,11 @@ interface Message {
   citations?: Citation[];
   attachedFileNames?: string[];
   workspaceNotice?: string;
+  activeWorkspaceContext?: string;
+  activeContextFiles?: string[];
+  followUpQuestions?: string[];
+  suggestOutsideResearch?: boolean;
+  originalQuery?: string;
   generatedImageUrl?: string;
   generatedImageCaption?: string;
   isFileReadyBadge?: boolean;
@@ -198,9 +185,9 @@ export default function WorkspaceChat({
   const [selectedVoiceProfile, setSelectedVoiceProfile] = useState<VoiceProfileId>(() => {
     try {
       const stored = localStorage.getItem('study_tutor_voice_profile');
-      if (stored && (stored in VOICE_PROFILES)) return stored as VoiceProfileId;
+      if (stored === 'male' || stored === 'female') return stored;
     } catch {}
-    return 'neutral'; // Default to neutral (Zephyr) for Socratic inquiry
+    return 'male'; // Default to Male Voice (1st option)
   });
 
   const [speechRate, setSpeechRate] = useState<number>(() => {
@@ -222,6 +209,21 @@ export default function WorkspaceChat({
   const [targetLoadingId, setTargetLoadingId] = useState<string | null>(null);
   const [isTtsLoading, setIsTtsLoading] = useState(false);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Full-screen circular upload overlay state for Chat uploads
+  const [chatUploadOverlay, setChatUploadOverlay] = useState<{
+    isOpen: boolean;
+    progress: number;
+    fileName: string;
+    stepText: string;
+    fileType: string;
+  }>({
+    isOpen: false,
+    progress: 0,
+    fileName: '',
+    stepText: '',
+    fileType: 'doc'
+  });
 
   // Close voice settings on outside click
   useEffect(() => {
@@ -294,7 +296,7 @@ export default function WorkspaceChat({
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(textToSpeak.slice(0, 1500));
       
-      const targetProfile = VOICE_PROFILES[voiceIdOverride || selectedVoiceProfile] || VOICE_PROFILES.neutral;
+      const targetProfile = VOICE_PROFILES[voiceIdOverride || selectedVoiceProfile] || VOICE_PROFILES.male;
       const targetGender = targetProfile.gender;
 
       const voices = window.speechSynthesis.getVoices() || [];
@@ -304,13 +306,9 @@ export default function WorkspaceChat({
         matchedVoice = voices.find(v => 
           v.lang.startsWith('en') && (v.name.includes('Samantha') || v.name.includes('Karen') || v.name.includes('Zira') || v.name.includes('Victoria') || (v.name.includes('Google') && v.name.includes('Female')) || v.name.includes('Female'))
         );
-      } else if (targetGender === 'male') {
-        matchedVoice = voices.find(v => 
-          v.lang.startsWith('en') && (v.name.includes('Daniel') || v.name.includes('Alex') || v.name.includes('David') || v.name.includes('George') || (v.name.includes('Google') && v.name.includes('Male')) || v.name.includes('Male'))
-        );
       } else {
         matchedVoice = voices.find(v => 
-          v.lang.startsWith('en') && (v.name.includes('Moira') || v.name.includes('Natural') || v.name.includes('Google UK English Male') || v.name.includes('en-GB'))
+          v.lang.startsWith('en') && (v.name.includes('Daniel') || v.name.includes('Alex') || v.name.includes('David') || v.name.includes('George') || (v.name.includes('Google') && v.name.includes('Male')) || v.name.includes('Male'))
         );
       }
 
@@ -318,7 +316,7 @@ export default function WorkspaceChat({
       if (naturalVoice) utterance.voice = naturalVoice;
 
       utterance.rate = customRate || speechRate || 1.0;
-      utterance.pitch = targetGender === 'female' ? 1.04 : targetGender === 'male' ? 0.95 : 1.0;
+      utterance.pitch = targetGender === 'female' ? 1.04 : 0.95;
 
       utterance.onstart = () => {
         setSpeakingMessageId(msgId);
@@ -361,7 +359,7 @@ export default function WorkspaceChat({
     setTargetLoadingId(msgId);
     setIsTtsLoading(true);
 
-    const activeProfile = VOICE_PROFILES[voiceProfileOverride || selectedVoiceProfile] || VOICE_PROFILES.neutral;
+    const activeProfile = VOICE_PROFILES[voiceProfileOverride || selectedVoiceProfile] || VOICE_PROFILES.male;
 
     try {
       // 1. Try high-fidelity Gemini 3.8 Flash Lite TTS endpoint
@@ -442,9 +440,91 @@ export default function WorkspaceChat({
     return () => clearInterval(interval);
   }, [isListening]);
 
-  // Clean files list for grounding (only use files belonging to the active workspace)
+  // Aggregate all user workspaces (props + local cache fallback) so the AI Tutor sees every workspace and uploaded item
+  const allUserWorkspaces = useMemo(() => {
+    const wsMap = new Map<string, Workspace>();
+    const stored = loadStoredWorkspaces(resolvedUserId) || [];
+    const storedGuest = resolvedUserId ? (loadStoredWorkspaces(null) || []) : [];
+
+    const mergeIntoMap = (ws: Workspace) => {
+      if (!ws || !ws.id) return;
+      const existing = wsMap.get(ws.id);
+      if (!existing) {
+        wsMap.set(ws.id, ws);
+      } else {
+        const fileMap = new Map<string, WorkspaceFile>();
+        [...(existing.files || []), ...(ws.files || [])].forEach(f => {
+          if (!f) return;
+          const key = String(f.id || f.name || '').trim().toLowerCase();
+          const dupByName = Array.from(fileMap.values()).find(
+            ef => ef.name && f.name && ef.name.trim().toLowerCase() === f.name.trim().toLowerCase()
+          );
+          if (dupByName) {
+            const dupKey = String(dupByName.id || dupByName.name || '').trim().toLowerCase();
+            fileMap.set(dupKey, {
+              ...dupByName,
+              ...f,
+              summary: f.summary || dupByName.summary,
+              transcription: f.transcription || dupByName.transcription,
+              contentText: f.contentText || dupByName.contentText
+            });
+          } else if (key) {
+            fileMap.set(key, f);
+          }
+        });
+
+        const noteMap = new Map<string, any>();
+        [...(existing.notes || []), ...(ws.notes || [])].forEach(n => {
+          if (!n) return;
+          const key = String(n.id || n.title || '').trim().toLowerCase();
+          if (key) noteMap.set(key, n);
+        });
+
+        wsMap.set(ws.id, {
+          ...existing,
+          ...ws,
+          files: Array.from(fileMap.values()),
+          notes: Array.from(noteMap.values()),
+          flashcards: (ws.flashcards && ws.flashcards.length > 0) ? ws.flashcards : (existing.flashcards || []),
+          quizzes: (ws.quizzes && ws.quizzes.length > 0) ? ws.quizzes : (existing.quizzes || [])
+        });
+      }
+    };
+
+    storedGuest.forEach(mergeIntoMap);
+    stored.forEach(mergeIntoMap);
+    (workspaces || []).forEach(mergeIntoMap);
+    if (workspace) mergeIntoMap(workspace);
+
+    return Array.from(wsMap.values());
+  }, [workspace, workspaces, resolvedUserId]);
+
+  // Clean files list for grounding across active workspace and all user workspaces
   const activeFiles = useMemo(() => {
-    const rawFiles = workspace.files || [];
+    const seenKeys = new Set<string>();
+    const rawFiles: Array<WorkspaceFile & { workspaceId?: string; workspaceName?: string }> = [];
+
+    const pushFilesFromWorkspace = (ws: Workspace) => {
+      (ws.files || []).forEach(f => {
+        if (!f) return;
+        const nameKey = String(f.name || f.id || '').trim().toLowerCase();
+        if (!nameKey || seenKeys.has(nameKey)) return;
+        seenKeys.add(nameKey);
+        rawFiles.push({
+          ...f,
+          workspaceId: ws.id,
+          workspaceName: ws.name || 'Workspace'
+        });
+      });
+    };
+
+    // Prioritize current active workspace first, then all other workspaces
+    if (workspace) pushFilesFromWorkspace(workspace);
+    allUserWorkspaces.forEach(ws => {
+      if (!workspace || ws.id !== workspace.id) {
+        pushFilesFromWorkspace(ws);
+      }
+    });
 
     const isDummyStr = (s?: string) => {
       if (!s) return true;
@@ -502,7 +582,7 @@ export default function WorkspaceChat({
         transcription: cleanTranscription
       };
     });
-  }, [workspace.files, workspaces]);
+  }, [workspace, allUserWorkspaces]);
 
   const chatHistoryKey = `study_chat_history_${resolvedUserId || 'guest'}_${workspace.id}`;
   const prevWorkspaceIdRef = useRef<string>(workspace.id);
@@ -738,10 +818,28 @@ export default function WorkspaceChat({
     );
   };
 
-  // File Attachment Handlers with deep binary & text reading
+  // File Attachment Handlers with deep binary & text reading + full-screen circular upload ring
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+
+    const firstFile = files[0];
+    const lowerFirst = firstFile.name.toLowerCase();
+    const detectedType = lowerFirst.endsWith('.pdf')
+      ? 'pdf'
+      : lowerFirst.match(/\.(png|jpg|jpeg|webp|gif|svg)$/)
+      ? 'image'
+      : lowerFirst.match(/\.(mp4|webm|mov|mkv)$/)
+      ? 'video'
+      : 'doc';
+
+    setChatUploadOverlay({
+      isOpen: true,
+      progress: 12,
+      fileName: files.length > 1 ? `${firstFile.name} (+${files.length - 1} more)` : firstFile.name,
+      stepText: 'Reading document binary & text stream...',
+      fileType: detectedType
+    });
 
     const newDrafts: AttachedDraftFile[] = [];
     for (let i = 0; i < files.length; i++) {
@@ -749,6 +847,13 @@ export default function WorkspaceChat({
       let content: string | undefined = undefined;
       let dataUrl: string | undefined = undefined;
       let base64: string | undefined = undefined;
+
+      setChatUploadOverlay(prev => ({
+        ...prev,
+        progress: Math.min(75, Math.round(((i + 0.4) / files.length) * 70) + 15),
+        fileName: file.name,
+        stepText: `Extracting content from ${file.name}...`
+      }));
 
       // 1. Read as Data URL (base64) so Gemini can natively inspect PDF, images, audio, etc.
       try {
@@ -793,6 +898,14 @@ export default function WorkspaceChat({
         fileObj: file
       });
     }
+
+    setChatUploadOverlay(prev => ({
+      ...prev,
+      progress: 92,
+      stepText: 'Indexing into active workspace knowledge graph...'
+    }));
+
+    await new Promise(resolve => setTimeout(resolve, 140));
 
     setAttachedDrafts(prev => [...prev, ...newDrafts]);
     if (newDrafts.length > 0) {
@@ -841,12 +954,24 @@ export default function WorkspaceChat({
       }));
       setMessages(prev => [...prev, ...readyBadges]);
 
+      setChatUploadOverlay(prev => ({
+        ...prev,
+        progress: 100,
+        stepText: 'Workspace knowledge base updated!'
+      }));
+
+      setTimeout(() => {
+        setChatUploadOverlay(prev => ({ ...prev, isOpen: false }));
+      }, 280);
+
       (window as any).showToast?.(
         `"${newDrafts.map(f => f.name).join(', ')}" is indexed & ready in your workspace.`,
         'success',
         3200,
         'Material Ready'
       );
+    } else {
+      setChatUploadOverlay(prev => ({ ...prev, isOpen: false }));
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -863,6 +988,21 @@ export default function WorkspaceChat({
     const isYt = /(?:youtube\.com|youtu\.be)/i.test(normalizedUrl);
 
     setIsAnalyzingLink(true);
+    setChatUploadOverlay({
+      isOpen: true,
+      progress: 18,
+      fileName: isYt ? 'YouTube Video Resource' : normalizedUrl,
+      stepText: isYt ? 'Extracting video transcript & chapters...' : 'Scraping webpage study content...',
+      fileType: isYt ? 'video' : 'doc'
+    });
+
+    const progInterval = setInterval(() => {
+      setChatUploadOverlay(prev => ({
+        ...prev,
+        progress: prev.progress < 88 ? prev.progress + 12 : prev.progress
+      }));
+    }, 180);
+
     try {
       let analyzedTitle = '';
       let fullText = '';
@@ -954,6 +1094,17 @@ export default function WorkspaceChat({
         }
       ]);
 
+      clearInterval(progInterval);
+      setChatUploadOverlay(prev => ({
+        ...prev,
+        fileName: analyzedTitle,
+        progress: 100,
+        stepText: 'Workspace knowledge base updated!'
+      }));
+      setTimeout(() => {
+        setChatUploadOverlay(prev => ({ ...prev, isOpen: false }));
+      }, 260);
+
       (window as any).showToast?.(
         `"${analyzedTitle}" is indexed & ready in your workspace.`,
         'success',
@@ -961,6 +1112,8 @@ export default function WorkspaceChat({
         'Video / Link Ready'
       );
     } catch (err) {
+      clearInterval(progInterval);
+      setChatUploadOverlay(prev => ({ ...prev, isOpen: false }));
       console.warn('Failed to analyze link:', err);
     } finally {
       setIsAnalyzingLink(false);
@@ -1145,7 +1298,7 @@ export default function WorkspaceChat({
   };
 
   // Send message
-  const handleSend = async (customPrompt?: string) => {
+  const handleSend = async (customPrompt?: string, sendOptions?: { allowOutsideResearch?: boolean }) => {
     const textToSend = (customPrompt || inputValue).trim();
     if ((!textToSend && attachedDrafts.length === 0) || isThinking) return;
 
@@ -1209,21 +1362,29 @@ export default function WorkspaceChat({
       };
     });
 
-    // Save newly attached files into workspace
-    if (onUpdateWorkspace && newlyConvertedFiles.length > 0) {
+    // Save newly attached files into workspace only if not already added during handleFileSelect / handleAttachLink
+    const existingWsFiles = workspace.files || [];
+    const trulyNewFiles = newlyConvertedFiles.filter(
+      nf => !existingWsFiles.some(ef => ef.name && nf.name && ef.name.trim().toLowerCase() === nf.name.trim().toLowerCase())
+    );
+    if (onUpdateWorkspace && trulyNewFiles.length > 0) {
       onUpdateWorkspace({
         ...workspace,
-        files: [...(workspace.files || []), ...newlyConvertedFiles]
+        files: [...trulyNewFiles, ...existingWsFiles]
       });
     }
 
-    // Place newly attached files at the FRONT of effectiveFiles so Gemini inspects them first!
-    const effectiveFiles = [...newlyConvertedFiles, ...activeFiles];
+    // Place newly attached files at the FRONT of effectiveFiles, deduplicated by name
+    const newFileNames = new Set(newlyConvertedFiles.map(f => String(f.name || '').trim().toLowerCase()));
+    const effectiveFiles = [
+      ...newlyConvertedFiles.map(f => ({ ...f, workspaceId: workspace.id, workspaceName: workspace.name })),
+      ...activeFiles.filter(af => !newFileNames.has(String(af.name || '').trim().toLowerCase()))
+    ];
     const newFileIds = new Set(newlyConvertedFiles.map(f => f.id));
 
-    // Create a compact, proxy-safe payload for attachedFiles so request body never triggers HTTP 400/413 HTML errors
+    // Create a compact, proxy-safe payload for attachedFiles across all workspaces (up to 50 files)
     let includedBinaryCount = 0;
-    const compactAttachedFiles = effectiveFiles.slice(0, 10).map(f => {
+    const compactAttachedFiles = effectiveFiles.slice(0, 50).map((f: any) => {
       const isNewAttachment = newFileIds.has(f.id);
       const safeUrl = (typeof f.url === 'string' && !f.url.startsWith('data:')) ? f.url.slice(0, 1000) : undefined;
       const needsBinaryInspection = isNewAttachment;
@@ -1243,15 +1404,45 @@ export default function WorkspaceChat({
         size: f.size,
         pages: f.pages,
         url: safeUrl,
+        workspaceId: f.workspaceId || workspace.id,
+        workspaceName: f.workspaceName || workspace.name,
         isDirectAttachment: isNewAttachment,
         summary: typeof f.summary === 'string' ? f.summary.slice(0, 3500) : undefined,
-        highlights: Array.isArray(f.highlights) ? f.highlights.slice(0, 12).map(h => String(h).slice(0, 500)) : undefined,
-        formulas: Array.isArray(f.formulas) ? f.formulas.slice(0, 12).map(eq => String(eq).slice(0, 250)) : undefined,
-        transcription: typeof fullTranscript === 'string' ? fullTranscript.slice(0, 28000) : undefined,
+        highlights: Array.isArray(f.highlights) ? f.highlights.slice(0, 12).map((h: any) => String(h).slice(0, 500)) : undefined,
+        formulas: Array.isArray(f.formulas) ? f.formulas.slice(0, 12).map((eq: any) => String(eq).slice(0, 250)) : undefined,
+        transcription: typeof fullTranscript === 'string' ? fullTranscript.slice(0, 18000) : undefined,
         fileBase64: safeBase64,
         fileMimeType: safeBase64 ? defaultMimeType : undefined
       };
     });
+
+    // Build compact overview of all workspaces and their files/notes/flashcards/quizzes so inventory queries show 100% of items
+    const compactAllWorkspaces = allUserWorkspaces.map(ws => ({
+      id: ws.id,
+      name: ws.name || 'Workspace',
+      subject: ws.subject || 'General',
+      files: (ws.id === workspace.id && trulyNewFiles.length > 0 ? [...trulyNewFiles, ...(ws.files || [])] : (ws.files || [])).map(f => ({
+        id: f.id,
+        name: f.name,
+        type: f.type || 'doc',
+        size: f.size,
+        pages: f.pages,
+        url: (typeof f.url === 'string' && !f.url.startsWith('data:')) ? f.url.slice(0, 500) : undefined,
+        summary: typeof f.summary === 'string' ? f.summary.slice(0, 1200) : undefined,
+        transcription: typeof (f.transcription || f.contentText) === 'string' ? String(f.transcription || f.contentText).slice(0, 6000) : undefined,
+        highlights: Array.isArray(f.highlights) ? f.highlights.slice(0, 6) : undefined
+      })),
+      notes: (ws.notes || []).map(n => ({
+        id: n.id,
+        title: n.title || 'Study Note',
+        content: typeof n.content === 'string' ? n.content.replace(/<[^>]+>/g, ' ').slice(0, 2500) : '',
+        tags: n.tags
+      })),
+      flashcardsCount: (ws.flashcards || []).length,
+      flashcardTopics: (ws.flashcards || []).slice(0, 10).map((fc: any) => fc.front || fc.question || '').filter(Boolean),
+      quizzesCount: (ws.quizzes || []).length,
+      quizTitles: (ws.quizzes || []).slice(0, 10).map((qz: any) => qz.title || qz.question || '').filter(Boolean)
+    }));
 
     // Exclude welcome greetings, file-ready badges, and error banners so history sent to Gemini is 100% clean conversation turns
     const history = messages
@@ -1270,7 +1461,9 @@ export default function WorkspaceChat({
         prompt: userMsg.text,
         history,
         compactAttachedFiles,
+        allWorkspaces: compactAllWorkspaces,
         accessToken,
+        allowOutsideResearch: Boolean(sendOptions?.allowOutsideResearch),
         userMsg
       });
 
@@ -1612,7 +1805,7 @@ export default function WorkspaceChat({
                     Select Voice Profile
                   </div>
                   <div className="grid grid-cols-1 gap-1.5">
-                    {(Object.keys(VOICE_PROFILES) as VoiceProfileId[]).map((vKey) => {
+                    {(['male', 'female'] as VoiceProfileId[]).map((vKey) => {
                       const v = VOICE_PROFILES[vKey];
                       const isSelected = selectedVoiceProfile === vKey;
                       const isPreviewing = isPlayingPreview === vKey || speakingMessageId === `preview-${vKey}`;
@@ -1812,28 +2005,56 @@ export default function WorkspaceChat({
                     : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-sm shadow-xs'
                 }`}>
                   
-                  {/* AI Message Header */}
+                  {/* AI Message Header with Active Context Attribution */}
                   {msg.sender === 'ai' && (
-                    <div className="flex items-center justify-between gap-2 mb-2.5 pb-2 border-b border-slate-100 dark:border-slate-800 text-xs">
-                      <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5 pb-2 border-b border-slate-100 dark:border-slate-800 text-xs">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="font-bold text-indigo-600 dark:text-indigo-400">
                           AI Tutor
                         </span>
+                        {!msg.isError && msg.id !== 'welcome-msg' && !msg.id.startsWith('welcome-') && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-medium border border-slate-200/70 dark:border-slate-700/70">
+                            <BookOpen className="w-3 h-3 text-indigo-500 shrink-0" />
+                            <span className="truncate max-w-[220px] sm:max-w-[320px]">
+                              {msg.activeContextFiles && msg.activeContextFiles.length > 0
+                                ? `Context: ${msg.activeWorkspaceContext || workspace.name} (${msg.activeContextFiles.slice(0, 2).join(', ')}${msg.activeContextFiles.length > 2 ? ` +${msg.activeContextFiles.length - 2}` : ''})`
+                                : `Context: ${msg.activeWorkspaceContext || workspace.name}`}
+                            </span>
+                          </span>
+                        )}
                       </div>
-                      <span className="text-[11px] text-slate-400">
+                      <span className="text-[11px] text-slate-400 tabular-nums">
                         {msg.time}
                       </span>
                     </div>
                   )}
 
-                  {/* Out-of-Workspace Topic Notice Banner */}
+                  {/* Out-of-Workspace Topic Notice Banner + Research Outside Workspace Button */}
                   {msg.sender === 'ai' && msg.workspaceNotice && !msg.isError && (
-                    <div className="mb-3 px-3 py-2 rounded-xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 flex items-start gap-2 text-xs text-amber-900 dark:text-amber-200">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                      <div className="leading-snug">
-                        <span className="font-bold">Topic not in uploaded workspace files: </span>
-                        <span>{msg.workspaceNotice}</span>
+                    <div className="mb-3.5 p-3 rounded-2xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-amber-900 dark:text-amber-200">
+                      <div className="flex items-start gap-2 leading-snug">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold block sm:inline">Workspace Context Check: </span>
+                          <span>{msg.workspaceNotice}</span>
+                        </div>
                       </div>
+                      {msg.suggestOutsideResearch && (
+                        <button
+                          type="button"
+                          disabled={isThinking}
+                          onClick={() =>
+                            handleSend(
+                              msg.originalQuery || `Research and explain this topic in detail outside my workspace`,
+                              { allowOutsideResearch: true }
+                            )
+                          }
+                          className="h-8 px-3 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold text-[11px] inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 shadow-2xs transition-all cursor-pointer self-start sm:self-center"
+                        >
+                          <Globe className="w-3.5 h-3.5" />
+                          <span>Research outside workspace</span>
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -1919,6 +2140,46 @@ export default function WorkspaceChat({
                           {c.page && <span className="opacity-70">p.{c.page}</span>}
                         </span>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Clickable Follow-Up Question Chips */}
+                  {msg.sender === 'ai' && !msg.isError && msg.followUpQuestions && msg.followUpQuestions.length > 0 && (
+                    <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/80 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                          Suggested Follow-Up Questions
+                        </span>
+                        {msg.suggestOutsideResearch && (
+                          <button
+                            type="button"
+                            disabled={isThinking}
+                            onClick={() =>
+                              handleSend(
+                                msg.originalQuery || `Research this topic in depth outside my workspace`,
+                                { allowOutsideResearch: true }
+                              )
+                            }
+                            className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                          >
+                            <Globe className="w-3 h-3" />
+                            <span>Research outside workspace</span>
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {msg.followUpQuestions.map((followUpQ, fqIdx) => (
+                          <button
+                            key={fqIdx}
+                            type="button"
+                            disabled={isThinking}
+                            onClick={() => handleSend(followUpQ)}
+                            className="text-left px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-indigo-50 dark:bg-slate-800/70 dark:hover:bg-indigo-950/50 border border-slate-200/80 hover:border-indigo-300 dark:border-slate-700/80 dark:hover:border-indigo-700 text-xs font-semibold text-slate-700 hover:text-indigo-700 dark:text-slate-200 dark:hover:text-indigo-300 transition-all cursor-pointer disabled:opacity-50"
+                          >
+                            {followUpQ}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2251,6 +2512,14 @@ export default function WorkspaceChat({
 
         </div>
       </footer>
+
+      <FullScreenUploadOverlay
+        isOpen={chatUploadOverlay.isOpen}
+        progress={chatUploadOverlay.progress}
+        fileName={chatUploadOverlay.fileName}
+        stepText={chatUploadOverlay.stepText}
+        fileType={chatUploadOverlay.fileType}
+      />
 
     </div>
   );

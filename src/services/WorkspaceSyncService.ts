@@ -3,7 +3,21 @@ import { Workspace, WorkspaceFile } from '../components/Dashboard/WorkspaceTypes
 import { toValidUuid } from '../utils/uuid';
 import { cleanNotebookLMTitle } from '../utils/notebookTitle';
 
+const workspacesCacheByUser = new Map<string, { data: Workspace[]; timestamp: number }>();
+const inflightFetchByUser = new Map<string, Promise<Workspace[]>>();
+const WORKSPACES_CACHE_TTL_MS = 15_000;
+
 export class WorkspaceSyncService {
+  public static clearCache(userId?: string | null): void {
+    if (userId) {
+      workspacesCacheByUser.delete(userId);
+      inflightFetchByUser.delete(userId);
+    } else {
+      workspacesCacheByUser.clear();
+      inflightFetchByUser.clear();
+    }
+  }
+
   /**
    * Helper to get current Supabase user ID if authenticated
    */
@@ -31,11 +45,23 @@ export class WorkspaceSyncService {
     const validId = toValidUuid(workspace.id);
     const userId = explicitUserId || await this.getUserId();
 
-    // If unauthenticated, do NOT push orphan workspace to Supabase.
-    // It remains safely isolated in the user's local guest storage until login.
     if (!userId) {
       return true;
     }
+
+    this.clearCache(userId);
+
+    const sanitizedFilesForJsonb = (workspace.files || []).map((f: WorkspaceFile) => {
+      const copy: any = { ...f };
+      // Prevent oversized base64 or data URL payloads from exceeding PostgREST JSONB row limits
+      if (typeof copy.fileBase64 === 'string' && copy.fileBase64.length > 80_000) {
+        delete copy.fileBase64;
+      }
+      if (typeof copy.url === 'string' && copy.url.startsWith('data:') && copy.url.length > 80_000) {
+        delete copy.url;
+      }
+      return copy;
+    });
 
     const row: Record<string, any> = {
       id: validId,
@@ -55,7 +81,7 @@ export class WorkspaceSyncService {
       last_opened: new Date().toISOString(),
       is_for_sale: Boolean(workspace.isForSale),
       price: workspace.price || null,
-      files: workspace.files || [],
+      files: sanitizedFilesForJsonb,
       flashcards: workspace.flashcards || [],
       quizzes: workspace.quizzes || [],
       notes: workspace.notes || [],
@@ -75,11 +101,10 @@ export class WorkspaceSyncService {
         return false;
       }
 
-      // Also ensure existing files in the workspace are synced to workspace_files
       if (workspace.files && workspace.files.length > 0) {
-        for (const file of workspace.files) {
-          await this.saveWorkspaceFile(validId, file);
-        }
+        await Promise.allSettled(
+          workspace.files.map((file) => this.saveWorkspaceFile(validId, file, userId))
+        );
       }
 
       return true;
@@ -99,14 +124,21 @@ export class WorkspaceSyncService {
     const validWsId = toValidUuid(workspaceId);
     const userId = explicitUserId || await this.getUserId();
 
+    if (userId) {
+      this.clearCache(userId);
+    }
+
     const cleanName = cleanNotebookLMTitle(file.name, file.url, file.type);
+    const safeUrl = (typeof file.url === 'string' && file.url.startsWith('data:') && file.url.length > 80_000)
+      ? null
+      : (file.url || null);
     const fileRow: Record<string, any> = {
       id: validFileId,
       workspace_id: validWsId,
       name: cleanName || 'Study Material',
       type: file.type || 'doc',
       size: file.size || '1 KB',
-      url: file.url || null,
+      url: safeUrl,
       storage_path: file.storagePath || null,
       summary: file.summary || '',
       transcription: file.transcription || null,
@@ -116,7 +148,7 @@ export class WorkspaceSyncService {
       extracted_diagrams: Array.isArray(file.extractedDiagrams) ? file.extractedDiagrams : (file.extractedDiagrams ? [JSON.stringify(file.extractedDiagrams)] : []),
       pages: typeof file.pages === 'number' ? file.pages : null,
       status: file.status || 'indexed',
-      content_text: file.contentText || null,
+      content_text: file.contentText || file.transcription || null,
       upload_date: file.uploadDate ? new Date(file.uploadDate).toISOString() : new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -125,7 +157,6 @@ export class WorkspaceSyncService {
       fileRow.user_id = userId;
     }
 
-    // Ensure parent workspace row exists in Supabase so workspace_files_workspace_id_fkey succeeds
     try {
       const { data: wsRow } = await supabase
         .from('workspaces')
@@ -173,6 +204,7 @@ export class WorkspaceSyncService {
     try {
       const userId = await this.getUserId();
       if (!userId) return false;
+      this.clearCache(userId);
 
       const validFileId = toValidUuid(fileId);
       const { error } = await supabase
@@ -201,6 +233,7 @@ export class WorkspaceSyncService {
     try {
       const userId = await this.getUserId();
       if (!userId) return false;
+      this.clearCache(userId);
 
       const validFileId = toValidUuid(fileId);
       const { error } = await supabase
@@ -224,17 +257,16 @@ export class WorkspaceSyncService {
     try {
       const userId = await this.getUserId();
       if (!userId) return false;
+      this.clearCache(userId);
 
       const validWsId = toValidUuid(workspaceId);
 
-      // Delete child files owned by user first
       await supabase
         .from('workspace_files')
         .delete()
         .eq('workspace_id', validWsId)
         .eq('user_id', userId);
 
-      // Delete workspace owned by user
       const { error } = await supabase
         .from('workspaces')
         .delete()
@@ -249,141 +281,169 @@ export class WorkspaceSyncService {
 
   /**
    * Loads all workspaces strictly belonging to the authenticated user from Supabase.
-   * If unauthenticated, returns empty array to prevent foreign workspace leakage.
+   * Uses in-flight request deduplication and fast TTL caching for 1,000-user scalability.
    */
-  public static async fetchWorkspaces(explicitUserId?: string): Promise<Workspace[]> {
+  public static async fetchWorkspaces(explicitUserId?: string, forceRefresh = false): Promise<Workspace[]> {
     if (!supabase) return [];
 
     try {
       const userId = explicitUserId || await this.getUserId();
-
-      // STRICT USER ISOLATION:
-      // If user is not authenticated, NEVER return remote workspaces from Supabase.
-      // This eliminates cross-user data leakage where other people's workspaces were displayed.
       if (!userId) {
         return [];
       }
 
-      // Query STRICTLY this user's workspaces
-      const { data: rows, error } = await supabase
-        .from('workspaces')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-
-      if (error || !rows || rows.length === 0) {
-        return [];
-      }
-
-      // Fetch all files for these workspaces strictly belonging to the authenticated user
-      // (notes and flashcards are persisted in the workspaces JSONB columns)
-      const wsIds = rows.map((r: any) => r.id);
-      const fileMap: Record<string, WorkspaceFile[]> = {};
-      const noteMap: Record<string, any[]> = {};
-      const flashcardMap: Record<string, any[]> = {};
-
-      try {
-        const filesRes = await supabase
-          .from('workspace_files')
-          .select('*')
-          .eq('user_id', userId)
-          .in('workspace_id', wsIds);
-
-        if (filesRes.data) {
-          filesRes.data.forEach((f: any) => {
-            if (!fileMap[f.workspace_id]) {
-              fileMap[f.workspace_id] = [];
-            }
-            fileMap[f.workspace_id].push({
-              id: f.id,
-              name: f.name || 'Untitled Document',
-              type: f.type || 'doc',
-              size: f.size || '1 KB',
-              uploadDate: f.upload_date || f.created_at || new Date().toISOString(),
-              status: (f.status as any) || 'indexed',
-              url: f.url || undefined,
-              storagePath: f.storage_path || undefined,
-              summary: f.summary || '',
-              highlights: Array.isArray(f.highlights) ? f.highlights : [],
-              tags: Array.isArray(f.tags) && f.tags.length > 0 ? f.tags : ['Document'],
-              transcription: f.transcription || undefined,
-              formulas: Array.isArray(f.formulas) ? f.formulas : [],
-              extractedDiagrams: f.extracted_diagrams || undefined,
-              contentText: f.content_text || undefined,
-              pages: typeof f.pages === 'number' ? f.pages : undefined
-            });
-          });
+      if (!forceRefresh) {
+        const cached = workspacesCacheByUser.get(userId);
+        if (cached && Date.now() - cached.timestamp < WORKSPACES_CACHE_TTL_MS) {
+          return cached.data;
         }
-      } catch {
-        // Non-fatal if child tables fetch fails
+        const inflight = inflightFetchByUser.get(userId);
+        if (inflight) {
+          return inflight;
+        }
       }
 
-      return rows.map((row: any): Workspace => {
-        const remoteTableFiles = fileMap[row.id] || [];
-        const jsonbFiles = Array.isArray(row.files) ? row.files : [];
-        const fileMapById = new Map<string, WorkspaceFile>();
-        jsonbFiles.forEach((f: any) => {
-          if (f && f.id) fileMapById.set(f.id, f);
-        });
-        remoteTableFiles.forEach((f: any) => {
-          if (f && f.id) fileMapById.set(f.id, f);
-        });
-        const files = Array.from(fileMapById.values());
+      const fetchPromise = (async (): Promise<Workspace[]> => {
+        try {
+          const { data: rows, error } = await supabase
+            .from('workspaces')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false });
 
-        const remoteNotes = noteMap[row.id] || [];
-        const jsonbNotes = Array.isArray(row.notes) ? row.notes : [];
-        const noteMapById = new Map<string, any>();
-        jsonbNotes.forEach((n: any) => { if (n && n.id) noteMapById.set(n.id, n); });
-        remoteNotes.forEach((n: any) => { if (n && n.id) noteMapById.set(n.id, n); });
-        const notes = Array.from(noteMapById.values());
+          if (error || !rows || rows.length === 0) {
+            workspacesCacheByUser.set(userId, { data: [], timestamp: Date.now() });
+            return [];
+          }
 
-        const remoteFlashcards = flashcardMap[row.id] || [];
-        const jsonbFlashcards = Array.isArray(row.flashcards) ? row.flashcards : [];
-        const fcMapById = new Map<string, any>();
-        jsonbFlashcards.forEach((fc: any) => { if (fc && fc.id) fcMapById.set(fc.id, fc); });
-        remoteFlashcards.forEach((fc: any) => { if (fc && fc.id) fcMapById.set(fc.id, fc); });
-        const flashcards = Array.from(fcMapById.values());
+          const wsIds = rows.map((r: any) => r.id);
+          const fileMap: Record<string, WorkspaceFile[]> = {};
 
-        return {
-          id: row.id,
-          name: row.name || 'Untitled Workspace',
-          subject: row.subject || 'General',
-          description: row.description || '',
-          colorTheme: (row.color_theme as any) || 'indigo',
-          coverImage: row.cover_image || 'https://images.unsplash.com/photo-1517842645767-c639042777db?q=80&w=600&auto=format&fit=crop',
-          emoji: row.emoji || '🧬',
-          visibility: (row.visibility as any) || 'private',
-          template: (row.template as any) || 'custom',
-          pinned: Boolean(row.pinned),
-          favorite: Boolean(row.favorite),
-          streak: row.streak || 1,
-          studyHours: row.study_hours || 0,
-          lastOpened: row.last_opened ? new Date(row.last_opened).toLocaleDateString() : 'Just Now',
-          isForSale: Boolean(row.is_for_sale),
-          price: row.price ? Number(row.price) : undefined,
-          files,
-          flashcards,
-          quizzes: Array.isArray(row.quizzes) ? row.quizzes : [],
-          notes,
-          plannerTasks: Array.isArray(row.planner_tasks) ? row.planner_tasks : [],
-          nodes: Array.isArray(row.nodes) && row.nodes.length > 0 ? row.nodes : [
-            { id: 'n-root', label: row.name, type: 'topic', color: '#6366F1', x: 250, y: 150 },
-            ...files.map((file: any, idx: number) => ({
-              id: `n-${file.id}`,
-              label: file.name.slice(0, 20) + '...',
-              type: 'file' as const,
-              color: '#3B82F6',
-              x: 100 + (idx % 5) * 80,
-              y: 200 + Math.floor(idx / 5) * 80,
-              details: `${file.type?.toUpperCase() || 'DOC'} file`
-            }))
-          ],
-          links: Array.isArray(row.links) && row.links.length > 0 ? row.links : files.map((file: any) => ({
-            source: 'n-root',
-            target: `n-${file.id}`
-          }))
-        };
-      });
+          try {
+            const filesRes = await supabase
+              .from('workspace_files')
+              .select('*')
+              .eq('user_id', userId)
+              .in('workspace_id', wsIds);
+
+            if (filesRes.data) {
+              filesRes.data.forEach((f: any) => {
+                if (!fileMap[f.workspace_id]) {
+                  fileMap[f.workspace_id] = [];
+                }
+                fileMap[f.workspace_id].push({
+                  id: f.id,
+                  name: f.name || 'Untitled Document',
+                  type: f.type || 'doc',
+                  size: f.size || '1 KB',
+                  uploadDate: f.upload_date || f.created_at || new Date().toISOString(),
+                  status: (f.status as any) || 'indexed',
+                  url: f.url || undefined,
+                  storagePath: f.storage_path || undefined,
+                  summary: f.summary || '',
+                  highlights: Array.isArray(f.highlights) ? f.highlights : [],
+                  tags: Array.isArray(f.tags) && f.tags.length > 0 ? f.tags : ['Document'],
+                  transcription: f.transcription || undefined,
+                  formulas: Array.isArray(f.formulas) ? f.formulas : [],
+                  extractedDiagrams: f.extracted_diagrams || undefined,
+                  contentText: f.content_text || undefined,
+                  pages: typeof f.pages === 'number' ? f.pages : undefined
+                });
+              });
+            }
+          } catch {
+            // Non-fatal if child tables fetch fails
+          }
+
+          const mappedWorkspaces = rows.map((row: any): Workspace => {
+            const remoteTableFiles = fileMap[row.id] || [];
+            const jsonbFiles = Array.isArray(row.files) ? row.files : [];
+            const fileMapByKey = new Map<string, WorkspaceFile>();
+            const getFileKey = (f: any) => String(f?.id || f?.name || '').trim().toLowerCase();
+
+            jsonbFiles.forEach((f: any) => {
+              if (!f) return;
+              const k = getFileKey(f);
+              if (k) fileMapByKey.set(k, f);
+            });
+            remoteTableFiles.forEach((f: any) => {
+              if (!f) return;
+              const byIdKey = String(f.id || '').trim().toLowerCase();
+              const byNameKey = Array.from(fileMapByKey.keys()).find(existingKey => {
+                const existing = fileMapByKey.get(existingKey);
+                return (
+                  (existing?.id && toValidUuid(existing.id) === f.id) ||
+                  (existing?.name && f.name && existing.name.trim().toLowerCase() === f.name.trim().toLowerCase())
+                );
+              });
+              const targetKey = byNameKey || byIdKey || getFileKey(f);
+              if (targetKey) {
+                const existing = fileMapByKey.get(targetKey);
+                fileMapByKey.set(targetKey, existing ? { ...existing, ...f, summary: f.summary || existing.summary, transcription: f.transcription || existing.transcription } : f);
+              }
+            });
+            const files = Array.from(fileMapByKey.values());
+
+            const jsonbNotes = Array.isArray(row.notes) ? row.notes : [];
+            const noteMapById = new Map<string, any>();
+            jsonbNotes.forEach((n: any) => { if (n && n.id) noteMapById.set(n.id, n); });
+            const notes = Array.from(noteMapById.values());
+
+            const jsonbFlashcards = Array.isArray(row.flashcards) ? row.flashcards : [];
+            const fcMapById = new Map<string, any>();
+            jsonbFlashcards.forEach((fc: any) => { if (fc && fc.id) fcMapById.set(fc.id, fc); });
+            const flashcards = Array.from(fcMapById.values());
+
+            return {
+              id: row.id,
+              name: row.name || 'Untitled Workspace',
+              subject: row.subject || 'General',
+              description: row.description || '',
+              colorTheme: (row.color_theme as any) || 'indigo',
+              coverImage: row.cover_image || 'https://images.unsplash.com/photo-1517842645767-c639042777db?q=80&w=600&auto=format&fit=crop',
+              emoji: row.emoji || '🧬',
+              visibility: (row.visibility as any) || 'private',
+              template: (row.template as any) || 'custom',
+              pinned: Boolean(row.pinned),
+              favorite: Boolean(row.favorite),
+              streak: row.streak || 1,
+              studyHours: row.study_hours || 0,
+              lastOpened: row.last_opened ? new Date(row.last_opened).toLocaleDateString() : 'Just Now',
+              isForSale: Boolean(row.is_for_sale),
+              price: row.price ? Number(row.price) : undefined,
+              files,
+              flashcards,
+              quizzes: Array.isArray(row.quizzes) ? row.quizzes : [],
+              notes,
+              plannerTasks: Array.isArray(row.planner_tasks) ? row.planner_tasks : [],
+              nodes: Array.isArray(row.nodes) && row.nodes.length > 0 ? row.nodes : [
+                { id: 'n-root', label: row.name, type: 'topic', color: '#6366F1', x: 250, y: 150 },
+                ...files.map((file: any, idx: number) => ({
+                  id: `n-${file.id}`,
+                  label: file.name.slice(0, 20) + '...',
+                  type: 'file' as const,
+                  color: '#3B82F6',
+                  x: 100 + (idx % 5) * 80,
+                  y: 200 + Math.floor(idx / 5) * 80,
+                  details: `${file.type?.toUpperCase() || 'DOC'} file`
+                }))
+              ],
+              links: Array.isArray(row.links) && row.links.length > 0 ? row.links : files.map((file: any) => ({
+                source: 'n-root',
+                target: `n-${file.id}`
+              }))
+            };
+          });
+
+          workspacesCacheByUser.set(userId, { data: mappedWorkspaces, timestamp: Date.now() });
+          return mappedWorkspaces;
+        } finally {
+          inflightFetchByUser.delete(userId);
+        }
+      })();
+
+      inflightFetchByUser.set(userId, fetchPromise);
+      return await fetchPromise;
     } catch (err: any) {
       console.warn('Workspace fetch error:', err.message);
       return [];
@@ -397,19 +457,16 @@ export class WorkspaceSyncService {
     if (!supabase || !userId || !localWorkspaces || localWorkspaces.length === 0) return localWorkspaces || [];
 
     try {
-      for (const ws of localWorkspaces) {
-        await this.saveWorkspace(ws, userId);
-      }
-      return await this.fetchWorkspaces(userId);
+      await Promise.allSettled(
+        localWorkspaces.map((ws) => this.saveWorkspace(ws, userId))
+      );
+      return await this.fetchWorkspaces(userId, true);
     } catch (err: any) {
       console.warn('Failed to claim local workspaces for user:', err.message);
       return localWorkspaces;
     }
   }
 
-  /**
-   * Automatically pushes any local workspaces that are not in Supabase yet.
-   */
   /**
    * Fetches all files for a specific workspace directly from Supabase workspace_files table,
    * strictly scoped to the authenticated user.
@@ -462,6 +519,7 @@ export class WorkspaceSyncService {
       const validWsId = toValidUuid(workspaceId);
       const userId = explicitUserId || await this.getUserId();
       if (!userId) return false;
+      this.clearCache(userId);
 
       const { data: wsRow } = await supabase
         .from('workspaces')
@@ -486,4 +544,3 @@ export class WorkspaceSyncService {
     }
   }
 }
-

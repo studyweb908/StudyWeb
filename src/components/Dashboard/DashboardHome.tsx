@@ -23,6 +23,7 @@ import { Workspace } from './WorkspaceTypes';
 import DailyQuoteCard from './DailyQuoteCard';
 import { getRealUserActivities, recordUserActivity, UserActivityItem } from '../../utils/userActivity';
 import { HomeWorkspaceSkeleton, RecentActivitySkeleton } from './DashboardSkeletons';
+import { readSyncProfileSnapshot, fetchAndReconcileSupabaseProfile } from '../../utils/profileStorage';
 
 interface DashboardHomeProps {
   setActiveTab: (tab: string) => void;
@@ -72,52 +73,41 @@ export default function DashboardHome({
   activeWorkspace,
   isLoading = false
 }: DashboardHomeProps) {
-  // 1. User Display Identity & ID
+  // 1. User Display Identity & ID (Synchronously hydrated from real profile)
+  const initialSnap = useMemo(() => readSyncProfileSnapshot(), []);
   const [displayName, setDisplayName] = useState<string>(() => {
-    return localStorage.getItem('studyweb_profile_name') || 'Scholar';
+    return initialSnap.fullName || (initialSnap.email ? initialSnap.email.split('@')[0] : 'Student');
   });
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(initialSnap.userId);
 
   useEffect(() => {
-    // Retrieve authenticated user details from Supabase session and profiles table
-    if (supabase) {
-      supabase.auth.getSession().then(async ({ data: { session } }) => {
-        if (session?.user) {
-          const user = session.user;
-          setCurrentUserId(user.id);
-          let resolvedName = user.user_metadata?.full_name || user.user_metadata?.name || '';
-
-          try {
-            const { data: profileRow } = await supabase
-              .from('profiles')
-              .select('full_name, name')
-              .eq('id', user.id)
-              .maybeSingle();
-            if (profileRow?.full_name || profileRow?.name) {
-              resolvedName = profileRow.full_name || profileRow.name;
-            }
-          } catch {}
-
-          if (!resolvedName && user.email) {
-            const emailName = user.email.split('@')[0];
-            resolvedName = emailName.charAt(0).toUpperCase() + emailName.slice(1);
-          }
-
-          if (resolvedName) {
-            setDisplayName(resolvedName);
-            localStorage.setItem('studyweb_profile_name', resolvedName);
-          }
+    let isMounted = true;
+    fetchAndReconcileSupabaseProfile()
+      .then(({ profile }) => {
+        if (!isMounted) return;
+        if (profile.userId) setCurrentUserId(profile.userId);
+        if (profile.fullName) {
+          setDisplayName(profile.fullName);
+        } else if (profile.email) {
+          setDisplayName(profile.email.split('@')[0]);
         }
-      }).catch(() => {});
-    }
+      })
+      .catch(() => {});
 
-    const handleStorageChange = () => {
-      const stored = localStorage.getItem('studyweb_profile_name');
-      if (stored) setDisplayName(stored);
+    const handleStorageChange = (e?: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      const snap = detail && typeof detail === 'object' && 'fullName' in detail ? detail : readSyncProfileSnapshot();
+      if (snap.fullName) {
+        setDisplayName(snap.fullName);
+      } else if (snap.email) {
+        setDisplayName(snap.email.split('@')[0]);
+      }
+      if (snap.userId) setCurrentUserId(snap.userId);
     };
     window.addEventListener('storage', handleStorageChange);
     window.addEventListener('studyweb_profile_updated', handleStorageChange);
     return () => {
+      isMounted = false;
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('studyweb_profile_updated', handleStorageChange);
     };
@@ -125,7 +115,7 @@ export default function DashboardHome({
 
   const firstName = useMemo(() => {
     const parts = displayName.trim().split(' ');
-    return parts[0] || 'Scholar';
+    return parts[0] || 'Student';
   }, [displayName]);
 
   // 2. Time-adapted greeting

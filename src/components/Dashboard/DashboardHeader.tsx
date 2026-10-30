@@ -18,6 +18,7 @@ import {
   User
 } from 'lucide-react';
 import { useThemeMode } from '../../hooks/useThemeMode';
+import { readSyncProfileSnapshot, fetchAndReconcileSupabaseProfile } from '../../utils/profileStorage';
 
 const tabLabels: Record<string, string> = {
   'dashboard': 'Home',
@@ -52,16 +53,24 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [isMobileSearchExpanded, setIsMobileSearchExpanded] = useState(false);
   const { themeMode, toggleTheme } = useThemeMode();
-  const [profilePic, setProfilePic] = useState<string | null>(null);
+  const [profilePic, setProfilePic] = useState<string | null>(() => readSyncProfileSnapshot().avatarUrl);
 
   useEffect(() => {
-    const updatePic = () => {
-      const savedPic = localStorage.getItem('studyweb_profile_avatar') || localStorage.getItem('studyweb_profile_pic');
-      if (savedPic) {
-        setProfilePic(savedPic);
+    const updatePic = (e?: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail && 'avatarUrl' in detail) {
+        setProfilePic(detail.avatarUrl || null);
+        return;
       }
+      const snap = readSyncProfileSnapshot();
+      setProfilePic(snap.avatarUrl);
     };
     updatePic();
+    fetchAndReconcileSupabaseProfile()
+      .then(({ profile }) => {
+        setProfilePic(profile.avatarUrl);
+      })
+      .catch(() => {});
     window.addEventListener('studyweb_profile_updated', updatePic);
     window.addEventListener('storage', updatePic);
     return () => {

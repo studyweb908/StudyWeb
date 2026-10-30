@@ -82,6 +82,12 @@ import { WorkspaceSyncService } from './services/WorkspaceSyncService.ts';
 import { StudyTrackerService } from './services/StudyTrackerService';
 import { loadStoredWorkspaces, saveStoredWorkspaces, clearGuestWorkspaces } from './utils/workspaceStorage';
 import { recordUserActivity } from './utils/userActivity';
+import {
+  readSyncProfileSnapshot,
+  fetchAndReconcileSupabaseProfile,
+  clearProfileMemoryCache
+} from './utils/profileStorage';
+import { ProfileSettingsHub } from './components/Dashboard/ProfileSettingsHub';
 import WorkspaceSelector from './components/Dashboard/WorkspaceSelector';
 import WorkspaceContainer from './components/Dashboard/WorkspaceContainer';
 import WorkspaceChat from './components/Dashboard/WorkspaceChat';
@@ -93,7 +99,6 @@ const ResourcesView = lazyWithRetry(() => import('./components/Dashboard/Auxilia
 const AnalyticsView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.AnalyticsView })));
 const AchievementsView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.AchievementsView })));
 const LeaderboardView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.LeaderboardView })));
-const ProfileView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.ProfileView })));
 const ParentDashboardView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.ParentDashboardView })));
 
 export default function App() {
@@ -113,10 +118,12 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showWelcomeBack, setShowWelcomeBack] = useState(false);
   const [welcomeUserName, setWelcomeUserName] = useState<string>(() => {
-    return localStorage.getItem('studyweb_profile_name') || 'Scholar';
+    const snap = readSyncProfileSnapshot();
+    return snap.fullName || (snap.email ? snap.email.split('@')[0] : 'Student');
   });
   const [welcomeAvatarUrl, setWelcomeAvatarUrl] = useState<string | undefined>(() => {
-    return localStorage.getItem('studyweb_profile_avatar') || localStorage.getItem('studyweb_profile_pic') || undefined;
+    const snap = readSyncProfileSnapshot();
+    return snap.avatarUrl || undefined;
   });
   const [legalModalType, setLegalModalType] = useState<'privacy' | 'terms' | null>(null);
 
@@ -174,12 +181,15 @@ export default function App() {
 
   // Workspace context handles persistance, but we still need to manage workspaces array locally.
   const handleUpdateWorkspace = (updated: Workspace) => {
-    const next = workspaces.map(w => w.id === updated.id ? updated : w);
-    setWorkspaces(next);
-    saveStoredWorkspaces(next, currentUserId);
-    if (activeWorkspace && activeWorkspace.id === updated.id) {
-      setActiveWorkspace(updated);
-    }
+    setWorkspaces(prev => {
+      const exists = prev.some(w => w.id === updated.id);
+      const next = exists
+        ? prev.map(w => w.id === updated.id ? updated : w)
+        : [updated, ...prev];
+      saveStoredWorkspaces(next, currentUserId);
+      return next;
+    });
+    setActiveWorkspace(prev => (prev && prev.id === updated.id ? updated : prev));
     // Synchronize updates directly to Supabase with user_id attached
     WorkspaceSyncService.saveWorkspace(updated, currentUserId || undefined);
   };
@@ -353,36 +363,67 @@ export default function App() {
           }
 
           // 2. Fetch user's profile and workspaces in parallel strictly from Supabase
-          const [remoteWorkspaces, profileResult] = await Promise.all([
+          const [remoteWorkspaces, reconciledProfileRes] = await Promise.all([
             WorkspaceSyncService.fetchWorkspaces(userId),
-            supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
+            fetchAndReconcileSupabaseProfile()
           ]);
 
-          const profileRow = profileResult?.data;
-          const metaName = user.user_metadata?.full_name || user.user_metadata?.name;
-          const dbName = profileRow?.full_name || metaName || (user.email ? user.email.split('@')[0] : '');
-          if (dbName) {
-            localStorage.setItem('studyweb_profile_name', dbName);
-            setWelcomeUserName(dbName);
+          const reconciledProfile = reconciledProfileRes?.profile;
+          if (reconciledProfile) {
+            if (reconciledProfile.fullName) {
+              setWelcomeUserName(reconciledProfile.fullName);
+            }
+            if (reconciledProfile.avatarUrl) {
+              setWelcomeAvatarUrl(reconciledProfile.avatarUrl);
+            }
           }
-          const dbAvatar = profileRow?.avatar_url || user.user_metadata?.avatar_url || user.user_metadata?.picture;
-          if (dbAvatar) {
-            localStorage.setItem('studyweb_profile_avatar', dbAvatar);
-            localStorage.setItem('studyweb_profile_pic', dbAvatar);
-            setWelcomeAvatarUrl(dbAvatar);
-          }
-          if (profileRow?.school) localStorage.setItem('studyweb_profile_school', profileRow.school);
-          if (profileRow?.grade) localStorage.setItem('studyweb_profile_grade', profileRow.grade);
-          if (profileRow?.bio) localStorage.setItem('studyweb_profile_bio', profileRow.bio);
-          if (profileRow?.learning_goal) localStorage.setItem('studyweb_profile_goal', profileRow.learning_goal);
-          window.dispatchEvent(new Event('studyweb_profile_updated'));
 
+          const userCached = loadStoredWorkspaces(userId) || [];
           if (Array.isArray(remoteWorkspaces) && remoteWorkspaces.length > 0) {
-            setWorkspaces(remoteWorkspaces);
-            saveStoredWorkspaces(remoteWorkspaces, userId);
+            // Merge remote workspaces with local cached workspaces so no locally uploaded files/notes are lost
+            const mergedMap = new Map<string, Workspace>();
+            remoteWorkspaces.forEach(rw => mergedMap.set(rw.id, rw));
+            userCached.forEach(lw => {
+              const existing = mergedMap.get(lw.id);
+              if (!existing) {
+                mergedMap.set(lw.id, lw);
+              } else {
+                const fileMap = new Map<string, any>();
+                (existing.files || []).forEach(f => fileMap.set(String(f.id || f.name).toLowerCase(), f));
+                (lw.files || []).forEach(f => {
+                  const key = String(f.id || f.name).toLowerCase();
+                  const hasByName = Array.from(fileMap.values()).some(
+                    ef => ef.name && f.name && ef.name.trim().toLowerCase() === f.name.trim().toLowerCase()
+                  );
+                  if (!fileMap.has(key) && !hasByName) {
+                    fileMap.set(key, f);
+                  }
+                });
+                const noteMap = new Map<string, any>();
+                (existing.notes || []).forEach(n => noteMap.set(String(n.id || n.title).toLowerCase(), n));
+                (lw.notes || []).forEach(n => {
+                  const key = String(n.id || n.title).toLowerCase();
+                  if (!noteMap.has(key)) noteMap.set(key, n);
+                });
+                mergedMap.set(lw.id, {
+                  ...existing,
+                  files: Array.from(fileMap.values()),
+                  notes: Array.from(noteMap.values()),
+                  flashcards: (existing.flashcards && existing.flashcards.length > 0) ? existing.flashcards : (lw.flashcards || []),
+                  quizzes: (existing.quizzes && existing.quizzes.length > 0) ? existing.quizzes : (lw.quizzes || [])
+                });
+              }
+            });
+            const mergedList = Array.from(mergedMap.values());
+            setWorkspaces(mergedList);
+            saveStoredWorkspaces(mergedList, userId);
+            setActiveWorkspace(prev => {
+              if (!prev) return prev;
+              const match = mergedList.find(w => w.id === prev.id);
+              return match || prev;
+            });
           } else {
-            const userCached = loadStoredWorkspaces(userId);
-            setWorkspaces(userCached || []);
+            setWorkspaces(userCached);
           }
         } else {
           // Unauthenticated guest user: strictly load local guest workspaces
@@ -413,9 +454,12 @@ export default function App() {
           setCurrentUserId(null);
           setWorkspaces([]);
           setActiveWorkspace(null);
+          clearProfileMemoryCache();
+          WorkspaceSyncService.clearCache();
           [
             'studyweb_is_logged_in',
             'studyweb_active_user_id',
+            'studyweb_profile_cache_latest',
             'studyweb_profile_name',
             'studyweb_profile_avatar',
             'studyweb_profile_pic',
@@ -543,6 +587,8 @@ export default function App() {
   const executeLogout = async () => {
     setIsLoggedIn(false);
     setCurrentUserId(null);
+    clearProfileMemoryCache();
+    WorkspaceSyncService.clearCache();
     
     // Clear Supabase Session
     try {
@@ -554,6 +600,8 @@ export default function App() {
     // Clear active session flags & user profile cache so next user never sees stale data
     [
       'studyweb_is_logged_in',
+      'studyweb_active_user_id',
+      'studyweb_profile_cache_latest',
       'studyweb_profile_name',
       'studyweb_profile_avatar',
       'studyweb_profile_pic',
@@ -700,7 +748,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Other Views — Rendered on demand so initial load is instantaneous */}
+        {/* Critical-Path Views — Rendered synchronously in 0ms without lazy chunk delay */}
         {(activeTab === 'dashboard' || !activeTab) && (
           <DashboardHome 
             setActiveTab={setActiveTab} 
@@ -710,6 +758,8 @@ export default function App() {
             isLoading={isLoadingWorkspaces}
           />
         )}
+        {activeTab === 'profile' && <ProfileSettingsHub />}
+
         <Suspense fallback={null}>
           {activeTab === 'study-session' && <StudySessionView />}
           {activeTab === 'study-planner' && <StudyPlannerView />}
@@ -718,7 +768,6 @@ export default function App() {
           {activeTab === 'analytics' && <AnalyticsView />}
           {activeTab === 'achievements' && <AchievementsView />}
           {activeTab === 'leaderboard' && <LeaderboardView />}
-          {activeTab === 'profile' && <ProfileView />}
           {activeTab === 'parent-dashboard' && <ParentDashboardView />}
           {activeTab === 'pdf-chat' && (
             <PDFWorkspaceView 

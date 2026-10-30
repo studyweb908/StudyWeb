@@ -139,6 +139,54 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
     return () => window.removeEventListener('studyweb-file-dataurl-ready', handleDataUrlReady);
   }, [workspace, onUpdateWorkspace]);
 
+  // Real-time fetch & merge of uploaded files from Supabase when entering or switching workspaces
+  useEffect(() => {
+    let isMounted = true;
+    if (!workspace?.id) return;
+
+    WorkspaceSyncService.fetchWorkspaceFiles(workspace.id)
+      .then((remoteFiles) => {
+        if (!isMounted || !Array.isArray(remoteFiles) || remoteFiles.length === 0) return;
+        const currentFiles = workspace.files || [];
+        const fileMap = new Map<string, WorkspaceFile>();
+
+        // Keep real local files first, then merge remote files by id or normalized name
+        currentFiles.forEach((f) => {
+          if (f && f.name) {
+            fileMap.set(f.id || f.name.toLowerCase(), f);
+          }
+        });
+
+        let hasNewOrUpdated = false;
+        remoteFiles.forEach((rf) => {
+          if (!rf || !rf.name) return;
+          const existingById = currentFiles.find((cf) => cf.id === rf.id);
+          const existingByName = currentFiles.find(
+            (cf) => cf.name && cf.name.trim().toLowerCase() === rf.name.trim().toLowerCase()
+          );
+          if (!existingById && !existingByName) {
+            fileMap.set(rf.id || rf.name.toLowerCase(), rf);
+            hasNewOrUpdated = true;
+          } else if (existingById && (!existingById.transcription && rf.transcription)) {
+            fileMap.set(existingById.id, { ...existingById, ...rf });
+            hasNewOrUpdated = true;
+          }
+        });
+
+        if (hasNewOrUpdated) {
+          onUpdateWorkspace({
+            ...workspace,
+            files: Array.from(fileMap.values())
+          });
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
+  }, [workspace.id]);
+
   useEffect(() => {
     let dragCounter = 0;
     const handleGlobalDragEnter = (e: DragEvent) => {

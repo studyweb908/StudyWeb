@@ -1,30 +1,42 @@
 /**
  * StudyTrackerService
  *
- * Real-time study time logging and daily streak tracker for StudyWeb.
- * Tracks actual student session time spent on StudyWeb and computes
- * strict, real consecutive-day calendar streaks ("every day there should be one streak every day").
+ * Personalized real-time study time logging, subject breakdown, and daily streak tracker for StudyWeb.
+ * Tracks actual user session time and logged study sessions per user and per subject,
+ * synchronizing directly with Supabase.
  */
 
 import { supabase } from '../lib/supabase';
 import { getActiveUserIdSync } from '../utils/userActivity';
 
+export interface StudySessionLogItem {
+  id: string;
+  subject: string;
+  minutes: number;
+  date: string;       // ISO timestamp
+  note?: string;
+}
+
 export interface StudyStats {
-  totalSeconds: number;       // Cumulative seconds studied
-  todaySeconds: number;       // Seconds studied on the current calendar day
-  currentStreak: number;      // Real consecutive calendar days streak
-  studyDates: string[];       // Chronological array of unique YYYY-MM-DD local dates
-  lastActiveDate: string;     // YYYY-MM-DD of last recorded activity
-  lastHeartbeat: number;      // Epoch ms of last active tick
-  isStudyingLive: boolean;    // Whether user is actively interacting now
+  totalSeconds: number;                   // Cumulative seconds studied by this user
+  todaySeconds: number;                   // Seconds studied on the current calendar day
+  currentStreak: number;                  // Consecutive calendar days streak
+  studyDates: string[];                   // Chronological array of unique YYYY-MM-DD local dates
+  lastActiveDate: string;                 // YYYY-MM-DD of last recorded activity
+  lastHeartbeat: number;                  // Epoch ms of last active tick
+  isStudyingLive: boolean;                // Whether user is actively interacting now
+  subjectSeconds: Record<string, number>; // Seconds studied per subject/workspace
+  recentSessions: StudySessionLogItem[];  // Recent logged study sessions
+  completedRoutineDates?: string[];       // YYYY-MM-DD dates when daily routine goal was completed
 }
 
 export interface FormattedStudyStats extends StudyStats {
   studyHoursFormatted: string; // e.g. "0.4" or "2.5"
   studyHoursNumber: number;    // e.g. 0.4
   todayMinutes: number;        // e.g. 24
-  streakBadgeText: string;     // e.g. "🔥 Active Today" or "Day 1 of Streak"
-  activeToday: boolean;        // whether student has logged in & studied today
+  streakBadgeText: string;     // e.g. "Day 1 Streak Active"
+  activeToday: boolean;        // whether student has completed daily routine today
+  subjectBreakdown: Array<{ subject: string; minutes: number; hours: string; percentage: number }>;
 }
 
 // Helper: Formats a local date to YYYY-MM-DD (safe against UTC timezone shifts)
@@ -43,28 +55,30 @@ export function getPreviousDateString(dateStr: string): string {
   return getLocalDateString(date);
 }
 
-// Compute consecutive calendar day streak from historical dates
-export function calculateConsecutiveStreak(studyDates: string[], todayStr: string): { streak: number; activeToday: boolean } {
-  if (!studyDates || studyDates.length === 0) {
-    return { streak: 1, activeToday: true };
-  }
+// Compute streak where base streak is 1 (or consecutive prior completed days) and completing today's routine adds +1
+export function calculateConsecutiveStreak(
+  completedRoutineDates: string[],
+  todayStr: string
+): { streak: number; activeToday: boolean } {
+  const dateSet = new Set(completedRoutineDates || []);
+  const routineDoneToday = dateSet.has(todayStr);
 
-  const dateSet = new Set(studyDates);
-  const activeToday = dateSet.has(todayStr);
-
-  let checkDate = activeToday ? todayStr : getPreviousDateString(todayStr);
-  let streak = 0;
-
-  // Walk backwards day-by-day
+  // Count consecutive completed days prior to today
+  let checkDate = getPreviousDateString(todayStr);
+  let priorCompletedDays = 0;
   while (dateSet.has(checkDate)) {
-    streak += 1;
+    priorCompletedDays += 1;
     checkDate = getPreviousDateString(checkDate);
   }
 
-  // If user is studying today, the minimum streak is 1
+  // Base streak starts at 1 for an active student (+ any additional prior completed days),
+  // and increments by +1 as soon as today's daily study routine is completed!
+  const baseStreak = Math.max(1, priorCompletedDays > 0 ? priorCompletedDays : 1);
+  const streak = routineDoneToday ? baseStreak + 1 : baseStreak;
+
   return {
-    streak: Math.max(1, streak),
-    activeToday
+    streak,
+    activeToday: routineDoneToday
   };
 }
 
@@ -74,14 +88,19 @@ class StudyTrackerManager {
   private lastUserInteraction: number = Date.now();
   private isLiveActive: boolean = true;
   private initialized: boolean = false;
+  private activeSubjectLabel: string = '';
+  private dailyGoalMinutes: number = 45;
   private memoryStats: StudyStats = {
     totalSeconds: 0,
     todaySeconds: 0,
     currentStreak: 1,
     studyDates: [],
+    completedRoutineDates: [],
     lastActiveDate: '',
     lastHeartbeat: Date.now(),
-    isStudyingLive: false
+    isStudyingLive: false,
+    subjectSeconds: {},
+    recentSessions: []
   };
 
   constructor() {
@@ -95,14 +114,65 @@ class StudyTrackerManager {
     return uid ? `studyweb_study_stats_${uid}` : 'studyweb_study_stats_guest';
   }
 
+  private resolveDailyGoalMinutes(): number {
+    if (typeof window !== 'undefined') {
+      try {
+        const cachedRaw = localStorage.getItem('studyweb_profile_cache_latest');
+        if (cachedRaw) {
+          const parsed = JSON.parse(cachedRaw);
+          const mins = Number(parsed?.dailyGoalMinutes);
+          if (Number.isFinite(mins) && mins >= 5) {
+            this.dailyGoalMinutes = mins;
+            return mins;
+          }
+        }
+        const directGoal = Number(localStorage.getItem('studyweb_profile_daily_goal'));
+        if (Number.isFinite(directGoal) && directGoal >= 5) {
+          this.dailyGoalMinutes = directGoal;
+          return directGoal;
+        }
+      } catch {}
+    }
+    return this.dailyGoalMinutes || 45;
+  }
+
+  public setDailyGoalMinutes(mins: number): void {
+    const clean = Math.max(5, Math.min(720, Math.round(Number(mins) || 45)));
+    this.dailyGoalMinutes = clean;
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('studyweb_profile_daily_goal', String(clean));
+      } catch {}
+    }
+    this.evaluateDailyRoutineStreak();
+    this.persistStats(true);
+    this.broadcastUpdate();
+  }
+
+  private resolveCurrentSubject(): string {
+    if (this.activeSubjectLabel) return this.activeSubjectLabel;
+    if (typeof window !== 'undefined') {
+      const profileSub = localStorage.getItem('studyweb_profile_subject');
+      if (profileSub && profileSub.trim()) return profileSub.trim();
+    }
+    return 'General Study';
+  }
+
+  public setActiveSubject(subjectName: string): void {
+    if (subjectName && subjectName.trim()) {
+      this.activeSubjectLabel = subjectName.trim();
+    }
+  }
+
   public init(): void {
     if (this.initialized || typeof window === 'undefined') return;
     this.initialized = true;
 
     this.activeUserId = getActiveUserIdSync();
+    this.resolveDailyGoalMinutes();
     this.loadStatsFromStorage();
+    this.reconcileWithSupabase();
 
-    // Register user activity listeners to detect active presence vs idle
     const onActivity = () => {
       this.lastUserInteraction = Date.now();
       if (!this.isLiveActive) {
@@ -119,33 +189,36 @@ class StudyTrackerManager {
     window.addEventListener('studyweb-activity-updated', () => {
       this.recordStudyAction('workspace');
     });
+    window.addEventListener('studyweb_profile_updated', () => {
+      this.resolveDailyGoalMinutes();
+      this.evaluateDailyRoutineStreak();
+      this.broadcastUpdate();
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         onActivity();
       }
     });
 
-    // 1-second real-time heartbeat ticker
     this.timer = setInterval(() => {
       this.tickStudySession();
     }, 1000);
 
-    // Initial check on today's streak registration
-    this.ensureTodayStreakLogged();
+    this.evaluateDailyRoutineStreak();
 
-    // Listen to auth changes to switch user storage keys smoothly
     if (supabase) {
       supabase.auth.onAuthStateChange((_event, session) => {
         const newUid = session?.user?.id || null;
         if (newUid !== this.activeUserId) {
           this.activeUserId = newUid;
+          this.resolveDailyGoalMinutes();
           this.loadStatsFromStorage();
-          this.ensureTodayStreakLogged();
+          this.evaluateDailyRoutineStreak();
+          this.reconcileWithSupabase();
         }
       });
     }
 
-    // Flush stats to storage on unload
     window.addEventListener('beforeunload', () => {
       this.persistStats(true);
     });
@@ -164,55 +237,171 @@ class StudyTrackerManager {
           studyDates.push(todayStr);
         }
 
-        const { streak } = calculateConsecutiveStreak(studyDates, todayStr);
+        const totalSeconds = Math.max(0, Number(parsed.totalSeconds) || 0);
+        const todaySeconds = parsed.lastActiveDate === todayStr ? Math.max(0, Number(parsed.todaySeconds) || 0) : 0;
+        const todayMins = todaySeconds > 0 ? Math.max(1, Math.round(todaySeconds / 60)) : 0;
+        const goalMins = this.resolveDailyGoalMinutes();
+
+        let completedRoutineDates: string[] = Array.isArray(parsed.completedRoutineDates)
+          ? [...parsed.completedRoutineDates]
+          : [];
+
+        if (todayMins >= goalMins && !completedRoutineDates.includes(todayStr)) {
+          completedRoutineDates.push(todayStr);
+        } else if (todayMins < goalMins && completedRoutineDates.includes(todayStr)) {
+          completedRoutineDates = completedRoutineDates.filter(d => d !== todayStr);
+        }
+
+        const { streak } = calculateConsecutiveStreak(completedRoutineDates, todayStr);
 
         this.memoryStats = {
-          totalSeconds: Number(parsed.totalSeconds) || 60, // Minimum initial active study seed
-          todaySeconds: parsed.lastActiveDate === todayStr ? (Number(parsed.todaySeconds) || 60) : 60,
+          totalSeconds,
+          todaySeconds,
           currentStreak: streak,
           studyDates,
+          completedRoutineDates,
           lastActiveDate: todayStr,
           lastHeartbeat: Date.now(),
-          isStudyingLive: true
+          isStudyingLive: true,
+          subjectSeconds: parsed.subjectSeconds && typeof parsed.subjectSeconds === 'object' ? parsed.subjectSeconds : {},
+          recentSessions: Array.isArray(parsed.recentSessions) ? parsed.recentSessions.slice(0, 20) : []
         };
       } else {
-        // Initial setup for new student: start with real Day 1 streak
         this.memoryStats = {
-          totalSeconds: 120, // 2 minutes initial active registration
-          todaySeconds: 120,
+          totalSeconds: 0,
+          todaySeconds: 0,
           currentStreak: 1,
           studyDates: [todayStr],
+          completedRoutineDates: [],
           lastActiveDate: todayStr,
           lastHeartbeat: Date.now(),
-          isStudyingLive: true
+          isStudyingLive: true,
+          subjectSeconds: {},
+          recentSessions: []
         };
         this.persistStats();
       }
     } catch {
       const todayStr = getLocalDateString();
       this.memoryStats = {
-        totalSeconds: 60,
-        todaySeconds: 60,
+        totalSeconds: 0,
+        todaySeconds: 0,
         currentStreak: 1,
         studyDates: [todayStr],
+        completedRoutineDates: [],
         lastActiveDate: todayStr,
         lastHeartbeat: Date.now(),
-        isStudyingLive: true
+        isStudyingLive: true,
+        subjectSeconds: {},
+        recentSessions: []
       };
     }
   }
 
-  private ensureTodayStreakLogged(): void {
+  public async reconcileWithSupabase(): Promise<void> {
+    if (!supabase) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) return;
+      const uid = session.user.id;
+      this.activeUserId = uid;
+
+      const metaStats = session.user.user_metadata?.study_stats;
+      const { data: profileRow } = await supabase
+        .from('profiles')
+        .select('study_hours, streak')
+        .eq('id', uid)
+        .maybeSingle();
+
+      const remoteHours = Number(profileRow?.study_hours || 0);
+      const remoteSecondsFromProfile = Number.isFinite(remoteHours) && remoteHours > 0 ? Math.round(remoteHours * 3600) : 0;
+      const remoteSecondsFromMeta = Number(metaStats?.totalSeconds || 0);
+      const bestTotalSeconds = Math.max(this.memoryStats.totalSeconds, remoteSecondsFromProfile, remoteSecondsFromMeta);
+
+      if (bestTotalSeconds > this.memoryStats.totalSeconds) {
+        this.memoryStats.totalSeconds = bestTotalSeconds;
+      }
+
+      if (metaStats && typeof metaStats === 'object') {
+        const todayStr = getLocalDateString();
+        if (metaStats.lastActiveDate === todayStr && Number(metaStats.todaySeconds) > this.memoryStats.todaySeconds) {
+          this.memoryStats.todaySeconds = Number(metaStats.todaySeconds);
+        }
+        if (Array.isArray(metaStats.studyDates)) {
+          const mergedDates = Array.from(new Set([...this.memoryStats.studyDates, ...metaStats.studyDates])).sort();
+          this.memoryStats.studyDates = mergedDates;
+        }
+        if (Array.isArray(metaStats.completedRoutineDates)) {
+          const mergedRoutine = Array.from(
+            new Set([...(this.memoryStats.completedRoutineDates || []), ...metaStats.completedRoutineDates])
+          ).sort();
+          this.memoryStats.completedRoutineDates = mergedRoutine;
+        }
+        if (metaStats.subjectSeconds && typeof metaStats.subjectSeconds === 'object') {
+          for (const [subj, secs] of Object.entries(metaStats.subjectSeconds)) {
+            const cur = this.memoryStats.subjectSeconds[subj] || 0;
+            this.memoryStats.subjectSeconds[subj] = Math.max(cur, Number(secs) || 0);
+          }
+        }
+        if (Array.isArray(metaStats.recentSessions) && this.memoryStats.recentSessions.length === 0) {
+          this.memoryStats.recentSessions = metaStats.recentSessions.slice(0, 20);
+        }
+      }
+
+      this.evaluateDailyRoutineStreak();
+      this.persistStats(false);
+      this.broadcastUpdate();
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  private evaluateDailyRoutineStreak(): boolean {
     const todayStr = getLocalDateString();
     if (!this.memoryStats.studyDates.includes(todayStr)) {
       this.memoryStats.studyDates.push(todayStr);
+      this.memoryStats.studyDates.sort();
     }
-    this.memoryStats.studyDates.sort();
 
-    const { streak } = calculateConsecutiveStreak(this.memoryStats.studyDates, todayStr);
+    const completedList = Array.isArray(this.memoryStats.completedRoutineDates)
+      ? [...this.memoryStats.completedRoutineDates]
+      : [];
+
+    const wasCompletedToday = completedList.includes(todayStr);
+    const todayMins = this.memoryStats.todaySeconds > 0
+      ? Math.max(1, Math.round(this.memoryStats.todaySeconds / 60))
+      : 0;
+    const goalMins = this.resolveDailyGoalMinutes();
+    const isNowCompletedToday = todayMins >= goalMins;
+
+    let newlyCompleted = false;
+    if (isNowCompletedToday && !wasCompletedToday) {
+      completedList.push(todayStr);
+      completedList.sort();
+      newlyCompleted = true;
+    } else if (!isNowCompletedToday && wasCompletedToday) {
+      const idx = completedList.indexOf(todayStr);
+      if (idx !== -1) completedList.splice(idx, 1);
+    }
+
+    this.memoryStats.completedRoutineDates = completedList;
+    const { streak } = calculateConsecutiveStreak(completedList, todayStr);
     this.memoryStats.currentStreak = streak;
     this.memoryStats.lastActiveDate = todayStr;
-    this.persistStats();
+
+    if (newlyCompleted && typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('studyweb-daily-routine-completed', {
+          detail: {
+            streak,
+            todayMinutes: todayMins,
+            dailyGoalMinutes: goalMins
+          }
+        })
+      );
+    }
+
+    return newlyCompleted;
   }
 
   private tickStudySession(): void {
@@ -222,7 +411,6 @@ class StudyTrackerManager {
     const idleSeconds = (now - this.lastUserInteraction) / 1000;
     const isVisible = document.visibilityState === 'visible';
 
-    // Count as active study if user interacted within the last 3 minutes and window is visible
     const isUserStudying = isVisible && idleSeconds <= 180;
     this.isLiveActive = isUserStudying;
     this.memoryStats.isStudyingLive = isUserStudying;
@@ -232,40 +420,66 @@ class StudyTrackerManager {
       this.memoryStats.todaySeconds += 1;
       this.memoryStats.lastHeartbeat = now;
 
+      const currentSubj = this.resolveCurrentSubject();
+      this.memoryStats.subjectSeconds[currentSubj] = (this.memoryStats.subjectSeconds[currentSubj] || 0) + 1;
+
       const todayStr = getLocalDateString();
       if (this.memoryStats.lastActiveDate !== todayStr) {
-        this.ensureTodayStreakLogged();
+        this.memoryStats.todaySeconds = 1;
       }
 
-      // Periodically persist to localStorage every 5 seconds
-      if (this.memoryStats.totalSeconds % 5 === 0) {
-        this.persistStats();
+      const newlyCompleted = this.evaluateDailyRoutineStreak();
+
+      if (newlyCompleted || this.memoryStats.totalSeconds % 5 === 0) {
+        this.persistStats(newlyCompleted);
       }
 
-      // Periodically sync to Supabase every 60 seconds
       if (this.memoryStats.totalSeconds % 60 === 0) {
         this.syncToSupabase();
       }
     }
 
-    // Broadcast live update event so UI updates reactively every second
     this.broadcastUpdate();
   }
 
-  public addActiveStudySeconds(seconds: number): void {
+  public addActiveStudySeconds(seconds: number, subjectName?: string): void {
     if (seconds <= 0) return;
+    const subj = (subjectName && subjectName.trim()) || this.resolveCurrentSubject();
     this.memoryStats.totalSeconds += seconds;
     this.memoryStats.todaySeconds += seconds;
-    this.ensureTodayStreakLogged();
-    this.persistStats();
+    this.memoryStats.subjectSeconds[subj] = (this.memoryStats.subjectSeconds[subj] || 0) + seconds;
+    const newlyCompleted = this.evaluateDailyRoutineStreak();
+    this.persistStats(newlyCompleted);
     this.broadcastUpdate();
   }
 
-  public recordStudyAction(type: 'tutor' | 'quiz' | 'flashcard' | 'note' | 'workspace'): void {
-    // Whenever student actively quizzes, writes notes, or chats with AI tutor, guarantee active study registration
+  public logManualStudySession(minutes: number, subjectName: string, note?: string): { newlyCompletedRoutine: boolean; currentStreak: number } {
+    const cleanMins = Math.max(1, Math.min(720, Math.round(Number(minutes) || 0)));
+    const cleanSubject = (subjectName || '').trim() || this.resolveCurrentSubject();
+    const addedSeconds = cleanMins * 60;
+
+    this.memoryStats.totalSeconds += addedSeconds;
+    this.memoryStats.todaySeconds += addedSeconds;
+    this.memoryStats.subjectSeconds[cleanSubject] = (this.memoryStats.subjectSeconds[cleanSubject] || 0) + addedSeconds;
+
+    const sessionItem: StudySessionLogItem = {
+      id: `sess-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      subject: cleanSubject,
+      minutes: cleanMins,
+      date: new Date().toISOString(),
+      note: note?.trim() || undefined
+    };
+
+    this.memoryStats.recentSessions = [sessionItem, ...(this.memoryStats.recentSessions || [])].slice(0, 20);
+    const newlyCompletedRoutine = this.evaluateDailyRoutineStreak();
+    this.persistStats(true);
+    this.broadcastUpdate();
+    return { newlyCompletedRoutine, currentStreak: this.memoryStats.currentStreak };
+  }
+
+  public recordStudyAction(type: 'tutor' | 'quiz' | 'flashcard' | 'note' | 'workspace', subjectName?: string): void {
     this.lastUserInteraction = Date.now();
-    this.ensureTodayStreakLogged();
-    this.addActiveStudySeconds(15); // Add a 15-second study bonus for completing actions
+    this.addActiveStudySeconds(15, subjectName);
   }
 
   private persistStats(forceSync = false): void {
@@ -276,8 +490,11 @@ class StudyTrackerManager {
         todaySeconds: this.memoryStats.todaySeconds,
         currentStreak: this.memoryStats.currentStreak,
         studyDates: this.memoryStats.studyDates,
+        completedRoutineDates: this.memoryStats.completedRoutineDates || [],
         lastActiveDate: this.memoryStats.lastActiveDate,
-        lastHeartbeat: this.memoryStats.lastHeartbeat
+        lastHeartbeat: this.memoryStats.lastHeartbeat,
+        subjectSeconds: this.memoryStats.subjectSeconds,
+        recentSessions: this.memoryStats.recentSessions
       }));
       if (forceSync) {
         this.syncToSupabase();
@@ -293,16 +510,30 @@ class StudyTrackerManager {
       const uid = this.activeUserId || getActiveUserIdSync();
       if (!uid) return;
 
-      const hoursLogged = Math.round((this.memoryStats.totalSeconds / 3600) * 10) / 10;
+      const hoursLogged = Math.round((this.memoryStats.totalSeconds / 3600) * 100) / 100;
       const streakVal = this.memoryStats.currentStreak;
 
-      // Update user profile study telemetry
-      await supabase.from('profiles').update({
-        study_hours: hoursLogged,
-        streak: streakVal,
-        updated_at: new Date().toISOString()
-      }).eq('id', uid);
-
+      await Promise.allSettled([
+        supabase.from('profiles').update({
+          study_hours: hoursLogged,
+          streak: streakVal,
+          updated_at: new Date().toISOString()
+        }).eq('id', uid),
+        supabase.auth.updateUser({
+          data: {
+            study_stats: {
+              totalSeconds: this.memoryStats.totalSeconds,
+              todaySeconds: this.memoryStats.todaySeconds,
+              currentStreak: this.memoryStats.currentStreak,
+              studyDates: this.memoryStats.studyDates.slice(-60),
+              completedRoutineDates: (this.memoryStats.completedRoutineDates || []).slice(-60),
+              lastActiveDate: this.memoryStats.lastActiveDate,
+              subjectSeconds: this.memoryStats.subjectSeconds,
+              recentSessions: (this.memoryStats.recentSessions || []).slice(0, 15)
+            }
+          }
+        })
+      ]);
     } catch (err) {
       console.debug('Background study stats sync notice:', err);
     }
@@ -315,23 +546,38 @@ class StudyTrackerManager {
   }
 
   public getFormattedStats(): FormattedStudyStats {
-    const totalSec = Math.max(60, this.memoryStats.totalSeconds);
-    const todaySec = this.memoryStats.todaySeconds;
-    const hoursNum = Math.round((totalSec / 3600) * 10) / 10;
-    
-    // High-resolution formatting: show at least 0.1 hours once study has begun
-    const studyHoursFormatted = hoursNum < 0.1 ? '0.1' : hoursNum.toFixed(1);
-    const todayMinutes = Math.max(1, Math.floor(todaySec / 60));
-    const streak = Math.max(1, this.memoryStats.currentStreak);
-    const todayStr = getLocalDateString();
-    const activeToday = this.memoryStats.studyDates.includes(todayStr);
+    const totalSec = Math.max(0, this.memoryStats.totalSeconds);
+    const todaySec = Math.max(0, this.memoryStats.todaySeconds);
+    const hoursNum = totalSec / 3600;
 
-    let streakBadgeText = `Day ${streak} Streak`;
-    if (streak === 1) {
-      streakBadgeText = 'Day 1 Streak Active';
-    } else {
-      streakBadgeText = activeToday ? `${streak} Days Streak Active` : `${streak} Days Streak`;
+    let studyHoursFormatted = '0.0';
+    if (totalSec > 0 && hoursNum < 0.1) {
+      studyHoursFormatted = '0.1';
+    } else if (totalSec > 0) {
+      studyHoursFormatted = hoursNum.toFixed(1);
     }
+
+    const todayMinutes = todaySec > 0 ? Math.max(1, Math.round(todaySec / 60)) : 0;
+    const todayStr = getLocalDateString();
+    const completedList = this.memoryStats.completedRoutineDates || [];
+    const { streak, activeToday } = calculateConsecutiveStreak(completedList, todayStr);
+
+    let streakBadgeText = activeToday
+      ? `Daily Routine Completed (+1 Streak!)`
+      : `Complete daily goal for +1 streak`;
+
+    const rawSubjects = this.memoryStats.subjectSeconds || {};
+    const subjectEntries = Object.entries(rawSubjects)
+      .filter(([, secs]) => Number(secs) > 0)
+      .sort((a, b) => Number(b[1]) - Number(a[1]));
+
+    const sumSubjectSecs = subjectEntries.reduce((acc, [, s]) => acc + Number(s), 0) || 1;
+    const subjectBreakdown = subjectEntries.slice(0, 6).map(([subject, secs]) => {
+      const mins = Math.max(1, Math.round(Number(secs) / 60));
+      const hrs = (Number(secs) / 3600).toFixed(1);
+      const percentage = Math.min(100, Math.max(4, Math.round((Number(secs) / sumSubjectSecs) * 100)));
+      return { subject, minutes: mins, hours: hrs, percentage };
+    });
 
     return {
       ...this.memoryStats,
@@ -342,7 +588,8 @@ class StudyTrackerManager {
       studyHoursNumber: Number(studyHoursFormatted),
       todayMinutes,
       streakBadgeText,
-      activeToday
+      activeToday,
+      subjectBreakdown
     };
   }
 }

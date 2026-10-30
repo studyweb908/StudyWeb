@@ -242,44 +242,54 @@ export default function WorkspaceOverview({
               </p>
             )}
 
-            {/* Quick Action Navigation Buttons */}
-            <div className="flex flex-wrap items-center gap-2.5 pt-2">
-              <button
-                onClick={onBack}
-                className="px-3.5 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer"
-              >
-                <Layers className="w-4 h-4" />
-                <span>All Workspaces</span>
-              </button>
+            {/* Cohesive Aligned Workspace Action Bar */}
+            <div className="pt-2">
+              <div className="inline-flex flex-wrap sm:flex-nowrap items-center gap-2 p-1.5 rounded-2xl bg-slate-50/90 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/70">
+                <button
+                  type="button"
+                  onClick={onBack}
+                  className="h-10 px-4 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700 text-xs font-bold transition-all inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0 shadow-2xs cursor-pointer"
+                >
+                  <Layers className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 shrink-0" />
+                  <span>All Workspaces</span>
+                </button>
 
-              <button
-                onClick={() => setActiveWorkspaceTab('library')}
-                className="px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/70 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-2xs"
-              >
-                <Upload className="w-4 h-4" />
-                <span>Upload Material</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveWorkspaceTab('library')}
+                  className="h-10 px-4 rounded-xl bg-white dark:bg-slate-900 hover:bg-indigo-50/60 dark:hover:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/70 text-xs font-bold transition-all inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0 shadow-2xs cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5 shrink-0" />
+                  <span>Upload Material</span>
+                </button>
 
-              <button
-                onClick={() => setActiveWorkspaceTab('chat')}
-                className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-xs shadow-indigo-600/20"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>AI Tutor</span>
-              </button>
-              <button
-                onClick={() => {
-                  if (onDeleteWorkspace) {
-                    onDeleteWorkspace(workspace.id);
-                  } else {
-                    setShowDeleteConfirm(true);
-                  }
-                }}
-                className="px-3.5 py-2 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-950/60 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/50 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ml-auto sm:ml-0"
-              >
-                <Trash2 className="w-4 h-4" />
-                <span>Delete</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveWorkspaceTab('chat')}
+                  className="h-10 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0 shadow-xs shadow-indigo-600/20 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                  <span>AI Tutor</span>
+                </button>
+
+                <div className="hidden sm:block w-px h-6 bg-slate-200 dark:bg-slate-700 mx-0.5 shrink-0" />
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onDeleteWorkspace) {
+                      onDeleteWorkspace(workspace.id);
+                    } else {
+                      setShowDeleteConfirm(true);
+                    }
+                  }}
+                  className="h-10 px-3.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200/80 dark:border-rose-900/50 text-xs font-bold transition-all inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 shadow-2xs cursor-pointer"
+                  title="Delete Workspace"
+                >
+                  <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>Delete</span>
+                </button>
+              </div>
             </div>
           </div>
 
