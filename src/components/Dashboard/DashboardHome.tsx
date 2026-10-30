@@ -18,7 +18,9 @@ import {
   Trash2,
   Lock,
   Sparkles,
-  CheckCircle2
+  CheckCircle2,
+  Flame,
+  Check
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { StorageQuotaWidget } from './DashboardWidgets';
@@ -27,6 +29,7 @@ import DailyQuoteCard from './DailyQuoteCard';
 import { getRealUserActivities, recordUserActivity, UserActivityItem } from '../../utils/userActivity';
 import { HomeWorkspaceSkeleton, RecentActivitySkeleton } from './DashboardSkeletons';
 import { readSyncProfileSnapshot, fetchAndReconcileSupabaseProfile } from '../../utils/profileStorage';
+import { StudyTrackerService } from '../../services/StudyTrackerService';
 
 interface DashboardHomeProps {
   setActiveTab: (tab: string) => void;
@@ -191,13 +194,33 @@ export default function DashboardHome({
 
   // 5. Real User Activity (Strictly real actions done by user, zero dummy data)
   const [activityTick, setActivityTick] = useState(0);
+  const [homeStreak, setHomeStreak] = useState(() => {
+    const s = StudyTrackerService.getFormattedStats();
+    return {
+      streak: s.currentStreak,
+      activeToday: s.activeToday,
+      weeklyDays: StudyTrackerService.getWeeklyStreakDays()
+    };
+  });
 
   useEffect(() => {
-    const handleActUpdate = () => setActivityTick(t => t + 1);
+    const handleActUpdate = () => {
+      setActivityTick(t => t + 1);
+      const s = StudyTrackerService.getFormattedStats();
+      setHomeStreak({
+        streak: s.currentStreak,
+        activeToday: s.activeToday,
+        weeklyDays: StudyTrackerService.getWeeklyStreakDays()
+      });
+    };
     window.addEventListener('studyweb-activity-updated', handleActUpdate);
+    window.addEventListener('studyweb-study-stats-updated', handleActUpdate);
+    window.addEventListener('studyweb-daily-routine-completed', handleActUpdate);
     window.addEventListener('storage', handleActUpdate);
     return () => {
       window.removeEventListener('studyweb-activity-updated', handleActUpdate);
+      window.removeEventListener('studyweb-study-stats-updated', handleActUpdate);
+      window.removeEventListener('studyweb-daily-routine-completed', handleActUpdate);
       window.removeEventListener('storage', handleActUpdate);
     };
   }, []);
@@ -311,6 +334,78 @@ export default function DashboardHome({
               >
                 <Bot className="w-4 h-4 text-violet-600 dark:text-violet-400" />
                 <span>Ask AI Tutor</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Live Duolingo-Style Daily Streak & 7-Day Weekly Tracker Bar */}
+          <div className="relative z-10 mt-5 pt-4 border-t border-slate-200/70 dark:border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('studyweb-open-streak-modal'))}
+                className="w-10 h-10 rounded-xl bg-gradient-to-b from-amber-400 to-[#FF7A00] text-white flex items-center justify-center shadow-[0_4px_12px_rgba(255,136,0,0.3)] shrink-0 cursor-pointer hover:scale-105 transition-transform"
+                title="View Daily Streak Celebration"
+              >
+                <Flame className="w-5 h-5 fill-white" />
+              </button>
+              <div className="text-left">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm sm:text-base font-black tabular-nums text-[#FF8800] dark:text-amber-400">
+                    {homeStreak.streak} {homeStreak.streak === 1 ? 'Day' : 'Days'} Streak
+                  </span>
+                  <span
+                    className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                      homeStreak.activeToday
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/60'
+                        : 'bg-amber-50 text-amber-700 border border-amber-200/80 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/60'
+                    }`}
+                  >
+                    {homeStreak.activeToday ? "Today's Goal Done" : 'Complete 1 Task Today'}
+                  </span>
+                </div>
+                <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium">
+                  {homeStreak.activeToday
+                    ? "You're on fire! Today's study streak is locked in."
+                    : 'Upload study material or ask your AI Tutor a question to extend your streak.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between sm:justify-end gap-3">
+              <div className="flex items-center gap-1.5 bg-slate-50/90 dark:bg-slate-800/70 px-3 py-1.5 rounded-xl border border-slate-200/80 dark:border-slate-700/70">
+                {homeStreak.weeklyDays.map(day => (
+                  <div key={day.dateStr} className="flex flex-col items-center gap-1 px-0.5">
+                    <span
+                      className={`text-[9px] font-extrabold uppercase ${
+                        day.isToday
+                          ? 'text-[#FF8800] dark:text-amber-400'
+                          : 'text-slate-400 dark:text-slate-500'
+                      }`}
+                    >
+                      {day.label}
+                    </span>
+                    <div
+                      className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                        day.completed
+                          ? 'bg-gradient-to-b from-[#FFA800] to-[#FF7A00] text-white shadow-2xs'
+                          : day.isToday
+                          ? 'border border-dashed border-[#FF8800] text-[#FF8800] bg-amber-50/60 dark:bg-amber-950/30'
+                          : 'bg-slate-200/70 dark:bg-slate-700 text-slate-400'
+                      }`}
+                    >
+                      {day.completed ? <Check className="w-3 h-3 stroke-[3]" /> : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('studyweb-open-streak-modal'))}
+                className="px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-950/70 border border-amber-200/90 dark:border-amber-800/70 text-[#FF8800] dark:text-amber-400 text-xs font-extrabold whitespace-nowrap cursor-pointer transition-colors"
+              >
+                View Streak
               </button>
             </div>
           </div>

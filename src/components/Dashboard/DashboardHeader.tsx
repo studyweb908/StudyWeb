@@ -15,10 +15,13 @@ import {
   X,
   Maximize2,
   Minimize2,
-  User
+  User,
+  Flame
 } from 'lucide-react';
 import { useThemeMode } from '../../hooks/useThemeMode';
 import { readSyncProfileSnapshot, fetchAndReconcileSupabaseProfile } from '../../utils/profileStorage';
+import { StudyTrackerService } from '../../services/StudyTrackerService';
+import { StreakCelebrationModal } from './StreakCelebrationModal';
 
 const tabLabels: Record<string, string> = {
   'dashboard': 'Home',
@@ -54,6 +57,23 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
   const [isMobileSearchExpanded, setIsMobileSearchExpanded] = useState(false);
   const { themeMode, toggleTheme } = useThemeMode();
   const [profilePic, setProfilePic] = useState<string | null>(() => readSyncProfileSnapshot().avatarUrl);
+  const [streakStats, setStreakStats] = useState(() => {
+    const s = StudyTrackerService.getFormattedStats();
+    return { streak: s.currentStreak, activeToday: s.activeToday };
+  });
+
+  useEffect(() => {
+    const syncStreak = () => {
+      const s = StudyTrackerService.getFormattedStats();
+      setStreakStats({ streak: s.currentStreak, activeToday: s.activeToday });
+    };
+    window.addEventListener('studyweb-study-stats-updated', syncStreak);
+    window.addEventListener('studyweb-daily-routine-completed', syncStreak);
+    return () => {
+      window.removeEventListener('studyweb-study-stats-updated', syncStreak);
+      window.removeEventListener('studyweb-daily-routine-completed', syncStreak);
+    };
+  }, []);
 
   useEffect(() => {
     const updatePic = (e?: Event) => {
@@ -281,7 +301,31 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
         </div>
 
         {/* Metrics, Gamification & Profile Area */}
-        <div className="flex items-center gap-1 sm:gap-2.5 md:gap-3 ml-auto shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 md:gap-3 ml-auto shrink-0">
+          {/* Live Interactive Daily Streak Pill */}
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('studyweb-open-streak-modal'))}
+            title={`${streakStats.streak} day streak — Click to view weekly streak progress`}
+            className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-extrabold tabular-nums transition-all cursor-pointer active:scale-95 ${
+              streakStats.activeToday
+                ? 'bg-amber-50 hover:bg-amber-100/80 dark:bg-amber-950/40 dark:hover:bg-amber-950/60 border-amber-200/90 dark:border-amber-800/70 text-[#FF8800] dark:text-amber-400 shadow-2xs'
+                : 'bg-slate-50 hover:bg-amber-50/60 dark:bg-slate-900 dark:hover:bg-amber-950/30 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            <Flame
+              className={`w-4 h-4 shrink-0 ${
+                streakStats.activeToday
+                  ? 'text-[#FF8800] fill-[#FF8800] drop-shadow-[0_1px_4px_rgba(255,136,0,0.4)]'
+                  : 'text-amber-500 fill-amber-500/30'
+              }`}
+            />
+            <span>{streakStats.streak}</span>
+            <span className="hidden sm:inline text-[11px] font-bold">
+              {streakStats.streak === 1 ? 'day' : 'days'}
+            </span>
+          </button>
+
           {/* Quick Actions Shortcuts (Desktop Only) */}
           <div className={`${isFocusMode ? 'hidden' : 'hidden md:flex'} items-center gap-2`}>
             <button
@@ -567,6 +611,9 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
           </div>
         </div>
       )}
+
+      {/* Duolingo-Style Full-Screen Streak Celebration Modal */}
+      <StreakCelebrationModal />
     </header>
   );
 }

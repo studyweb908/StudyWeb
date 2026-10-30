@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for: (1) Minimal boxless StudyWeb logo breathing loading indicator in AI Tutor, (2) Upgraded 3-Step Mastery section on Home with Step 3 frozen as 'Coming Soon', and (3) Upgraded Full-Screen Upload Overlay with StudyWeb branding and zero Supabase mentions.",
-  "updatedAt":  "2026-10-30T15:21:27.723063590Z",
+  "summary":  "Implementation plan for: (1) Duolingo-style Full-Screen Daily Streak Celebration & 7-Day Weekly Tracker Modal + Live Header/Home Streak Badge, and (2) Pure White Frosted Glass Full-Screen Upload Overlay with StudyWeb branding and smooth progress bar.",
+  "updatedAt":  "2026-10-30T15:50:59.522637229Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

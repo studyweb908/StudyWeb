@@ -186,8 +186,13 @@ class StudyTrackerManager {
     window.addEventListener('click', onActivity, { passive: true });
     window.addEventListener('scroll', onActivity, { passive: true });
     window.addEventListener('touchstart', onActivity, { passive: true });
-    window.addEventListener('studyweb-activity-updated', () => {
-      this.recordStudyAction('workspace');
+    window.addEventListener('studyweb-activity-updated', (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      const iconType = detail?.iconType || 'workspace';
+      this.recordStudyAction(iconType);
+      if (iconType === 'upload' || iconType === 'tutor' || iconType === 'note' || iconType === 'quiz') {
+        this.completeTodayStudyTask(detail?.title || 'Completed today\'s study task');
+      }
     });
     window.addEventListener('studyweb_profile_updated', () => {
       this.resolveDailyGoalMinutes();
@@ -248,8 +253,6 @@ class StudyTrackerManager {
 
         if (todayMins >= goalMins && !completedRoutineDates.includes(todayStr)) {
           completedRoutineDates.push(todayStr);
-        } else if (todayMins < goalMins && completedRoutineDates.includes(todayStr)) {
-          completedRoutineDates = completedRoutineDates.filter(d => d !== todayStr);
         }
 
         const { streak } = calculateConsecutiveStreak(completedRoutineDates, todayStr);
@@ -379,9 +382,6 @@ class StudyTrackerManager {
       completedList.push(todayStr);
       completedList.sort();
       newlyCompleted = true;
-    } else if (!isNowCompletedToday && wasCompletedToday) {
-      const idx = completedList.indexOf(todayStr);
-      if (idx !== -1) completedList.splice(idx, 1);
     }
 
     this.memoryStats.completedRoutineDates = completedList;
@@ -395,13 +395,82 @@ class StudyTrackerManager {
           detail: {
             streak,
             todayMinutes: todayMins,
-            dailyGoalMinutes: goalMins
+            dailyGoalMinutes: goalMins,
+            reason: 'Completed today\'s daily study goal!'
           }
         })
       );
     }
 
     return newlyCompleted;
+  }
+
+  public completeTodayStudyTask(reason = "You've completed today's study task!"): { newlyCompleted: boolean; streak: number } {
+    const todayStr = getLocalDateString();
+    if (!this.memoryStats.studyDates.includes(todayStr)) {
+      this.memoryStats.studyDates.push(todayStr);
+      this.memoryStats.studyDates.sort();
+    }
+
+    const completedList = Array.isArray(this.memoryStats.completedRoutineDates)
+      ? [...this.memoryStats.completedRoutineDates]
+      : [];
+
+    const wasCompletedToday = completedList.includes(todayStr);
+    let newlyCompleted = false;
+
+    if (!wasCompletedToday) {
+      completedList.push(todayStr);
+      completedList.sort();
+      newlyCompleted = true;
+    }
+
+    this.memoryStats.completedRoutineDates = completedList;
+    const { streak } = calculateConsecutiveStreak(completedList, todayStr);
+    this.memoryStats.currentStreak = streak;
+    this.memoryStats.lastActiveDate = todayStr;
+
+    this.persistStats(true);
+    this.broadcastUpdate();
+
+    if (newlyCompleted && typeof window !== 'undefined') {
+      const todayMins = this.memoryStats.todaySeconds > 0
+        ? Math.max(1, Math.round(this.memoryStats.todaySeconds / 60))
+        : 1;
+      window.dispatchEvent(
+        new CustomEvent('studyweb-daily-routine-completed', {
+          detail: {
+            streak,
+            todayMinutes: todayMins,
+            dailyGoalMinutes: this.resolveDailyGoalMinutes(),
+            reason
+          }
+        })
+      );
+    }
+
+    return { newlyCompleted, streak };
+  }
+
+  public getWeeklyStreakDays(): Array<{ label: string; dateStr: string; completed: boolean; isToday: boolean }> {
+    const now = new Date();
+    const todayStr = getLocalDateString(now);
+    const dayOfWeek = now.getDay(); // 0 = Sunday .. 6 = Saturday
+    const labels = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+    const completedSet = new Set([
+      ...(this.memoryStats.completedRoutineDates || []),
+    ]);
+
+    return labels.map((label, idx) => {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (dayOfWeek - idx));
+      const dStr = getLocalDateString(d);
+      return {
+        label,
+        dateStr: dStr,
+        completed: completedSet.has(dStr),
+        isToday: dStr === todayStr
+      };
+    });
   }
 
   private tickStudySession(): void {
