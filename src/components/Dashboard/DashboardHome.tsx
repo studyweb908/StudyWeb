@@ -15,7 +15,10 @@ import {
   Layers,
   LayoutDashboard,
   FolderPlus,
-  Trash2
+  Trash2,
+  Lock,
+  Sparkles,
+  CheckCircle2
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { StorageQuotaWidget } from './DashboardWidgets';
@@ -313,6 +316,201 @@ export default function DashboardHome({
           </div>
         </div>
       </motion.div>
+
+      {/* ========================================================= */}
+      {/* 1.5 ONBOARDING ACTIVATION CHECKLIST (Time-to-Value Guide) */}
+      {/* ========================================================= */}
+      {(() => {
+        const totalUploadedFiles = workspaces.reduce((sum, ws) => sum + (ws.files?.length || 0) + (ws.notes?.length || 0), 0);
+        const hasUploadedMaterial = totalUploadedFiles > 0;
+        const hasAskedTutor = realActivities.some(
+          a => a.iconType === 'tutor' || /tutor|asked|interview|question/i.test(a.title)
+        );
+        const totalQuizzesOrFlashcards = workspaces.reduce(
+          (sum, ws) => sum + (ws.quizzes?.length || 0) + (ws.flashcards?.length || 0),
+          0
+        );
+        const hasCompletedPractice =
+          totalQuizzesOrFlashcards > 0 ||
+          realActivities.some(a => a.iconType === 'quiz' || a.iconType === 'streak');
+
+        const steps = [
+          {
+            id: 'step-upload',
+            num: '01',
+            title: 'Upload your first study material',
+            subtitle: hasUploadedMaterial
+              ? `${totalUploadedFiles} study ${totalUploadedFiles === 1 ? 'item' : 'items'} indexed across your workspaces`
+              : 'Add a PDF, image, diagram, or YouTube link to index your syllabus',
+            done: hasUploadedMaterial,
+            locked: false,
+            icon: <FileUp className="w-4 h-4" />,
+            ctaLabel: hasUploadedMaterial ? 'Add More Material' : 'Upload Material',
+            onAction: () => setActiveTab('workspaces')
+          },
+          {
+            id: 'step-tutor',
+            num: '02',
+            title: 'Ask an interview or study question',
+            subtitle: hasAskedTutor
+              ? 'AI Tutor & follow-up question engine active'
+              : 'Get a cited explanation plus 3 suggested follow-up questions',
+            done: hasAskedTutor,
+            locked: false,
+            icon: <Sparkles className="w-4 h-4" />,
+            ctaLabel: hasAskedTutor ? 'Open AI Tutor' : 'Ask AI Tutor',
+            onAction: () =>
+              handleAskAiTutor(
+                hasUploadedMaterial
+                  ? 'What is in my study material? Explain the key concepts and ask me 3 interview follow-up questions.'
+                  : 'Ask me a high-impact interview question for my subject and show me a model answer.'
+              )
+          },
+          {
+            id: 'step-practice',
+            num: '03',
+            title: 'Complete a quiz or daily study goal',
+            subtitle: 'Interactive adaptive quizzes and active recall practice are launching soon.',
+            done: false,
+            locked: true,
+            icon: <Lock className="w-4 h-4" />,
+            ctaLabel: 'Coming Soon',
+            onAction: () => {}
+          }
+        ];
+
+        const activeStepsCount = 2;
+        const completedCount = steps.filter(s => !s.locked && s.done).length;
+        const progressPct = Math.round((completedCount / activeStepsCount) * 100);
+
+        return (
+          <motion.div variants={itemVariants} className="w-full">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 sm:p-6 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 pb-4 border-b border-slate-100 dark:border-slate-800/80">
+                <div>
+                  <div className="flex items-center gap-2 text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                    <span>Quick-Start Launchpad</span>
+                    <span aria-hidden="true">·</span>
+                    <span className="tabular-nums">{completedCount} of {activeStepsCount} active steps completed</span>
+                  </div>
+                  <h2 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white mt-0.5 tracking-tight">
+                    Your 3 steps to exam &amp; interview mastery
+                  </h2>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-xs font-bold tabular-nums text-slate-500 dark:text-slate-400">
+                    {progressPct}%
+                  </span>
+                  <div className="w-full sm:w-36 h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-indigo-600 to-violet-500 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.max(8, progressPct)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                {steps.map(step => (
+                  <div
+                    key={step.id}
+                    aria-disabled={step.locked}
+                    className={`relative p-4 rounded-xl border transition-all flex flex-col justify-between gap-4 ${
+                      step.locked
+                        ? 'bg-slate-50/60 dark:bg-slate-900/40 border-slate-200/60 dark:border-slate-800/60 opacity-75 select-none'
+                        : step.done
+                        ? 'bg-emerald-50/35 dark:bg-emerald-950/15 border-emerald-200/70 dark:border-emerald-800/50'
+                        : 'bg-slate-50/70 dark:bg-slate-800/35 border-slate-200/80 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700/70 hover:bg-white dark:hover:bg-slate-800/60'
+                    }`}
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                              step.locked
+                                ? 'bg-slate-200/70 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                                : step.done
+                                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'
+                            }`}
+                          >
+                            {step.done ? <CheckCircle2 className="w-4 h-4" /> : step.icon}
+                          </div>
+                          <span
+                            className={`text-xs font-bold tabular-nums ${
+                              step.locked
+                                ? 'text-slate-400 dark:text-slate-500'
+                                : step.done
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-indigo-600 dark:text-indigo-400'
+                            }`}
+                          >
+                            Step {step.num}
+                          </span>
+                        </div>
+
+                        {step.locked ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 bg-slate-200/70 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                            <Lock className="w-2.5 h-2.5" />
+                            <span>Coming Soon</span>
+                          </span>
+                        ) : step.done ? (
+                          <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                            Completed
+                          </span>
+                        ) : (
+                          <span className="text-[11px] font-semibold text-slate-400 dark:text-slate-500">
+                            Action Step
+                          </span>
+                        )}
+                      </div>
+
+                      <h3
+                        className={`text-xs sm:text-sm font-bold ${
+                          step.locked
+                            ? 'text-slate-500 dark:text-slate-400'
+                            : 'text-slate-900 dark:text-white'
+                        }`}
+                      >
+                        {step.title}
+                      </h3>
+                      <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                        {step.subtitle}
+                      </p>
+                    </div>
+
+                    {step.locked ? (
+                      <button
+                        type="button"
+                        disabled
+                        aria-disabled="true"
+                        className="w-full py-2 px-3 rounded-lg text-xs font-bold inline-flex items-center justify-center gap-1.5 bg-slate-200/70 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 border border-slate-300/60 dark:border-slate-700/60 cursor-not-allowed whitespace-nowrap"
+                      >
+                        <Lock className="w-3.5 h-3.5 shrink-0" />
+                        <span>Coming Soon</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={step.onAction}
+                        className={`w-full py-2 px-3 rounded-lg text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                          step.done
+                            ? 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs'
+                        }`}
+                      >
+                        <span>{step.ctaLabel}</span>
+                        <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        );
+      })()}
 
       {/* ========================================================= */}
       {/* 2. THREE CORE PILLARS QUICK NAVIGATION ROW               */}

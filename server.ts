@@ -2208,7 +2208,18 @@ The student is asking about "${topicLabel}", which is NOT found in their uploade
       const isQuizRequest =
         /\b(quiz me|test me|give me .*questions|generate .*questions|practice questions|create a quiz|make a quiz|ask me .*questions|flashcards? for)\b/i.test(qLower);
 
-      if (isSummaryQuery && hasRelevantWorkspaceMaterial && searchableMaterials.length > 0) {
+      const isInterviewQuery =
+        /\b(interview|interviewer|viva|oral\s+exam|mock\s+interview|hr\s+question|behavioral\s+question|technical\s+round|system\s+design|coding\s+round|tell\s+me\s+about\s+yourself|strengths?\s+and\s+weaknesses|why\s+should\s+we\s+hire|star\s+method|situational\s+question|candidate|job\s+role|placement)\b/i.test(qLower);
+
+      if (isInterviewQuery) {
+        specializedFormatInstruction = `
+[INTERVIEW & VIVA PREPARATION MODE]
+The student is asking an interview or oral exam/viva question. Deliver a sharp, authoritative, interview-winning response structured as follows:
+1. **Direct Model Answer (60-Second Interview Pitch)**: A clear, confident, ready-to-speak answer the candidate can deliver directly to an interviewer.
+2. **Core Technical / Conceptual Breakdown (or STAR Framework)**: Deep, accurate points explaining the mechanism, architecture, or behavioral structure${hasRelevantWorkspaceMaterial ? ' grounded in their uploaded workspace material' : ''}.
+3. **Practical Example & Common Pitfalls to Avoid**: Concrete real-world example plus 1-2 mistakes candidates commonly make on this question.
+4. At the very end, output 3 contextual interview follow-up questions using [FOLLOW_UP: ...] tags (e.g., a harder follow-up interviewer question on this topic, a 60-second elevator pitch drill, and a scenario/edge-case question).`;
+      } else if (isSummaryQuery && hasRelevantWorkspaceMaterial && searchableMaterials.length > 0) {
         specializedFormatInstruction = `
 [COMPLETE WORKSPACE MATERIAL / TOPIC EXPLANATION REQUESTED]
 The student is asking for a thorough explanation of their uploaded study material or topic from their workspace.
@@ -2424,10 +2435,7 @@ ${citationGuideline}`;
               const contentsPayload = pass === 0 ? buildContentsPayload(activeParts, 6) : prompt;
               const timeoutMs = 9500;
 
-              const supportsMinimalThinking =
-                currentModel.includes("flash-lite") ||
-                currentModel.includes("gemini-3-flash") ||
-                currentModel.includes("gemini-flash");
+              const supportsMinimalThinking = currentModel.startsWith("gemini-3");
 
               const genPromise = ai.models.generateContent({
                 model: currentModel,
@@ -2556,23 +2564,31 @@ ${citationGuideline}`;
       }
       responseText = responseText.replace(/\[FOLLOW_UP:\s*[^\]]+\]/gi, '').trim();
 
-      if (parsedFollowUps.length === 0) {
-        if (hasRelevantWorkspaceMaterial && effectiveFiles.length > 0) {
-          const primaryFile = effectiveFiles[0]?.name || 'this study material';
-          parsedFollowUps.push(
-            `What are the most important exam takeaways from "${primaryFile}"?`,
-            `Create 3 practice quiz questions based on "${primaryFile}"`,
-            `Explain the hardest concept in "${primaryFile}" with a step-by-step example`
-          );
-        } else {
-          const cleanT = topicLabel || 'this topic';
-          parsedFollowUps.push(
+      const cleanT = topicLabel || 'this topic';
+      const fallbackPool = isInterviewQuery
+        ? [
+            `Ask me a harder follow-up interview question on ${cleanT} and critique my approach`,
+            `How do I summarize ${cleanT} in a 60-second interview answer?`,
+            `What real-world scenario or edge-case interview question is asked about ${cleanT}?`
+          ]
+        : (hasRelevantWorkspaceMaterial && effectiveFiles.length > 0)
+        ? [
+            `What are the most important exam or interview takeaways from "${effectiveFiles[0]?.name || 'this study material'}"?`,
+            `Ask me 3 interview or practice quiz questions based on "${effectiveFiles[0]?.name || 'this study material'}"`,
+            `Explain the hardest concept in "${effectiveFiles[0]?.name || 'this study material'}" with a step-by-step example`
+          ]
+        : [
+            `What top interview or exam questions are commonly asked about ${cleanT}?`,
             `Can you give me a real-world example and step-by-step breakdown of ${cleanT}?`,
-            `Quiz me with 3 practice questions on ${cleanT}`,
             effectiveFiles.length > 0
-              ? `How does ${cleanT} compare to my uploaded file "${effectiveFiles[0].name}"?`
-              : `What are the most common exam misconceptions about ${cleanT}?`
-          );
+              ? `How does ${cleanT} connect to my uploaded file "${effectiveFiles[0].name}"?`
+              : `Quiz me with 3 progressive difficulty questions on ${cleanT}`
+          ];
+
+      for (const candidateQ of fallbackPool) {
+        if (parsedFollowUps.length >= 3) break;
+        if (!parsedFollowUps.includes(candidateQ)) {
+          parsedFollowUps.push(candidateQ);
         }
       }
 

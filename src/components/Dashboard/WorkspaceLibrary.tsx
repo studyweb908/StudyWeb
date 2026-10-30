@@ -733,12 +733,12 @@ export default function WorkspaceLibrary({
       ];
     } else if (type === 'image') {
       steps = [
-        'Reading high-resolution image binary...',
-        'Running Gemini Vision OCR and visual layout inspection...',
-        'Extracting visible text, UI elements, diagrams, and key concepts...',
+        'Uploading your material...',
+        'Analyzing visual layout and extracting content...',
+        'Extracting visible text, diagrams, and key concepts...',
         'Synthesizing structured study notes and takeaways...',
-        'Saving analyzed image and notes to Supabase...',
-        'Image analyzed and indexed successfully!'
+        'Indexing study material into your workspace...',
+        'Study material ready!'
       ];
     } else if (type === 'pdf' || type === 'doc' || type === 'ppt') {
       steps = [

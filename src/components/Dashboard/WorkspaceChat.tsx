@@ -972,7 +972,7 @@ export default function WorkspaceChat({
         ...prev,
         progress: Math.min(88, Math.round(((i + 0.7) / files.length) * 75) + 15),
         fileName: file.name,
-        stepText: `Analyzing ${file.name} with AI & saving to Supabase...`
+        stepText: `Uploading and analyzing ${file.name}...`
       }));
 
       let analyzedMaterial: any = null;
@@ -1657,11 +1657,18 @@ export default function WorkspaceChat({
             source: 'Voice Agent',
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           };
+          const cleanSubj = question.replace(/[?!.]+$/, '').slice(0, 48).trim() || workspace.name || 'this topic';
           const aiMsg: Message = {
             id: `msg-ai-${Date.now() + 1}`,
             sender: 'ai',
             text: answer,
             source: 'Gemini AI Tutor (Voice)',
+            originalQuery: question,
+            followUpQuestions: [
+              `Ask me a follow-up interview question on "${cleanSubj}"`,
+              `Give me a practical step-by-step example of "${cleanSubj}"`,
+              `Quiz me with 3 practice questions on "${cleanSubj}"`
+            ],
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           };
           setMessages(prev => [...prev, userMsg, aiMsg]);
@@ -2305,45 +2312,56 @@ export default function WorkspaceChat({
                     </div>
                   )}
 
-                  {/* Clickable Follow-Up Question Chips */}
-                  {msg.sender === 'ai' && !msg.isError && msg.followUpQuestions && msg.followUpQuestions.length > 0 && (
-                    <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/80 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                          Suggested Follow-Up Questions
-                        </span>
-                        {msg.suggestOutsideResearch && (
-                          <button
-                            type="button"
-                            disabled={isThinking}
-                            onClick={() =>
-                              handleSend(
-                                msg.originalQuery || `Research this topic in depth outside my workspace`,
-                                { allowOutsideResearch: true }
-                              )
-                            }
-                            className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                          >
-                            <Globe className="w-3 h-3" />
-                            <span>Research outside workspace</span>
-                          </button>
-                        )}
+                  {/* Clickable Follow-Up Question Chips Inside Each AI Message Bubble */}
+                  {msg.sender === 'ai' && !msg.isError && !msg.isFileReadyBadge && msg.id !== 'welcome-msg' && !msg.id.startsWith('welcome-') && (() => {
+                    const effectiveFollowUps = (msg.followUpQuestions && msg.followUpQuestions.length > 0)
+                      ? msg.followUpQuestions
+                      : [
+                          `Ask me a follow-up interview question on ${msg.activeWorkspaceContext || workspace.name || 'this topic'}`,
+                          `Give me a real-world example and 60-second summary of this concept`,
+                          `Create 3 practice quiz questions to test my understanding`
+                        ];
+                    return (
+                      <div className="mt-4 pt-3.5 border-t border-slate-100 dark:border-slate-800/80 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
+                            <Sparkles className="w-3 h-3 text-indigo-500 shrink-0" />
+                            <span>Suggested Follow-Up Questions</span>
+                          </span>
+                          {msg.suggestOutsideResearch && (
+                            <button
+                              type="button"
+                              disabled={isThinking}
+                              onClick={() =>
+                                handleSend(
+                                  msg.originalQuery || `Research this topic in depth outside my workspace`,
+                                  { allowOutsideResearch: true }
+                                )
+                              }
+                              className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                            >
+                              <Globe className="w-3 h-3" />
+                              <span>Research outside workspace</span>
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2">
+                          {effectiveFollowUps.slice(0, 3).map((followUpQ, fqIdx) => (
+                            <button
+                              key={fqIdx}
+                              type="button"
+                              disabled={isThinking}
+                              onClick={() => handleSend(followUpQ)}
+                              className="text-left px-3 py-2 rounded-xl bg-slate-50 hover:bg-indigo-50 dark:bg-slate-800/70 dark:hover:bg-indigo-950/50 border border-slate-200/80 hover:border-indigo-300 dark:border-slate-700/80 dark:hover:border-indigo-700 text-xs font-semibold text-slate-700 hover:text-indigo-700 dark:text-slate-200 dark:hover:text-indigo-300 inline-flex items-center justify-between gap-2 transition-all cursor-pointer disabled:opacity-50 group"
+                            >
+                              <span>{followUpQ}</span>
+                              <Send className="w-3 h-3 text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 shrink-0" />
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {msg.followUpQuestions.map((followUpQ, fqIdx) => (
-                          <button
-                            key={fqIdx}
-                            type="button"
-                            disabled={isThinking}
-                            onClick={() => handleSend(followUpQ)}
-                            className="text-left px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-indigo-50 dark:bg-slate-800/70 dark:hover:bg-indigo-950/50 border border-slate-200/80 hover:border-indigo-300 dark:border-slate-700/80 dark:hover:border-indigo-700 text-xs font-semibold text-slate-700 hover:text-indigo-700 dark:text-slate-200 dark:hover:text-indigo-300 transition-all cursor-pointer disabled:opacity-50"
-                          >
-                            {followUpQ}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
 
                 {/* AI Bubble Actions: Listen (TTS) & Copy */}
@@ -2415,16 +2433,43 @@ export default function WorkspaceChat({
             );
           })}
 
-          {/* Thinking Indicator */}
+          {/* Minimal Boxless StudyWeb Brand Logo Breathing Indicator */}
           {isThinking && (
-            <div className="flex gap-2.5 sm:gap-3.5 items-center">
-              <div className="shrink-0">
-                {renderWorkspaceLogo('w-7 h-7 sm:w-8.5 sm:h-8.5 animate-pulse', 'text-xs sm:text-sm')}
-              </div>
-              <div className="px-3.5 py-2.5 sm:p-4 rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-xs sm:text-sm font-semibold text-slate-500 flex items-center gap-2 shadow-xs">
-                <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-500 animate-pulse shrink-0" />
-                <span>Thinking...</span>
-              </div>
+            <div className="flex items-center pl-1 py-2" role="status" aria-label="Generating response">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.88 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.88 }}
+                transition={{ duration: 0.2 }}
+                className="relative flex items-center justify-center w-9 h-9"
+              >
+                <motion.div
+                  animate={{
+                    scale: [0.9, 1.22, 0.9],
+                    opacity: [0.22, 0.48, 0.22],
+                  }}
+                  transition={{
+                    duration: 2.2,
+                    repeat: Infinity,
+                    ease: 'easeInOut',
+                  }}
+                  className="pointer-events-none absolute inset-0 rounded-full bg-indigo-500/30 dark:bg-indigo-400/25 blur-md"
+                />
+                <motion.img
+                  src="/logo-inner.png"
+                  alt="StudyWeb AI"
+                  animate={{
+                    scale: [0.94, 1.07, 0.94],
+                    opacity: [0.72, 1, 0.72],
+                  }}
+                  transition={{
+                    duration: 2.2,
+                    repeat: Infinity,
+                    ease: 'easeInOut',
+                  }}
+                  className="relative z-10 w-6 h-6 sm:w-7 sm:h-7 object-contain select-none drop-shadow-[0_2px_8px_rgba(99,102,241,0.35)]"
+                />
+              </motion.div>
             </div>
           )}
 
@@ -2433,63 +2478,17 @@ export default function WorkspaceChat({
       </div>
 
       {/* ============================================================== */}
-      {/* 3. MINIMALIST FULL-WIDTH CHAT INPUT DOCK + CLAUDE FOLLOW-UPS   */}
+      {/* 3. MINIMALIST FULL-WIDTH CHAT INPUT DOCK                        */}
       {/* ============================================================== */}
       <footer className="p-2 sm:p-4 border-t border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md shrink-0">
         <div className="max-w-3xl mx-auto space-y-2.5">
-          
-          {/* Claude-Style Bottom Follow-Up Questions Bar (anchored at bottom of screen above input) */}
-          {(() => {
-            const latestAiMsg = [...messages].reverse().find(m => m.sender === 'ai' && !m.isError && !m.isFileReadyBadge && m.id !== 'welcome-msg' && !m.id.startsWith('welcome-'));
-            if (!isThinking && latestAiMsg && latestAiMsg.followUpQuestions && latestAiMsg.followUpQuestions.length > 0) {
-              return (
-                <div className="p-2.5 rounded-2xl bg-slate-50/90 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 space-y-1.5 animate-fade-in">
-                  <div className="flex items-center justify-between px-1">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
-                      <Sparkles className="w-3 h-3 text-indigo-500" />
-                      <span>Follow-up questions</span>
-                    </span>
-                    {latestAiMsg.suggestOutsideResearch && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleSend(
-                            latestAiMsg.originalQuery || 'Research this topic in depth outside my workspace',
-                            { allowOutsideResearch: true }
-                          )
-                        }
-                        className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <Globe className="w-3 h-3" />
-                        <span>Research outside workspace</span>
-                      </button>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
-                    {latestAiMsg.followUpQuestions.slice(0, 3).map((qText, qIdx) => (
-                      <button
-                        key={qIdx}
-                        type="button"
-                        onClick={() => handleSend(qText)}
-                        className="text-left px-3 py-2 rounded-xl bg-white hover:bg-indigo-50/80 dark:bg-slate-950 dark:hover:bg-indigo-950/40 border border-slate-200/80 hover:border-indigo-300 dark:border-slate-800 dark:hover:border-indigo-700 text-xs font-semibold text-slate-700 hover:text-indigo-700 dark:text-slate-200 dark:hover:text-indigo-300 flex items-center justify-between gap-2 transition-all cursor-pointer group shadow-2xs"
-                      >
-                        <span className="line-clamp-1">{qText}</span>
-                        <Send className="w-3 h-3 text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 shrink-0" />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            }
-            return null;
-          })()}
-
           {/* Quick Prompt Suggestions when chat is fresh */}
           {messages.length <= 1 && (
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
               <span className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider pl-1 shrink-0">Try:</span>
               {[
                 { label: "📂 What is in my study material?", prompt: "What is in my study material? Explain everything uploaded in this workspace." },
+                { label: "🎯 Ask me an interview question", prompt: `Ask me a high-impact interview question for ${workspace.name || 'my subject'} and provide a model interview answer.` },
                 { label: "⚡ Summarize uploaded material", prompt: "Can you explain the main concepts and details from my uploaded workspace material?" },
                 { label: "📝 Quiz me on key terms", prompt: "Create a 3-question quick quiz based on my workspace study material." }
               ].map((item, i) => (

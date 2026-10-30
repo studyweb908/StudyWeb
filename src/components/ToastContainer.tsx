@@ -12,6 +12,7 @@ import {
   FileCheck2,
   FolderCheck,
 } from 'lucide-react';
+import { playGlassPopSound } from '../utils/soundEffects';
 
 export interface Toast {
   id: string;
@@ -38,6 +39,7 @@ export function triggerGlobalNotification(
   title?: string
 ) {
   if (typeof window === 'undefined') return;
+  playGlassPopSound();
   const detail: Omit<Toast, 'id'> =
     typeof input === 'string'
       ? { message: input, type, duration, title }

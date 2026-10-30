@@ -334,6 +334,31 @@ class AITutorBackgroundManager {
         }
       }
 
+      // Guarantee 3 contextual follow-up questions for every single AI response
+      const rawFollowUps: string[] = Array.isArray(data?.followUpQuestions)
+        ? data.followUpQuestions.filter((q: any) => typeof q === 'string' && q.trim().length > 0)
+        : [];
+      if (rawFollowUps.length < 3 && data && (data.reply || data.text)) {
+        const qText = String(userMsg.text || '').trim();
+        const isInterview = /\b(interview|interviewer|viva|oral|behavioral|star\s+method|tell\s+me\s+about\s+yourself|hire|candidate)\b/i.test(qText);
+        const cleanSubject = qText.replace(/^(what\s+is|explain|tell\s+me\s+about|how\s+does|how\s+do\s+i\s+answer)\s+/i, '').replace(/[?!.]+$/, '').slice(0, 48).trim() || (workspaceName || 'this topic');
+        const defaultFollowUps = isInterview
+          ? [
+              `Ask me a harder follow-up interview question on "${cleanSubject}"`,
+              `How do I deliver this answer in under 60 seconds during an interview?`,
+              `What common mistakes do candidates make when answering this question?`
+            ]
+          : [
+              `Ask me an interview or viva question on "${cleanSubject}"`,
+              `Give me a practical real-world example of "${cleanSubject}"`,
+              `Quiz me with 3 practice questions on "${cleanSubject}"`
+            ];
+        for (const df of defaultFollowUps) {
+          if (rawFollowUps.length >= 3) break;
+          if (!rawFollowUps.includes(df)) rawFollowUps.push(df);
+        }
+      }
+
       // Format AI Message (never fabricate dummy fallback text)
       const aiMsg: TutorMessage = data && (data.reply || data.text)
         ? {
@@ -345,7 +370,7 @@ class AITutorBackgroundManager {
             workspaceNotice: data.workspaceNotice,
             activeWorkspaceContext: data.activeWorkspaceContext || workspaceName,
             activeContextFiles: Array.isArray(data.activeContextFiles) ? data.activeContextFiles : [],
-            followUpQuestions: Array.isArray(data.followUpQuestions) ? data.followUpQuestions : [],
+            followUpQuestions: rawFollowUps.slice(0, 3),
             suggestOutsideResearch: Boolean(data.suggestOutsideResearch),
             originalQuery: userMsg.text,
             generatedImageUrl: data.generatedImageUrl,
@@ -378,8 +403,13 @@ class AITutorBackgroundManager {
       this.persistInFlightState(workspaceId, null);
       this.notifyListeners();
 
-      // 6. Broadcast completion event
+      // 6. Broadcast completion event & play Apple-style glass pop sound
       if (typeof window !== 'undefined') {
+        try {
+          const { playGlassPopSound } = await import('../utils/soundEffects');
+          playGlassPopSound();
+        } catch {}
+
         window.dispatchEvent(new CustomEvent('studyweb-tutor-message-completed', {
           detail: {
             workspaceId,

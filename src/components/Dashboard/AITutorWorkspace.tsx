@@ -1504,6 +1504,29 @@ export default function AITutorWorkspace() {
                       </button>
                     </div>
                   )}
+
+                  {msg.sender === 'ai' && !msg.isError && msg.followUpQuestions && msg.followUpQuestions.length > 0 && (
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 mt-2.5 flex flex-col gap-1.5">
+                      <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-0.5">
+                        <Sparkles className="w-3 h-3 text-indigo-500" />
+                        <span>Suggested Follow-Up Questions</span>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        {msg.followUpQuestions.map((question, qIdx) => (
+                          <button
+                            key={qIdx}
+                            type="button"
+                            disabled={isThinking}
+                            onClick={() => handleSend(question)}
+                            className="w-full text-left px-3 py-2 rounded-lg bg-slate-50 hover:bg-indigo-50/80 dark:bg-slate-800/60 dark:hover:bg-indigo-950/40 border border-slate-200/80 hover:border-indigo-300 dark:border-slate-700/70 dark:hover:border-indigo-500/40 text-xs font-medium text-slate-700 hover:text-indigo-700 dark:text-slate-300 dark:hover:text-indigo-300 transition-all flex items-center justify-between gap-2 group cursor-pointer disabled:opacity-50"
+                          >
+                            <span className="line-clamp-2 leading-snug">{question}</span>
+                            <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all shrink-0" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 px-1 mt-0.5">
                   <span className="text-[10px] text-slate-400 dark:text-slate-500">{msg.time}</span>
@@ -1527,27 +1550,45 @@ export default function AITutorWorkspace() {
             </div>
           ))}
 
-          {/* AI Thinking Bubble */}
+          {/* Minimal Boxless StudyWeb Brand Logo Breathing Indicator */}
           <AnimatePresence>
             {isThinking && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="flex gap-3 sm:gap-4 max-w-xl mr-auto"
+              <motion.div
+                initial={{ opacity: 0, scale: 0.88 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.88 }}
+                transition={{ duration: 0.2 }}
+                className="flex items-center pl-1 py-2 mr-auto"
+                role="status"
+                aria-label="Generating response"
               >
-                <div className="w-7 h-7 sm:w-8.5 sm:h-8.5 flex items-center justify-center flex-shrink-0">
-                  {renderWorkspaceLogo('w-full h-full animate-pulse', 'text-xs sm:text-sm')}
-                </div>
-                <div className="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-800/60 px-4 sm:px-6 py-3 sm:py-5 rounded-[16px] sm:rounded-[20px] rounded-tl-none shadow-[0_2px_8px_-2px_rgba(0,0,0,0.04)] text-xs sm:text-[15px]">
-                  <div className="flex items-center gap-2.5 sm:gap-3">
-                    <div className="flex gap-1.5">
-                      <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
-                      <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
-                      <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
-                    </div>
-                    <span className="text-xs sm:text-[13px] text-slate-500 dark:text-slate-400 font-medium">Thinking...</span>
-                  </div>
+                <div className="relative flex items-center justify-center w-9 h-9">
+                  <motion.div
+                    animate={{
+                      scale: [0.9, 1.22, 0.9],
+                      opacity: [0.22, 0.48, 0.22],
+                    }}
+                    transition={{
+                      duration: 2.2,
+                      repeat: Infinity,
+                      ease: 'easeInOut',
+                    }}
+                    className="pointer-events-none absolute inset-0 rounded-full bg-indigo-500/30 dark:bg-indigo-400/25 blur-md"
+                  />
+                  <motion.img
+                    src="/logo-inner.png"
+                    alt="StudyWeb AI"
+                    animate={{
+                      scale: [0.94, 1.07, 0.94],
+                      opacity: [0.72, 1, 0.72],
+                    }}
+                    transition={{
+                      duration: 2.2,
+                      repeat: Infinity,
+                      ease: 'easeInOut',
+                    }}
+                    className="relative z-10 w-6 h-6 sm:w-7 sm:h-7 object-contain select-none drop-shadow-[0_2px_8px_rgba(99,102,241,0.35)]"
+                  />
                 </div>
               </motion.div>
             )}
@@ -1560,39 +1601,6 @@ export default function AITutorWorkspace() {
 
         {/* Message Input & Attachment Dock */}
         <div className="p-2.5 sm:p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 relative">
-          {/* Claude-Style Bottom Follow-Up Questions Dock */}
-          {(() => {
-            const lastAiMsg = [...messages]
-              .reverse()
-              .find(m => m.sender === 'ai' && !m.isError && !m.id.startsWith('welcome'));
-            if (!lastAiMsg) return null;
-            const followUps = Array.isArray(lastAiMsg.followUpQuestions) ? lastAiMsg.followUpQuestions : [];
-            if (followUps.length === 0) return null;
-
-            return (
-              <div className="mb-2.5 px-1 animate-fade-in">
-                <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/90 px-3 py-2">
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">
-                    Suggested Follow-Ups
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {followUps.map((q: string, qIdx: number) => (
-                      <button
-                        key={qIdx}
-                        type="button"
-                        disabled={isThinking}
-                        onClick={() => handleSend(q)}
-                        className="text-left px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-slate-700 dark:text-slate-200 hover:text-indigo-700 dark:hover:text-indigo-300 border border-slate-200/90 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-500/40 text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
-                      >
-                        <ChevronRight className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                        <span>{q}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
 
           {/* Render attached files summary inside input container */}
           <AnimatePresence>
