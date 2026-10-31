@@ -43,9 +43,6 @@ export const FullScreenUploadOverlay: React.FC<FullScreenUploadOverlayProps> = (
     if (isComplete && !playedCompleteRef.current) {
       playedCompleteRef.current = true;
       playGlassPopSound();
-      try {
-        StudyTrackerService.completeTodayStudyTask("You've uploaded and indexed study material today!");
-      } catch {}
     }
   }, [isOpen, isComplete]);
 
@@ -92,21 +89,29 @@ export const FullScreenUploadOverlay: React.FC<FullScreenUploadOverlayProps> = (
         }`}
       />
 
-      {/* Elevated Pure White Card */}
-      <div className="relative z-10 flex flex-col items-center max-w-md w-full text-center bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-[0_24px_70px_-15px_rgba(79,70,229,0.16)]">
-        {/* Top Brand Pill */}
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50/90 border border-indigo-100 text-indigo-700 text-[11px] font-bold tracking-wide mb-5">
-          <img src="/logo-inner.png" alt="StudyWeb" className="w-3.5 h-3.5 object-contain" />
+      {/* Elevated Card */}
+      <div className="relative z-10 flex flex-col items-center max-w-md w-full text-center bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-[0_24px_70px_-15px_rgba(79,70,229,0.16)] dark:shadow-[0_24px_70px_-15px_rgba(0,0,0,0.6)]">
+        {/* Top Status Pill */}
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50/90 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-900/60 text-indigo-700 dark:text-indigo-300 text-[11px] font-bold tracking-wide mb-5">
+          {isComplete ? (
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+          ) : (
+            <img
+              src="/assets/aistudio/upload_1e68f79f.svg"
+              alt="Uploading"
+              className="w-4 h-4 object-contain shrink-0"
+            />
+          )}
           <span>{isComplete ? 'Upload Complete' : 'StudyWeb Smart Upload'}</span>
         </div>
 
-        {/* Daylight Circular Progress Ring with StudyWeb Brand Mark */}
+        {/* Circular Progress Ring with Upload SVG / Complete Check */}
         <div className="relative flex items-center justify-center mb-6">
           <div
             className={`absolute inset-[-8px] rounded-full border border-dashed transition-colors duration-500 ${
               isComplete
-                ? 'border-emerald-300/80'
-                : 'border-indigo-200/90 animate-[spin_12s_linear_infinite]'
+                ? 'border-emerald-300/80 dark:border-emerald-700/80'
+                : 'border-indigo-200/90 dark:border-indigo-800/80 animate-[spin_12s_linear_infinite]'
             }`}
           />
 
@@ -133,9 +138,10 @@ export const FullScreenUploadOverlay: React.FC<FullScreenUploadOverlayProps> = (
               cx={center}
               cy={center}
               r={radius}
-              fill="#F8FAFC"
-              stroke="#E2E8F0"
+              fill="transparent"
+              stroke="currentColor"
               strokeWidth={strokeWidth}
+              className="text-slate-100 dark:text-slate-800"
             />
 
             {/* Animated Progress Arc */}
@@ -153,47 +159,45 @@ export const FullScreenUploadOverlay: React.FC<FullScreenUploadOverlayProps> = (
             />
           </svg>
 
-          {/* Center StudyWeb Logo & Percentage */}
+          {/* Center Upload Animation & Percentage */}
           <div className="absolute inset-0 flex flex-col items-center justify-center px-4">
             {isComplete ? (
-              <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center mb-1 text-emerald-600 animate-in zoom-in-75 duration-200">
-                <CheckCircle2 className="w-5 h-5" />
+              <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center mb-1 text-emerald-600 dark:text-emerald-400 animate-in zoom-in-75 duration-200">
+                <CheckCircle2 className="w-6 h-6" />
               </div>
             ) : (
-              <div className="w-10 h-10 rounded-2xl bg-white border border-slate-200/90 shadow-xs flex items-center justify-center mb-1">
-                <img
-                  src="/logo-inner.png"
-                  alt="StudyWeb"
-                  className="w-6 h-6 object-contain select-none animate-pulse"
-                />
-              </div>
+              <img
+                src="/assets/aistudio/upload_1e68f79f.svg"
+                alt="Uploading..."
+                className="w-16 h-16 sm:w-20 sm:h-20 object-contain select-none mb-1 drop-shadow-sm"
+              />
             )}
 
-            <div className="font-mono tabular-nums text-3xl sm:text-4xl font-black tracking-tight text-slate-900">
+            <div className="font-mono tabular-nums text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-white">
               {clampedProgress}%
             </div>
 
-            <span className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">
+            <span className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
               {isComplete ? 'Complete' : 'Uploading'}
             </span>
           </div>
         </div>
 
         {/* File Name Pill */}
-        <div className="inline-flex items-center gap-2 max-w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200/90 mb-3">
+        <div className="inline-flex items-center gap-2 max-w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/90 dark:border-slate-700/80 mb-3">
           {getFileIcon()}
-          <span className="text-xs sm:text-sm font-bold text-slate-800 truncate max-w-[260px]">
+          <span className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-200 truncate max-w-[260px]">
             {fileName || 'Study Material'}
           </span>
         </div>
 
         {/* Active Stage Text */}
-        <p className="text-xs sm:text-sm font-semibold text-slate-600 tracking-tight min-h-[20px] mb-4">
+        <p className="text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-300 tracking-tight min-h-[20px] mb-4">
           {displayStepText}
         </p>
 
         {/* Smooth Linear Progress Bar */}
-        <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden mb-5 border border-slate-200/60">
+        <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden mb-5 border border-slate-200/60 dark:border-slate-700/60">
           <div
             className={`h-full rounded-full transition-all duration-150 ${
               isComplete
@@ -205,12 +209,12 @@ export const FullScreenUploadOverlay: React.FC<FullScreenUploadOverlayProps> = (
         </div>
 
         {/* 3-Stage Live Pipeline Indicator */}
-        <div className="w-full grid grid-cols-3 gap-2 p-2.5 rounded-2xl bg-slate-50/90 border border-slate-200/80">
+        <div className="w-full grid grid-cols-3 gap-2 p-2.5 rounded-2xl bg-slate-50/90 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80">
           {stages.map((stage, idx) => (
             <div
               key={stage.label}
               className={`flex flex-col items-center gap-1 py-1.5 px-1 rounded-xl transition-colors ${
-                stage.active ? 'bg-white shadow-2xs border border-slate-200/70' : ''
+                stage.active ? 'bg-white dark:bg-slate-800 shadow-2xs border border-slate-200/70 dark:border-slate-700' : ''
               }`}
             >
               <div className="flex items-center gap-1.5">
@@ -220,16 +224,16 @@ export const FullScreenUploadOverlay: React.FC<FullScreenUploadOverlayProps> = (
                       ? 'bg-emerald-500'
                       : stage.active
                       ? 'bg-indigo-600 animate-pulse'
-                      : 'bg-slate-300'
+                      : 'bg-slate-300 dark:bg-slate-600'
                   }`}
                 />
                 <span
                   className={`text-[10px] font-extrabold tabular-nums ${
                     stage.done
-                      ? 'text-emerald-600'
+                      ? 'text-emerald-600 dark:text-emerald-400'
                       : stage.active
-                      ? 'text-indigo-600'
-                      : 'text-slate-400'
+                      ? 'text-indigo-600 dark:text-indigo-400'
+                      : 'text-slate-400 dark:text-slate-500'
                   }`}
                 >
                   0{idx + 1}
@@ -238,10 +242,10 @@ export const FullScreenUploadOverlay: React.FC<FullScreenUploadOverlayProps> = (
               <span
                 className={`text-[10px] font-semibold leading-tight ${
                   stage.done
-                    ? 'text-emerald-700'
+                    ? 'text-emerald-700 dark:text-emerald-400'
                     : stage.active
-                    ? 'text-slate-800'
-                    : 'text-slate-400'
+                    ? 'text-slate-800 dark:text-slate-200'
+                    : 'text-slate-400 dark:text-slate-500'
                 }`}
               >
                 {stage.label}
@@ -252,7 +256,7 @@ export const FullScreenUploadOverlay: React.FC<FullScreenUploadOverlayProps> = (
 
         {/* Elapsed time */}
         {typeof elapsedSeconds === 'number' && elapsedSeconds > 0 && (
-          <p className="mt-3 font-mono tabular-nums text-[11px] font-semibold text-slate-400">
+          <p className="mt-3 font-mono tabular-nums text-[11px] font-semibold text-slate-400 dark:text-slate-500">
             {elapsedSeconds.toFixed(1)}s elapsed
           </p>
         )}

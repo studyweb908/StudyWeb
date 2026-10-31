@@ -397,8 +397,8 @@ export default function Navigation() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <a href="#" className="flex items-center gap-2.5">
-                <img src="/logo-inner.png" alt="StudyWeb Logo" className="h-9 sm:h-10 md:h-11 w-auto object-contain select-none transition-all" />
+              <a href="#" className="flex items-center gap-2.5 group">
+                <img src="/logo-inner.png" alt="StudyWeb Logo" className="w-8 h-8 sm:w-9 sm:h-9 object-contain select-none shrink-0 group-hover:scale-105 transition-transform" />
                 <span className="font-extrabold font-display text-lg sm:text-xl tracking-tight text-brand-text">StudyWeb</span>
               </a>
             </div>

@@ -246,7 +246,7 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
       )}
       <div className="flex items-center justify-between gap-2 sm:gap-4">
         {/* Hamburger & Logo */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5 md:pr-4 min-w-0">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 md:pr-2 min-w-0">
           <button
             onClick={onMenuToggle}
             className="md:hidden p-1.5 -ml-1 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
@@ -255,11 +255,21 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
           >
             <Menu className="w-5 h-5" />
           </button>
-          <img 
-            src="/logo-inner.png" 
-            alt="StudyWeb Logo" 
-            className="md:hidden h-7 sm:h-8 w-auto object-contain select-none shrink-0" 
-          />
+          <button
+            type="button"
+            onClick={() => setActiveTab('dashboard')}
+            className="flex items-center gap-2 cursor-pointer group shrink-0"
+            title="StudyWeb Home"
+          >
+            <img 
+              src="/logo-inner.png" 
+              alt="StudyWeb Logo" 
+              className="w-7 h-7 sm:w-8 sm:h-8 object-contain select-none shrink-0 group-hover:scale-105 transition-transform" 
+            />
+            <span className="hidden lg:inline-block text-sm font-extrabold tracking-tight text-[#151D3B] dark:text-white">
+              StudyWeb
+            </span>
+          </button>
           <span className="md:hidden text-xs font-extrabold text-slate-900 dark:text-white truncate max-w-[95px] xs:max-w-[140px] sm:max-w-[200px]">
             {tabLabels[activeTab] || 'Home'}
           </span>

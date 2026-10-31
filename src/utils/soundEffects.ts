@@ -1,13 +1,23 @@
-// Web Audio API synthesizer for a clean Apple-style glass pop completion sound
+// Authentic Streak Audio Player & Real-Time Audio Clock
+// Uses the uploaded video's audio track (/assets/aistudio/screen-20261031-071332-1793410917614_2_a4c966b1.mp4)
+// and exposes a high-precision playback clock so visual phases lock frame-for-frame to the audio beats.
 
+const STREAK_VIDEO_AUDIO_URL = '/assets/aistudio/screen-20261031-071332-1793410917614_2_a4c966b1.mp4';
+
+let activeStreakAudio: HTMLAudioElement | null = null;
 let sharedAudioCtx: AudioContext | null = null;
-let lastPlayedTimestamp = 0;
+let cachedStreakBuffer: AudioBuffer | null = null;
+let activeBufferSource: AudioBufferSourceNode | null = null;
+let bufferStartCtxTime: number | null = null;
+let fallbackStartPerfTime: number | null = null;
+let isAudioClockRunning = false;
+let isDecodingBuffer = false;
 
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
   if (!AudioCtx) return null;
-  if (!sharedAudioCtx) {
+  if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
     try {
       sharedAudioCtx = new AudioCtx();
     } catch {
@@ -21,62 +31,178 @@ function getAudioContext(): AudioContext | null {
 }
 
 /**
- * Plays a single, clean Apple-style glass pop sound for completed tasks
- * (file upload complete, AI Tutor reply ready, profile/workspace saved, item deleted).
- * Includes a 180ms debounce guard so simultaneous events never double-fire.
+ * Preloads the uploaded video's audio track into memory for instant, zero-latency playback.
+ */
+export function preloadStreakVideoAudio(): void {
+  if (typeof window === 'undefined') return;
+  if (cachedStreakBuffer || isDecodingBuffer) return;
+
+  isDecodingBuffer = true;
+  fetch(STREAK_VIDEO_AUDIO_URL)
+    .then((res) => (res.ok ? res.arrayBuffer() : Promise.reject(new Error('Failed to fetch audio'))))
+    .then((arrayBuffer) => {
+      const ctx = getAudioContext();
+      if (!ctx) {
+        isDecodingBuffer = false;
+        return null;
+      }
+      return ctx.decodeAudioData(arrayBuffer);
+    })
+    .then((decoded) => {
+      if (decoded) {
+        cachedStreakBuffer = decoded;
+      }
+      isDecodingBuffer = false;
+    })
+    .catch(() => {
+      isDecodingBuffer = false;
+    });
+}
+
+/**
+ * Stops any currently playing streak celebration audio and resets the clock.
+ */
+export function stopStreakVideoAudio(): void {
+  isAudioClockRunning = false;
+  bufferStartCtxTime = null;
+  fallbackStartPerfTime = null;
+
+  if (activeBufferSource) {
+    try {
+      activeBufferSource.stop();
+      activeBufferSource.disconnect();
+    } catch {}
+    activeBufferSource = null;
+  }
+  if (activeStreakAudio) {
+    try {
+      activeStreakAudio.pause();
+      activeStreakAudio.currentTime = 0;
+    } catch {}
+    activeStreakAudio = null;
+  }
+}
+
+/**
+ * Returns the exact elapsed playback time in seconds of the streak audio track.
+ * - Prioritizes the live Web Audio hardware clock or HTMLAudioElement.currentTime
+ *   so visual transitions never drift from the sound effect.
+ * - Falls back to monotonic performance.now() only if browser autoplay policies block audio.
+ */
+export function getStreakAudioElapsedSeconds(): number {
+  if (!isAudioClockRunning) return 0;
+
+  // 1. Web Audio API hardware clock (sample-accurate)
+  if (activeBufferSource && sharedAudioCtx && bufferStartCtxTime !== null) {
+    const elapsed = sharedAudioCtx.currentTime - bufferStartCtxTime;
+    if (elapsed >= 0) {
+      return elapsed;
+    }
+  }
+
+  // 2. HTMLAudioElement playback clock
+  if (activeStreakAudio && !activeStreakAudio.paused && activeStreakAudio.currentTime > 0) {
+    return activeStreakAudio.currentTime;
+  }
+
+  // 3. Monotonic fallback clock (accounting for initial audio startup grace period)
+  if (fallbackStartPerfTime !== null) {
+    const wallElapsed = (performance.now() - fallbackStartPerfTime) / 1000;
+    // Wait up to 180ms for HTMLAudioElement to begin before advancing fallback clock
+    if (activeStreakAudio && activeStreakAudio.readyState < 2 && wallElapsed < 0.18) {
+      return 0;
+    }
+    return Math.max(0, wallElapsed);
+  }
+
+  return 0;
+}
+
+/**
+ * Plays the exact audio track from the user's uploaded streak video
+ * (/assets/aistudio/screen-20261031-071332-1793410917614_2_a4c966b1.mp4)
+ * and starts the synchronized playback clock.
+ */
+export function playStreakVideoAudio(): void {
+  if (typeof window === 'undefined') return;
+  stopStreakVideoAudio();
+
+  isAudioClockRunning = true;
+  fallbackStartPerfTime = performance.now();
+
+  // If we already decoded the Web Audio buffer, use it first for 0ms instant start & sample-accurate clock
+  const ctx = getAudioContext();
+  if (ctx && cachedStreakBuffer && ctx.state === 'running') {
+    try {
+      const source = ctx.createBufferSource();
+      source.buffer = cachedStreakBuffer;
+      source.connect(ctx.destination);
+      bufferStartCtxTime = ctx.currentTime;
+      source.start(0);
+      activeBufferSource = source;
+      return;
+    } catch {
+      bufferStartCtxTime = null;
+    }
+  }
+
+  // Otherwise use HTMLAudioElement and reset fallbackStartPerfTime on 'playing' event so clock locks to audio start
+  try {
+    const audio = new Audio(STREAK_VIDEO_AUDIO_URL);
+    audio.preload = 'auto';
+    audio.volume = 1.0;
+    activeStreakAudio = audio;
+
+    audio.addEventListener(
+      'playing',
+      () => {
+        fallbackStartPerfTime = performance.now() - audio.currentTime * 1000;
+      },
+      { once: true }
+    );
+
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+      playPromise.catch(() => {
+        playDecodedBufferFallback();
+      });
+    }
+    return;
+  } catch {
+    playDecodedBufferFallback();
+  }
+}
+
+function playDecodedBufferFallback(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  if (cachedStreakBuffer) {
+    try {
+      const source = ctx.createBufferSource();
+      source.buffer = cachedStreakBuffer;
+      source.connect(ctx.destination);
+      bufferStartCtxTime = ctx.currentTime;
+      fallbackStartPerfTime = performance.now();
+      source.start(0);
+      activeBufferSource = source;
+    } catch {}
+  } else {
+    preloadStreakVideoAudio();
+  }
+}
+
+/**
+ * Synthetic beep removed per user request so only the authentic uploaded video audio
+ * is used on the Streak screen.
  */
 export function playGlassPopSound(): void {
-  if (typeof window === 'undefined') return;
-  const nowMs = Date.now();
-  if (nowMs - lastPlayedTimestamp < 180) {
-    return;
-  }
-  lastPlayedTimestamp = nowMs;
-
-  try {
-    const ctx = getAudioContext();
-    if (!ctx) return;
-
-    const now = ctx.currentTime;
-
-    // Primary resonant glass sine pop (pitch envelope: 587.33 Hz D5 -> 880 Hz A5)
-    const osc1 = ctx.createOscillator();
-    const gain1 = ctx.createGain();
-    osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(587.33, now);
-    osc1.frequency.exponentialRampToValueAtTime(880, now + 0.085);
-
-    gain1.gain.setValueAtTime(0.0001, now);
-    gain1.gain.linearRampToValueAtTime(0.22, now + 0.012);
-    gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.13);
-
-    osc1.connect(gain1);
-    gain1.connect(ctx.destination);
-
-    // Subtle crystalline harmonic overtone (triangle wave an octave higher)
-    const osc2 = ctx.createOscillator();
-    const gain2 = ctx.createGain();
-    osc2.type = 'triangle';
-    osc2.frequency.setValueAtTime(1174.66, now + 0.01);
-    osc2.frequency.exponentialRampToValueAtTime(1760, now + 0.09);
-
-    gain2.gain.setValueAtTime(0.0001, now);
-    gain2.gain.linearRampToValueAtTime(0.08, now + 0.018);
-    gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.115);
-
-    osc2.connect(gain2);
-    gain2.connect(ctx.destination);
-
-    osc1.start(now);
-    osc1.stop(now + 0.14);
-
-    osc2.start(now + 0.008);
-    osc2.stop(now + 0.125);
-  } catch {
-    // Ignore audio context restrictions if user has not interacted yet
-  }
+  // Intentionally no-op: synthetic beep disabled everywhere
 }
 
 if (typeof window !== 'undefined') {
   (window as any).playStudyWebPopSound = playGlassPopSound;
+  setTimeout(() => {
+    preloadStreakVideoAudio();
+  }, 800);
 }

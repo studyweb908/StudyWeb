@@ -227,9 +227,11 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                   </button>
                 ) : (
                   <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
-                      <Sparkles className="w-4 h-4" />
-                    </div>
+                    <img
+                      src="/logo-inner.png"
+                      alt="StudyWeb Logo"
+                      className="w-8 h-8 object-contain select-none shrink-0"
+                    />
                     <span className="font-extrabold text-base tracking-tight text-slate-900 dark:text-white">
                       StudyWeb Setup
                     </span>
@@ -276,9 +278,11 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
                 >
                   {step === 0 && (
                     <div className="text-center py-8 sm:py-12 flex flex-col items-center justify-center space-y-6 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-8 sm:p-12 shadow-sm">
-                      <div className="w-16 h-16 bg-indigo-50 dark:bg-indigo-500/10 rounded-2xl flex items-center justify-center border border-indigo-100 dark:border-indigo-500/20">
-                        <Sparkles className="w-8 h-8 text-indigo-600 dark:text-indigo-400" />
-                      </div>
+                      <img
+                        src="/logo-inner.png"
+                        alt="StudyWeb Logo"
+                        className="w-16 h-16 object-contain select-none shrink-0"
+                      />
                       <div className="space-y-3 max-w-md mx-auto">
                         <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white tracking-tight">
                           Welcome to StudyWeb

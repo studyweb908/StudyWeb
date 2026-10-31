@@ -410,13 +410,6 @@ class AITutorBackgroundManager {
           playGlassPopSound();
         } catch {}
 
-        if (!aiMsg.isError) {
-          try {
-            const { StudyTrackerService } = await import('./StudyTrackerService');
-            StudyTrackerService.completeTodayStudyTask("You've completed today's AI Tutor study session!");
-          } catch {}
-        }
-
         window.dispatchEvent(new CustomEvent('studyweb-tutor-message-completed', {
           detail: {
             workspaceId,

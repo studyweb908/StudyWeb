@@ -319,7 +319,6 @@ export function AIInsightsCard({ onStartRefresher }: { onStartRefresher?: () => 
 // -----------------------------------------
 // 4. Recent Study Materials
 // -----------------------------------------
-import { Workspace } from './WorkspaceTypes';
 
 export function RecentStudyMaterials({ 
   workspaces = [],

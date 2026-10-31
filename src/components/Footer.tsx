@@ -43,7 +43,7 @@ export default function Footer() {
                 height="48" 
                 loading="lazy" 
                 decoding="async" 
-                className="w-11 h-12 object-contain select-none" 
+                className="w-10 h-11 object-contain select-none shrink-0" 
               />
               <div className="flex flex-col justify-center mt-1 text-white">
                 <span className="font-serif font-semibold text-2xl tracking-[0.15em] leading-none mb-1">

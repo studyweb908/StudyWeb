@@ -1,45 +1,106 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Check, Sparkles, X } from 'lucide-react';
+import { Check, RotateCcw, Share2, X, Flame } from 'lucide-react';
 import { StudyTrackerService } from '../../services/StudyTrackerService';
-import { playGlassPopSound } from '../../utils/soundEffects';
+import { readSyncProfileSnapshot, fetchAndReconcileSupabaseProfile } from '../../utils/profileStorage';
+import {
+  playStreakVideoAudio,
+  stopStreakVideoAudio,
+  getStreakAudioElapsedSeconds,
+  playGlassPopSound,
+} from '../../utils/soundEffects';
+
+// Synchronized audio-reactive phases locked to the celebratory audio track
+type AnimationPhase = 'igniting' | 'flare' | 'settled';
+
+const CELEBRATION_CONFETTI_PARTICLES = [
+  { angle: -162, dist: 120, color: '#00E676', w: 8, h: 4, round: false },
+  { angle: -142, dist: 98, color: '#FFD600', w: 6, h: 6, round: true },
+  { angle: -125, dist: 130, color: '#00C853', w: 10, h: 4, round: false },
+  { angle: -48, dist: 114, color: '#FF9100', w: 8, h: 4, round: false },
+  { angle: -28, dist: 128, color: '#00E676', w: 9, h: 4, round: false },
+  { angle: -12, dist: 106, color: '#FFD600', w: 7, h: 7, round: true },
+  { angle: 12, dist: 124, color: '#00E676', w: 10, h: 4, round: false },
+  { angle: 28, dist: 100, color: '#FF3D00', w: 6, h: 6, round: true },
+  { angle: 152, dist: 114, color: '#FF9100', w: 9, h: 4, round: false },
+  { angle: 168, dist: 128, color: '#FFD600', w: 8, h: 4, round: false },
+  { angle: -175, dist: 104, color: '#00C853', w: 6, h: 6, round: true },
+];
+
+const TODAY_CHECK_BURST_PARTICLES = [
+  { angle: -135, dist: 36, color: '#00E676', w: 7, h: 4 },
+  { angle: -95, dist: 40, color: '#FFD600', w: 6, h: 6 },
+  { angle: -45, dist: 38, color: '#00C853', w: 8, h: 4 },
+  { angle: -10, dist: 34, color: '#FF9100', w: 6, h: 4 },
+  { angle: 35, dist: 36, color: '#00E676', w: 7, h: 4 },
+  { angle: 80, dist: 32, color: '#FFD600', w: 5, h: 5 },
+  { angle: 130, dist: 36, color: '#00C853', w: 7, h: 4 },
+  { angle: 170, dist: 34, color: '#FF9100', w: 6, h: 4 },
+];
 
 export const StreakCelebrationModal: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
+  const [phase, setPhase] = useState<AnimationPhase>('igniting');
+  const [replaySeed, setReplaySeed] = useState(0);
   const [streakCount, setStreakCount] = useState<number>(1);
   const [displayCount, setDisplayCount] = useState<number>(1);
-  const [subtitleText, setSubtitleText] = useState<string>("You've completed today's study task!");
+  const [activeToday, setActiveToday] = useState<boolean>(false);
+  const [todayMinutes, setTodayMinutes] = useState<number>(0);
+  const [dailyGoalMinutes, setDailyGoalMinutes] = useState<number>(45);
+  const [firstName, setFirstName] = useState<string>('STUDENT');
   const [weeklyDays, setWeeklyDays] = useState<
-    Array<{ label: string; dateStr: string; completed: boolean; isToday: boolean }>
+    Array<{
+      label: string;
+      dateStr: string;
+      dayNumber: number;
+      completed: boolean;
+      isToday: boolean;
+      isFuture: boolean;
+    }>
   >([]);
 
-  const refreshData = (customStreak?: number, customReason?: string) => {
+  const rafRef = useRef<number | null>(null);
+
+  const loadSnapshot = useCallback((customStreak?: number) => {
     const stats = StudyTrackerService.getFormattedStats();
-    const resolvedStreak = typeof customStreak === 'number' && customStreak > 0 ? customStreak : stats.currentStreak;
+    const resolvedStreak = typeof customStreak === 'number' ? customStreak : stats.currentStreak;
     setStreakCount(resolvedStreak);
-    setDisplayCount(Math.max(1, resolvedStreak - 1));
-    setSubtitleText(
-      customReason ||
-        (stats.activeToday
-          ? "You've completed today's study task!"
-          : 'Complete a study task today to extend your streak!')
-    );
+    setDisplayCount(resolvedStreak);
+    setActiveToday(stats.activeToday);
+    setTodayMinutes(stats.todayMinutes);
+    setDailyGoalMinutes(stats.dailyGoalMinutes);
     setWeeklyDays(StudyTrackerService.getWeeklyStreakDays());
-  };
+
+    const snap = readSyncProfileSnapshot();
+    const rawName = (snap.fullName || snap.email?.split('@')[0] || 'Student').trim();
+    const first = rawName.split(/\s+/)[0] || 'Student';
+    setFirstName(first.toUpperCase());
+
+    fetchAndReconcileSupabaseProfile()
+      .then(({ profile }) => {
+        const name = (profile.fullName || profile.email?.split('@')[0] || 'Student').trim();
+        const f = name.split(/\s+/)[0] || 'Student';
+        setFirstName(f.toUpperCase());
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const handleCompleted = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
-      refreshData(detail?.streak, detail?.reason || "You've completed today's study task!");
+      loadSnapshot(detail?.streak);
+      setPhase('igniting');
+      setReplaySeed((s) => s + 1);
       setIsOpen(true);
-      playGlassPopSound();
     };
 
     const handleOpenManual = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
-      refreshData(detail?.streak, detail?.reason);
+      loadSnapshot(detail?.streak);
+      setPhase('igniting');
+      setReplaySeed((s) => s + 1);
       setIsOpen(true);
-      playGlassPopSound();
     };
 
     window.addEventListener('studyweb-daily-routine-completed', handleCompleted);
@@ -48,18 +109,103 @@ export const StreakCelebrationModal: React.FC = () => {
       window.removeEventListener('studyweb-daily-routine-completed', handleCompleted);
       window.removeEventListener('studyweb-open-streak-modal', handleOpenManual);
     };
-  }, []);
+  }, [loadSnapshot]);
 
-  // Roll up number animation when modal opens
+  // Synchronize audio clock with visual phases
   useEffect(() => {
-    if (!isOpen) return;
-    const t = setTimeout(() => {
-      setDisplayCount(streakCount);
-    }, 340);
-    return () => clearTimeout(t);
-  }, [isOpen, streakCount]);
+    if (!isOpen) {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      stopStreakVideoAudio();
+      return;
+    }
 
-  return (
+    setPhase('igniting');
+    playStreakVideoAudio();
+
+    let currentPhaseLocal: AnimationPhase = 'igniting';
+
+    const syncFrameToAudioClock = () => {
+      const t = getStreakAudioElapsedSeconds();
+
+      let nextPhase: AnimationPhase = 'igniting';
+      if (t >= 2.5) {
+        nextPhase = 'settled';
+      } else if (t >= 1.2) {
+        nextPhase = 'flare';
+      } else {
+        nextPhase = 'igniting';
+      }
+
+      if (nextPhase !== currentPhaseLocal) {
+        currentPhaseLocal = nextPhase;
+        setPhase(nextPhase);
+      }
+
+      if (currentPhaseLocal !== 'settled') {
+        rafRef.current = requestAnimationFrame(syncFrameToAudioClock);
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(syncFrameToAudioClock);
+
+    return () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      stopStreakVideoAudio();
+    };
+  }, [isOpen, replaySeed]);
+
+  if (typeof document === 'undefined') return null;
+
+  // Find range of completed days for the continuous green pill highlight
+  const firstCompletedIdx = weeklyDays.findIndex((d) => d.completed);
+  const lastCompletedIdx = weeklyDays.reduce((acc, d, idx) => (d.completed ? idx : acc), -1);
+  const todayIdx = weeklyDays.findIndex((d) => d.isToday);
+
+  const handleClose = () => {
+    stopStreakVideoAudio();
+    setIsOpen(false);
+  };
+
+  const handleReplay = () => {
+    setReplaySeed((s) => s + 1);
+  };
+
+  const handleCheckInAction = () => {
+    if (!activeToday) {
+      // User checks in today!
+      const res = StudyTrackerService.checkInToday();
+      setStreakCount(res.streak);
+      setDisplayCount(res.streak);
+      setActiveToday(true);
+      setWeeklyDays(StudyTrackerService.getWeeklyStreakDays());
+      playGlassPopSound();
+    } else {
+      // Already checked in today, close modal smoothly
+      handleClose();
+    }
+  };
+
+  const handleShareStreak = async () => {
+    const shareText = `🔥 I'm on a ${streakCount}-day study streak on StudyWeb! Keep the fire alive!`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'StudyWeb Streak', text: shareText });
+        return;
+      } catch {}
+    }
+    try {
+      await navigator.clipboard.writeText(shareText);
+      (window as any).showToast?.('Streak copied to clipboard!', 'success');
+    } catch {}
+  };
+
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
         <motion.div
@@ -67,162 +213,346 @@ export const StreakCelebrationModal: React.FC = () => {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.22 }}
-          className="fixed inset-0 z-[9998] flex items-center justify-center p-4 sm:p-6 bg-white/95 dark:bg-slate-950/95 backdrop-blur-2xl select-none"
+          className="fixed inset-0 z-[99999] w-screen h-screen bg-[#0C120F] text-white flex flex-col items-center justify-between px-4 sm:px-6 py-6 sm:py-8 overflow-y-auto select-none"
           role="dialog"
           aria-modal="true"
-          aria-label="Daily Streak Celebration"
+          aria-label="Daily Streak Check-in"
         >
-          {/* Ambient Golden Flame Glow */}
-          <div className="pointer-events-none absolute w-[380px] h-[380px] rounded-full bg-amber-400/20 dark:bg-amber-500/15 blur-3xl -top-10" />
-
-          {/* Close Button */}
-          <button
-            type="button"
-            onClick={() => setIsOpen(false)}
-            aria-label="Close streak modal"
-            className="absolute top-5 right-5 p-2.5 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300 transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
-
-          <motion.div
-            initial={{ opacity: 0, y: 24, scale: 0.94 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 16, scale: 0.96 }}
-            transition={{ type: 'spring', stiffness: 320, damping: 26 }}
-            className="relative z-10 w-full max-w-md flex flex-col items-center text-center px-2 sm:px-4"
-          >
-            {/* 1. Duolingo-Style Multi-Layer Flame Illustration */}
-            <div className="relative w-36 h-40 flex items-center justify-center mb-2">
-              {/* Floating Sparkles */}
-              <motion.span
-                animate={{ y: [-4, -14, -4], opacity: [0.5, 1, 0.5], scale: [0.9, 1.15, 0.9] }}
-                transition={{ duration: 2.1, repeat: Infinity, ease: 'easeInOut' }}
-                className="absolute top-3 left-5 w-3 h-3 rounded-full bg-amber-400 shadow-[0_0_12px_#fbbf24]"
+          {/* TOP NAV BAR */}
+          <div className="w-full max-w-md flex items-center justify-between z-30 shrink-0">
+            {/* Top-Left StudyWeb Pure Logo (Zero outer blur / Zero white circle) */}
+            <div className="flex items-center gap-2">
+              <img
+                src="/logo-inner.png"
+                alt="StudyWeb"
+                className="w-7 h-7 object-contain select-none shrink-0"
               />
-              <motion.span
-                animate={{ y: [-2, -12, -2], opacity: [0.4, 1, 0.4], scale: [0.85, 1.2, 0.85] }}
-                transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut', delay: 0.4 }}
-                className="absolute top-6 right-5 w-2.5 h-2.5 rounded-full bg-orange-400 shadow-[0_0_10px_#fb923c]"
-              />
-              <motion.span
-                animate={{ y: [0, -10, 0], opacity: [0.6, 1, 0.6] }}
-                transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut', delay: 0.8 }}
-                className="absolute bottom-8 left-3 text-amber-400"
-              >
-                <Sparkles className="w-4 h-4 fill-amber-400" />
-              </motion.span>
-
-              <motion.svg
-                viewBox="0 0 160 180"
-                className="w-32 h-36 drop-shadow-[0_14px_28px_rgba(249,115,22,0.38)]"
-                animate={{ scale: [1, 1.04, 1], y: [0, -3, 0] }}
-                transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
-              >
-                <defs>
-                  <linearGradient id="duoOuterFlame" x1="50%" y1="0%" x2="50%" y2="100%">
-                    <stop offset="0%" stopColor="#FFB020" />
-                    <stop offset="55%" stopColor="#FF7A00" />
-                    <stop offset="100%" stopColor="#F94D00" />
-                  </linearGradient>
-                  <linearGradient id="duoInnerFlame" x1="50%" y1="0%" x2="50%" y2="100%">
-                    <stop offset="0%" stopColor="#FFF3B0" />
-                    <stop offset="50%" stopColor="#FFD026" />
-                    <stop offset="100%" stopColor="#FF9800" />
-                  </linearGradient>
-                </defs>
-                {/* Outer Orange Flame */}
-                <path
-                  d="M84 10 C84 10 138 56 138 110 C138 145 112 170 80 170 C48 170 22 145 22 110 C22 76 46 50 56 38 C54 56 64 66 64 66 C60 40 84 10 84 10 Z"
-                  fill="url(#duoOuterFlame)"
-                />
-                {/* Inner Golden Flame */}
-                <path
-                  d="M82 54 C82 54 114 84 114 118 C114 140 99 156 80 156 C61 156 46 140 46 118 C46 98 62 80 70 72 C69 84 76 90 76 90 C74 72 82 54 82 54 Z"
-                  fill="url(#duoInnerFlame)"
-                />
-                {/* Core Warm Highlight */}
-                <ellipse cx="80" cy="134" rx="16" ry="20" fill="#FFF9DB" opacity="0.92" />
-              </motion.svg>
+              <span className="text-sm font-extrabold tracking-tight text-white/90">StudyWeb</span>
             </div>
 
-            {/* 2. Giant Animated Streak Number & "day streak!" */}
-            <motion.div
-              key={displayCount}
-              initial={{ scale: 0.75, opacity: 0.6 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: 'spring', stiffness: 380, damping: 20 }}
-              className="font-display font-black tabular-nums text-6xl sm:text-7xl tracking-tight text-[#FF8800] dark:text-[#FFA114] drop-shadow-[0_2px_10px_rgba(255,136,0,0.22)] leading-none"
-            >
-              {displayCount}
-            </motion.div>
+            {/* Top-Right Controls */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleReplay}
+                aria-label="Replay celebration audio"
+                title="Replay celebration audio"
+                className="p-2.5 rounded-full bg-[#16211B] hover:bg-[#1E2E25] text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={handleShareStreak}
+                aria-label="Share streak"
+                title="Share your streak"
+                className="p-2.5 rounded-full bg-[#16211B] hover:bg-[#1E2E25] text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                <Share2 className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={handleClose}
+                aria-label="Close streak modal"
+                className="p-2.5 rounded-full bg-[#16211B] hover:bg-[#1E2E25] text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
 
-            <h2 className="mt-1.5 text-2xl sm:text-3xl font-black tracking-tight text-[#FF8800] dark:text-[#FFA114]">
-              day streak!
-            </h2>
+          {/* MAIN STREAK HERO CARD */}
+          <div className="relative w-full max-w-sm sm:max-w-md flex-1 flex flex-col items-center justify-center my-auto py-4">
+            {/* Deep Emerald Green Ambient Radial Glow behind Flame */}
+            <div
+              className="pointer-events-none absolute -top-10 left-1/2 -translate-x-1/2 w-[340px] sm:w-[420px] h-[340px] sm:h-[420px] rounded-full blur-3xl opacity-80"
+              style={{
+                background:
+                  'radial-gradient(circle, rgba(0, 200, 83, 0.28) 0%, rgba(5, 120, 50, 0.16) 42%, transparent 72%)',
+              }}
+            />
 
-            <p className="mt-1.5 text-xs sm:text-sm font-bold text-slate-600 dark:text-slate-300">
-              {subtitleText}
-            </p>
+            {/* 1. ANIMATED FIRE FLAME */}
+            <div className="relative flex flex-col items-center justify-center mb-6 z-10">
+              <motion.div
+                animate={{
+                  scale: phase === 'flare' ? [1, 1.14, 1.05] : [1, 1.05, 1],
+                  y: [0, -3, 0],
+                }}
+                transition={{
+                  duration: 2.2,
+                  repeat: Infinity,
+                  ease: 'easeInOut',
+                }}
+                className="relative flex items-center justify-center"
+              >
+                {/* Glowing drop shadow behind flame */}
+                <div className="absolute inset-0 rounded-full blur-xl bg-orange-500/35 scale-125" />
 
-            {/* 3. 7-Day Weekly Streak Card (Su Mo Tu We Th Fr Sa) */}
-            <div className="w-full mt-6 p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border-2 border-slate-200/90 dark:border-slate-800 shadow-sm">
-              <div className="grid grid-cols-7 gap-1.5 sm:gap-2 pb-4 border-b border-slate-100 dark:border-slate-800">
-                {weeklyDays.map((day, idx) => (
-                  <div key={day.dateStr} className="flex flex-col items-center gap-2">
-                    <span
-                      className={`text-[11px] sm:text-xs font-extrabold uppercase tracking-wide ${
-                        day.isToday
-                          ? 'text-[#FF8800] dark:text-amber-400'
-                          : 'text-slate-400 dark:text-slate-500'
-                      }`}
-                    >
-                      {day.label}
-                    </span>
+                {/* Vector SVG Flame with vivid gradient core */}
+                <svg
+                  width="110"
+                  height="124"
+                  viewBox="0 0 120 136"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="relative z-10 drop-shadow-[0_4px_24px_rgba(255,109,0,0.55)]"
+                >
+                  <defs>
+                    <linearGradient id="streakFlameOuter" x1="50%" y1="0%" x2="50%" y2="100%">
+                      <stop offset="0%" stopColor="#FF9800" />
+                      <stop offset="35%" stopColor="#FF6D00" />
+                      <stop offset="70%" stopColor="#FC630D" />
+                      <stop offset="100%" stopColor="#F44336" />
+                    </linearGradient>
+                    <radialGradient id="streakFlameInner" cx="50%" cy="65%" r="45%">
+                      <stop offset="0%" stopColor="#FFF9C4" />
+                      <stop offset="50%" stopColor="#FFE082" />
+                      <stop offset="100%" stopColor="#FFA000" />
+                    </radialGradient>
+                  </defs>
 
-                    <motion.div
-                      initial={day.isToday ? { scale: 0.5 } : false}
-                      animate={day.isToday ? { scale: 1 } : undefined}
-                      transition={{
-                        type: 'spring',
-                        stiffness: 360,
-                        damping: 18,
-                        delay: day.isToday ? 0.25 : idx * 0.03,
-                      }}
-                      className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center font-bold transition-all ${
-                        day.completed
-                          ? 'bg-gradient-to-b from-[#FFA800] to-[#FF7A00] text-white shadow-[0_3px_10px_rgba(255,136,0,0.35)]'
-                          : day.isToday
-                          ? 'border-2 border-dashed border-[#FF8800] bg-amber-50/60 dark:bg-amber-950/30 text-[#FF8800]'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-300 dark:text-slate-600 border border-slate-200/80 dark:border-slate-700/60'
-                      }`}
-                    >
-                      {day.completed ? (
-                        <Check className="w-4 h-4 sm:w-5 sm:h-5 stroke-[3.2]" />
-                      ) : (
-                        <span className="w-2 h-2 rounded-full bg-current opacity-40" />
-                      )}
-                    </motion.div>
+                  {/* Outer Fiery Silhouette */}
+                  <path
+                    d="M60 4C60 4 88 38 88 78C88 102 75 120 60 120C45 120 32 102 32 78C32 58 46 42 53 30C52 42 58 50 58 50C55 34 60 4 60 4Z"
+                    fill="url(#streakFlameOuter)"
+                  />
+                  {/* Mid Warm Amber Petals */}
+                  <path
+                    d="M60 34C60 34 80 58 80 84C80 102 71 114 60 114C49 114 40 102 40 84C40 68 50 56 55 46C54 54 59 60 59 60C57 48 60 34 60 34Z"
+                    fill="#FFB300"
+                  />
+                  {/* Inner Glowing White/Yellow Seed */}
+                  <path
+                    d="M60 64C60 64 72 80 72 96C72 106 66 112 60 112C54 112 48 106 48 96C48 84 54 74 57 68C56 72 60 76 60 76C59 70 60 64 60 64Z"
+                    fill="url(#streakFlameInner)"
+                  />
+                </svg>
+
+                {/* Floating Fiery Sparkles */}
+                <motion.div
+                  animate={{ y: [-2, -18, -2], opacity: [0, 1, 0], scale: [0.6, 1, 0.4] }}
+                  transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }}
+                  className="absolute -top-1 right-3 w-2 h-2 rounded-full bg-amber-300 blur-[0.5px]"
+                />
+                <motion.div
+                  animate={{ y: [0, -16, 0], opacity: [0, 0.9, 0], scale: [0.5, 0.9, 0.3] }}
+                  transition={{ duration: 2.1, repeat: Infinity, delay: 0.7, ease: 'easeOut' }}
+                  className="absolute -top-3 left-4 w-1.5 h-1.5 rounded-full bg-yellow-200 blur-[0.5px]"
+                />
+              </motion.div>
+
+              {/* Real Streak Count Pill */}
+              <div className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#18231C] border border-[#23402C] text-xs font-black tracking-wide text-emerald-300">
+                <Flame className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                <span>
+                  {streakCount} {streakCount === 1 ? 'DAY' : 'DAYS'} STREAK
+                </span>
+              </div>
+            </div>
+
+            {/* 2. EMERALD GREEN HEADLINE (Matches uploaded design) */}
+            <div className="text-center mb-6 z-10 px-2">
+              <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-[#00C853] tracking-tight leading-[1.18]">
+                {activeToday ? (
+                  <>
+                    Keep the fire alive<br />
+                    streak active today!
+                  </>
+                ) : (
+                  <>
+                    Keep the fire alive<br />
+                    check in today!
+                  </>
+                )}
+              </h2>
+            </div>
+
+            {/* 3. WEEKLY STREAK CARD (Remade with user's live data!) */}
+            <div className="relative w-full bg-[#181113] border border-[#2B1B1F] rounded-2xl sm:rounded-3xl p-4 sm:p-5 shadow-[0_16px_40px_rgba(0,0,0,0.6)] z-10">
+              {/* Confetti Particle Burst on Flare or Check-in */}
+              <AnimatePresence>
+                {phase === 'flare' && (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-20">
+                    {CELEBRATION_CONFETTI_PARTICLES.map((p, i) => {
+                      const rad = (p.angle * Math.PI) / 180;
+                      const tx = Math.cos(rad) * p.dist;
+                      const ty = Math.sin(rad) * p.dist;
+                      return (
+                        <motion.span
+                          key={i}
+                          initial={{ x: tx * 0.2, y: ty * 0.2, scale: 0.4, opacity: 1 }}
+                          animate={{
+                            x: tx,
+                            y: ty,
+                            scale: 1,
+                            opacity: [1, 1, 0],
+                            rotate: p.angle * 1.5,
+                          }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.75, ease: 'easeOut' }}
+                          style={{
+                            width: p.w,
+                            height: p.h,
+                            backgroundColor: p.color,
+                          }}
+                          className={`absolute ${p.round ? 'rounded-full' : 'rounded-xs'}`}
+                        />
+                      );
+                    })}
                   </div>
+                )}
+              </AnimatePresence>
+
+              {/* Day of Week Row: M T W T F S S */}
+              <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-3 text-center">
+                {weeklyDays.map((d, i) => (
+                  <span
+                    key={`header-${i}-${d.dateStr}`}
+                    className="text-xs sm:text-sm font-extrabold text-white/90 tracking-wide"
+                  >
+                    {d.label}
+                  </span>
                 ))}
               </div>
 
-              <p className="pt-3.5 text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-300 leading-relaxed">
-                Studying every day builds lasting exam &amp; interview mastery. Keep your flame lit tomorrow!
+              {/* Day Circles with Continuous Green Pill Track */}
+              <div className="relative grid grid-cols-7 gap-1 sm:gap-2 items-center py-1">
+                {/* Continuous connected green pill track between first and last completed day */}
+                {firstCompletedIdx !== -1 && lastCompletedIdx >= firstCompletedIdx && (
+                  <motion.div
+                    layout
+                    initial={{ opacity: 0, scaleY: 0.8 }}
+                    animate={{ opacity: 1, scaleY: 1 }}
+                    transition={{ duration: 0.3 }}
+                    style={{
+                      left: `${(firstCompletedIdx / 7) * 100 + 1.2}%`,
+                      width: `${((lastCompletedIdx - firstCompletedIdx + 1) / 7) * 100 - 2.4}%`,
+                    }}
+                    className="absolute h-9 sm:h-10 rounded-full bg-[#1E6B27] border border-[#2EA037]/70 z-0 shadow-[0_0_12px_rgba(34,197,94,0.3)]"
+                  />
+                )}
+
+                {weeklyDays.map((d, idx) => {
+                  const isTodayCell = idx === todayIdx;
+
+                  return (
+                    <div
+                      key={`circle-${d.dateStr}`}
+                      className="relative z-10 flex items-center justify-center"
+                    >
+                      {/* Local Confetti Burst when Today is checked in */}
+                      {isTodayCell && activeToday && (
+                        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                          {TODAY_CHECK_BURST_PARTICLES.map((p, pIdx) => {
+                            const rad = (p.angle * Math.PI) / 180;
+                            const tx = Math.cos(rad) * p.dist;
+                            const ty = Math.sin(rad) * p.dist;
+                            return (
+                              <motion.span
+                                key={pIdx}
+                                initial={{ x: 0, y: 0, scale: 0.3, opacity: 1 }}
+                                animate={{
+                                  x: tx,
+                                  y: ty,
+                                  scale: 1,
+                                  opacity: [1, 1, 0],
+                                  rotate: p.angle,
+                                }}
+                                transition={{ duration: 0.65, delay: 0.08, ease: 'easeOut' }}
+                                style={{
+                                  width: p.w,
+                                  height: p.h,
+                                  backgroundColor: p.color,
+                                }}
+                                className="absolute rounded-xs"
+                              />
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {d.completed ? (
+                        /* Completed Day: Vivid Green Checkmark in Connected Track */
+                        <motion.div
+                          initial={{ scale: 0.6 }}
+                          animate={{ scale: 1 }}
+                          transition={{ type: 'spring', stiffness: 420, damping: 20 }}
+                          className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#2E9937] flex items-center justify-center text-white shadow-xs"
+                          title={`Completed on ${d.dateStr}`}
+                        >
+                          <Check className="w-5 h-5 text-white stroke-[3.5]" />
+                        </motion.div>
+                      ) : isTodayCell ? (
+                        /* Today Cell (Active Waiting for Check-in): Translucent Green Halo with Date */
+                        <motion.button
+                          type="button"
+                          onClick={handleCheckInAction}
+                          animate={{ scale: [1, 1.06, 1] }}
+                          transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                          title="Click to check in today!"
+                          className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#183620]/90 border-2 border-[#22C55E] text-[#4ADE80] font-black text-xs sm:text-sm flex items-center justify-center ring-4 ring-[#22C55E]/20 shadow-[0_0_18px_rgba(34,197,94,0.45)] cursor-pointer"
+                        >
+                          {d.dayNumber}
+                        </motion.button>
+                      ) : (
+                        /* Future / Other Day: Dark Slate Circular Badge with Date */
+                        <div
+                          className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#27262A] text-slate-300 font-bold text-xs sm:text-sm flex items-center justify-center"
+                          title={d.dateStr}
+                        >
+                          {d.dayNumber}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Focus Minutes / Goal Progress Subtitle */}
+            <div className="mt-3 text-center z-10">
+              <p className="text-xs font-semibold text-slate-400">
+                Today&apos;s Focus:{' '}
+                <span className="text-[#00C853] font-bold tabular-nums">
+                  {todayMinutes}m / {dailyGoalMinutes}m
+                </span>
+                {!activeToday && (
+                  <span className="text-slate-400">
+                    {' '}({Math.max(1, dailyGoalMinutes - todayMinutes)}m goal target)
+                  </span>
+                )}
               </p>
             </div>
 
-            {/* 4. Tactile Full-Width CONTINUE Button */}
-            <button
-              type="button"
-              onClick={() => setIsOpen(false)}
-              className="w-full mt-6 py-3.5 px-6 rounded-2xl bg-[#FF8800] hover:bg-[#FF961A] active:translate-y-0.5 text-white font-extrabold text-sm sm:text-base uppercase tracking-wider shadow-[0_4px_0_#CC6D00] hover:shadow-[0_4px_0_#CC6D00] active:shadow-none transition-all cursor-pointer"
-            >
-              Continue
-            </button>
-          </motion.div>
+            {/* 4. PROMINENT BOTTOM GREEN CTA BUTTON */}
+            <div className="w-full mt-6 z-10">
+              <button
+                type="button"
+                onClick={handleCheckInAction}
+                className="w-full py-4 px-6 rounded-full font-black text-base sm:text-lg bg-[#00B341] hover:bg-[#00C84A] active:scale-98 text-white transition-all duration-150 cursor-pointer shadow-[0_8px_24px_rgba(0,179,65,0.38)] flex items-center justify-center gap-2"
+              >
+                {activeToday ? (
+                  <>
+                    <Check className="w-5 h-5 stroke-[3]" />
+                    <span>Checked in today! 🔥</span>
+                  </>
+                ) : (
+                  <span>Check in today!</span>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* BOTTOM FOOTER */}
+          <div className="w-full max-w-md text-center shrink-0 z-10">
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+              StudyWeb Daily Learning Streak • Keep up the momentum
+            </p>
+          </div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 };

@@ -189,6 +189,9 @@ export default function DashboardHome({
       detail: query || 'Started AI Tutor study consultation',
       iconType: 'tutor'
     }, currentUserId);
+    if (!activeWorkspace && workspaces.length > 0) {
+      setActiveWorkspace(workspaces[0]);
+    }
     setActiveTab('ai-tutor');
   };
 
@@ -216,12 +219,10 @@ export default function DashboardHome({
     window.addEventListener('studyweb-activity-updated', handleActUpdate);
     window.addEventListener('studyweb-study-stats-updated', handleActUpdate);
     window.addEventListener('studyweb-daily-routine-completed', handleActUpdate);
-    window.addEventListener('storage', handleActUpdate);
     return () => {
       window.removeEventListener('studyweb-activity-updated', handleActUpdate);
       window.removeEventListener('studyweb-study-stats-updated', handleActUpdate);
       window.removeEventListener('studyweb-daily-routine-completed', handleActUpdate);
-      window.removeEventListener('storage', handleActUpdate);
     };
   }, []);
 
@@ -305,6 +306,7 @@ export default function DashboardHome({
           <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5 sm:gap-6">
             <div className="space-y-1.5 sm:space-y-2 max-w-2xl text-left">
               <div className="flex items-center gap-2 text-[11px] sm:text-xs font-semibold text-indigo-600 dark:text-indigo-400 tracking-wide uppercase">
+                <img src="/logo-inner.png" alt="StudyWeb" className="w-5 h-5 object-contain select-none shrink-0" />
                 <span>{formattedDate}</span>
                 <span aria-hidden="true">·</span>
                 <span>StudyWeb Learning Core</span>
@@ -329,7 +331,12 @@ export default function DashboardHome({
                 <span>Open Workspaces</span>
               </button>
               <button
-                onClick={() => setActiveTab('ai-tutor')}
+                onClick={() => {
+                  if (!activeWorkspace && workspaces.length > 0) {
+                    setActiveWorkspace(workspaces[0]);
+                  }
+                  setActiveTab('ai-tutor');
+                }}
                 className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm shadow-xs transition-all duration-200 cursor-pointer active:scale-95 text-center"
               >
                 <Bot className="w-4 h-4 text-violet-600 dark:text-violet-400" />
@@ -355,19 +362,19 @@ export default function DashboardHome({
                     {homeStreak.streak} {homeStreak.streak === 1 ? 'Day' : 'Days'} Streak
                   </span>
                   <span
-                    className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                    className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md tabular-nums ${
                       homeStreak.activeToday
                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/60'
                         : 'bg-amber-50 text-amber-700 border border-amber-200/80 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/60'
                     }`}
                   >
-                    {homeStreak.activeToday ? "Today's Goal Done" : 'Complete 1 Task Today'}
+                    {homeStreak.activeToday ? 'Active Today' : 'Daily Streak'}
                   </span>
                 </div>
                 <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium">
                   {homeStreak.activeToday
-                    ? "You're on fire! Today's study streak is locked in."
-                    : 'Upload study material or ask your AI Tutor a question to extend your streak.'}
+                    ? "Great work! Your daily study streak is recorded for today."
+                    : "Study with your course materials or ask your AI Tutor to build your learning streak."}
                 </p>
               </div>
             </div>
@@ -400,13 +407,15 @@ export default function DashboardHome({
                 ))}
               </div>
 
-              <button
-                type="button"
-                onClick={() => window.dispatchEvent(new CustomEvent('studyweb-open-streak-modal'))}
-                className="px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-950/70 border border-amber-200/90 dark:border-amber-800/70 text-[#FF8800] dark:text-amber-400 text-xs font-extrabold whitespace-nowrap cursor-pointer transition-colors"
-              >
-                View Streak
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('studyweb-open-streak-modal'))}
+                  className="px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-950/70 border border-amber-200/90 dark:border-amber-800/70 text-[#FF8800] dark:text-amber-400 text-xs font-extrabold whitespace-nowrap cursor-pointer transition-colors"
+                >
+                  View Streak
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -427,7 +436,7 @@ export default function DashboardHome({
         );
         const hasCompletedPractice =
           totalQuizzesOrFlashcards > 0 ||
-          realActivities.some(a => a.iconType === 'quiz' || a.iconType === 'streak');
+          realActivities.some(a => a.iconType === 'quiz');
 
         const steps = [
           {
@@ -464,7 +473,7 @@ export default function DashboardHome({
           {
             id: 'step-practice',
             num: '03',
-            title: 'Complete a quiz or daily study goal',
+            title: 'Complete an interactive quiz or practice session',
             subtitle: 'Interactive adaptive quizzes and active recall practice are launching soon.',
             done: false,
             locked: true,
@@ -642,7 +651,12 @@ export default function DashboardHome({
 
           {/* Pillar 3: AI Tutor */}
           <button
-            onClick={() => setActiveTab('ai-tutor')}
+            onClick={() => {
+              if (!activeWorkspace && workspaces.length > 0) {
+                setActiveWorkspace(workspaces[0]);
+              }
+              setActiveTab('ai-tutor');
+            }}
             className="flex items-center gap-2.5 sm:gap-3 p-3 sm:p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 shadow-xs hover:border-violet-300 dark:hover:border-violet-700/60 hover:shadow-md transition-all group text-left cursor-pointer active:scale-98"
           >
             <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-violet-50 dark:bg-violet-950/60 border border-violet-100 dark:border-violet-900/40 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
@@ -847,7 +861,12 @@ export default function DashboardHome({
                       <span>Open Workspaces</span>
                     </button>
                     <button
-                      onClick={() => setActiveTab('ai-tutor')}
+                      onClick={() => {
+                        if (!activeWorkspace && workspaces.length > 0) {
+                          setActiveWorkspace(workspaces[0]);
+                        }
+                        setActiveTab('ai-tutor');
+                      }}
                       className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-violet-50 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 text-xs font-semibold hover:bg-violet-100 transition-colors cursor-pointer"
                     >
                       <Bot className="w-3.5 h-3.5" />
@@ -916,22 +935,18 @@ export default function DashboardHome({
           {/* 4B. AI TUTOR PREVIEW */}
           <motion.div variants={itemVariants} className="w-full">
             <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-6 shadow-sm">
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-2.5 mb-1">
                 {(() => {
                   const homeWs = activeWorkspace || (workspaces && workspaces[0]) || null;
-                  const wsLogo = (homeWs as any)?.logo || (homeWs as any)?.icon || (homeWs as any)?.logoUrl || homeWs?.emoji || '🧬';
-                  const isImg = typeof wsLogo === 'string' && (wsLogo.startsWith('data:') || wsLogo.startsWith('http') || (wsLogo.startsWith('/') && !wsLogo.includes('logo-inner.png')));
+                  const wsLogo = (homeWs as any)?.logo || (homeWs as any)?.icon || (homeWs as any)?.logoUrl || homeWs?.emoji || '/logo-inner.png';
+                  const isImg = typeof wsLogo === 'string' && (wsLogo.startsWith('data:') || wsLogo.startsWith('http') || wsLogo.startsWith('/'));
                   return (
-                    <div 
-                      className="w-7 h-7 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 flex items-center justify-center shrink-0 overflow-hidden shadow-2xs select-none"
-                      title={homeWs?.name ? `Workspace: ${homeWs.name}` : 'AI Tutor'}
-                    >
-                      {isImg ? (
-                        <img src={wsLogo} alt="Workspace Logo" className="w-full h-full object-cover select-none" />
-                      ) : (
-                        <span className="text-sm leading-none select-none">{wsLogo}</span>
-                      )}
-                    </div>
+                    <img
+                      src={isImg ? wsLogo : '/logo-inner.png'}
+                      alt="StudyWeb Logo"
+                      title={homeWs?.name ? `Workspace: ${homeWs.name}` : 'StudyWeb AI Tutor'}
+                      className="w-7 h-7 object-contain select-none shrink-0"
+                    />
                   );
                 })()}
                 <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">AI Tutor</h3>

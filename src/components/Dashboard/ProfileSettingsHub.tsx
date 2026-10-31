@@ -40,6 +40,11 @@ import {
   getMonogramAvatar,
   getCuratedMonogramPresets
 } from '../../utils/profileStorage';
+import {
+  CustomDailyGoalSelector,
+  LiveStudyCountdownTimer,
+  formatMinutesHuman
+} from './CustomFocusGoalAndTimer';
 
 type SettingsTab = 'overview' | 'personal' | 'curriculum';
 
@@ -1092,35 +1097,13 @@ export function ProfileSettingsHub() {
                     />
                   </div>
 
-                  {/* Daily Focus Goal Selector */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-bold text-slate-700 dark:text-slate-300">Daily Focus Target</span>
-                      <span className="font-mono font-bold tabular-nums text-indigo-600 dark:text-indigo-400">
-                        {dailyGoalMinutes} mins/day ({todayMinutes}m logged today)
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-5 gap-2">
-                      {[30, 45, 60, 90, 120].map((mins) => (
-                        <button
-                          key={mins}
-                          type="button"
-                          onClick={async () => {
-                            setDailyGoalMinutes(mins);
-                            StudyTrackerService.setDailyGoalMinutes(mins);
-                            await saveProfileToSupabase({ dailyGoalMinutes: mins });
-                          }}
-                          className={`py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
-                            dailyGoalMinutes === mins
-                              ? 'bg-indigo-600 text-white border-indigo-500 shadow-xs'
-                              : 'bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10'
-                          }`}
-                        >
-                          {mins}m
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  {/* Customizable Daily Focus Goal Selector (Presets + Custom Hours/Minutes) */}
+                  <CustomDailyGoalSelector
+                    dailyGoalMinutes={dailyGoalMinutes}
+                    todayMinutes={todayMinutes}
+                    onGoalChange={(mins) => setDailyGoalMinutes(mins)}
+                    compact
+                  />
 
                   {/* Next Core Exam Target Date & Name in Overview */}
                   <div className="p-4 rounded-2xl bg-slate-50/90 dark:bg-slate-950/50 border border-slate-200/70 dark:border-slate-800 space-y-3">
@@ -1206,6 +1189,13 @@ export function ProfileSettingsHub() {
                   ))}
                 </div>
               </div>
+
+              {/* Interactive Live Study Countdown Timer */}
+              <LiveStudyCountdownTimer
+                subjectName={customSessionSubject || subject || 'General Study'}
+                dailyGoalMinutes={dailyGoalMinutes}
+                todayMinutes={todayMinutes}
+              />
 
               <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
                 {/* Left: Subject Breakdown & Daily Progress */}
@@ -1592,43 +1582,19 @@ export function ProfileSettingsHub() {
                 </div>
               </div>
 
-              {/* 2. Daily Focus Goal Target */}
-              <div className="space-y-3 p-5 rounded-2xl bg-slate-50/80 dark:bg-white/5 border border-slate-200/60 dark:border-white/5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                    <span>Daily Focus Target</span>
-                  </label>
-                  <span className="font-mono text-sm font-extrabold tabular-nums text-indigo-600 dark:text-indigo-400">
-                    {dailyGoalMinutes} Minutes / Day
-                  </span>
-                </div>
+              {/* 2. Customizable Daily Focus Goal Target + Live Countdown Timer */}
+              <div className="space-y-5 p-5 rounded-2xl bg-slate-50/80 dark:bg-white/5 border border-slate-200/60 dark:border-white/5">
+                <CustomDailyGoalSelector
+                  dailyGoalMinutes={dailyGoalMinutes}
+                  todayMinutes={todayMinutes}
+                  onGoalChange={(mins) => setDailyGoalMinutes(mins)}
+                />
 
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                  {[30, 45, 60, 90, 120].map((mins) => (
-                    <button
-                      key={mins}
-                      type="button"
-                      onClick={() => {
-                        setDailyGoalMinutes(mins);
-                        StudyTrackerService.setDailyGoalMinutes(mins);
-                      }}
-                      className={`py-3 rounded-2xl border text-xs font-bold transition-all cursor-pointer ${
-                        dailyGoalMinutes === mins
-                          ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/20'
-                          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10 shadow-xs'
-                      }`}
-                    >
-                      {mins} mins
-                    </button>
-                  ))}
-                </div>
-
-                <div className="pt-2 space-y-1.5">
+                <div className="pt-1 space-y-1.5">
                   <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
                     <span>Today&apos;s Focus Completion</span>
                     <span className="font-mono font-bold tabular-nums text-slate-700 dark:text-slate-200">
-                      {todayMinutes}m / {dailyGoalMinutes}m ({dailyGoalProgressPct}%)
+                      {todayMinutes}m / {formatMinutesHuman(dailyGoalMinutes)} ({dailyGoalProgressPct}%)
                     </span>
                   </div>
                   <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
@@ -1638,6 +1604,12 @@ export function ProfileSettingsHub() {
                     />
                   </div>
                 </div>
+
+                <LiveStudyCountdownTimer
+                  subjectName={subject || 'General Study'}
+                  dailyGoalMinutes={dailyGoalMinutes}
+                  todayMinutes={todayMinutes}
+                />
               </div>
 
               {/* 3. Upgraded Next Core Exam Target Date & Live Countdown Tracker */}
@@ -1982,7 +1954,11 @@ export function ProfileSettingsHub() {
                 >
                   {isUploadingPhoto ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <img
+                        src="/assets/aistudio/upload_1e68f79f.svg"
+                        alt="Uploading..."
+                        className="w-4 h-4 object-contain shrink-0"
+                      />
                       <span>Saving & Uploading...</span>
                     </>
                   ) : (

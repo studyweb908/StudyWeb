@@ -77,13 +77,11 @@ export default function DashboardSidebar({
         {/* Brand Logo Header */}
         <div className={`flex items-center ${isCollapsedState ? 'justify-center py-4 px-2' : 'justify-between px-4 sm:px-5 py-4'} border-b border-[#E2E8F0] dark:border-slate-800 bg-white dark:bg-[#0E1528]`}>
           <div className="flex items-center gap-3 min-w-0">
-            <div className="flex items-center justify-center shrink-0">
-              <img 
-                src="/logo-inner.png" 
-                alt="StudyWeb Logo" 
-                className={`${isCollapsedState ? 'h-9 w-9' : 'h-10 w-auto max-w-[42px]'} object-contain select-none transition-all`} 
-              />
-            </div>
+            <img 
+              src="/logo-inner.png" 
+              alt="StudyWeb Logo" 
+              className="w-8 h-8 object-contain select-none shrink-0 transition-all" 
+            />
             <div className={`${isCollapsedState ? 'hidden' : 'block'} min-w-0`}>
               <div className="flex items-center gap-1.5">
                 <span className="font-extrabold text-[17px] tracking-tight text-[#151D3B] dark:text-white">StudyWeb</span>
@@ -124,6 +122,9 @@ export default function DashboardSidebar({
                 onClick={() => {
                   if (item.id === 'workspaces' && setActiveWorkspace) {
                     setActiveWorkspace(null);
+                  }
+                  if (item.id === 'ai-tutor' && !activeWorkspace && workspaces && workspaces.length > 0 && setActiveWorkspace) {
+                    setActiveWorkspace(workspaces[0]);
                   }
                   setActiveTab(item.id);
                   onClose();

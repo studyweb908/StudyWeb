@@ -37,6 +37,7 @@ import { AITutorBackgroundService } from '../../services/AITutorBackgroundServic
 import { FullScreenUploadOverlay } from './FullScreenUploadOverlay';
 import { loadStoredWorkspaces, saveStoredWorkspaces } from '../../utils/workspaceStorage';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
+import AITutorAvatar from './AITutorAvatar';
 
 interface Message {
   id: string;
@@ -213,39 +214,12 @@ export default function AITutorWorkspace() {
   const { activeWorkspace } = useTaskContext();
   const targetWsId = activeWorkspace?.id || 'local-workspace';
 
-  // Workspace Logo & Icon helper: renders the workspace's actual icon/emoji or custom image with its theme accent
-  const workspaceIcon = (activeWorkspace as any)?.logo || (activeWorkspace as any)?.icon || (activeWorkspace as any)?.logoUrl || activeWorkspace?.emoji || '🧬';
-  const isWorkspaceImageLogo = typeof workspaceIcon === 'string' &&
-    (workspaceIcon.startsWith('data:') || workspaceIcon.startsWith('http://') || workspaceIcon.startsWith('https://') || (workspaceIcon.startsWith('/') && !workspaceIcon.includes('logo-inner.png')));
-
-  const renderWorkspaceLogo = (sizeClass = 'w-7 h-7 sm:w-9 sm:h-9', textClass = 'text-base sm:text-lg') => {
-    const themeBg: Record<string, string> = {
-      indigo: 'bg-indigo-50 dark:bg-indigo-950/70 border-indigo-200/80 dark:border-indigo-800/60 text-indigo-600 dark:text-indigo-300',
-      emerald: 'bg-emerald-50 dark:bg-emerald-950/70 border-emerald-200/80 dark:border-emerald-800/60 text-emerald-600 dark:text-emerald-300',
-      amber: 'bg-amber-50 dark:bg-amber-950/70 border-amber-200/80 dark:border-amber-800/60 text-amber-600 dark:text-amber-300',
-      rose: 'bg-rose-50 dark:bg-rose-950/70 border-rose-200/80 dark:border-rose-800/60 text-rose-600 dark:text-rose-300',
-      violet: 'bg-violet-50 dark:bg-violet-950/70 border-violet-200/80 dark:border-violet-800/60 text-violet-600 dark:text-violet-300',
-      cyan: 'bg-cyan-50 dark:bg-cyan-950/70 border-cyan-200/80 dark:border-cyan-800/60 text-cyan-600 dark:text-cyan-300',
-    };
-    const currentThemeClass = themeBg[activeWorkspace?.colorTheme || 'indigo'] || themeBg.indigo;
-
+  const renderWorkspaceLogo = (sizeClass = 'w-7 h-7 sm:w-9 sm:h-9', _textClass = 'text-base sm:text-lg') => {
     return (
-      <div 
-        className={`${sizeClass} rounded-xl border flex items-center justify-center shrink-0 overflow-hidden shadow-2xs select-none ${currentThemeClass}`}
-        title={`Workspace: ${activeWorkspace?.name || 'Study Workspace'}`}
-      >
-        {isWorkspaceImageLogo ? (
-          <img 
-            src={workspaceIcon} 
-            alt={`${activeWorkspace?.name || 'Workspace'} Logo`} 
-            className="w-full h-full object-cover select-none" 
-          />
-        ) : (
-          <span className={`${textClass} leading-none select-none`}>
-            {workspaceIcon}
-          </span>
-        )}
-      </div>
+      <AITutorAvatar
+        workspace={activeWorkspace}
+        sizeClass={sizeClass}
+      />
     );
   };
 
@@ -1550,46 +1524,23 @@ export default function AITutorWorkspace() {
             </div>
           ))}
 
-          {/* Minimal Boxless StudyWeb Brand Logo Breathing Indicator */}
+          {/* Crisp Boxless StudyWeb Brand Logo Subtle Scale Indicator */}
           <AnimatePresence>
             {isThinking && (
               <motion.div
-                initial={{ opacity: 0, scale: 0.88 }}
+                initial={{ opacity: 0, scale: 0.92 }}
                 animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.88 }}
+                exit={{ opacity: 0, scale: 0.92 }}
                 transition={{ duration: 0.2 }}
                 className="flex items-center pl-1 py-2 mr-auto"
                 role="status"
                 aria-label="Generating response"
               >
-                <div className="relative flex items-center justify-center w-9 h-9">
-                  <motion.div
-                    animate={{
-                      scale: [0.9, 1.22, 0.9],
-                      opacity: [0.22, 0.48, 0.22],
-                    }}
-                    transition={{
-                      duration: 2.2,
-                      repeat: Infinity,
-                      ease: 'easeInOut',
-                    }}
-                    className="pointer-events-none absolute inset-0 rounded-full bg-indigo-500/30 dark:bg-indigo-400/25 blur-md"
-                  />
-                  <motion.img
-                    src="/logo-inner.png"
-                    alt="StudyWeb AI"
-                    animate={{
-                      scale: [0.94, 1.07, 0.94],
-                      opacity: [0.72, 1, 0.72],
-                    }}
-                    transition={{
-                      duration: 2.2,
-                      repeat: Infinity,
-                      ease: 'easeInOut',
-                    }}
-                    className="relative z-10 w-6 h-6 sm:w-7 sm:h-7 object-contain select-none drop-shadow-[0_2px_8px_rgba(99,102,241,0.35)]"
-                  />
-                </div>
+                <AITutorAvatar
+                  workspace={activeWorkspace}
+                  sizeClass="w-7 h-7 sm:w-8 sm:h-8"
+                  animateThinking={true}
+                />
               </motion.div>
             )}
           </AnimatePresence>

@@ -35,6 +35,7 @@ import { FullScreenUploadOverlay } from './FullScreenUploadOverlay';
 import { loadStoredWorkspaces } from '../../utils/workspaceStorage';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import { toValidUuid } from '../../utils/uuid';
+import AITutorAvatar from './AITutorAvatar';
 
 export type TutorPersona = string;
 
@@ -1771,39 +1772,12 @@ export default function WorkspaceChat({
     );
   };
 
-  // Workspace Logo & Icon helper: renders the workspace's actual icon/emoji or custom image with its theme accent
-  const workspaceIcon = (workspace as any)?.logo || (workspace as any)?.icon || (workspace as any)?.logoUrl || workspace?.emoji || '🧬';
-  const isWorkspaceImageLogo = typeof workspaceIcon === 'string' &&
-    (workspaceIcon.startsWith('data:') || workspaceIcon.startsWith('http://') || workspaceIcon.startsWith('https://') || (workspaceIcon.startsWith('/') && !workspaceIcon.includes('logo-inner.png')));
-
-  const renderWorkspaceLogo = (sizeClass = 'w-7 h-7 sm:w-8.5 sm:h-8.5', textClass = 'text-base sm:text-lg') => {
-    const themeBg: Record<string, string> = {
-      indigo: 'bg-indigo-50 dark:bg-indigo-950/70 border-indigo-200/80 dark:border-indigo-800/60 text-indigo-600 dark:text-indigo-300',
-      emerald: 'bg-emerald-50 dark:bg-emerald-950/70 border-emerald-200/80 dark:border-emerald-800/60 text-emerald-600 dark:text-emerald-300',
-      amber: 'bg-amber-50 dark:bg-amber-950/70 border-amber-200/80 dark:border-amber-800/60 text-amber-600 dark:text-amber-300',
-      rose: 'bg-rose-50 dark:bg-rose-950/70 border-rose-200/80 dark:border-rose-800/60 text-rose-600 dark:text-rose-300',
-      violet: 'bg-violet-50 dark:bg-violet-950/70 border-violet-200/80 dark:border-violet-800/60 text-violet-600 dark:text-violet-300',
-      cyan: 'bg-cyan-50 dark:bg-cyan-950/70 border-cyan-200/80 dark:border-cyan-800/60 text-cyan-600 dark:text-cyan-300',
-    };
-    const currentThemeClass = themeBg[workspace.colorTheme || 'indigo'] || themeBg.indigo;
-
+  const renderWorkspaceLogo = (sizeClass = 'w-7 h-7 sm:w-8.5 sm:h-8.5', _textClass = 'text-base sm:text-lg') => {
     return (
-      <div 
-        className={`${sizeClass} rounded-xl border flex items-center justify-center shrink-0 overflow-hidden shadow-2xs select-none ${currentThemeClass}`}
-        title={`Workspace: ${workspace.name}`}
-      >
-        {isWorkspaceImageLogo ? (
-          <img 
-            src={workspaceIcon} 
-            alt={`${workspace.name} Logo`} 
-            className="w-full h-full object-cover select-none" 
-          />
-        ) : (
-          <span className={`${textClass} leading-none select-none`}>
-            {workspaceIcon}
-          </span>
-        )}
-      </div>
+      <AITutorAvatar
+        workspace={workspace}
+        sizeClass={sizeClass}
+      />
     );
   };
 
@@ -1841,25 +1815,69 @@ export default function WorkspaceChat({
                   </button>
 
                   {showWorkspaceMenu && (
-                    <div className="absolute left-0 mt-2 w-56 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl p-1.5 z-50 space-y-0.5">
+                    <div className="absolute left-0 mt-2 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl p-1.5 z-50 space-y-1">
                       <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
                         Switch Study Workspace
                       </div>
-                      {workspaces.map(ws => (
+                      <button
+                        key="general-study-opt"
+                        onClick={() => {
+                          onSelectWorkspace({
+                            id: 'general-study',
+                            name: 'General Study',
+                            subject: 'All Subjects',
+                            description: 'Open AI study assistant for any topic, homework, or concept.',
+                            colorTheme: 'indigo',
+                            emoji: '🎓',
+                            visibility: 'private',
+                            template: 'notes',
+                            pinned: false,
+                            favorite: false,
+                            files: [],
+                            nodes: [],
+                            links: [],
+                            flashcards: [],
+                            quizzes: [],
+                            notes: [],
+                            plannerTasks: [],
+                            streak: 1,
+                            studyHours: 0,
+                            lastOpened: new Date().toISOString()
+                          } as Workspace);
+                          setShowWorkspaceMenu(false);
+                        }}
+                        className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
+                          workspace.id === 'general-study'
+                            ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold'
+                            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <AITutorAvatar workspace={{ id: 'general-study' }} sizeClass="w-5 h-5" />
+                          <span className="truncate">General Study</span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-normal shrink-0">
+                          All Subjects
+                        </span>
+                      </button>
+                      {workspaces.filter(ws => ws.id !== 'general-study').map(ws => (
                         <button
                           key={ws.id}
                           onClick={() => {
                             onSelectWorkspace(ws);
                             setShowWorkspaceMenu(false);
                           }}
-                          className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
+                          className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                             ws.id === workspace.id
                               ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-bold'
                               : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                           }`}
                         >
-                          <span className="truncate">{ws.name}</span>
-                          <span className="text-[10px] text-slate-400 font-normal">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <AITutorAvatar workspace={ws} sizeClass="w-5 h-5" />
+                            <span className="truncate">{ws.name}</span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-normal shrink-0">
                             {ws.files?.length || 0} docs
                           </span>
                         </button>
@@ -2433,41 +2451,20 @@ export default function WorkspaceChat({
             );
           })}
 
-          {/* Minimal Boxless StudyWeb Brand Logo Breathing Indicator */}
+          {/* Crisp Boxless StudyWeb Brand Logo Subtle Scale Indicator */}
           {isThinking && (
             <div className="flex items-center pl-1 py-2" role="status" aria-label="Generating response">
               <motion.div
-                initial={{ opacity: 0, scale: 0.88 }}
+                initial={{ opacity: 0, scale: 0.92 }}
                 animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.88 }}
+                exit={{ opacity: 0, scale: 0.92 }}
                 transition={{ duration: 0.2 }}
-                className="relative flex items-center justify-center w-9 h-9"
+                className="relative flex items-center justify-center w-8 h-8"
               >
-                <motion.div
-                  animate={{
-                    scale: [0.9, 1.22, 0.9],
-                    opacity: [0.22, 0.48, 0.22],
-                  }}
-                  transition={{
-                    duration: 2.2,
-                    repeat: Infinity,
-                    ease: 'easeInOut',
-                  }}
-                  className="pointer-events-none absolute inset-0 rounded-full bg-indigo-500/30 dark:bg-indigo-400/25 blur-md"
-                />
-                <motion.img
-                  src="/logo-inner.png"
-                  alt="StudyWeb AI"
-                  animate={{
-                    scale: [0.94, 1.07, 0.94],
-                    opacity: [0.72, 1, 0.72],
-                  }}
-                  transition={{
-                    duration: 2.2,
-                    repeat: Infinity,
-                    ease: 'easeInOut',
-                  }}
-                  className="relative z-10 w-6 h-6 sm:w-7 sm:h-7 object-contain select-none drop-shadow-[0_2px_8px_rgba(99,102,241,0.35)]"
+                <AITutorAvatar
+                  workspace={workspace}
+                  sizeClass="w-7 h-7 sm:w-8 sm:h-8"
+                  animateThinking={true}
                 />
               </motion.div>
             </div>

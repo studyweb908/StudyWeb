@@ -18,11 +18,14 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (typeof window === 'undefined') return null;
     try {
       const storedId = sessionStorage.getItem('studyweb_active_workspace_id');
+      const savedUid = localStorage.getItem('studyweb_active_user_id');
+      const workspaces = loadStoredWorkspaces(savedUid || undefined);
       if (storedId) {
-        const savedUid = localStorage.getItem('studyweb_active_user_id');
-        const workspaces = loadStoredWorkspaces(savedUid || undefined);
         const ws = workspaces.find((w: Workspace) => w.id === storedId);
         if (ws) return ws;
+      }
+      if (workspaces && workspaces.length > 0) {
+        return workspaces[0];
       }
     } catch {}
     return null;

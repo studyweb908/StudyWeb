@@ -691,7 +691,7 @@ export default function App() {
       lastOpened: new Date().toISOString()
     };
     
-    // Tutor workspace: retains the selected workspace or defaults to the primary workspace
+    // Tutor workspace: retains the selected workspace, or opens in the first available workspace, or General Study
     const tutorWorkspace = activeWorkspace || (workspaces.length > 0 ? workspaces[0] : fallbackGeneralWorkspace);
     const targetWorkspace = activeWorkspace || (activeTab !== 'workspaces' ? (workspaces.length > 0 ? workspaces[0] : fallbackGeneralWorkspace) : null);
 
@@ -871,6 +871,9 @@ export default function App() {
             {/* 4. AI Tutor */}
             <button
               onClick={() => {
+                if (!activeWorkspace && workspaces.length > 0) {
+                  setActiveWorkspace(workspaces[0]);
+                }
                 setActiveTab('ai-tutor');
               }}
               className={`w-full min-h-[44px] h-full flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95 ${
@@ -998,6 +1001,9 @@ export default function App() {
                     <button
                       onClick={() => {
                         setIsBottomSheetOpen(false);
+                        if (!activeWorkspace && workspaces.length > 0) {
+                          setActiveWorkspace(workspaces[0]);
+                        }
                         setActiveTab('ai-tutor');
                       }}
                       className="p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 hover:bg-amber-50/20 dark:hover:bg-amber-950/20 text-left cursor-pointer transition-all flex flex-col gap-2 group active:scale-95"

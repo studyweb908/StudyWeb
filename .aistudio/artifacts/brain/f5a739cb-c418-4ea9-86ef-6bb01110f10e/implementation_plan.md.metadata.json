@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for: (1) Duolingo-style Full-Screen Daily Streak Celebration & 7-Day Weekly Tracker Modal + Live Header/Home Streak Badge, and (2) Pure White Frosted Glass Full-Screen Upload Overlay with StudyWeb branding and smooth progress bar.",
-  "updatedAt":  "2026-10-30T15:50:59.522637229Z",
+  "summary":  "Implementation plan for dynamic AI Tutor avatars: replacing StudyWeb platform logo with the active user workspace's logo/theme badge when inside a workspace, and a distinct modern academic crest with smart tech styling when in General Study mode.",
+  "updatedAt":  "2026-10-31T04:11:52.470040798Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
