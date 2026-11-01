@@ -698,7 +698,7 @@ export default function Navigation() {
                           setResetEmailSent(true);
                           (window as any).showToast?.('Password reset email sent!', 'success');
                         } catch (err: any) {
-                          console.error('Password reset error:', err);
+                          console.warn('Password reset notice:', err?.message || err);
                           setAuthError(err.message || 'Failed to send password reset email. Please try again.');
                         } finally {
                           setAuthLoading(false);
@@ -783,7 +783,7 @@ export default function Navigation() {
                             }
                           }, 2000);
                         } catch (err: any) {
-                          console.error('Update password error:', err);
+                          console.warn('Update password notice:', err?.message || err);
                           setAuthError(err.message || 'Failed to update password. Please try again.');
                         } finally {
                           setAuthLoading(false);
@@ -896,12 +896,41 @@ export default function Navigation() {
                             }
                           }
                         });
-                        if (error) throw error;
 
-                        if (data?.user?.identities && data.user.identities.length === 0) {
-                          setAuthError('User already registered. Please log in with your password.');
+                        const isAlreadyRegistered =
+                          (error && error.message?.toLowerCase().includes('already registered')) ||
+                          (data?.user?.identities && data.user.identities.length === 0);
+
+                        if (isAlreadyRegistered) {
+                          // Attempt to sign the user in seamlessly if their password matches
+                          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+                            email: email.trim(),
+                            password,
+                          });
+
+                          if (!signInError && signInData?.user) {
+                            const user = signInData.user;
+                            let resolvedName = user?.user_metadata?.full_name || user?.user_metadata?.name || fullName.trim() || '';
+                            if (!resolvedName && user?.email) {
+                              const emailPrefix = user.email.split('@')[0];
+                              resolvedName = emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1);
+                            }
+                            if (!resolvedName) resolvedName = 'Scholar';
+                            localStorage.setItem('studyweb_profile_name', resolvedName);
+                            localStorage.setItem('studyweb_onboarding_complete', 'true');
+                            localStorage.setItem('studyweb_is_logged_in', 'true');
+                            (window as any).showToast?.('Welcome back! Logged in to your existing StudyWeb account.', 'success');
+                            window.dispatchEvent(new CustomEvent('studyweb-login-success'));
+                            setIsAuthModalOpen(false);
+                            return;
+                          }
+
+                          setAuthMode('login');
+                          setAuthError('User already registered with this email. Please enter your password to log in.');
                           return;
                         }
+
+                        if (error) throw error;
                         
                         if (data.session) {
                           localStorage.setItem('studyweb_is_logged_in', 'true');
@@ -952,7 +981,7 @@ export default function Navigation() {
                         setIsAuthModalOpen(false);
                       }
                     } catch (err: any) {
-                      console.error('Auth error:', err);
+                      console.warn('Auth validation notice:', err?.message || err);
                       let errMsg = err.message || 'Authentication failed';
                       if (errMsg === 'Failed to fetch') {
                         errMsg = 'Network error or adblocker prevented connection to auth server. Please check your connection.';

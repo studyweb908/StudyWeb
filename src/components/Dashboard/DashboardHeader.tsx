@@ -16,12 +16,14 @@ import {
   Maximize2,
   Minimize2,
   User,
-  Flame
+  Flame,
+  Compass
 } from 'lucide-react';
 import { useThemeMode } from '../../hooks/useThemeMode';
 import { readSyncProfileSnapshot, fetchAndReconcileSupabaseProfile } from '../../utils/profileStorage';
 import { StudyTrackerService } from '../../services/StudyTrackerService';
 import { StreakCelebrationModal } from './StreakCelebrationModal';
+import { ProductTourService } from '../../services/ProductTourService';
 
 const tabLabels: Record<string, string> = {
   'dashboard': 'Home',
@@ -339,6 +341,7 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
           {/* Quick Actions Shortcuts (Desktop Only) */}
           <div className={`${isFocusMode ? 'hidden' : 'hidden md:flex'} items-center gap-2`}>
             <button
+              data-tour="header-ai-tutor-btn"
               onClick={() => setActiveTab('ai-tutor')}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#5145F5] hover:bg-[#4336E0] text-white text-xs font-bold transition-all shadow-md shadow-[#5145F5]/20 cursor-pointer"
             >
@@ -346,6 +349,18 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
               <span>Ask AI Tutor</span>
             </button>
           </div>
+
+          {/* Restart Guided Tour Button */}
+          <button
+            type="button"
+            onClick={() => ProductTourService.startOrRestartTour()}
+            className="min-w-[38px] min-h-[38px] px-2 sm:px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-[#5145F5] dark:hover:text-indigo-400 hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/30 transition-all cursor-pointer inline-flex items-center justify-center gap-1.5"
+            aria-label="Restart Guided Tour"
+            title="Start or Restart Guided Product Tour"
+          >
+            <Compass className="w-4 h-4 shrink-0" />
+            <span className="hidden xl:inline text-[11px] font-bold">Tour</span>
+          </button>
 
           {/* Focus Mode Button - Hidden on mobile where screen is already compact */}
           <button

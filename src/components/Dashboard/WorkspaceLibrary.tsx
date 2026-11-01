@@ -1273,6 +1273,7 @@ export default function WorkspaceLibrary({
                 <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
                   <button
                     type="button"
+                    data-tour="upload-documents"
                     onClick={() => triggerUploadInput('pdf')}
                     className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer shadow-xs transition-all"
                   >

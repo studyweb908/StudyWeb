@@ -28,11 +28,13 @@ import {
   Edit3,
   Award,
   Plus,
-  BarChart3
+  BarChart3,
+  Compass
 } from 'lucide-react';
 import { useThemeMode } from '../../hooks/useThemeMode';
 import { useStudyStats } from '../../hooks/useStudyStats';
 import { StudyTrackerService } from '../../services/StudyTrackerService';
+import { ProductTourService } from '../../services/ProductTourService';
 import {
   readSyncProfileSnapshot,
   fetchAndReconcileSupabaseProfile,
@@ -773,6 +775,15 @@ export function ProfileSettingsHub() {
                 <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
                   {displayIdentityName}
                 </h1>
+                <button
+                  type="button"
+                  onClick={() => ProductTourService.startOrRestartTour()}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 border border-indigo-200/80 dark:border-indigo-800/70 text-indigo-700 dark:text-indigo-300 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Restart the 5-step StudyWeb Guided Product Tour"
+                >
+                  <Compass className="w-3.5 h-3.5" />
+                  <span>Restart Tour</span>
+                </button>
               </div>
 
               {heroMetadataItems.length > 0 && (
@@ -1332,6 +1343,31 @@ export function ProfileSettingsHub() {
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* Guided Onboarding Tour Card */}
+            <div className="rounded-[28px] bg-white/90 dark:bg-slate-900/65 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors">
+              <div className="flex items-start sm:items-center gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200/70 dark:border-indigo-800/70 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
+                  <Compass className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                    Interactive Guided Product Tour
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Take a quick 5-step interactive walkthrough of your Dashboard, Workspaces, Document Upload, and AI Tutor.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => ProductTourService.startOrRestartTour()}
+                className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold inline-flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Compass className="w-4 h-4" />
+                <span>Restart Guided Tour</span>
+              </button>
             </div>
           </div>
         )}

@@ -80,6 +80,8 @@ import { Workspace, INITIAL_WORKSPACES } from './components/Dashboard/WorkspaceT
 import { toValidUuid } from './utils/uuid.ts';
 import { WorkspaceSyncService } from './services/WorkspaceSyncService.ts';
 import { StudyTrackerService } from './services/StudyTrackerService';
+import { ProductTourService } from './services/ProductTourService';
+import GuidedProductTour from './components/Dashboard/GuidedProductTour';
 import { loadStoredWorkspaces, saveStoredWorkspaces, clearGuestWorkspaces } from './utils/workspaceStorage';
 import { recordUserActivity } from './utils/userActivity';
 import {
@@ -517,6 +519,7 @@ export default function App() {
     if (savedLogin === 'true') {
       setIsLoggedIn(true);
       if (onboardingComplete !== 'true') {
+        ProductTourService.markNewUserTourPending();
         setShowOnboarding(true);
       } else {
         sessionStorage.setItem('studyweb_welcome_shown_session', 'true');
@@ -548,6 +551,7 @@ export default function App() {
       const prevIdx = parseInt(localStorage.getItem('studyweb_banner_quote_index') || '0', 10);
       localStorage.setItem('studyweb_banner_quote_index', String((prevIdx + 1) % 21));
       setActiveTab('dashboard');
+      ProductTourService.markNewUserTourPending();
       setShowOnboarding(true);
     };
 
@@ -1264,11 +1268,20 @@ export default function App() {
               isOpen={showOnboarding}
               onComplete={() => {
                 localStorage.setItem('studyweb_onboarding_complete', 'true');
+                ProductTourService.markNewUserTourPending();
                 setShowOnboarding(false);
                 setShowLoginToast(true);
+                setActiveTab('dashboard');
               }}
             />
           )}
+
+          <GuidedProductTour
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            isLoggedIn={isLoggedIn}
+            showOnboarding={showOnboarding}
+          />
 
           {showWelcomeBack && (
             <WelcomeBackModal

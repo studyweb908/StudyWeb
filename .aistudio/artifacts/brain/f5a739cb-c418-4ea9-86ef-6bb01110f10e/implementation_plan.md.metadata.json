@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for dynamic AI Tutor avatars: replacing StudyWeb platform logo with the active user workspace's logo/theme badge when inside a workspace, and a distinct modern academic crest with smart tech styling when in General Study mode.",
-  "updatedAt":  "2026-10-31T04:11:52.470040798Z",
+  "summary":  "Implementation plan for the interactive, five-step guided onboarding tour for StudyWeb, featuring a Welcome Modal, live spotlight element walkthrough (Dashboard, Workspace, Upload Documents, AI Tutor), Completion Modal, dual database/localStorage persistence for completed vs. skipped states, and Restart Tour controls in both the Top Header and Profile Settings.",
+  "updatedAt":  "2026-10-31T07:24:33.437162583Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

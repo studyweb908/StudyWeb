@@ -264,7 +264,7 @@ export default function DashboardHome({
       {/* ========================================================= */}
       {/* 1. PERSONALIZED GREETING BANNER                           */}
       {/* ========================================================= */}
-      <motion.div variants={itemVariants} className="w-full">
+      <motion.div variants={itemVariants} className="w-full" data-tour="dashboard-overview">
         <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm p-4 sm:p-6 md:p-8 transition-colors">
           {/* Scenic peaceful atmospheric backdrop */}
           <div className="absolute inset-0 bg-gradient-to-r from-indigo-50/70 via-slate-50/40 to-white dark:from-slate-900 dark:via-indigo-950/30 dark:to-slate-900 pointer-events-none z-0" />
@@ -324,6 +324,7 @@ export default function DashboardHome({
 
             <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 shrink-0 w-full sm:w-auto">
               <button
+                data-tour="home-workspaces-btn"
                 onClick={() => setActiveTab('workspaces')}
                 className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs sm:text-sm shadow-sm transition-all duration-200 focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none cursor-pointer active:scale-95 text-center"
               >
@@ -331,6 +332,7 @@ export default function DashboardHome({
                 <span>Open Workspaces</span>
               </button>
               <button
+                data-tour="home-ai-tutor-btn"
                 onClick={() => {
                   if (!activeWorkspace && workspaces.length > 0) {
                     setActiveWorkspace(workspaces[0]);
@@ -597,6 +599,7 @@ export default function DashboardHome({
                     ) : (
                       <button
                         type="button"
+                        data-tour={step.id === 'step-upload' ? 'upload-documents' : undefined}
                         onClick={step.onAction}
                         className={`w-full py-2 px-3 rounded-lg text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
                           step.done

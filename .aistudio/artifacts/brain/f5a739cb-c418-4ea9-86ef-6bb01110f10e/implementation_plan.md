@@ -1,26 +1,25 @@
-# Dynamic AI Tutor Branding & Workspace-Aware Avatar System
+# StudyWeb Interactive Guided Onboarding Tour
 
-Replace the generic StudyWeb platform logo inside the AI Tutor with the active user workspace's custom logo/theme badge when scoped to a workspace, and display a distinctive modern academic tech crest insignia when in General Study mode.
+Deliver a polished, SaaS-grade interactive guided onboarding tour for StudyWeb that introduces newly registered users to their personal learning environment—without altering any existing design, branding, layout, authentication, or database architecture.
+
+---
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> The following design decisions were aligned during Phase 1 clarification:
-> - **General Study Insignia**: **Modern academic crest with smart tech styling** — an SVG shield insignia featuring academic linework with electric indigo/cyan tech accents, rendered without any blurry filters or white outer circle pills.
-> - **Workspace AI Tutor Avatar**: **Workspace custom icon or emoji with matching theme tint** — dynamically derived from the active workspace's icon, logo URL, or emoji set in a themed squircle tint badge matching `workspace.colorTheme`.
-> - **No StudyWeb App Logo in Tutor**: The StudyWeb site logo (`/logo-inner.png`) is completely decoupled from the AI Tutor and will never appear as the tutor's avatar, header badge, or thinking indicator.
+> The following product and UX choices were confirmed and guide this implementation:
 
-- **Confirmed Decision 1**: Modern academic tech crest for General Study AI Tutor mode.
-- **Confirmed Decision 2**: Workspace-specific avatar (custom image logo or emoji with theme tint) for workspace-scoped AI Tutor mode.
-- **Confirmed Decision 3**: Synchronized thinking animation across chat messages, headers, and loading pulses using the active avatar.
+- **Confirmed Decision 1 (Launch Timing)**: The guided onboarding tour launches automatically right after a newly registered user finishes the initial personalization questionnaire.
+- **Confirmed Decision 2 (Step 3 — Upload Documents Highlight)**: Highlights the real document upload action on the Dashboard (`Upload Material` / quick upload trigger) and seamlessly adapts if the user is inside the Workspace Library upload section.
+- **Confirmed Decision 3 (Restart Tour Access)**: Users can restart the guided tour at any time from both the **Top Header** (quick help/tour trigger) and **Profile Settings**.
 
 ---
 
 ## 1. Overview & Core Concept
 
-- **What It Does**: Upgrades the AI Tutor visual identity in both `AITutorWorkspace.tsx` and `WorkspaceChat.tsx` so students always have immediate visual confirmation of the knowledge base context they are chatting with. When working inside a specific workspace (e.g., *AP Physics*, *Cell Biology*, *Calculus III*), the AI Tutor adopts that workspace's brand mark, emoji, and theme tint. When in open General Study mode, it displays a distinguished Modern Academic Crest insignia.
-- **Target Audience / Persona**: Students and lifelong learners seeking clear visual context and seamless immersion between different study hubs.
-- **Key Value**: Eliminates visual ambiguity between the StudyWeb platform itself and the user's personal course workspaces, fulfilling the user's requirement for zero brand contamination and zero unwanted borders or blurring.
+- **What It Does**: Provides a seamless onboarding experience consisting of a **Welcome Modal**, a **4-stage live UI spotlight walkthrough**, and a **Completion Celebration Modal** (5 steps total). Every step anchors to real, live DOM elements in StudyWeb using stable `data-tour` attributes, dynamically computing bounding boxes across desktop and mobile viewports.
+- **Target Audience / Persona**: Newly registered students, self-learners, and educators entering StudyWeb for the first time, as well as returning users who want a quick refresher from the Header or Profile Settings.
+- **Key Value**: Accelerates time-to-value by guiding learners directly to their core workflow—Dashboard overview, Workspaces, Document Upload, and AI Tutor—while persisting completion or skip status to their authenticated Supabase profile and local storage so the tour never interrupts returning sessions.
 
 ---
 
@@ -28,91 +27,98 @@ Replace the generic StudyWeb platform logo inside the AI Tutor with the active u
 
 ### Key User Flows
 
-1. **Entering a Workspace AI Tutor**:
-   - The user opens an active workspace (e.g. *Physics: Mechanics & Motion* with ⚛️ emoji and indigo theme, or a custom course with uploaded badge).
-   - In the AI Tutor top header, AI response bubbles, and animated thinking indicator, the tutor avatar dynamically displays the workspace's custom logo image or themed squircle badge.
-   - Tooltip and label reflect: `AI Tutor · Physics: Mechanics & Motion`.
+1. **Welcome Screen (Entry Modal)**
+   - Triggered automatically once a newly registered user completes the initial personalization setup (or manually via the **Restart Tour** button in the Header or Profile Settings).
+   - Displays a centered, glassmorphic StudyWeb card with the crisp StudyWeb logo:
+     - **Heading**: *"Welcome to StudyWeb!"*
+     - **Body**: *"Your personal learning journey starts here. Let's take a quick tour."*
+     - **Actions**: Primary **"Get Started"** button (`#5145F5` / `indigo-600`) and secondary **"Skip Tour"** button.
+2. **Step 1 of 5 — Dashboard**
+   - Spotlight highlights the main StudyWeb Dashboard overview banner & quick-start launchpad.
+   - **Copy**: *"This is your StudyWeb dashboard. Your learning tools are accessible from here."*
+3. **Step 2 of 5 — Workspace**
+   - Spotlight highlights the real **Workspaces** navigation button in the sidebar (or the primary **Open Workspaces** control on mobile viewports where the sidebar drawer is collapsed, or automatically opens/targets the visible Workspace control).
+   - **Copy**: *"Your personal study space. Organize your learning materials and keep everything together."*
+4. **Step 3 of 5 — Upload Documents**
+   - Spotlight highlights the real **Upload Material** button on the Dashboard (and supports the Workspace Library upload dropzone/button when active).
+   - **Copy**: *"Upload your study materials, PDFs and notes to get started."*
+5. **Step 4 of 5 — AI Tutor**
+   - Spotlight highlights the real **Your AI Tutor** navigation button (and primary AI Tutor trigger).
+   - **Copy**: *"Meet your personal AI Tutor. Ask questions, understand difficult concepts and get help with your studies."*
+6. **Step 5 of 5 — Completion Modal**
+   - Displays a celebratory completion modal:
+     - **Heading**: *"You're all set! Your StudyWeb journey begins now."*
+     - **Primary Button**: **"Start Learning"** (closes the tour, records `completed` status, and focuses the dashboard).
 
-2. **Switching to General Study Mode**:
-   - The user switches to "General Study" or opens the tutor without an active workspace.
-   - The AI Tutor instantly transitions its avatar to the **Modern Academic Crest with smart tech styling**: a geometric shield bearing an academic codex / atom geometry with clean cyan/indigo circuit conduits.
-   - Tooltip and label reflect: `AI Tutor · General Study Assistant`.
+### Visual Identity & Theme
 
-3. **Generating Responses (Thinking Indicator)**:
-   - When the tutor is reasoning or streaming responses, the active avatar (workspace logo or academic crest) performs a subtle, organic scale pulsation with zero blur filters and no outer pills.
-
-### Visual Identity & Theme Tokens
-
-- **Aesthetic Direction**: High-precision academic tech; geometric, crisp vectors, no blurry radial drop shadows, and zero pill-enclosure borders around avatars.
-- **Color Palette & Theme Integration**:
-  - Indigo / Violet theme: `bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20`
-  - Emerald theme: `bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20`
-  - Amber theme: `bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20`
-  - Rose theme: `bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20`
-  - Cyan theme: `bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20`
-  - General Study Crest: Cyber-academic gradient (`#4F46E5` indigo to `#06B6D4` cyan) on neutral deep slate or crisp transparent backing.
+- **Aesthetic Direction**: Clean, high-craft SaaS spotlight overlay matching StudyWeb's existing visual system (`Plus Jakarta Sans` typography, crisp borders, and zero visual clutter).
+- **Color Palette & Mood**:
+  - **Spotlight Backdrop**: Smooth SVG cutout mask with `rgba(15, 23, 42, 0.68)` backdrop blur and an animated indigo focus ring (`#5145F5` / `#6366F1`) framing the highlighted UI element.
+  - **Tooltip Card**: Pure white (`#FFFFFF`) in light mode and deep slate (`#0E1528` / `slate-900`) in dark mode, with `1px` structural borders (`border-slate-200/90 dark:border-slate-800`) and subtle elevation shadow.
+  - **Progress & Badges**: Tabular step counter (`Step X of 5` with `tabular-nums`), segmented 5-dot progress bar, and crisp indigo primary controls.
+- **Interactive Feedback & Motion**:
+  - Smooth spring-physics bounding-box transitions (`motion/react`) when moving from Step 1 through Step 5.
+  - Automatic `scrollIntoView({ behavior: 'smooth', block: 'center' })` and viewport-clamped popover positioning so tooltips never clip off-screen on mobile (`375px`) or desktop (`1440px`).
+  - Full keyboard accessibility (`ArrowRight` / `Enter` for Next, `ArrowLeft` for Back, `Escape` to Skip).
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-- **Decision 1: Modular `AITutorAvatar` Component**
-  - *Chosen Approach*: Implement a shared, reusable `AITutorAvatar` component that accepts `workspace`, `sizeClass`, `animateThinking`, and `className`.
-  - *Why*: Ensures identical, bug-free avatar behavior across `AITutorWorkspace.tsx`, `WorkspaceChat.tsx`, and future tutor entry points, preventing code duplication.
-  - *Alternatives Considered*: Writing inline ternary checks inside each file; rejected because inline conditionals are error-prone and hard to maintain across multiple screens.
-
-- **Decision 2: SVG Vector Crest for General Study Mode**
-  - *Chosen Approach*: Hand-craft a clean, lightweight vector SVG component for the Modern Academic Crest.
-  - *Why*: SVG renders at infinite resolution at any DPI without blurriness, network requests, or external asset dependencies.
-  - *Alternatives Considered*: Loading a static bitmap PNG; rejected because bitmaps blur when scaled on high-density Retina displays.
-
-- **Decision 3: Complete Removal of `/logo-inner.png` Fallbacks in Tutor**
-  - *Chosen Approach*: Replace all default fallbacks to `/logo-inner.png` within tutor files with the General Study academic crest or workspace badge.
-  - *Why*: Directly honors the user's explicit directive: *"there should be the logo of the user's workspace logo there in the AI tutor, not the study apps. And if there is the general study, then there should be a different type of logo there."*
+- **Decision 1: Custom React + Motion Spotlight Engine vs. External DOM Wrapper**
+  - *Chosen Approach*: Build a dedicated, zero-dependency React Spotlight & Popover Tour controller powered by StudyWeb's existing `motion/react` animation library and an SVG `<mask>` cutout overlay.
+  - *Why*: Integrates natively with React state, dark/light theme tokens, lazy-loaded views, and responsive mobile drawers without CSS conflicts, global DOM mutations, or memory leaks. Gracefully falls back to centered modal presentation if a target selector is temporarily off-screen.
+- **Decision 2: Dual-Layer User Persistence (`completed` vs. `skipped`)**
+  - *Chosen Approach*: Persist onboarding tour state (`status: 'completed' | 'skipped'`, `updatedAt`) both in user-scoped `localStorage` (`studyweb_product_tour_status_<userId>`) and inside the authenticated user's Supabase `profiles` record (`onboarding_data.product_tour_status` / user metadata).
+  - *Why*: Ensures returning users on any device are never shown the tour repeatedly once completed or skipped, while still distinguishing between users who completed all 5 steps versus those who skipped early.
 
 ---
 
-## 4. Technical Architecture & Data Strategy *(Technical Reference)*
+## 4. Technical Architecture & Data Strategy
 
-### System Layout & Component Hierarchy
+### Architecture & Component Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      TaskContext                            │
-│           (provides activeWorkspace & workspaces)           │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-               ┌───────────────┴───────────────┐
-               ▼                               ▼
-    ┌──────────────────────┐       ┌──────────────────────┐
-    │  AITutorWorkspace    │       │    WorkspaceChat     │
-    │  (Standalone Tutor)  │       │  (In-Workspace Chat) │
-    └──────────┬───────────┘       └──────────┬───────────┘
-               │                              │
-               └───────────────┬──────────────┘
-                               ▼
-               ┌───────────────────────────────┐
-               │        AITutorAvatar          │
-               │  - Inspects active workspace  │
-               │  - Workspace mode: logo/badge │
-               │  - General Study: tech crest  │
-               └───────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                        StudyWeb Application Root                         │
+│  ┌─────────────────────────┐          ┌───────────────────────────────┐  │
+│  │  Onboarding Questionnaire│ ───────► │  ProductTourService (State &  │  │
+│  │   (New User Signup)     │ Triggers │  Supabase + Local Persistence)│  │
+│  └─────────────────────────┘          └───────────────┬───────────────┘  │
+│                                                       │                  │
+│  ┌─────────────────────────┐                          ▼                  │
+│  │Restart Tour Triggers    │          ┌───────────────────────────────┐  │
+│  │• Top Header Help Button │ ───────► │    GuidedProductTourOverlay   │  │
+│  │• Profile Settings Card  │          │  • Welcome Modal (Pre-Step)   │  │
+│  └─────────────────────────┘          │  • SVG Spotlight Cutout Mask  │  │
+│                                       │  • Responsive Tooltip Popover │  │
+│                                       │  • Step 5 Completion Modal    │  │
+│                                       └───────────────┬───────────────┘  │
+│                                                       │                  │
+│          ┌──────────────────────┬─────────────────────┴───────┐          │
+│          ▼                      ▼                             ▼          │
+│  ┌───────────────┐      ┌───────────────┐             ┌───────────────┐  │
+│  │ data-tour=    │      │ data-tour=    │             │ data-tour=    │  │
+│  │ "dashboard"   │      │ "workspaces"  │             │ "upload" /    │  │
+│  │               │      │               │             │ "ai-tutor"    │  │
+│  └───────────────┘      └───────────────┘             └───────────────┘  │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Component & State Mapping
+### Interactive Component & State Mapping
 
-| Target Component | Avatar Placement | Current Behavior | Target Behavior |
-| :--- | :--- | :--- | :--- |
-| `AITutorWorkspace.tsx` | Header bar (left) | `/logo-inner.png` fallback | `AITutorAvatar` with workspace logo or General Study crest |
-| `AITutorWorkspace.tsx` | AI message bubbles | `renderWorkspaceLogo` (`/logo-inner.png`) | `AITutorAvatar` scoped to message workspace context |
-| `AITutorWorkspace.tsx` | Thinking indicator | `motion.img` (`/logo-inner.png`) | `AITutorAvatar` with `animateThinking={true}` |
-| `WorkspaceChat.tsx` | Header bar (left) | `renderWorkspaceLogo` (`/logo-inner.png`) | `AITutorAvatar` scoped to current `workspace` |
-| `WorkspaceChat.tsx` | AI message bubbles | `renderWorkspaceLogo` (`/logo-inner.png`) | `AITutorAvatar` scoped to current `workspace` |
-| `WorkspaceChat.tsx` | Thinking indicator | `motion.img` (`/logo-inner.png`) | `AITutorAvatar` with `animateThinking={true}` |
-
-### Verification Plan
-
-1. Verify `AITutorAvatar` displays workspace custom image or themed emoji badge when inside any active workspace.
-2. Verify `AITutorAvatar` displays the Modern Academic Crest when active workspace is `general-study` or null.
-3. Verify that `/logo-inner.png` (StudyWeb platform logo) does not appear in AI Tutor header, message bubbles, or thinking indicator.
-4. Run `npm run build` and `compile_applet` to ensure TypeScript compliance and zero build warnings.
+1. **Target Element Instrumentation (`data-tour` attributes)**:
+   - `data-tour="dashboard-overview"`: Main dashboard overview container in the Home view.
+   - `data-tour="nav-workspaces"` & `data-tour="home-workspaces-btn"`: Workspaces navigation button in the sidebar and quick button on the dashboard for mobile fallback.
+   - `data-tour="upload-documents"`: Document upload action button on the Dashboard Launchpad and inside the Workspace Library.
+   - `data-tour="nav-ai-tutor"` & `data-tour="home-ai-tutor-btn"`: AI Tutor navigation button in the sidebar and quick action button on the dashboard.
+2. **Navigation & Route Synchronization**:
+   - When the tour starts or transitions between steps 1–4, the tour controller ensures the `dashboard` tab is active (or smoothly switches tabs if the user started the tour from Profile Settings) and waits a frame via `requestAnimationFrame` before measuring target element coordinates.
+   - Resize and scroll listeners use passive event handlers and clean up completely on unmount.
+3. **Persistence & Lifecycle States**:
+   - **New User**: Completes initial setup -> `ProductTourService` sees no prior tour status -> opens Welcome Modal.
+   - **Existing User**: Logs in -> `ProductTourService` reconciles Supabase `profiles.onboarding_data` and local state -> suppresses automatic tour if already `completed` or `skipped`.
+   - **Skip Tour**: Records `skipped` with timestamp in local storage and Supabase `profiles`, immediately dismissing the overlay.
+   - **Complete Tour**: Records `completed` with timestamp when clicking **"Start Learning"** on Step 5.
+   - **Restart Tour**: Dispatching `studyweb-start-product-tour` from the Top Header or Profile Settings resets active step to the Welcome Screen and launches the tour immediately.

@@ -119,6 +119,7 @@ export default function DashboardSidebar({
             return (
               <button
                 key={item.id}
+                data-tour={`nav-${item.id}`}
                 onClick={() => {
                   if (item.id === 'workspaces' && setActiveWorkspace) {
                     setActiveWorkspace(null);
