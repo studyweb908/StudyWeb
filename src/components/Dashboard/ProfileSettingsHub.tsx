@@ -912,7 +912,10 @@ export function ProfileSettingsHub() {
       </div>
 
       {/* 2. SEGMENTED TABS (Cloud & Account Removed) */}
-      <div className="flex items-center gap-1.5 p-1.5 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 rounded-2xl overflow-x-auto scrollbar-none shadow-sm transition-colors">
+      <div
+        data-tour="profile-tabs-bar"
+        className="flex items-center gap-1.5 p-1.5 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 rounded-2xl overflow-x-auto scrollbar-none shadow-sm transition-colors"
+      >
         <button
           onClick={() => setActiveTab('overview')}
           className={`flex-1 min-w-[140px] flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
@@ -960,7 +963,10 @@ export function ProfileSettingsHub() {
             {/* Row 1: Real Personal Info Summary & Study Goals Together */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
               {/* Card A: Real Personal & Academic Profile Summary + Quick Save */}
-              <div className="rounded-[28px] bg-white/90 dark:bg-slate-900/65 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-7 flex flex-col justify-between space-y-5 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors">
+              <div
+                data-tour="profile-customization-card"
+                className="rounded-[28px] bg-white/90 dark:bg-slate-900/65 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-7 flex flex-col justify-between space-y-5 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors"
+              >
                 <div className="space-y-5">
                   <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
                     <div>
@@ -983,6 +989,7 @@ export function ProfileSettingsHub() {
                       </button>
                       <button
                         type="button"
+                        data-tour="profile-save-btn"
                         onClick={handleSavePersonal}
                         disabled={isSaving}
                         className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap shadow-sm"

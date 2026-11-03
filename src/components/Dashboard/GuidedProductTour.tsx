@@ -9,6 +9,7 @@ import {
   FileUp,
   Sparkles,
   LayoutDashboard,
+  User,
   X
 } from 'lucide-react';
 import { ProductTourService } from '../../services/ProductTourService';
@@ -21,16 +22,19 @@ export interface GuidedProductTourProps {
   showOnboarding: boolean;
 }
 
-type TourStage = 'idle' | 'welcome' | 'walkthrough';
+type TourStage = 'idle' | 'welcome' | 'walkthrough' | 'completion';
 
 interface WalkthroughStepConfig {
   stepNumber: number; // 1 to 5
   id: string;
-  title: string;
-  description: string;
+  navbarLabel: string;
+  title: string; // Strictly 2-word title
+  description: string; // Brief 1-sentence tip
   selectors: string[];
-  requiredTab?: string;
-  preferredPlacement?: 'bottom' | 'right' | 'top' | 'left' | 'center';
+  requiredTab: string;
+  workspaceSubTab?: 'overview' | 'library' | null;
+  requireActiveWorkspace?: boolean;
+  preferredPlacement?: 'bottom' | 'right' | 'top' | 'left';
   icon: React.ReactNode;
 }
 
@@ -39,56 +43,86 @@ const TOTAL_WALKTHROUGH_STEPS = 5;
 const TOUR_STEPS: WalkthroughStepConfig[] = [
   {
     stepNumber: 1,
-    id: 'dashboard',
-    title: 'Dashboard',
-    description: 'This is your StudyWeb dashboard. Your learning tools are accessible from here.',
-    selectors: ['[data-tour="dashboard-overview"]', '[data-tour="nav-dashboard"]'],
+    id: 'dashboard-navbar',
+    navbarLabel: 'Navbar • Menu',
+    title: 'Navigation Bar',
+    description: 'Use this navbar to switch between Home, Spaces, AI Tutor, and Profile.',
+    selectors: [
+      '[data-tour="nav-sidebar-overview"]',
+      '[data-tour="mobile-bottom-nav"]',
+      '[data-tour="nav-dashboard"]'
+    ],
     requiredTab: 'dashboard',
-    preferredPlacement: 'bottom',
-    icon: <LayoutDashboard className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+    workspaceSubTab: null,
+    preferredPlacement: 'right',
+    icon: <LayoutDashboard className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
   },
   {
     stepNumber: 2,
-    id: 'workspace',
-    title: 'Workspace',
-    description: 'Your personal study space. Organize your learning materials and keep everything together.',
-    selectors: ['[data-tour="nav-workspaces"]', '[data-tour="home-workspaces-btn"]'],
-    requiredTab: 'dashboard',
-    preferredPlacement: 'right',
-    icon: <Folder className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+    id: 'workspace-overview',
+    navbarLabel: 'Navbar → Spaces',
+    title: 'Study Spaces',
+    description: 'Open any subject Space to organize notes, flashcards, and quizzes.',
+    selectors: [
+      '[data-tour="space-overview-header"]',
+      '[data-tour="workspace-action-bar"]',
+      '[data-tour="workspace-upload-btn"]'
+    ],
+    requiredTab: 'workspaces',
+    workspaceSubTab: 'overview',
+    requireActiveWorkspace: true,
+    preferredPlacement: 'bottom',
+    icon: <Folder className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
   },
   {
     stepNumber: 3,
     id: 'upload-documents',
-    title: 'Upload documents',
-    description: 'Upload your study materials, PDFs and notes to get started.',
-    selectors: ['[data-tour="upload-documents"]'],
-    requiredTab: 'dashboard',
-    preferredPlacement: 'top',
-    icon: <FileUp className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+    navbarLabel: 'Spaces → Library',
+    title: 'Upload Materials',
+    description: 'Click here to upload PDFs, slides, or notes into your Space.',
+    selectors: [
+      '[data-tour="upload-documents"]',
+      '[data-tour="space-upload-dropzone"]',
+      '[data-tour="workspace-upload-btn"]'
+    ],
+    requiredTab: 'workspaces',
+    workspaceSubTab: 'library',
+    requireActiveWorkspace: true,
+    preferredPlacement: 'bottom',
+    icon: <FileUp className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
   },
   {
     stepNumber: 4,
-    id: 'ai-tutor',
+    id: 'ai-tutor-dock',
+    navbarLabel: 'Navbar → AI Tutor',
     title: 'AI Tutor',
-    description: 'Meet your personal AI Tutor. Ask questions, understand difficult concepts and get help with your studies.',
+    description: 'Attach a study file and ask your AI Tutor any question.',
     selectors: [
-      '[data-tour="nav-ai-tutor"]',
-      '[data-tour="header-ai-tutor-btn"]',
-      '[data-tour="home-ai-tutor-btn"]'
+      '[data-tour="ai-tutor-input-bar"]',
+      '[data-tour="ai-tutor-input-dock"]',
+      '[data-tour="nav-ai-tutor"]'
     ],
-    requiredTab: 'dashboard',
-    preferredPlacement: 'right',
-    icon: <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+    requiredTab: 'ai-tutor',
+    workspaceSubTab: null,
+    requireActiveWorkspace: true,
+    preferredPlacement: 'top',
+    icon: <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
   },
   {
     stepNumber: 5,
-    id: 'completion',
-    title: "You're all set!",
-    description: "You're all set! Your StudyWeb journey begins now.",
-    selectors: [],
-    preferredPlacement: 'center',
-    icon: <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+    id: 'profile-customization',
+    navbarLabel: 'Navbar → Profile',
+    title: 'Profile Goals',
+    description: 'Save your school info, exam date, and daily study goals here.',
+    selectors: [
+      '[data-tour="profile-save-btn"]',
+      '[data-tour="profile-tabs-bar"]',
+      '[data-tour="restart-tour-profile"]'
+    ],
+    requiredTab: 'profile',
+    workspaceSubTab: null,
+    preferredPlacement: 'bottom',
+    icon: <User className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
   }
 ];
 
@@ -128,8 +162,41 @@ function findVisibleElement(selectors: string[]): HTMLElement | null {
   return null;
 }
 
+/**
+ * Dispatches synchronized view configuration events so App.tsx and WorkspaceContainer.tsx
+ * switch to the exact screen and workspace sub-tab required by the active tour step.
+ */
+function configureViewForStep(step: WalkthroughStepConfig | null) {
+  if (typeof window === 'undefined') return;
+  if (!step) {
+    window.dispatchEvent(
+      new CustomEvent('studyweb-tour-configure-view', {
+        detail: { workspaceSubTab: null }
+      })
+    );
+    return;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent('studyweb-tour-configure-view', {
+      detail: {
+        tab: step.requiredTab,
+        workspaceSubTab: step.workspaceSubTab ?? null,
+        requireActiveWorkspace: Boolean(step.requireActiveWorkspace)
+      }
+    })
+  );
+
+  if (step.requiredTab === 'workspaces' && step.workspaceSubTab) {
+    window.dispatchEvent(
+      new CustomEvent('studyweb-tour-workspace-subtab', {
+        detail: { subTab: step.workspaceSubTab }
+      })
+    );
+  }
+}
+
 export default function GuidedProductTour({
-  activeTab,
   setActiveTab,
   isLoggedIn,
   showOnboarding
@@ -137,6 +204,7 @@ export default function GuidedProductTour({
   const [stage, setStage] = useState<TourStage>('idle');
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0); // 0..4 (Step 1..5)
   const [targetRect, setTargetRect] = useState<TargetRect | null>(null);
+  const [cardSize, setCardSize] = useState<{ w: number; h: number }>({ w: 292, h: 176 });
   const [viewportSize, setViewportSize] = useState<{ w: number; h: number }>({
     w: typeof window !== 'undefined' ? window.innerWidth : 1280,
     h: typeof window !== 'undefined' ? window.innerHeight : 800
@@ -144,9 +212,22 @@ export default function GuidedProductTour({
 
   const tooltipRef = useRef<HTMLDivElement>(null);
   const activeStep = TOUR_STEPS[currentStepIndex] || TOUR_STEPS[0];
-  const isCompletionStep = activeStep.stepNumber === TOTAL_WALKTHROUGH_STEPS;
+  const isCompletionStep = stage === 'completion';
 
-  // Measure and scroll target element into view
+  // Measure actual rendered tooltip height so positioning never clips off-screen
+  useEffect(() => {
+    if (stage !== 'walkthrough' || !tooltipRef.current) return;
+    const rect = tooltipRef.current.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      setCardSize((prev) =>
+        Math.abs(prev.w - rect.width) > 2 || Math.abs(prev.h - rect.height) > 2
+          ? { w: rect.width, h: rect.height }
+          : prev
+      );
+    }
+  }, [stage, currentStepIndex, targetRect]);
+
+  // Measure and scroll single target element into view
   const measureActiveTarget = useCallback(
     (shouldScroll = false) => {
       if (typeof window === 'undefined') return;
@@ -181,7 +262,7 @@ export default function GuidedProductTour({
       }
 
       const rect = el.getBoundingClientRect();
-      const pad = 6;
+      const pad = 5;
       setTargetRect({
         top: Math.max(4, rect.top - pad),
         left: Math.max(4, rect.left - pad),
@@ -230,6 +311,7 @@ export default function GuidedProductTour({
   // Listen for manual "Start / Restart Tour" events from Header or Profile Settings
   useEffect(() => {
     const handleManualStartTour = () => {
+      configureViewForStep(null);
       setActiveTab('dashboard');
       setCurrentStepIndex(0);
       setStage('welcome');
@@ -244,31 +326,36 @@ export default function GuidedProductTour({
     };
   }, [setActiveTab]);
 
-  // Ensure required route/tab is active when stepping through walkthrough
+  // Ensure required route/tab and Space sub-tab are active when stepping through walkthrough
   useEffect(() => {
     if (stage !== 'walkthrough') return;
 
     const step = TOUR_STEPS[currentStepIndex];
     if (!step) return;
 
-    // For Step 3 (Upload documents), if the user is already in 'workspaces' and an upload button is visible, keep them there; otherwise ensure 'dashboard' is shown
-    if (step.requiredTab && activeTab !== step.requiredTab) {
-      const alreadyHasVisibleTarget = findVisibleElement(step.selectors) !== null;
-      if (!alreadyHasVisibleTarget) {
-        setActiveTab(step.requiredTab);
-      }
-    }
+    configureViewForStep(step);
 
-    // Measure immediately and again after layout/animation settles
+    // Measure immediately and re-measure across layout/animation settle frames
     measureActiveTarget(true);
-    const t1 = window.setTimeout(() => measureActiveTarget(true), 140);
-    const t2 = window.setTimeout(() => measureActiveTarget(false), 360);
+    const t1 = window.setTimeout(() => {
+      if (step.requiredTab === 'workspaces' && step.workspaceSubTab) {
+        window.dispatchEvent(
+          new CustomEvent('studyweb-tour-workspace-subtab', {
+            detail: { subTab: step.workspaceSubTab }
+          })
+        );
+      }
+      measureActiveTarget(true);
+    }, 110);
+    const t2 = window.setTimeout(() => measureActiveTarget(true), 250);
+    const t3 = window.setTimeout(() => measureActiveTarget(false), 420);
 
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
+      window.clearTimeout(t3);
     };
-  }, [stage, currentStepIndex, activeTab, setActiveTab, measureActiveTarget]);
+  }, [stage, currentStepIndex, measureActiveTarget]);
 
   // Passive resize and scroll listeners while walkthrough is active
   useEffect(() => {
@@ -296,15 +383,14 @@ export default function GuidedProductTour({
     try {
       playGlassPopSound();
     } catch {}
-    if (activeTab !== 'dashboard') {
-      setActiveTab('dashboard');
-    }
     setCurrentStepIndex(0);
     setStage('walkthrough');
-  }, [activeTab, setActiveTab]);
+    configureViewForStep(TOUR_STEPS[0]);
+  }, []);
 
   const handleSkipTour = useCallback(async () => {
     const stepReached = stage === 'welcome' ? 0 : currentStepIndex + 1;
+    configureViewForStep(null);
     setStage('idle');
     setTargetRect(null);
     await ProductTourService.saveTourStatus('skipped', stepReached);
@@ -314,10 +400,12 @@ export default function GuidedProductTour({
     try {
       playGlassPopSound();
     } catch {}
+    configureViewForStep(null);
     setStage('idle');
     setTargetRect(null);
+    setActiveTab('dashboard');
     await ProductTourService.saveTourStatus('completed', TOTAL_WALKTHROUGH_STEPS);
-  }, []);
+  }, [setActiveTab]);
 
   const handleNextStep = useCallback(() => {
     try {
@@ -326,17 +414,25 @@ export default function GuidedProductTour({
     if (currentStepIndex < TOUR_STEPS.length - 1) {
       setCurrentStepIndex((prev) => prev + 1);
     } else {
-      handleCompleteTour();
+      setTargetRect(null);
+      setStage('completion');
     }
-  }, [currentStepIndex, handleCompleteTour]);
+  }, [currentStepIndex]);
 
   const handlePrevStep = useCallback(() => {
+    if (stage === 'completion') {
+      setStage('walkthrough');
+      setCurrentStepIndex(TOUR_STEPS.length - 1);
+      return;
+    }
     if (currentStepIndex > 0) {
       setCurrentStepIndex((prev) => prev - 1);
     } else {
+      configureViewForStep(null);
+      setActiveTab('dashboard');
       setStage('welcome');
     }
-  }, [currentStepIndex]);
+  }, [stage, currentStepIndex, setActiveTab]);
 
   // Keyboard navigation support
   useEffect(() => {
@@ -349,10 +445,10 @@ export default function GuidedProductTour({
       } else if (stage === 'welcome' && e.key === 'Enter') {
         e.preventDefault();
         handleStartWalkthrough();
-      } else if (stage === 'walkthrough') {
+      } else if (stage === 'walkthrough' || stage === 'completion') {
         if (e.key === 'ArrowRight' || e.key === 'Enter') {
           e.preventDefault();
-          if (isCompletionStep) {
+          if (stage === 'completion') {
             handleCompleteTour();
           } else {
             handleNextStep();
@@ -368,7 +464,6 @@ export default function GuidedProductTour({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     stage,
-    isCompletionStep,
     handleSkipTour,
     handleStartWalkthrough,
     handleNextStep,
@@ -378,94 +473,104 @@ export default function GuidedProductTour({
 
   if (stage === 'idle') return null;
 
-  // Compute responsive tooltip position for steps 1–4
+  // Compute responsive, centered, non-overlapping compact tooltip position
   const getTooltipPositionStyle = (): React.CSSProperties => {
     const isMobile = viewportSize.w < 640;
-    const cardWidth = isMobile ? Math.min(viewportSize.w - 24, 360) : 380;
-    const estimatedCardHeight = 250;
-    const margin = 14;
+    const width = isMobile ? Math.min(viewportSize.w - 24, 308) : 320;
+    const height = Math.max(152, Math.min(220, cardSize.h || 176));
+    const gap = 14;
+    const edgePad = 14;
+
+    const centeredLeft = Math.max(edgePad, Math.round((viewportSize.w - width) / 2));
+    const centeredTop = Math.max(edgePad, Math.round((viewportSize.h - height) / 2));
 
     if (!targetRect || isCompletionStep) {
       return {
         position: 'fixed',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
-        width: `${cardWidth}px`,
+        top: `${centeredTop}px`,
+        left: `${centeredLeft}px`,
+        width: `${width}px`,
         maxWidth: 'calc(100vw - 24px)'
       };
     }
 
     if (isMobile) {
-      // On mobile screens, place tooltip cleanly below or above the spotlighted element
       const spaceBelow = viewportSize.h - (targetRect.top + targetRect.height);
-      const placeBelow = spaceBelow >= estimatedCardHeight + 20 || targetRect.top < viewportSize.h / 2;
-      const rawTop = placeBelow
-        ? targetRect.top + targetRect.height + margin
-        : Math.max(12, targetRect.top - estimatedCardHeight - margin);
-      const clampedTop = Math.max(
-        12,
-        Math.min(viewportSize.h - estimatedCardHeight - 16, rawTop)
-      );
+      const spaceAbove = targetRect.top;
+      let rawTop: number;
+
+      if (spaceBelow >= height + gap + edgePad) {
+        rawTop = targetRect.top + targetRect.height + gap;
+      } else if (spaceAbove >= height + gap + edgePad) {
+        rawTop = targetRect.top - height - gap;
+      } else {
+        rawTop = centeredTop;
+      }
+
+      const clampedTop = Math.max(edgePad, Math.min(viewportSize.h - height - edgePad, Math.round(rawTop)));
 
       return {
         position: 'fixed',
         top: `${clampedTop}px`,
-        left: `${Math.max(12, (viewportSize.w - cardWidth) / 2)}px`,
-        width: `${cardWidth}px`,
+        left: `${centeredLeft}px`,
+        width: `${width}px`,
         maxWidth: 'calc(100vw - 24px)'
       };
     }
 
-    // Desktop positioning logic
+    // Desktop collision-aware placement keeping the card centered and readable
     const preferred = activeStep.preferredPlacement || 'bottom';
-    let top = targetRect.top + targetRect.height + margin;
-    let left = targetRect.left;
+    const spaceRight = viewportSize.w - (targetRect.left + targetRect.width);
+    const spaceLeft = targetRect.left;
+    const spaceBottom = viewportSize.h - (targetRect.top + targetRect.height);
+    const spaceTop = targetRect.top;
 
-    if (preferred === 'right') {
-      const candidateLeft = targetRect.left + targetRect.width + margin;
-      if (candidateLeft + cardWidth <= viewportSize.w - 16) {
-        left = candidateLeft;
-        top = targetRect.top;
-      }
-    } else if (preferred === 'top') {
-      const candidateTop = targetRect.top - estimatedCardHeight - margin;
-      if (candidateTop >= 16) {
-        top = candidateTop;
-        left = targetRect.left + targetRect.width / 2 - cardWidth / 2;
-      } else {
-        top = targetRect.top + targetRect.height + margin;
-        left = targetRect.left + targetRect.width / 2 - cardWidth / 2;
-      }
-    } else if (preferred === 'bottom') {
-      const candidateTop = targetRect.top + targetRect.height + margin;
-      if (candidateTop + estimatedCardHeight > viewportSize.h - 16 && targetRect.top > estimatedCardHeight + 24) {
-        top = targetRect.top - estimatedCardHeight - margin;
-      } else {
-        top = candidateTop;
-      }
-      left = targetRect.left + Math.min(40, targetRect.width / 4);
+    let top = targetRect.top + targetRect.height + gap;
+    let left = targetRect.left + targetRect.width / 2 - width / 2;
+
+    if (preferred === 'right' && spaceRight >= width + gap + edgePad) {
+      left = targetRect.left + targetRect.width + gap;
+      top = Math.max(edgePad + 48, Math.round(targetRect.top + targetRect.height / 2 - height / 2));
+    } else if (preferred === 'left' && spaceLeft >= width + gap + edgePad) {
+      left = targetRect.left - width - gap;
+      top = Math.max(edgePad, Math.round(targetRect.top + targetRect.height / 2 - height / 2));
+    } else if (preferred === 'top' && spaceTop >= height + gap + edgePad) {
+      top = targetRect.top - height - gap;
+      left = targetRect.left + targetRect.width / 2 - width / 2;
+    } else if (spaceBottom >= height + gap + edgePad) {
+      top = targetRect.top + targetRect.height + gap;
+      left = targetRect.left + targetRect.width / 2 - width / 2;
+    } else if (spaceTop >= height + gap + edgePad) {
+      top = targetRect.top - height - gap;
+      left = targetRect.left + targetRect.width / 2 - width / 2;
+    } else if (spaceRight >= width + gap + edgePad) {
+      left = targetRect.left + targetRect.width + gap;
+      top = centeredTop;
+    } else {
+      top = centeredTop;
+      left = centeredLeft;
     }
 
-    // Clamp inside desktop viewport bounds
-    const clampedLeft = Math.max(16, Math.min(viewportSize.w - cardWidth - 16, left));
-    const clampedTop = Math.max(16, Math.min(viewportSize.h - estimatedCardHeight - 16, top));
+    const clampedLeft = Math.max(edgePad, Math.min(viewportSize.w - width - edgePad, Math.round(left)));
+    const clampedTop = Math.max(edgePad, Math.min(viewportSize.h - height - edgePad, Math.round(top)));
 
     return {
       position: 'fixed',
       top: `${clampedTop}px`,
       left: `${clampedLeft}px`,
-      width: `${cardWidth}px`,
-      maxWidth: 'calc(100vw - 32px)'
+      width: `${width}px`,
+      maxWidth: 'calc(100vw - 24px)'
     };
   };
 
-  const progressPercent = Math.round(((currentStepIndex + 1) / TOTAL_WALKTHROUGH_STEPS) * 100);
+  const progressPercent = isCompletionStep
+    ? 100
+    : Math.round(((currentStepIndex + 1) / TOTAL_WALKTHROUGH_STEPS) * 100);
 
   return (
     <AnimatePresence>
       {/* ================================================================= */}
-      {/* 1. WELCOME MODAL                                                  */}
+      {/* 1. COMPACT WELCOME MODAL                                          */}
       {/* ================================================================= */}
       {stage === 'welcome' && (
         <motion.div
@@ -473,26 +578,23 @@ export default function GuidedProductTour({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.22 }}
-          className="fixed inset-0 z-[9990] flex items-center justify-center p-4 sm:p-6 bg-slate-950/65 backdrop-blur-md select-none"
+          transition={{ duration: 0.2 }}
+          className="fixed inset-0 z-[9990] flex items-center justify-center p-4 bg-slate-950/65 backdrop-blur-md select-none"
           role="dialog"
           aria-modal="true"
           aria-labelledby="studyweb-tour-welcome-title"
         >
           <motion.div
-            initial={{ opacity: 0, scale: 0.94, y: 14 }}
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{ type: 'spring', stiffness: 340, damping: 28 }}
-            className="relative w-full max-w-md bg-white dark:bg-[#0E1528] border border-slate-200/90 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-[0_24px_70px_-15px_rgba(15,23,42,0.45)] text-center overflow-hidden"
+            exit={{ opacity: 0, scale: 0.96, y: 8 }}
+            transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+            className="relative w-full max-w-sm bg-white dark:bg-[#0E1528] border border-slate-200/90 dark:border-slate-800 rounded-2xl p-5 sm:p-6 shadow-[0_24px_60px_-15px_rgba(15,23,42,0.45)] text-center overflow-hidden"
           >
-            {/* Subtle top ambient accent */}
-            <div className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 w-72 h-40 rounded-full bg-indigo-500/15 dark:bg-indigo-500/20 blur-3xl" />
-
             <button
               type="button"
               onClick={handleSkipTour}
-              className="absolute top-4 right-4 p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              className="absolute top-3.5 right-3.5 p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               aria-label="Skip Tour"
               title="Skip Tour"
             >
@@ -500,45 +602,47 @@ export default function GuidedProductTour({
             </button>
 
             <div className="relative z-10 flex flex-col items-center">
-              <div className="w-16 h-16 rounded-2xl bg-indigo-50/90 dark:bg-indigo-950/60 border border-indigo-200/70 dark:border-indigo-800/70 flex items-center justify-center mb-5 shadow-xs">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-50/90 dark:bg-indigo-950/60 border border-indigo-200/70 dark:border-indigo-800/70 flex items-center justify-center mb-3.5 shadow-2xs">
                 <img
                   src="/logo-inner.png"
                   alt="StudyWeb Logo"
-                  className="w-10 h-10 object-contain select-none"
+                  className="w-8 h-8 object-contain select-none"
                 />
               </div>
 
-              <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 mb-2">
-                <Compass className="w-3.5 h-3.5" />
-                <span>Interactive Product Tour</span>
+              <div className="inline-flex items-center gap-1 text-fluid-2xs font-bold text-indigo-600 dark:text-indigo-400 mb-1">
+                <Compass className="w-3 h-3" />
+                <span>5-Step Quick Tour</span>
               </div>
 
-              <h2
+              <div
                 id="studyweb-tour-welcome-title"
-                className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight"
+                role="heading"
+                aria-level={2}
+                className="text-fluid-title font-extrabold text-slate-900 dark:text-white tracking-tight"
               >
                 Welcome to StudyWeb!
-              </h2>
+              </div>
 
-              <p className="mt-3 text-sm sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed max-w-sm">
+              <p className="mt-1.5 text-fluid-xs text-slate-600 dark:text-slate-300 leading-relaxed max-w-xs">
                 Your personal learning journey starts here. Let&apos;s take a quick tour.
               </p>
 
-              <div className="mt-7 w-full flex flex-col sm:flex-row items-center gap-2.5">
+              <div className="mt-4 w-full flex items-center gap-2">
                 <button
                   type="button"
                   onClick={handleSkipTour}
-                  className="w-full sm:w-auto sm:flex-1 py-3 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs sm:text-sm transition-colors cursor-pointer"
+                  className="flex-1 py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-fluid-xs transition-colors cursor-pointer whitespace-nowrap"
                 >
                   Skip Tour
                 </button>
                 <button
                   type="button"
                   onClick={handleStartWalkthrough}
-                  className="w-full sm:w-auto sm:flex-[1.35] py-3 px-5 rounded-xl bg-[#5145F5] hover:bg-[#4336E0] text-white font-bold text-xs sm:text-sm shadow-md shadow-[#5145F5]/25 inline-flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+                  className="flex-[1.35] py-2 px-4 rounded-xl bg-[#5145F5] hover:bg-[#4336E0] text-white font-bold text-fluid-xs shadow-sm shadow-[#5145F5]/25 inline-flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer whitespace-nowrap"
                 >
                   <span>Get Started</span>
-                  <ArrowRight className="w-4 h-4" />
+                  <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
@@ -547,23 +651,26 @@ export default function GuidedProductTour({
       )}
 
       {/* ================================================================= */}
-      {/* 2. FIVE-STEP GUIDED WALKTHROUGH & SPOTLIGHT                       */}
+      {/* 2. SINGLE-ITEM SPOTLIGHT WALKTHROUGH & COMPLETION MODAL           */}
       {/* ================================================================= */}
-      {stage === 'walkthrough' && (
+      {(stage === 'walkthrough' || stage === 'completion') && (
         <div
           key="studyweb-tour-walkthrough"
           className="fixed inset-0 z-[9990] pointer-events-auto select-none"
           role="dialog"
           aria-modal="true"
-          aria-label={`Guided Tour Step ${activeStep.stepNumber} of ${TOTAL_WALKTHROUGH_STEPS}`}
+          aria-label={
+            isCompletionStep
+              ? 'Guided Tour Completed'
+              : `Guided Tour Step ${activeStep.stepNumber} of ${TOTAL_WALKTHROUGH_STEPS}`
+          }
         >
-          {/* SVG Spotlight Overlay with Cutout Window */}
+          {/* SVG Spotlight Overlay with Single-Element Cutout */}
           <svg
             className="fixed inset-0 w-full h-full pointer-events-auto"
             width={viewportSize.w}
             height={viewportSize.h}
             onClick={(e) => {
-              // Prevent accidental backdrop clicks from triggering underlying controls
               e.stopPropagation();
             }}
           >
@@ -576,8 +683,8 @@ export default function GuidedProductTour({
                     y={targetRect.top}
                     width={targetRect.width}
                     height={targetRect.height}
-                    rx={14}
-                    ry={14}
+                    rx={12}
+                    ry={12}
                     fill="black"
                   />
                 )}
@@ -588,12 +695,12 @@ export default function GuidedProductTour({
               y="0"
               width="100%"
               height="100%"
-              fill="rgba(15, 23, 42, 0.68)"
+              fill="rgba(15, 23, 42, 0.72)"
               mask="url(#studyweb-tour-spotlight-mask)"
             />
           </svg>
 
-          {/* Animated Spotlight Focus Frame around Target Element */}
+          {/* Crisp Single-Element Focus Ring */}
           {targetRect && !isCompletionStep && (
             <motion.div
               layoutId="studyweb-tour-focus-ring"
@@ -604,148 +711,128 @@ export default function GuidedProductTour({
                 width: targetRect.width,
                 height: targetRect.height
               }}
-              transition={{ type: 'spring', stiffness: 320, damping: 30 }}
-              className="fixed pointer-events-none rounded-[14px] ring-2 ring-[#5145F5] dark:ring-indigo-400 shadow-[0_0_0_4px_rgba(81,69,245,0.22),0_0_30px_rgba(81,69,245,0.35)] z-[9991]"
+              transition={{ type: 'spring', stiffness: 340, damping: 30 }}
+              className="fixed pointer-events-none rounded-[12px] ring-2 ring-[#5145F5] dark:ring-indigo-400 shadow-[0_0_0_4px_rgba(81,69,245,0.22),0_0_24px_rgba(81,69,245,0.35)] z-[9991]"
             />
           )}
 
-          {/* STEP 5: COMPLETION MODAL */}
+          {/* COMPLETION MODAL */}
           {isCompletionStep ? (
-            <div className="fixed inset-0 z-[9992] flex items-center justify-center p-4 sm:p-6">
+            <div className="fixed inset-0 z-[9992] flex items-center justify-center p-4">
               <motion.div
                 key="tour-step-completion"
-                initial={{ opacity: 0, scale: 0.94, y: 14 }}
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                transition={{ type: 'spring', stiffness: 340, damping: 28 }}
-                className="relative w-full max-w-md bg-white dark:bg-[#0E1528] border border-slate-200/90 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-[0_24px_70px_-15px_rgba(15,23,42,0.5)] text-center overflow-hidden"
+                exit={{ opacity: 0, scale: 0.96, y: 8 }}
+                transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+                className="relative w-full max-w-sm bg-white dark:bg-[#0E1528] border border-slate-200/90 dark:border-slate-800 rounded-2xl p-5 sm:p-6 shadow-[0_24px_60px_-15px_rgba(15,23,42,0.5)] text-center overflow-hidden"
               >
-                <div className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 w-72 h-40 rounded-full bg-emerald-500/15 dark:bg-emerald-500/20 blur-3xl" />
-
                 <div className="relative z-10 flex flex-col items-center">
-                  {/* Top Step & Progress Header */}
-                  <div className="w-full flex items-center justify-between text-xs font-bold text-slate-400 dark:text-slate-500 mb-4">
-                    <span className="tabular-nums text-indigo-600 dark:text-indigo-400">
-                      Step {activeStep.stepNumber} of {TOTAL_WALKTHROUGH_STEPS}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      {TOUR_STEPS.map((s, idx) => (
-                        <span
-                          key={s.id}
-                          className={`h-1.5 rounded-full transition-all duration-300 ${
-                            idx === currentStepIndex
-                              ? 'w-5 bg-emerald-500'
-                              : 'w-2 bg-emerald-500/50'
-                          }`}
-                        />
-                      ))}
-                    </div>
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/80 dark:border-emerald-800/70 flex items-center justify-center mb-3 text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle2 className="w-7 h-7" />
                   </div>
 
-                  {/* Linear Progress Bar */}
-                  <div className="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden mb-6">
-                    <motion.div
-                      className="h-full bg-gradient-to-r from-indigo-600 to-emerald-500 rounded-full"
-                      initial={{ width: '80%' }}
-                      animate={{ width: '100%' }}
-                      transition={{ duration: 0.3 }}
-                    />
-                  </div>
-
-                  <div className="w-16 h-16 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/80 dark:border-emerald-800/70 flex items-center justify-center mb-4 text-emerald-600 dark:text-emerald-400 shadow-xs">
-                    <CheckCircle2 className="w-9 h-9" />
-                  </div>
-
-                  <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                  <div
+                    role="heading"
+                    aria-level={2}
+                    className="text-fluid-title font-extrabold text-slate-900 dark:text-white tracking-tight"
+                  >
                     You&apos;re all set!
-                  </h2>
+                  </div>
 
-                  <p className="mt-2.5 text-sm sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed max-w-sm">
-                    You&apos;re all set! Your StudyWeb journey begins now.
+                  <p className="mt-1.5 text-fluid-xs text-slate-600 dark:text-slate-300 leading-relaxed max-w-xs">
+                    Your StudyWeb journey begins now.
                   </p>
 
-                  <div className="mt-7 w-full flex items-center gap-2.5">
+                  <div className="mt-4 w-full flex items-center gap-2">
                     <button
                       type="button"
                       onClick={handlePrevStep}
-                      className="py-3 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs sm:text-sm inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      className="py-2 px-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-fluid-xs inline-flex items-center justify-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
                     >
-                      <ArrowLeft className="w-4 h-4" />
+                      <ArrowLeft className="w-3.5 h-3.5" />
                       <span>Back</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={handleCompleteTour}
-                      className="flex-1 py-3 px-6 rounded-xl bg-[#5145F5] hover:bg-[#4336E0] text-white font-bold text-xs sm:text-sm shadow-md shadow-[#5145F5]/25 inline-flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+                      className="flex-1 py-2 px-4 rounded-xl bg-[#5145F5] hover:bg-[#4336E0] text-white font-bold text-fluid-xs shadow-sm shadow-[#5145F5]/25 inline-flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer whitespace-nowrap"
                     >
                       <span>Start Learning</span>
-                      <ArrowRight className="w-4 h-4" />
+                      <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
               </motion.div>
             </div>
           ) : (
-            /* STEPS 1 TO 4: CONTEXTUAL SPOTLIGHT TOOLTIP CARD */
+            /* STEPS 1 TO 5: SMALL CARD WITH TWO-WORD TITLE & BRIEF TIP */
             <motion.div
               ref={tooltipRef}
               key={`tour-step-${activeStep.id}`}
-              initial={{ opacity: 0, y: 8, scale: 0.97 }}
+              initial={{ opacity: 0, y: 6, scale: 0.97 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 6, scale: 0.97 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
+              exit={{ opacity: 0, y: 4, scale: 0.97 }}
+              transition={{ duration: 0.16, ease: 'easeOut' }}
               style={getTooltipPositionStyle()}
-              className="z-[9992] bg-white dark:bg-[#0E1528] border border-slate-200/95 dark:border-slate-800 rounded-2xl p-5 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.45)] text-left"
+              className="z-[9992] bg-white dark:bg-[#0E1528] border border-slate-200 dark:border-slate-700 rounded-2xl p-3.5 sm:p-4 shadow-[0_20px_50px_-10px_rgba(15,23,42,0.55)] text-left"
             >
-              {/* Top Row: Step Counter + Skip Tour */}
-              <div className="flex items-center justify-between gap-2 mb-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-100 dark:border-indigo-800/70 flex items-center justify-center shrink-0">
+              {/* Top Meta Line: Step Counter + Navbar Context + Skip */}
+              <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="w-5 h-5 rounded-md bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-100 dark:border-indigo-800/70 flex items-center justify-center shrink-0">
                     {activeStep.icon}
                   </div>
-                  <span className="text-xs font-extrabold tabular-nums text-indigo-600 dark:text-indigo-400">
-                    Step {activeStep.stepNumber} of {TOTAL_WALKTHROUGH_STEPS}
+                  <span className="text-fluid-2xs font-extrabold tabular-nums text-indigo-600 dark:text-indigo-400 whitespace-nowrap">
+                    {activeStep.stepNumber}/{TOTAL_WALKTHROUGH_STEPS}
+                  </span>
+                  <span className="text-slate-300 dark:text-slate-600 text-[10px]">·</span>
+                  <span className="text-fluid-2xs font-semibold text-slate-600 dark:text-slate-300 truncate">
+                    {activeStep.navbarLabel}
                   </span>
                 </div>
 
                 <button
                   type="button"
                   onClick={handleSkipTour}
-                  className="text-xs font-semibold text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer px-1.5 py-0.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="text-fluid-2xs font-semibold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white transition-colors cursor-pointer px-1.5 py-0.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0 whitespace-nowrap"
                 >
-                  Skip Tour
+                  Skip
                 </button>
               </div>
 
-              {/* Smooth Linear Progress Bar */}
-              <div className="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden mb-3.5">
+              {/* Thin Progress Bar */}
+              <div className="w-full h-1 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden mb-2">
                 <motion.div
                   className="h-full bg-[#5145F5] dark:bg-indigo-500 rounded-full"
                   initial={false}
                   animate={{ width: `${progressPercent}%` }}
-                  transition={{ duration: 0.25, ease: 'easeOut' }}
+                  transition={{ duration: 0.2, ease: 'easeOut' }}
                 />
               </div>
 
-              {/* Step Title & Explanation */}
-              <h3 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white tracking-tight">
+              {/* Two-Word Title & Minimal Tip */}
+              <div
+                role="heading"
+                aria-level={3}
+                className="text-fluid-lg font-extrabold text-slate-900 dark:text-white tracking-tight leading-snug"
+              >
                 {activeStep.title}
-              </h3>
-              <p className="mt-1.5 text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+              </div>
+              <p className="mt-0.5 text-fluid-xs font-medium text-slate-700 dark:text-slate-200 leading-relaxed">
                 {activeStep.description}
               </p>
 
-              {/* Bottom Controls: Step Dots + Back / Next */}
-              <div className="mt-5 pt-3.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-3">
-                {/* 5-Step Dots Indicator */}
-                <div className="flex items-center gap-1.5" aria-hidden="true">
+              {/* Compact Footer Controls */}
+              <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1" aria-hidden="true">
                   {TOUR_STEPS.map((s, idx) => (
                     <span
                       key={s.id}
                       className={`h-1.5 rounded-full transition-all duration-200 ${
                         idx === currentStepIndex
-                          ? 'w-4 bg-[#5145F5] dark:bg-indigo-400'
+                          ? 'w-3.5 bg-[#5145F5] dark:bg-indigo-400'
                           : idx < currentStepIndex
                           ? 'w-1.5 bg-indigo-300 dark:bg-indigo-700'
                           : 'w-1.5 bg-slate-200 dark:bg-slate-700'
@@ -754,23 +841,23 @@ export default function GuidedProductTour({
                   ))}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
                   <button
                     type="button"
                     onClick={handlePrevStep}
-                    className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold inline-flex items-center gap-1 transition-colors cursor-pointer"
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/80 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-fluid-2xs font-bold inline-flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
                   >
-                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <ArrowLeft className="w-3 h-3" />
                     <span>Back</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={handleNextStep}
-                    className="px-4 py-1.5 rounded-xl bg-[#5145F5] hover:bg-[#4336E0] text-white text-xs font-bold shadow-sm shadow-[#5145F5]/20 inline-flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+                    className="px-3 py-1 rounded-lg bg-[#5145F5] hover:bg-[#4336E0] text-white text-fluid-2xs font-bold shadow-2xs inline-flex items-center gap-1 transition-all active:scale-95 cursor-pointer whitespace-nowrap"
                   >
-                    <span>Next</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
+                    <span>{currentStepIndex === TOUR_STEPS.length - 1 ? 'Finish' : 'Next'}</span>
+                    <ArrowRight className="w-3 h-3" />
                   </button>
                 </div>
               </div>

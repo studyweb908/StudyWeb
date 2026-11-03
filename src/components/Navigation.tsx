@@ -910,6 +910,7 @@ export default function Navigation() {
 
                           if (!signInError && signInData?.user) {
                             const user = signInData.user;
+                            localStorage.setItem('studyweb_active_user_id', user.id);
                             let resolvedName = user?.user_metadata?.full_name || user?.user_metadata?.name || fullName.trim() || '';
                             if (!resolvedName && user?.email) {
                               const emailPrefix = user.email.split('@')[0];
@@ -917,7 +918,15 @@ export default function Navigation() {
                             }
                             if (!resolvedName) resolvedName = 'Scholar';
                             localStorage.setItem('studyweb_profile_name', resolvedName);
-                            localStorage.setItem('studyweb_onboarding_complete', 'true');
+                            const isUserOnboarded =
+                              user?.user_metadata?.onboarding_completed === true ||
+                              localStorage.getItem(`studyweb_onboarding_complete_${user.id}`) === 'true';
+                            if (isUserOnboarded) {
+                              localStorage.setItem('studyweb_onboarding_complete', 'true');
+                              localStorage.setItem(`studyweb_onboarding_complete_${user.id}`, 'true');
+                            } else {
+                              localStorage.removeItem('studyweb_onboarding_complete');
+                            }
                             localStorage.setItem('studyweb_is_logged_in', 'true');
                             (window as any).showToast?.('Welcome back! Logged in to your existing StudyWeb account.', 'success');
                             window.dispatchEvent(new CustomEvent('studyweb-login-success'));
@@ -934,10 +943,13 @@ export default function Navigation() {
                         
                         if (data.session) {
                           localStorage.setItem('studyweb_is_logged_in', 'true');
+                          localStorage.removeItem('studyweb_onboarding_complete');
                           if (fullName.trim()) {
                             localStorage.setItem('studyweb_profile_name', fullName.trim());
                           }
                           if (data.user) {
+                            localStorage.setItem('studyweb_active_user_id', data.user.id);
+                            localStorage.removeItem(`studyweb_onboarding_complete_${data.user.id}`);
                             try {
                               await supabase.from('profiles').upsert({
                                 id: data.user.id,
@@ -966,6 +978,9 @@ export default function Navigation() {
                         if (error) throw error;
 
                         const user = data.user;
+                        if (user?.id) {
+                          localStorage.setItem('studyweb_active_user_id', user.id);
+                        }
                         let resolvedName = user?.user_metadata?.full_name || user?.user_metadata?.name || '';
                         if (!resolvedName && user?.email) {
                           const emailPrefix = user.email.split('@')[0];
@@ -973,8 +988,16 @@ export default function Navigation() {
                         }
                         if (!resolvedName) resolvedName = 'Scholar';
                         localStorage.setItem('studyweb_profile_name', resolvedName);
-                        
-                        localStorage.setItem('studyweb_onboarding_complete', 'true');
+
+                        const isUserOnboarded =
+                          user?.user_metadata?.onboarding_completed === true ||
+                          (user?.id ? localStorage.getItem(`studyweb_onboarding_complete_${user.id}`) === 'true' : false);
+                        if (isUserOnboarded && user?.id) {
+                          localStorage.setItem('studyweb_onboarding_complete', 'true');
+                          localStorage.setItem(`studyweb_onboarding_complete_${user.id}`, 'true');
+                        } else if (!isUserOnboarded) {
+                          localStorage.removeItem('studyweb_onboarding_complete');
+                        }
                         localStorage.setItem('studyweb_is_logged_in', 'true');
                         (window as any).showToast?.('Successfully logged in to StudyWeb!', 'success');
                         window.dispatchEvent(new CustomEvent('studyweb-login-success'));

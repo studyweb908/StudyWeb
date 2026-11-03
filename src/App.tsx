@@ -55,7 +55,7 @@ const ResetPasswordModal = lazyWithRetry(() => import('./components/ResetPasswor
 const PDFWorkspaceView = lazyWithRetry(() => import('./components/Dashboard/PDFWorkspaceView'));
 const StudySessionView = lazyWithRetry(() => import('./components/Dashboard/StudySessionView'));
 const QuickNoteModal = lazyWithRetry(() => import('./components/Dashboard/QuickNoteModal'));
-const OnboardingModal = lazyWithRetry(() => import('./components/OnboardingModal'));
+import OnboardingModal, { isOnboardingDataComplete } from './components/OnboardingModal';
 const WelcomeBackModal = lazyWithRetry(() => import('./components/Dashboard/WelcomeBackModal'));
 const DeleteWorkspaceModal = lazyWithRetry(() => import('./components/Dashboard/DeleteWorkspaceModal'));
 import { 
@@ -117,7 +117,15 @@ export default function App() {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('studyweb_is_logged_in') === 'true';
   });
-  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const loggedIn = localStorage.getItem('studyweb_is_logged_in') === 'true';
+    if (!loggedIn) return false;
+    const uid = localStorage.getItem('studyweb_active_user_id');
+    const userScopedComplete = uid ? localStorage.getItem(`studyweb_onboarding_complete_${uid}`) === 'true' : false;
+    const globalComplete = localStorage.getItem('studyweb_onboarding_complete') === 'true';
+    return !(userScopedComplete || globalComplete);
+  });
   const [showWelcomeBack, setShowWelcomeBack] = useState(false);
   const [welcomeUserName, setWelcomeUserName] = useState<string>(() => {
     const snap = readSyncProfileSnapshot();
@@ -380,6 +388,31 @@ export default function App() {
             }
           }
 
+          // Reconcile mandatory onboarding status for this specific user account
+          const metaCompleted = user.user_metadata?.onboarding_completed === true;
+          const metaDataComplete = isOnboardingDataComplete(user.user_metadata?.onboarding_data);
+          const localUserComplete = localStorage.getItem(`studyweb_onboarding_complete_${userId}`) === 'true';
+          const hasProfileAcademicFields = Boolean(
+            reconciledProfile &&
+              reconciledProfile.className?.trim() &&
+              reconciledProfile.targetAim?.trim() &&
+              reconciledProfile.studentBio?.trim()
+          );
+
+          const isFullyOnboarded =
+            metaCompleted || metaDataComplete || localUserComplete || hasProfileAcademicFields;
+
+          if (isFullyOnboarded) {
+            localStorage.setItem('studyweb_onboarding_complete', 'true');
+            localStorage.setItem(`studyweb_onboarding_complete_${userId}`, 'true');
+            setShowOnboarding(false);
+          } else {
+            localStorage.removeItem('studyweb_onboarding_complete');
+            ProductTourService.markNewUserTourPending();
+            setShowWelcomeBack(false);
+            setShowOnboarding(true);
+          }
+
           const userCached = loadStoredWorkspaces(userId) || [];
           if (Array.isArray(remoteWorkspaces) && remoteWorkspaces.length > 0) {
             // Merge remote workspaces with local cached workspaces so no locally uploaded files/notes are lost
@@ -461,6 +494,8 @@ export default function App() {
           [
             'studyweb_is_logged_in',
             'studyweb_active_user_id',
+            'studyweb_onboarding_complete',
+            'studyweb_onboarding_draft',
             'studyweb_profile_cache_latest',
             'studyweb_profile_name',
             'studyweb_profile_avatar',
@@ -514,11 +549,14 @@ export default function App() {
   // Initialize and listen to custom auth events
   useEffect(() => {
     const savedLogin = localStorage.getItem('studyweb_is_logged_in');
-    const onboardingComplete = localStorage.getItem('studyweb_onboarding_complete');
+    const savedUid = localStorage.getItem('studyweb_active_user_id');
+    const onboardingComplete =
+      (savedUid && localStorage.getItem(`studyweb_onboarding_complete_${savedUid}`) === 'true') ||
+      localStorage.getItem('studyweb_onboarding_complete') === 'true';
     
     if (savedLogin === 'true') {
       setIsLoggedIn(true);
-      if (onboardingComplete !== 'true') {
+      if (!onboardingComplete) {
         ProductTourService.markNewUserTourPending();
         setShowOnboarding(true);
       } else {
@@ -532,9 +570,20 @@ export default function App() {
       const prevIdx = parseInt(localStorage.getItem('studyweb_banner_quote_index') || '0', 10);
       localStorage.setItem('studyweb_banner_quote_index', String((prevIdx + 1) % 21));
       setActiveTab('dashboard');
-      setShowLoginToast(true);
 
-      // Previous user logging in: trigger full-screen high-dopamine welcome back pop-up
+      const activeUid = localStorage.getItem('studyweb_active_user_id');
+      const isUserOnboardingDone =
+        (activeUid && localStorage.getItem(`studyweb_onboarding_complete_${activeUid}`) === 'true') ||
+        localStorage.getItem('studyweb_onboarding_complete') === 'true';
+
+      if (!isUserOnboardingDone) {
+        ProductTourService.markNewUserTourPending();
+        setShowWelcomeBack(false);
+        setShowOnboarding(true);
+        return;
+      }
+
+      setShowLoginToast(true);
       const storedName = localStorage.getItem('studyweb_profile_name');
       if (storedName) setWelcomeUserName(storedName);
       const storedAvatar = localStorage.getItem('studyweb_profile_avatar') || localStorage.getItem('studyweb_profile_pic');
@@ -548,9 +597,11 @@ export default function App() {
     const handleSignupSuccess = () => {
       setIsLoggedIn(true);
       localStorage.setItem('studyweb_is_logged_in', 'true');
+      localStorage.removeItem('studyweb_onboarding_complete');
       const prevIdx = parseInt(localStorage.getItem('studyweb_banner_quote_index') || '0', 10);
       localStorage.setItem('studyweb_banner_quote_index', String((prevIdx + 1) % 21));
       setActiveTab('dashboard');
+      setShowWelcomeBack(false);
       ProductTourService.markNewUserTourPending();
       setShowOnboarding(true);
     };
@@ -591,6 +642,7 @@ export default function App() {
   const executeLogout = async () => {
     setIsLoggedIn(false);
     setCurrentUserId(null);
+    setShowOnboarding(false);
     clearProfileMemoryCache();
     WorkspaceSyncService.clearCache();
     
@@ -605,6 +657,8 @@ export default function App() {
     [
       'studyweb_is_logged_in',
       'studyweb_active_user_id',
+      'studyweb_onboarding_complete',
+      'studyweb_onboarding_draft',
       'studyweb_profile_cache_latest',
       'studyweb_profile_name',
       'studyweb_profile_avatar',
@@ -663,7 +717,36 @@ export default function App() {
     return () => window.removeEventListener('studyweb-navigate-to-tutor', handleNavigateToTutor);
   }, [workspaces]);
 
+  const [tourWorkspaceSubTab, setTourWorkspaceSubTab] = useState<'overview' | 'library' | null>(null);
 
+  // Coordinate multi-screen guided product tour navigation across tabs and active Space views
+  useEffect(() => {
+    const handleTourConfigureView = (e: Event) => {
+      const customEvent = e as CustomEvent<{
+        tab?: string;
+        workspaceSubTab?: 'overview' | 'library' | null;
+        requireActiveWorkspace?: boolean;
+      }>;
+      const detail = customEvent.detail || {};
+
+      if (detail.workspaceSubTab !== undefined) {
+        setTourWorkspaceSubTab(detail.workspaceSubTab);
+      } else {
+        setTourWorkspaceSubTab(null);
+      }
+
+      if (detail.requireActiveWorkspace && !activeWorkspace && workspaces.length > 0) {
+        setActiveWorkspace(workspaces[0]);
+      }
+
+      if (detail.tab) {
+        setActiveTab(detail.tab);
+      }
+    };
+
+    window.addEventListener('studyweb-tour-configure-view', handleTourConfigureView);
+    return () => window.removeEventListener('studyweb-tour-configure-view', handleTourConfigureView);
+  }, [activeWorkspace, workspaces]);
 
   // Helper to render active workspace tabs
   const renderDashboardContent = () => {
@@ -697,7 +780,13 @@ export default function App() {
     
     // Tutor workspace: retains the selected workspace, or opens in the first available workspace, or General Study
     const tutorWorkspace = activeWorkspace || (workspaces.length > 0 ? workspaces[0] : fallbackGeneralWorkspace);
-    const targetWorkspace = activeWorkspace || (activeTab !== 'workspaces' ? (workspaces.length > 0 ? workspaces[0] : fallbackGeneralWorkspace) : null);
+    const targetWorkspace =
+      activeWorkspace ||
+      (activeTab !== 'workspaces' || tourWorkspaceSubTab !== null
+        ? workspaces.length > 0
+          ? workspaces[0]
+          : fallbackGeneralWorkspace
+        : null);
 
     return (
       <div className={`w-full ${isAITutorTab ? 'h-full flex-1 flex flex-col min-h-0' : 'h-full'} relative`}>
@@ -725,10 +814,13 @@ export default function App() {
                 workspaces={workspaces}
                 onSwitchWorkspace={setActiveWorkspace}
                 onDeleteWorkspace={handleDeleteWorkspace}
-                onBack={() => setActiveWorkspace(null)} 
+                onBack={() => {
+                  setTourWorkspaceSubTab(null);
+                  setActiveWorkspace(null);
+                }} 
                 onUpdateWorkspace={handleUpdateWorkspace}
                 initialTab={
-                  activeTab === 'workspaces' ? 'overview' : 
+                  activeTab === 'workspaces' ? (tourWorkspaceSubTab || 'overview') : 
                   activeTab === 'notes' ? 'notes' : 
                   activeTab === 'flashcards' ? 'flashcards' : 
                   activeTab === 'quiz-center' ? 'quiz' : 'overview'
@@ -829,6 +921,7 @@ export default function App() {
           {/* Mobile Bottom Navigation Bar */}
           <nav 
             aria-label="Mobile Bottom Navigation"
+            data-tour="mobile-bottom-nav"
             className="md:hidden fixed bottom-0 left-0 right-0 h-[calc(4rem+env(safe-area-inset-bottom,0px))] bg-white/95 dark:bg-slate-900/95 border-t border-slate-200/80 dark:border-slate-800/80 backdrop-blur-lg grid grid-cols-5 items-center justify-items-center px-1 pb-[env(safe-area-inset-bottom,0px)] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.4)]"
           >
             {/* 1. Home / Dashboard */}
@@ -1253,6 +1346,24 @@ export default function App() {
           )}
         </AnimatePresence>
 
+        {/* Mandatory Onboarding Gate (Rendered synchronously outside Suspense so workspace is strictly gated) */}
+        {showOnboarding && (
+          <OnboardingModal
+            isOpen={showOnboarding}
+            onComplete={() => {
+              localStorage.setItem('studyweb_onboarding_complete', 'true');
+              const uid = currentUserId || localStorage.getItem('studyweb_active_user_id');
+              if (uid) {
+                localStorage.setItem(`studyweb_onboarding_complete_${uid}`, 'true');
+              }
+              ProductTourService.markNewUserTourPending();
+              setShowOnboarding(false);
+              setShowLoginToast(true);
+              setActiveTab('dashboard');
+            }}
+          />
+        )}
+
         {/* Global Modals & Background Listeners (Lazy-loaded on demand) */}
         <Suspense fallback={null}>
           {showQuickNote && (
@@ -1260,19 +1371,6 @@ export default function App() {
               isOpen={showQuickNote} 
               onClose={() => setShowQuickNote(false)} 
               onNavigateToNotes={() => setActiveTab('notes')} 
-            />
-          )}
-          
-          {showOnboarding && (
-            <OnboardingModal
-              isOpen={showOnboarding}
-              onComplete={() => {
-                localStorage.setItem('studyweb_onboarding_complete', 'true');
-                ProductTourService.markNewUserTourPending();
-                setShowOnboarding(false);
-                setShowLoginToast(true);
-                setActiveTab('dashboard');
-              }}
             />
           )}
 
@@ -1283,7 +1381,7 @@ export default function App() {
             showOnboarding={showOnboarding}
           />
 
-          {showWelcomeBack && (
+          {showWelcomeBack && !showOnboarding && (
             <WelcomeBackModal
               isOpen={showWelcomeBack}
               onClose={() => setShowWelcomeBack(false)}

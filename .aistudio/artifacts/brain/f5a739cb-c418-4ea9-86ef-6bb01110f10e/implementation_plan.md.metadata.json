@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for the interactive, five-step guided onboarding tour for StudyWeb, featuring a Welcome Modal, live spotlight element walkthrough (Dashboard, Workspace, Upload Documents, AI Tutor), Completion Modal, dual database/localStorage persistence for completed vs. skipped states, and Restart Tour controls in both the Top Header and Profile Settings.",
-  "updatedAt":  "2026-10-31T07:24:33.437162583Z",
-  "requestFeedback":  true,
-  "userFacing":  true
+  "summary": "Implementation plan for responsive clamp() typography scaling, strict mandatory onboarding gate across logins with resume-from-last-unanswered-question persistence, hybrid auto-advance + universal Next button across all onboarding steps, and a compact, minimal centered onboarding modal card that fits without scrolling.",
+  "updatedAt": "2026-11-03T06:51:40.457863284Z",
+  "requestFeedback": true,
+  "userFacing": true
 }

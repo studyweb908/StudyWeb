@@ -117,6 +117,18 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
   }, [initialTab]);
 
   useEffect(() => {
+    if (initialTab === 'chat') return;
+    const handleTourSubTab = (e: Event) => {
+      const customEvent = e as CustomEvent<{ subTab?: TabType }>;
+      if (customEvent.detail?.subTab) {
+        setActiveTab(customEvent.detail.subTab);
+      }
+    };
+    window.addEventListener('studyweb-tour-workspace-subtab', handleTourSubTab);
+    return () => window.removeEventListener('studyweb-tour-workspace-subtab', handleTourSubTab);
+  }, [initialTab]);
+
+  useEffect(() => {
     if (activeTab === 'chat') setHasVisitedChat(true);
   }, [activeTab]);
 

@@ -1171,26 +1171,29 @@ export default function WorkspaceLibrary({
       />
 
       {/* UPLOAD STUDY MATERIALS STUDIO */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden animate-fade-in">
+      <div
+        data-tour="space-upload-dropzone"
+        className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden animate-fade-in"
+      >
         {/* Top Studio Header & Segmented Mode Navigation */}
-        <div className="px-5 sm:px-7 pt-5 sm:pt-6 pb-4 border-b border-slate-100 bg-slate-50/50">
+        <div className="px-5 sm:px-7 pt-5 sm:pt-6 pb-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div className="flex items-start gap-3.5">
               <div className="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
                 <Upload className="w-5 h-5" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight leading-snug">
+                <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white tracking-tight leading-snug">
                   Upload Study Materials
                 </h3>
-                <p className="text-xs sm:text-[13px] text-slate-500 mt-0.5 leading-relaxed">
-                  Upload your documents, add direct links, or paste study notes into <span className="font-semibold text-slate-700">{workspace.name}</span>.
+                <p className="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300 mt-0.5 leading-relaxed">
+                  Upload your documents, add direct links, or paste study notes into <span className="font-semibold text-slate-800 dark:text-white">{workspace.name}</span>.
                 </p>
               </div>
             </div>
 
             {/* Clean 3-Mode Navigation Bar */}
-            <div className="grid grid-cols-3 sm:inline-flex p-1 bg-slate-200/70 rounded-2xl gap-1 shrink-0">
+            <div className="grid grid-cols-3 sm:inline-flex p-1 bg-slate-200/70 dark:bg-slate-800 rounded-2xl gap-1 shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -1199,8 +1202,8 @@ export default function WorkspaceLibrary({
                 }}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                   !showUrlInput && !showDriveCopyInput
-                    ? 'bg-white text-indigo-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Upload className="w-3.5 h-3.5" />
@@ -1216,8 +1219,8 @@ export default function WorkspaceLibrary({
                 }}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                   showUrlInput
-                    ? 'bg-white text-indigo-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Link className="w-3.5 h-3.5" />
@@ -1232,8 +1235,8 @@ export default function WorkspaceLibrary({
                 }}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                   showDriveCopyInput
-                    ? 'bg-white text-indigo-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Clipboard className="w-3.5 h-3.5" />
@@ -1254,19 +1257,19 @@ export default function WorkspaceLibrary({
               onDrop={handleDrop}
               className={`border-2 border-dashed rounded-2xl p-8 sm:p-10 text-center transition-all ${
                 isDraggingLocal
-                  ? 'border-indigo-500 bg-indigo-50/50'
-                  : 'border-slate-200 bg-slate-50/60 hover:bg-slate-100/50'
+                  ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/30'
+                  : 'border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40 hover:bg-slate-100/50 dark:hover:bg-slate-800/60'
               }`}
             >
               <div className="flex flex-col items-center justify-center max-w-md mx-auto space-y-4">
-                <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-800/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
                   <Upload className="w-6 h-6" />
                 </div>
                 <div>
-                  <h4 className="font-bold text-base text-slate-900">
+                  <h4 className="font-bold text-base text-slate-900 dark:text-white">
                     Drag and drop your study files here
                   </h4>
-                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
                     Supports PDF textbooks, Word documents (DOCX), lecture slides (PPTX), images, audio recordings, and video files.
                   </p>
                 </div>

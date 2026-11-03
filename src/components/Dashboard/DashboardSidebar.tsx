@@ -113,7 +113,10 @@ export default function DashboardSidebar({
         </div>
 
         {/* Nav Items (Scrollable) */}
-        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-1 custom-scrollbar">
+        <div
+          data-tour="nav-sidebar-overview"
+          className="flex-1 overflow-y-auto px-3 py-4 space-y-1 custom-scrollbar"
+        >
           {menuItems.filter(i => !i.comingSoon).map((item) => {
             const isActive = activeTab === item.id;
             return (

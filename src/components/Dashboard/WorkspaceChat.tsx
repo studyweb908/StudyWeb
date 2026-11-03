@@ -2478,7 +2478,7 @@ export default function WorkspaceChat({
       {/* 3. MINIMALIST FULL-WIDTH CHAT INPUT DOCK                        */}
       {/* ============================================================== */}
       <footer className="p-2 sm:p-4 border-t border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md shrink-0">
-        <div className="max-w-3xl mx-auto space-y-2.5">
+        <div data-tour="ai-tutor-input-dock" className="max-w-3xl mx-auto space-y-2.5">
           {/* Quick Prompt Suggestions when chat is fresh */}
           {messages.length <= 1 && (
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
@@ -2589,7 +2589,10 @@ export default function WorkspaceChat({
           />
 
           {/* Clean Input Bar */}
-          <div className="flex items-end gap-1 sm:gap-2 p-1 sm:p-1.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-750 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all shadow-xs max-w-full">
+          <div
+            data-tour="ai-tutor-input-bar"
+            className="flex items-end gap-1 sm:gap-2 p-1 sm:p-1.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-750 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all shadow-xs max-w-full"
+          >
             
             {/* 1. ATTACH BUTTON */}
             <button
