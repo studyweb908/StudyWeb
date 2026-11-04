@@ -1125,8 +1125,17 @@ async function startServer() {
   }
 
 function isImageOrDiagramRequest(prompt: string): boolean {
-  const q = prompt.toLowerCase();
-  return /\b(generate\s+(an?\s+)?(image|picture|diagram|illustration|photo|drawing|visual|chart|sketch)|create\s+(an?\s+)?(image|picture|diagram|illustration|photo|drawing|visual|chart|sketch)|make\s+(an?\s+)?(image|picture|diagram|illustration|drawing|visual)|draw\s+(an?\s+|me\s+(an?\s+)?)?(image|picture|diagram|illustration|chart|sketch|process|cycle|cell|plant|structure|model|photosynthesis|atom|heart|circuit|map|graph)|show\s+(me\s+)?(an?\s+)?(image|picture|diagram|illustration|drawing)|illustrate\s+|image\s+of\s+|diagram\s+of\s+|picture\s+of\s+|illustration\s+of\s+)\b/i.test(q);
+  const q = prompt.toLowerCase().trim();
+  if (
+    /\b(explain|analyze|describe|read|summarize|what\s+is\s+in|what's\s+in|solve)\s+(this|the|my|attached|uploaded)\s+(image|picture|photo|diagram)\b/i.test(
+      q
+    )
+  ) {
+    return false;
+  }
+  return /\b((generate|create|make|draw|produce|render|design|paint|sketch)\s+(me\s+)?(an?\s+|some\s+|the\s+|any\s+)?(\w+\s+)?(image|images|picture|pictures|photo|photos|illustration|illustrations|drawing|drawings|diagram|diagrams|artwork|art|portrait|wallpaper|poster|logo)|(show|give|send|provide)\s+(me\s+)?(an?\s+|some\s+)?(image|images|picture|pictures|photo|photos|illustration|drawing))|^(an?\s+)?(image|picture|photo)\s+of\b/i.test(
+    q
+  );
 }
 
 function extractCleanTopicLabel(prompt: string): string {
@@ -1303,59 +1312,12 @@ function generateEducationalDiagramDataUrl(prompt: string, topicLabel: string): 
 }
 
 async function generateTutorVisualIfNeeded(
-  prompt: string,
-  topicLabel: string,
-  apiKey: string | null
+  _prompt: string,
+  _topicLabel: string,
+  _apiKey: string | null
 ): Promise<{ imageUrl: string; caption: string } | null> {
-  if (!isImageOrDiagramRequest(prompt)) return null;
-
-  if (apiKey && !isModelOnCooldown("gemini-3.1-flash-lite-image")) {
-    try {
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: { headers: { "User-Agent": "aistudio-build" } }
-      });
-
-      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-      const imgPromise = ai.models.generateContent({
-        model: "gemini-3.1-flash-lite-image",
-        contents: {
-          parts: [
-            {
-              text: `Create a clean, clear, high-resolution educational textbook illustration or labeled scientific diagram explaining: ${prompt}. Clean academic style, legible labels, vibrant colors.`
-            }
-          ]
-        },
-        config: {
-          imageConfig: {
-            aspectRatio: "16:9"
-          }
-        }
-      });
-
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => reject(new Error("Image generation timeout")), 4500);
-      });
-
-      const imgRes: any = await Promise.race([imgPromise, timeoutPromise]);
-      if (timeoutHandle) clearTimeout(timeoutHandle);
-
-      const parts = imgRes?.candidates?.[0]?.content?.parts || [];
-      for (const part of parts) {
-        if (part?.inlineData?.data) {
-          const mime = part.inlineData.mimeType || "image/png";
-          return {
-            imageUrl: `data:${mime};base64,${part.inlineData.data}`,
-            caption: `AI-Generated Educational Illustration: ${topicLabel}`
-          };
-        }
-      }
-    } catch (imgErr: any) {
-      recordModelQuotaCooldown("gemini-3.1-flash-lite-image", imgErr);
-    }
-  }
-
-  return generateEducationalDiagramDataUrl(prompt, topicLabel);
+  // Image generation is disabled per StudyWeb policy
+  return null;
 }
 
 function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], groundedSourceContext?: string, workspaceNotice?: string): string {
@@ -1464,6 +1426,14 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
 
       const q = query.trim();
       const qLower = q.toLowerCase();
+
+      if (isImageOrDiagramRequest(q)) {
+        const noImgReply = "I cannot generate image. I can help you with your study tasks.";
+        return res.json({
+          answer: noImgReply,
+          spokenText: noImgReply
+        });
+      }
 
       // Instant fast-path benchmark queries for sub-50ms vocal delivery
       if (qLower.includes("currency") && qLower.includes("india")) {
@@ -2451,8 +2421,28 @@ The student is asking about "${topicLabel}", which is NOT found in their uploade
         }
       }
 
-      // Start automatic visual/diagram generation in parallel if the student requested an image or diagram
-      const visualPromise = generateTutorVisualIfNeeded(prompt, topicLabel, getGeminiApiKey());
+      // If the user asks StudyWeb to generate an image, do not generate any image and respond immediately
+      if (isImageOrDiagramRequest(prompt)) {
+        const noImageReply = "I cannot generate image. I can help you with your study tasks.";
+        const cleanSubj = topicLabel || workspaceName || "your study topic";
+        return res.status(200).json({
+          reply: noImageReply,
+          text: noImageReply,
+          source: "StudyWeb AI Tutor",
+          modelUsed: "StudyWeb AI Tutor",
+          documentCount: effectiveFiles.length,
+          activeWorkspaceContext: workspaceName || "Active Workspace",
+          activeContextFiles: [],
+          followUpQuestions: [
+            `Explain the key concepts of ${cleanSubj} in simple words`,
+            `Create 3 practice quiz questions on ${cleanSubj}`,
+            `Summarize the most important exam points for ${cleanSubj}`
+          ],
+          suggestOutsideResearch: false
+        });
+      }
+
+      const visualPromise = Promise.resolve(null);
 
       // 2. Precise Intent Detection
       let specializedFormatInstruction = "";
@@ -2522,6 +2512,7 @@ CRITICAL INSTRUCTION DIRECTIVES:
 4. MULTIMODAL ANALYSIS (VIDEOS, WEBSITES, DOCUMENTS, IMAGES, TEXT):
    - When analyzing an uploaded or linked video, website, PDF, document, or image, provide a thorough, structured breakdown of its contents, key concepts, formulas, arguments, and takeaways.
 5. STRICT AVOIDANCE:
+   - NEVER generate any image, SVG, or picture. If the user asks you to generate, create, draw, or make an image or picture, reply: "I cannot generate image. I can help you with your study tasks."
    - NEVER mention "Document 1246", "Enjoy the videos", "music you love", or "Mix".
    - NEVER mention "Real-Time Interactive Learning Studio" or interactive widgets.
    - NEVER provide canned repetitive filler or say you are temporarily disconnected.

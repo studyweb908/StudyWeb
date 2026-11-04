@@ -56,6 +56,8 @@ interface Message {
   followUpQuestions?: string[];
   suggestOutsideResearch?: boolean;
   originalQuery?: string;
+  generatedImageUrl?: string;
+  generatedImageCaption?: string;
   isError?: boolean;
   failedPrompt?: string;
 }
@@ -736,6 +738,8 @@ export default function AITutorWorkspace() {
         followUpQuestions: Array.isArray(data.followUpQuestions) ? data.followUpQuestions : [],
         suggestOutsideResearch: Boolean(data.suggestOutsideResearch),
         originalQuery: textToSend,
+        generatedImageUrl: data.generatedImageUrl,
+        generatedImageCaption: data.generatedImageCaption,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setMessages(prev => [...prev, aiMsg]);
@@ -1470,6 +1474,21 @@ export default function AITutorWorkspace() {
                     </div>
                   )}
 
+                  {msg.sender === 'ai' && msg.generatedImageUrl && (
+                    <div className="mt-3 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950 shadow-sm">
+                      <img
+                        src={msg.generatedImageUrl}
+                        alt={msg.generatedImageCaption || 'Generated educational diagram'}
+                        className="w-full h-auto max-h-[360px] object-contain bg-slate-950"
+                      />
+                      <div className="px-3 py-2 bg-slate-900 border-t border-slate-800 flex items-center justify-between gap-2 text-xs text-slate-300">
+                        <span className="font-semibold truncate">
+                          {msg.generatedImageCaption || 'AI Tutor Generated Visual Diagram'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   {msg.isError && msg.failedPrompt && (
                     <div className="pt-2 border-t border-rose-200/50 dark:border-rose-900/50 mt-2 flex items-center gap-2">
                       <button
@@ -1540,6 +1559,8 @@ export default function AITutorWorkspace() {
                               aiAnswerText: msg.text,
                               questionText: prevQuestion,
                               workspaceName: activeWorkspace?.name || 'AI Tutor',
+                              imageUrl: msg.generatedImageUrl,
+                              imageCaption: msg.generatedImageCaption,
                             });
                           }}
                           className="text-[10px] font-semibold flex items-center gap-1 cursor-pointer transition-colors px-2 py-0.5 rounded-md text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-slate-100 dark:hover:bg-slate-800"

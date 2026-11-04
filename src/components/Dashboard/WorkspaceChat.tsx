@@ -2468,6 +2468,8 @@ export default function WorkspaceChat({
                           aiAnswerText: msg.text,
                           questionText: prevQuestion,
                           workspaceName: workspace.name,
+                          imageUrl: msg.generatedImageUrl,
+                          imageCaption: msg.generatedImageCaption,
                         });
                       }}
                       className="hover:text-indigo-600 dark:hover:text-indigo-300 flex items-center gap-1.5 cursor-pointer transition-colors px-2.5 py-1 rounded-xl text-xs border border-transparent hover:bg-slate-100 dark:hover:bg-slate-800 hover:border-slate-200 dark:hover:border-slate-750"
