@@ -80,30 +80,29 @@ export default function StudyTools() {
   ];
 
   return (
-    <section className="py-24 bg-brand-bg-light dark:bg-brand-bg-dark relative overflow-hidden transition-colors duration-300" id="study-tools">
+    <section className="py-fluid-section bg-brand-bg-light dark:bg-brand-bg-dark relative overflow-hidden transition-colors duration-300" id="study-tools">
       {/* Decorative Light Gradients */}
       <div className="absolute top-1/4 left-1/4 w-[350px] h-[350px] bg-brand-primary/5 rounded-full blur-[100px] pointer-events-none -z-10" />
       <div className="absolute bottom-1/4 right-1/4 w-[450px] h-[450px] bg-brand-secondary/5 rounded-full blur-[120px] pointer-events-none -z-10" />
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-        <div className="text-center max-w-3xl mx-auto mb-20 space-y-4">
-
+      <div className="responsive-container relative z-10">
+        <div className="text-center max-w-3xl mx-auto mb-12 sm:mb-16 space-y-4">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ delay: 0.1 }}
           >
-            <h2 className="text-4xl md:text-5xl font-display font-extrabold text-brand-text tracking-tight mb-6">
+            <h2 className="text-fluid-h2 font-display font-extrabold text-brand-text tracking-tight mb-4 sm:mb-6" style={{ textWrap: 'balance' }}>
               Powerful Academic Features
             </h2>
-            <p className="text-base sm:text-lg text-brand-text-light max-w-2xl mx-auto leading-relaxed">
+            <p className="text-sm sm:text-base md:text-lg text-brand-text-light max-w-2xl mx-auto leading-relaxed">
               Unlock a comprehensive suite of AI-driven tools engineered to optimize your learning strategy, save hours, and boost grade consistency.
             </p>
           </motion.div>
         </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {tools.map((tool, index) => (
             <motion.div
               key={index}
@@ -111,15 +110,15 @@ export default function StudyTools() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ delay: index * 0.05 }}
-              className={`bg-card-bg p-6 rounded-3xl border border-card-border shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col h-full bg-gradient-to-b ${tool.color}`}
+              className={`bg-card-bg p-5 sm:p-6 rounded-2xl sm:rounded-3xl border border-card-border shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col h-full bg-gradient-to-b ${tool.color}`}
             >
-              <div className={`${tool.iconColor} w-12 h-12 rounded-2xl flex items-center justify-center mb-5 flex-shrink-0`}>
-                <tool.icon className="w-6 h-6" />
+              <div className={`${tool.iconColor} w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center mb-4 sm:mb-5 flex-shrink-0`}>
+                <tool.icon className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
-              <h3 className="text-base font-bold font-display text-brand-text mb-2.5">
+              <h3 className="text-base sm:text-lg font-bold font-display text-brand-text mb-2">
                 {tool.title}
               </h3>
-              <p className="text-brand-text-light text-xs leading-relaxed font-medium">
+              <p className="text-brand-text-light text-xs sm:text-sm leading-relaxed font-medium">
                 {tool.desc}
               </p>
             </motion.div>

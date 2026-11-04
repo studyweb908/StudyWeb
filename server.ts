@@ -10,6 +10,7 @@ import { TranscriptProcessor } from "./src/services/TranscriptProcessor.js";
 import { cleanNotebookLMTitle } from "./src/utils/notebookTitle.js";
 import { getServerGeminiApiKey } from "./src/utils/serverEnv.js";
 import { createClient } from "@supabase/supabase-js";
+import { streakRouter, setServerUserDailyGoal, getServerUserDailyGoal } from "./src/services/streakEngineServer.js";
 
 // Load environment variables
 dotenv.config();
@@ -22,6 +23,56 @@ if (!process.env.DISABLE_HMR) {
 const DEFAULT_SUPABASE_URL = "https://fzutrlzeyystbaiueker.supabase.co";
 const DEFAULT_SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ6dXRybHpleXlzdGJhaXVla2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzOTg1MDMsImV4cCI6MjA5ODk3NDUwM30.usJ97CqSdQOAhYC8nXGvKg42xiKrjsmlJiGSTIYSLF4";
 
+// Server-side authoritative cache for user profiles so profile edits & daily focus targets survive expired client tokens
+const serverProfileStore = new Map<string, Record<string, any>>();
+
+// Helper to validate that a Bearer JWT is not expired before forwarding to PostgREST
+export function sanitizeSupabaseAuthHeader(authHeader?: string): string | undefined {
+  if (!authHeader || typeof authHeader !== "string" || authHeader.length >= 4000) {
+    return undefined;
+  }
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return undefined;
+  }
+  const trimmed = authHeader.trim();
+  const token = trimmed.replace(/^Bearer\s+/i, "").trim();
+  if (!token || token === "undefined" || token === "null") {
+    return undefined;
+  }
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    return undefined;
+  }
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    if (payload && typeof payload.exp === "number") {
+      // Treat token as expired if it expires within the next 10 seconds
+      if (payload.exp * 1000 <= Date.now() + 10_000) {
+        return undefined;
+      }
+    }
+  } catch {
+    return undefined;
+  }
+  return /^Bearer\s+/i.test(trimmed) ? trimmed : `Bearer ${token}`;
+}
+
+export function extractUserIdFromAuthHeader(authHeader?: string): string | undefined {
+  if (!authHeader || typeof authHeader !== "string") return undefined;
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const parts = token.split(".");
+  if (parts.length < 2) return undefined;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    if (payload && typeof payload.sub === "string" && payload.sub.trim()) {
+      return payload.sub.trim();
+    }
+  } catch {
+    // ignore decode errors
+  }
+  return undefined;
+}
+
 // Supabase Server-Side Client Helper
 export function getSupabaseServerClient(authHeader?: string) {
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || DEFAULT_SUPABASE_URL;
@@ -29,7 +80,7 @@ export function getSupabaseServerClient(authHeader?: string) {
   if (!supabaseUrl || !supabaseKey) {
     return null;
   }
-  const safeAuth = authHeader && authHeader.length < 4000 ? authHeader : undefined;
+  const safeAuth = sanitizeSupabaseAuthHeader(authHeader);
   const options = safeAuth ? { global: { headers: { Authorization: safeAuth } } } : {};
   return createClient(supabaseUrl, supabaseKey, options);
 }
@@ -162,9 +213,201 @@ async function startServer() {
     next();
   });
 
-  // Mount Knowledge Engine Module
+  // Mount Knowledge Engine & StudyWeb Streaks Modules
   app.use("/api/knowledge", knowledgeRouter);
   app.use("/api/study-materials", studyMaterialRouter);
+  app.use("/api/streaks", streakRouter);
+
+  // API Route: Resilient Profile & Daily Focus Target Sync (/api/profile)
+  app.get("/api/profile", async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    try {
+      const userId = String(
+        req.query?.userId ||
+          req.headers["x-studyweb-user-id"] ||
+          extractUserIdFromAuthHeader(req.headers.authorization) ||
+          ""
+      ).trim();
+
+      if (!userId) {
+        return res.json({ success: true, profile: null });
+      }
+
+      const cached = serverProfileStore.get(userId) || {};
+      const streakGoal = getServerUserDailyGoal(userId);
+      const supabase = getSupabaseServerClient(req.headers.authorization);
+      let dbRow: Record<string, any> | null = null;
+      let streakRow: Record<string, any> | null = null;
+
+      if (supabase) {
+        try {
+          const [profRes, stRes] = await Promise.allSettled([
+            supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
+            supabase.from("study_streak_settings").select("*").eq("user_id", userId).maybeSingle(),
+          ]);
+          if (profRes.status === "fulfilled" && profRes.value.data) {
+            dbRow = profRes.value.data;
+          }
+          if (stRes.status === "fulfilled" && stRes.value.data) {
+            streakRow = stRes.value.data;
+          }
+        } catch {}
+      }
+
+      const resolvedGoal =
+        cached.dailyGoalMinutes ??
+        streakGoal ??
+        (Number(streakRow?.daily_goal_minutes) >= 5 ? Number(streakRow?.daily_goal_minutes) : undefined) ??
+        (Number(dbRow?.daily_goal_minutes) >= 5 ? Number(dbRow?.daily_goal_minutes) : undefined);
+
+      const profile = {
+        userId,
+        fullName: cached.fullName || dbRow?.full_name || dbRow?.name || "",
+        avatarUrl: cached.avatarUrl || dbRow?.avatar_url || "",
+        schoolName: cached.schoolName || dbRow?.school_name || dbRow?.school || "",
+        className: cached.className || dbRow?.class_name || dbRow?.grade || "",
+        subject: cached.subject || dbRow?.subject || "",
+        targetAim: cached.targetAim || dbRow?.target_aim || dbRow?.learning_goal || "",
+        studentBio: cached.studentBio || dbRow?.scholar_bio || dbRow?.bio || "",
+        dailyGoalMinutes: resolvedGoal,
+        examName: cached.examName || dbRow?.exam_name || "",
+        examDate: cached.examDate || dbRow?.exam_date || "",
+        activeMascot: cached.activeMascot || dbRow?.active_mascot || "",
+        voiceStyle: cached.voiceStyle || dbRow?.voice_style || "",
+        updatedAt: cached.updatedAt || dbRow?.updated_at || "",
+      };
+
+      return res.json({ success: true, profile });
+    } catch (err: any) {
+      return res.status(200).json({ success: false, profile: null, error: err?.message });
+    }
+  });
+
+  app.post("/api/profile", async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    try {
+      const body = req.body || {};
+      const userId = String(
+        body.userId ||
+          req.headers["x-studyweb-user-id"] ||
+          extractUserIdFromAuthHeader(req.headers.authorization) ||
+          ""
+      ).trim();
+
+      if (!userId) {
+        return res.status(400).json({ success: false, error: "Missing userId" });
+      }
+
+      const nowIso = body.updatedAt || new Date().toISOString();
+      const prev = serverProfileStore.get(userId) || {};
+      const cleanGoal =
+        body.dailyGoalMinutes !== undefined && Number(body.dailyGoalMinutes) >= 5
+          ? Math.max(5, Math.min(720, Math.round(Number(body.dailyGoalMinutes))))
+          : prev.dailyGoalMinutes;
+
+      const updatedProfile: Record<string, any> = {
+        ...prev,
+        userId,
+        ...(body.fullName !== undefined ? { fullName: String(body.fullName).trim() } : {}),
+        ...(body.avatarUrl !== undefined ? { avatarUrl: String(body.avatarUrl) } : {}),
+        ...(body.schoolName !== undefined ? { schoolName: String(body.schoolName).trim() } : {}),
+        ...(body.className !== undefined ? { className: String(body.className).trim() } : {}),
+        ...(body.subject !== undefined ? { subject: String(body.subject).trim() } : {}),
+        ...(body.targetAim !== undefined ? { targetAim: String(body.targetAim).trim() } : {}),
+        ...(body.studentBio !== undefined ? { studentBio: String(body.studentBio).trim() } : {}),
+        ...(cleanGoal !== undefined ? { dailyGoalMinutes: cleanGoal } : {}),
+        ...(body.examName !== undefined ? { examName: String(body.examName).trim() } : {}),
+        ...(body.examDate !== undefined ? { examDate: String(body.examDate).trim() } : {}),
+        ...(body.activeMascot !== undefined ? { activeMascot: String(body.activeMascot).trim() } : {}),
+        ...(body.voiceStyle !== undefined ? { voiceStyle: String(body.voiceStyle).trim() } : {}),
+        updatedAt: nowIso,
+      };
+
+      serverProfileStore.set(userId, updatedProfile);
+      if (cleanGoal !== undefined) {
+        setServerUserDailyGoal(userId, cleanGoal);
+      }
+
+      let dbSynced = false;
+      const supabase = getSupabaseServerClient(req.headers.authorization);
+      if (supabase) {
+        const candidatePayloads: Record<string, any>[] = [
+          {
+            id: userId,
+            ...(updatedProfile.fullName ? { full_name: updatedProfile.fullName } : {}),
+            ...(updatedProfile.avatarUrl ? { avatar_url: updatedProfile.avatarUrl } : {}),
+            ...(updatedProfile.schoolName !== undefined ? { school: updatedProfile.schoolName } : {}),
+            ...(updatedProfile.className !== undefined ? { grade: updatedProfile.className } : {}),
+            ...(updatedProfile.subject !== undefined ? { subject: updatedProfile.subject } : {}),
+            ...(updatedProfile.targetAim !== undefined ? { learning_goal: updatedProfile.targetAim } : {}),
+            ...(updatedProfile.studentBio !== undefined ? { bio: updatedProfile.studentBio } : {}),
+            ...(cleanGoal !== undefined ? { daily_goal_minutes: cleanGoal } : {}),
+            ...(updatedProfile.examName !== undefined ? { exam_name: updatedProfile.examName } : {}),
+            ...(updatedProfile.examDate !== undefined ? { exam_date: updatedProfile.examDate } : {}),
+            updated_at: nowIso,
+          },
+          {
+            id: userId,
+            ...(updatedProfile.fullName ? { full_name: updatedProfile.fullName } : {}),
+            ...(updatedProfile.avatarUrl ? { avatar_url: updatedProfile.avatarUrl } : {}),
+            ...(updatedProfile.schoolName !== undefined ? { school: updatedProfile.schoolName } : {}),
+            ...(updatedProfile.className !== undefined ? { grade: updatedProfile.className } : {}),
+            ...(updatedProfile.targetAim !== undefined ? { learning_goal: updatedProfile.targetAim } : {}),
+            ...(cleanGoal !== undefined ? { daily_goal_minutes: cleanGoal } : {}),
+            updated_at: nowIso,
+          },
+          {
+            id: userId,
+            ...(updatedProfile.fullName ? { full_name: updatedProfile.fullName } : {}),
+            ...(updatedProfile.avatarUrl ? { avatar_url: updatedProfile.avatarUrl } : {}),
+            ...(updatedProfile.schoolName !== undefined ? { school: updatedProfile.schoolName } : {}),
+            ...(updatedProfile.className !== undefined ? { grade: updatedProfile.className } : {}),
+            ...(updatedProfile.targetAim !== undefined ? { learning_goal: updatedProfile.targetAim } : {}),
+            updated_at: nowIso,
+          },
+          {
+            id: userId,
+            ...(updatedProfile.fullName ? { full_name: updatedProfile.fullName } : {}),
+            ...(updatedProfile.avatarUrl ? { avatar_url: updatedProfile.avatarUrl } : {}),
+            updated_at: nowIso,
+          },
+        ];
+
+        for (const payload of candidatePayloads) {
+          try {
+            const { error } = await supabase.from("profiles").upsert(payload as any);
+            if (!error) {
+              dbSynced = true;
+              break;
+            }
+          } catch {}
+        }
+
+        if (cleanGoal !== undefined) {
+          try {
+            const { error: stErr } = await supabase.from("study_streak_settings").upsert({
+              user_id: userId,
+              daily_goal_minutes: cleanGoal,
+              updated_at: nowIso,
+            });
+            if (!stErr) dbSynced = true;
+          } catch {}
+        }
+      }
+
+      return res.json({
+        success: true,
+        synced: true,
+        dbSynced,
+        profile: updatedProfile,
+      });
+    } catch (err: any) {
+      return res.status(200).json({
+        success: false,
+        error: err?.message || "Failed to save profile",
+      });
+    }
+  });
 
   // API Route: Video Transcript & Caption Downloader via TranscriptProcessor
   app.all("/api/video-transcript", async (req, res) => {
@@ -1493,14 +1736,15 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         });
       });
 
-      const supabase = getSupabaseServerClient(effectiveAuthHeader);
+      const validAuthHeader = sanitizeSupabaseAuthHeader(effectiveAuthHeader);
+      const supabase = getSupabaseServerClient(validAuthHeader);
 
       if (supabase && (isRealWorkspaceId || userId || effectiveAuthHeader)) {
         try {
           const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Supabase query timeout (1500ms)")), 1500));
           const fetchPromise = (async () => {
-            let resolvedUserId = userId;
-            if (!resolvedUserId && effectiveAuthHeader) {
+            let resolvedUserId = userId || extractUserIdFromAuthHeader(effectiveAuthHeader);
+            if (!resolvedUserId && validAuthHeader) {
               try {
                 const { data: authData } = await supabase.auth.getUser();
                 if (authData?.user?.id) resolvedUserId = authData.user.id;
@@ -1509,34 +1753,46 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
               }
             }
 
-            const [profileRes, wsRes, wsFilesRes, wsNotesRes] = await Promise.all([
+            const runQueries = async (client: NonNullable<ReturnType<typeof getSupabaseServerClient>>) => Promise.all([
               resolvedUserId
-                ? supabase.from('profiles').select('full_name, school, grade, learning_goal').eq('id', resolvedUserId).maybeSingle()
+                ? client.from('profiles').select('full_name, school, grade, learning_goal').eq('id', resolvedUserId).maybeSingle()
                 : Promise.resolve({ data: null, error: null }),
               resolvedUserId
-                ? supabase.from('workspaces').select('id, name, subject, description, files, notes, flashcards, quizzes').eq('user_id', resolvedUserId)
+                ? client.from('workspaces').select('id, name, subject, description, files, notes, flashcards, quizzes').eq('user_id', resolvedUserId)
                 : (isRealWorkspaceId
-                    ? supabase.from('workspaces').select('id, name, subject, description, files, notes, flashcards, quizzes').eq('id', workspaceId)
+                    ? client.from('workspaces').select('id, name, subject, description, files, notes, flashcards, quizzes').eq('id', workspaceId)
                     : Promise.resolve({ data: null, error: null })),
               resolvedUserId
-                ? supabase.from('workspace_files').select('*').eq('user_id', resolvedUserId)
+                ? client.from('workspace_files').select('*').eq('user_id', resolvedUserId)
                 : (isRealWorkspaceId
-                    ? supabase.from('workspace_files').select('*').eq('workspace_id', workspaceId)
+                    ? client.from('workspace_files').select('*').eq('workspace_id', workspaceId)
                     : Promise.resolve({ data: null, error: null })),
               resolvedUserId
-                ? supabase.from('study_notes').select('id, title, content, workspace_id').eq('user_id', resolvedUserId).limit(30)
+                ? client.from('study_notes').select('id, title, content, workspace_id').eq('user_id', resolvedUserId).limit(30)
                 : (isRealWorkspaceId
-                    ? supabase.from('study_notes').select('id, title, content, workspace_id').eq('workspace_id', workspaceId).limit(20)
+                    ? client.from('study_notes').select('id, title, content, workspace_id').eq('workspace_id', workspaceId).limit(20)
                     : Promise.resolve({ data: null, error: null }))
             ]);
 
-            if (wsRes?.error) {
+            let [profileRes, wsRes, wsFilesRes, wsNotesRes] = await runQueries(supabase);
+
+            const isJwtExpiredError = (err: any) =>
+              err && (err.code === 'PGRST303' || String(err.message || '').toLowerCase().includes('jwt expired'));
+
+            if (isJwtExpiredError(wsRes?.error) || isJwtExpiredError(wsFilesRes?.error) || isJwtExpiredError(profileRes?.error)) {
+              const fallbackClient = getSupabaseServerClient(undefined);
+              if (fallbackClient) {
+                [profileRes, wsRes, wsFilesRes, wsNotesRes] = await runQueries(fallbackClient);
+              }
+            }
+
+            if (wsRes?.error && !isJwtExpiredError(wsRes.error)) {
               console.error('[Supabase Error][AI Tutor workspaces fetch]', {
                 code: wsRes.error.code || 'SUPABASE_WS_ERR',
                 message: wsRes.error.message
               });
             }
-            if (wsFilesRes?.error) {
+            if (wsFilesRes?.error && !isJwtExpiredError(wsFilesRes.error)) {
               console.error('[Supabase Error][AI Tutor workspace_files fetch]', {
                 code: wsFilesRes.error.code || 'SUPABASE_FILES_ERR',
                 message: wsFilesRes.error.message

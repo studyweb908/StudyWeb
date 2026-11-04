@@ -5,7 +5,6 @@ import confetti from 'canvas-confetti';
 import {
   User,
   Sparkles,
-  Flame,
   CheckCircle2,
   Save,
   Clock,
@@ -28,13 +27,11 @@ import {
   Edit3,
   Award,
   Plus,
-  BarChart3,
-  Compass
+  BarChart3
 } from 'lucide-react';
 import { useThemeMode } from '../../hooks/useThemeMode';
 import { useStudyStats } from '../../hooks/useStudyStats';
 import { StudyTrackerService } from '../../services/StudyTrackerService';
-import { ProductTourService } from '../../services/ProductTourService';
 import {
   readSyncProfileSnapshot,
   fetchAndReconcileSupabaseProfile,
@@ -53,12 +50,9 @@ type SettingsTab = 'overview' | 'personal' | 'curriculum';
 export function ProfileSettingsHub() {
   useThemeMode();
   const {
-    currentStreak,
     studyHoursFormatted,
     todayMinutes,
     isStudyingLive,
-    activeToday,
-    streakBadgeText,
     subjectBreakdown,
     recentSessions
   } = useStudyStats();
@@ -237,9 +231,19 @@ export function ProfileSettingsHub() {
     const handleProfileUpdated = (e: any) => {
       const p = e?.detail || readSyncProfileSnapshot();
       if (!p || !isMounted) return;
-      if (p.email) setUserEmail(p.email);
-      if (p.fullName) setFullName(p.fullName);
-      if (p.avatarUrl) setAvatarUrl(p.avatarUrl);
+      if (p.email !== undefined) setUserEmail(p.email);
+      if (p.fullName !== undefined) setFullName(p.fullName);
+      if (p.avatarUrl !== undefined) setAvatarUrl(p.avatarUrl);
+      if (p.schoolName !== undefined) setSchoolName(p.schoolName);
+      if (p.className !== undefined) setClassName(p.className);
+      if (p.subject !== undefined) setSubject(p.subject);
+      if (p.targetAim !== undefined) setTargetAim(p.targetAim);
+      if (p.studentBio !== undefined) setStudentBio(p.studentBio);
+      if (p.dailyGoalMinutes !== undefined && Number(p.dailyGoalMinutes) >= 5) {
+        setDailyGoalMinutes(Number(p.dailyGoalMinutes));
+      }
+      if (p.examName !== undefined) setExamName(p.examName);
+      if (p.examDate !== undefined) setExamDate(p.examDate);
     };
 
     window.addEventListener('studyweb_profile_updated', handleProfileUpdated);
@@ -269,8 +273,17 @@ export function ProfileSettingsHub() {
         examDate
       });
 
+      StudyTrackerService.setDailyGoalMinutes(profile.dailyGoalMinutes);
       setFullName(profile.fullName);
       setAvatarUrl(profile.avatarUrl);
+      setSchoolName(profile.schoolName);
+      setClassName(profile.className);
+      setSubject(profile.subject);
+      setTargetAim(profile.targetAim);
+      setStudentBio(profile.studentBio);
+      setDailyGoalMinutes(profile.dailyGoalMinutes);
+      setExamName(profile.examName);
+      setExamDate(profile.examDate);
       setSyncStatus(synced ? 'synced' : 'local');
       setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       triggerToast('✨ Profile and academic details saved!');
@@ -329,7 +342,7 @@ export function ProfileSettingsHub() {
     setCustomSessionNote('');
     setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     if (result.newlyCompletedRoutine) {
-      triggerToast(`🔥 Daily study goal (${dailyGoalMinutes}m) completed! Current Streak +1 (${result.currentStreak} Days)!`);
+      triggerToast(`🎯 Daily study goal (${dailyGoalMinutes}m) completed!`);
       confetti({
         particleCount: 55,
         spread: 70,
@@ -720,26 +733,26 @@ export function ProfileSettingsHub() {
   }, [todayMinutes, dailyGoalMinutes]);
 
   return (
-    <div className="w-full max-w-5xl mx-auto space-y-8 text-left pb-16">
+    <div className="w-full max-w-5xl mx-auto space-y-5 sm:space-y-7 text-left pb-16 min-w-0">
       {/* 1. HERO COMMAND CARD */}
-      <div className="relative overflow-hidden rounded-[32px] bg-white/90 dark:bg-slate-900/85 backdrop-blur-2xl border border-slate-200/80 dark:border-slate-800/80 p-6 sm:p-10 shadow-xl shadow-slate-200/40 dark:shadow-none transition-colors">
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-[32px] bg-white/90 dark:bg-slate-900/85 backdrop-blur-2xl border border-slate-200/80 dark:border-slate-800/80 p-4 sm:p-8 shadow-lg shadow-slate-200/30 dark:shadow-none transition-colors">
         <div className="absolute top-0 right-0 -mt-16 -mr-16 w-80 h-80 bg-gradient-to-bl from-indigo-500/10 via-purple-500/5 to-transparent rounded-full blur-3xl pointer-events-none" />
         <div className="absolute bottom-0 left-0 -mb-16 -ml-16 w-80 h-80 bg-gradient-to-tr from-sky-500/10 via-blue-500/5 to-transparent rounded-full blur-3xl pointer-events-none" />
 
-        <div className="relative z-10 flex flex-col md:flex-row items-center md:items-start gap-8 justify-between">
+        <div className="relative z-10 flex flex-col md:flex-row items-center md:items-start gap-5 sm:gap-8 justify-between">
           {/* Left: Avatar + Real Identity Info */}
-          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 text-center sm:text-left">
+          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6 text-center sm:text-left min-w-0 w-full">
             <div className="relative group shrink-0">
-              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl overflow-hidden border-2 border-indigo-400/40 dark:border-indigo-400/30 p-1 bg-white/90 dark:bg-slate-950/50 shadow-md group-hover:border-indigo-500 group-hover:scale-105 transition-all duration-300 relative">
+              <div className="w-20 h-20 sm:w-28 sm:h-28 rounded-2xl sm:rounded-3xl overflow-hidden border-2 border-indigo-400/40 dark:border-indigo-400/30 p-1 bg-white/90 dark:bg-slate-950/50 shadow-md group-hover:border-indigo-500 group-hover:scale-105 transition-all duration-300 relative">
                 <img
                   src={avatarUrl || getMonogramAvatar(displayIdentityName || userEmail || 'User')}
                   alt={displayIdentityName}
-                  className="w-full h-full object-cover rounded-[20px]"
+                  className="w-full h-full object-cover rounded-[14px] sm:rounded-[20px]"
                   onError={(e) => {
                     (e.target as HTMLImageElement).src = getMonogramAvatar(displayIdentityName || userEmail || 'User');
                   }}
                 />
-                <div className="absolute inset-0 bg-slate-950/70 rounded-[20px] opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white gap-2 backdrop-blur-xs p-1.5 z-10">
+                <div className="absolute inset-0 bg-slate-950/70 rounded-[14px] sm:rounded-[20px] opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white gap-2 backdrop-blur-xs p-1.5 z-10">
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
@@ -770,24 +783,15 @@ export function ProfileSettingsHub() {
             </div>
 
             {/* Real Scholar Identity Meta */}
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2.5">
-                <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+            <div className="space-y-1.5 sm:space-y-2 min-w-0 max-w-full">
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                <h1 className="text-xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight truncate max-w-full">
                   {displayIdentityName}
                 </h1>
-                <button
-                  type="button"
-                  onClick={() => ProductTourService.startOrRestartTour()}
-                  className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 border border-indigo-200/80 dark:border-indigo-800/70 text-indigo-700 dark:text-indigo-300 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                  title="Restart the 5-step StudyWeb Guided Product Tour"
-                >
-                  <Compass className="w-3.5 h-3.5" />
-                  <span>Restart Tour</span>
-                </button>
               </div>
 
               {heroMetadataItems.length > 0 && (
-                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 text-xs text-slate-600 dark:text-slate-300 font-medium">
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-2 gap-y-1 text-xs text-slate-600 dark:text-slate-300 font-medium">
                   {heroMetadataItems.map((item, idx) => (
                     <React.Fragment key={idx}>
                       {idx > 0 && (
@@ -795,7 +799,7 @@ export function ProfileSettingsHub() {
                           ·
                         </span>
                       )}
-                      <span className={item.includes('@') ? 'font-mono text-slate-500 dark:text-slate-400' : ''}>
+                      <span className={`truncate max-w-[240px] sm:max-w-none ${item.includes('@') ? 'font-mono text-slate-500 dark:text-slate-400' : ''}`}>
                         {item}
                       </span>
                     </React.Fragment>
@@ -804,7 +808,7 @@ export function ProfileSettingsHub() {
               )}
 
               {targetAim ? (
-                <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 break-words">
                   Aim: {targetAim}
                 </p>
               ) : null}
@@ -813,59 +817,36 @@ export function ProfileSettingsHub() {
         </div>
 
         {/* METRIC STRIP: Real-Time Personalized Tabular Figures */}
-        <div className="mt-8 pt-6 border-t border-slate-100 dark:border-white/10 grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="p-3.5 rounded-2xl bg-white/70 dark:bg-white/5 border border-slate-200/70 dark:border-white/5 shadow-xs hover:border-amber-500/30 transition-all">
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs font-medium">
-                <Flame className="w-4 h-4 text-amber-500" />
-                <span>Current Streak</span>
-              </div>
-              {activeToday && (
-                <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
-                  Active Today
-                </span>
-              )}
-            </div>
-            <div className="text-xl sm:text-2xl font-mono font-bold tabular-nums text-slate-900 dark:text-white flex items-baseline gap-1.5">
-              <span>{currentStreak}</span>
-              <span className="text-xs font-sans text-slate-500 dark:text-slate-400 font-normal">
-                {currentStreak === 1 ? 'Day' : 'Days'}
-              </span>
-            </div>
-            <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5">
-              {streakBadgeText} · Daily Goal: {dailyGoalMinutes}m
-            </p>
-          </div>
-
+        <div className="mt-5 sm:mt-7 pt-4 sm:pt-6 border-t border-slate-100 dark:border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           {/* Personalized Logged Study Hours Card */}
-          <div className="p-3.5 rounded-2xl bg-white/70 dark:bg-white/5 border border-slate-200/70 dark:border-white/5 shadow-xs hover:border-sky-500/30 transition-all flex flex-col justify-between">
+          <div className="p-3.5 rounded-2xl bg-white/70 dark:bg-white/5 border border-slate-200/70 dark:border-white/5 shadow-xs hover:border-sky-500/30 transition-all flex flex-col justify-between min-w-0">
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs font-medium">
-                  <Clock className="w-4 h-4 text-sky-500" />
-                  <span>Logged Study ({displayIdentityName.split(' ')[0]})</span>
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 text-xs font-medium min-w-0">
+                  <Clock className="w-4 h-4 text-sky-500 shrink-0" />
+                  <span className="truncate">Logged Study ({displayIdentityName.split(' ')[0]})</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => handleLogStudySession(15)}
-                  className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-0.5"
+                  className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-0.5 shrink-0"
                   title="Quick log +15 minutes to your study profile"
                 >
                   <Plus className="w-3 h-3" />
                   <span>15m</span>
                 </button>
               </div>
-              <div className="text-xl sm:text-2xl font-mono font-bold tabular-nums text-slate-900 dark:text-white flex items-baseline gap-1.5">
+              <div className="text-lg sm:text-2xl font-mono font-bold tabular-nums text-slate-900 dark:text-white flex items-baseline gap-1.5 flex-wrap">
                 <span>{studyHoursFormatted}</span>
-                <span className="text-xs font-sans text-slate-500 dark:text-slate-400 font-normal">
+                <span className="text-xs font-sans text-slate-500 dark:text-slate-400 font-normal truncate">
                   Hours{subject ? ` · ${subject}` : ''}
                 </span>
               </div>
             </div>
-            <div className="mt-1.5 space-y-1">
+            <div className="mt-2 space-y-1">
               <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                <span>{todayMinutes}m / {dailyGoalMinutes}m today</span>
-                <span className="font-mono font-bold text-sky-600 dark:text-sky-400">{dailyGoalProgressPct}%</span>
+                <span className="font-mono tabular-nums">{todayMinutes}m / {dailyGoalMinutes}m today</span>
+                <span className="font-mono font-bold tabular-nums text-sky-600 dark:text-sky-400">{dailyGoalProgressPct}%</span>
               </div>
               <div className="w-full h-1.5 rounded-full bg-slate-200/80 dark:bg-slate-800 overflow-hidden">
                 <div
@@ -878,11 +859,11 @@ export function ProfileSettingsHub() {
 
           <div
             onClick={() => setActiveTab('curriculum')}
-            className="p-3.5 rounded-2xl bg-white/70 dark:bg-white/5 border border-slate-200/70 dark:border-white/5 shadow-xs hover:border-purple-500/40 transition-all cursor-pointer"
+            className="p-3.5 rounded-2xl bg-white/70 dark:bg-white/5 border border-slate-200/70 dark:border-white/5 shadow-xs hover:border-purple-500/40 transition-all cursor-pointer min-w-0"
             title="Click to configure Next Core Exam Target Date"
           >
             <div className="flex items-center justify-between gap-2 text-slate-500 dark:text-slate-400 text-xs font-medium mb-1">
-              <div className="flex items-center gap-2 truncate">
+              <div className="flex items-center gap-1.5 truncate min-w-0">
                 <Target className="w-4 h-4 text-purple-500 shrink-0" />
                 <span className="truncate">{examName ? examName : 'Next Core Exam'}</span>
               </div>
@@ -890,7 +871,7 @@ export function ProfileSettingsHub() {
                 {examCountdown.hasDate ? examCountdown.formattedDate : 'Set Date →'}
               </span>
             </div>
-            <div className="text-xl sm:text-2xl font-mono font-bold tabular-nums text-slate-900 dark:text-white">
+            <div className="text-lg sm:text-2xl font-mono font-bold tabular-nums text-slate-900 dark:text-white">
               {examCountdown.hasDate ? (
                 <>
                   {examCountdown.daysRemaining}{' '}
@@ -904,87 +885,90 @@ export function ProfileSettingsHub() {
                 </span>
               )}
             </div>
-            <p className={`text-[11px] font-medium mt-0.5 ${examCountdown.phaseColor}`}>
+            <p className={`text-[11px] font-medium mt-0.5 truncate ${examCountdown.phaseColor}`}>
               {examCountdown.phaseLabel}
             </p>
           </div>
         </div>
       </div>
 
-      {/* 2. SEGMENTED TABS (Cloud & Account Removed) */}
+      {/* 2. SEGMENTED TABS (Equal-width 3-column grid — zero mobile overflow) */}
       <div
         data-tour="profile-tabs-bar"
-        className="flex items-center gap-1.5 p-1.5 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 rounded-2xl overflow-x-auto scrollbar-none shadow-sm transition-colors"
+        className="grid grid-cols-3 gap-1 sm:gap-1.5 p-1 sm:p-1.5 bg-white/90 dark:bg-slate-900/85 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-xs transition-colors"
       >
         <button
+          type="button"
           onClick={() => setActiveTab('overview')}
-          className={`flex-1 min-w-[140px] flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+          className={`flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 px-2 sm:py-3 sm:px-4 rounded-xl text-[11px] sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap min-w-0 ${
             activeTab === 'overview'
-              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/25'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/80 dark:hover:bg-white/5'
           }`}
         >
-          <Sparkles className="w-4 h-4" />
-          <span>Overview</span>
+          <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+          <span className="truncate">Overview</span>
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('personal')}
-          className={`flex-1 min-w-[140px] flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+          className={`flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 px-2 sm:py-3 sm:px-4 rounded-xl text-[11px] sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap min-w-0 ${
             activeTab === 'personal'
-              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/25'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/80 dark:hover:bg-white/5'
           }`}
         >
-          <User className="w-4 h-4" />
-          <span>Personal Info</span>
+          <User className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+          <span className="truncate">Personal Info</span>
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('curriculum')}
-          className={`flex-1 min-w-[140px] flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+          className={`flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 px-2 sm:py-3 sm:px-4 rounded-xl text-[11px] sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap min-w-0 ${
             activeTab === 'curriculum'
-              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/25'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/80 dark:hover:bg-white/5'
           }`}
         >
-          <GraduationCap className="w-4 h-4" />
-          <span>Study Goals</span>
+          <GraduationCap className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+          <span className="truncate">Study Goals</span>
         </button>
       </div>
 
       {/* 3. TAB CONTENT PANELS */}
-      <div className="transition-all duration-300">
+      <div className="transition-all duration-300 min-w-0">
         {/* ========================================================= */}
         {/* TAB 1: OVERVIEW (REAL PERSONAL INFO + STUDY GOALS + HOURS) */}
         {/* ========================================================= */}
         {activeTab === 'overview' && (
-          <div className="space-y-6">
+          <div className="space-y-5 sm:space-y-6">
             {/* Row 1: Real Personal Info Summary & Study Goals Together */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6 items-stretch">
               {/* Card A: Real Personal & Academic Profile Summary + Quick Save */}
               <div
                 data-tour="profile-customization-card"
-                className="rounded-[28px] bg-white/90 dark:bg-slate-900/65 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-7 flex flex-col justify-between space-y-5 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors"
+                className="rounded-2xl sm:rounded-[28px] bg-white/90 dark:bg-slate-900/65 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-6 flex flex-col justify-between space-y-4 sm:space-y-5 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors min-w-0"
               >
-                <div className="space-y-5">
-                  <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
-                    <div>
-                      <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                        <User className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                        <span>Personal & Academic Profile</span>
+                <div className="space-y-4 sm:space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3.5">
+                    <div className="min-w-0">
+                      <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <User className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                        <span className="truncate">Personal & Academic Profile</span>
                       </h3>
                       <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                         Your personal and academic details
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
                       <button
                         type="button"
                         onClick={() => setActiveTab('personal')}
-                        className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                        className="flex-1 sm:flex-initial justify-center px-3 py-2 sm:py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
                       >
-                        <Edit3 className="w-3.5 h-3.5" />
+                        <Edit3 className="w-3.5 h-3.5 shrink-0" />
                         <span>Full Form</span>
                       </button>
                       <button
@@ -992,9 +976,9 @@ export function ProfileSettingsHub() {
                         data-tour="profile-save-btn"
                         onClick={handleSavePersonal}
                         disabled={isSaving}
-                        className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap shadow-sm"
+                        className="flex-1 sm:flex-initial justify-center px-3.5 py-2 sm:py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap shadow-xs"
                       >
-                        {isSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                        {isSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" /> : <Save className="w-3.5 h-3.5 shrink-0" />}
                         <span>{isSaving ? 'Saving...' : 'Save Profile'}</span>
                       </button>
                     </div>
@@ -1078,13 +1062,13 @@ export function ProfileSettingsHub() {
               </div>
 
               {/* Card B: Real Study Goals & Next Core Exam Countdown in Overview */}
-              <div className="rounded-[28px] bg-white/90 dark:bg-slate-900/65 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-7 flex flex-col justify-between space-y-5 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors">
-                <div className="space-y-5">
-                  <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
-                    <div>
-                      <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                        <Target className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                        <span>Study Goals & Exam Countdown</span>
+              <div className="rounded-2xl sm:rounded-[28px] bg-white/90 dark:bg-slate-900/65 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-6 flex flex-col justify-between space-y-4 sm:space-y-5 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors min-w-0">
+                <div className="space-y-4 sm:space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3.5">
+                    <div className="min-w-0">
+                      <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <Target className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                        <span className="truncate">Study Goals & Exam Countdown</span>
                       </h3>
                       <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                         Your active daily focus target, learning aim, and next core exam
@@ -1094,9 +1078,9 @@ export function ProfileSettingsHub() {
                       type="button"
                       onClick={handleSaveGoals}
                       disabled={isSavingGoals}
-                      className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap shadow-sm"
+                      className="w-full sm:w-auto justify-center px-3.5 py-2 sm:py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap shadow-xs shrink-0"
                     >
-                      {isSavingGoals ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                      {isSavingGoals ? <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" /> : <Save className="w-3.5 h-3.5 shrink-0" />}
                       <span>{isSavingGoals ? 'Saving...' : 'Save Goals'}</span>
                     </button>
                   </div>
@@ -1124,7 +1108,7 @@ export function ProfileSettingsHub() {
                   />
 
                   {/* Next Core Exam Target Date & Name in Overview */}
-                  <div className="p-4 rounded-2xl bg-slate-50/90 dark:bg-slate-950/50 border border-slate-200/70 dark:border-slate-800 space-y-3">
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50/90 dark:bg-slate-950/50 border border-slate-200/70 dark:border-slate-800 space-y-3">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-1">
                         <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400">
@@ -1152,7 +1136,7 @@ export function ProfileSettingsHub() {
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between pt-1 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1 text-xs">
                       <span className={`font-semibold ${examCountdown.phaseColor}`}>
                         {examCountdown.phaseLabel}
                       </span>
@@ -1165,7 +1149,7 @@ export function ProfileSettingsHub() {
                   </div>
                 </div>
 
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
                   <span>
                     {examCountdown.hasDate && examCountdown.projectedHours > 0
                       ? `Projected study before exam: ${examCountdown.projectedHours} hrs`
@@ -1174,7 +1158,7 @@ export function ProfileSettingsHub() {
                   <button
                     type="button"
                     onClick={() => setActiveTab('curriculum')}
-                    className="font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                    className="font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer shrink-0"
                   >
                     Open Study Goals →
                   </button>
@@ -1183,24 +1167,24 @@ export function ProfileSettingsHub() {
             </div>
 
             {/* Row 2: Personalized Study Hours & Subject Breakdown */}
-            <div className="rounded-[28px] bg-white/90 dark:bg-slate-900/65 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-7 space-y-5 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <BarChart3 className="w-4 h-4 text-sky-600 dark:text-sky-400" />
-                    <span>Personalized Logged Study Hours ({displayIdentityName})</span>
+            <div className="rounded-2xl sm:rounded-[28px] bg-white/90 dark:bg-slate-900/65 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-6 space-y-4 sm:space-y-5 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors min-w-0">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3.5">
+                <div className="min-w-0">
+                  <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
+                    <span className="truncate">Personalized Logged Study Hours ({displayIdentityName})</span>
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     Real-time active study tracking & custom session logging for your daily routine
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-4 sm:flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto shrink-0">
                   {[15, 30, 45, 60].map((mins) => (
                     <button
                       key={mins}
                       type="button"
                       onClick={() => handleLogStudySession(mins)}
-                      className="px-2.5 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/60 border border-sky-200/80 dark:border-sky-800/60 text-sky-700 dark:text-sky-300 text-xs font-bold transition-colors cursor-pointer"
+                      className="px-2.5 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/60 border border-sky-200/80 dark:border-sky-800/60 text-sky-700 dark:text-sky-300 text-xs font-mono font-bold tabular-nums transition-colors cursor-pointer text-center"
                     >
                       +{mins}m
                     </button>
@@ -1208,18 +1192,11 @@ export function ProfileSettingsHub() {
                 </div>
               </div>
 
-              {/* Interactive Live Study Countdown Timer */}
-              <LiveStudyCountdownTimer
-                subjectName={customSessionSubject || subject || 'General Study'}
-                dailyGoalMinutes={dailyGoalMinutes}
-                todayMinutes={todayMinutes}
-              />
-
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-5 sm:gap-6 items-start">
                 {/* Left: Subject Breakdown & Daily Progress */}
-                <div className="md:col-span-7 space-y-4">
-                  <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-950/50 border border-slate-200/70 dark:border-slate-800 space-y-3">
-                    <div className="flex items-center justify-between">
+                <div className="md:col-span-7 space-y-4 min-w-0">
+                  <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-950/50 border border-slate-200/70 dark:border-slate-800 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
                           Today&apos;s Personalized Focus Progress
@@ -1228,7 +1205,7 @@ export function ProfileSettingsHub() {
                           {isStudyingLive ? 'Live study session tracking active' : 'Automatically tracks while you study'}
                         </p>
                       </div>
-                      <span className="font-mono text-sm font-extrabold text-indigo-600 dark:text-indigo-400">
+                      <span className="font-mono text-xs sm:text-sm font-extrabold tabular-nums text-indigo-600 dark:text-indigo-400">
                         {todayMinutes}m / {dailyGoalMinutes}m ({dailyGoalProgressPct}%)
                       </span>
                     </div>
@@ -1351,31 +1328,6 @@ export function ProfileSettingsHub() {
                 </div>
               </div>
             </div>
-
-            {/* Guided Onboarding Tour Card */}
-            <div className="rounded-[28px] bg-white/90 dark:bg-slate-900/65 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors">
-              <div className="flex items-start sm:items-center gap-3.5">
-                <div className="w-11 h-11 rounded-2xl bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200/70 dark:border-indigo-800/70 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
-                  <Compass className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
-                    Interactive Guided Product Tour
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Take a quick 5-step interactive walkthrough of your Dashboard, Workspaces, Document Upload, and AI Tutor.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => ProductTourService.startOrRestartTour()}
-                className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold inline-flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
-              >
-                <Compass className="w-4 h-4" />
-                <span>Restart Guided Tour</span>
-              </button>
-            </div>
           </div>
         )}
 
@@ -1383,10 +1335,10 @@ export function ProfileSettingsHub() {
         {/* TAB 2: PERSONAL INFORMATION FORM (NO CURRICULUM BOARD)    */}
         {/* ========================================================= */}
         {activeTab === 'personal' && (
-          <div className="rounded-[28px] bg-white/85 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-9 space-y-8 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors">
-            <div className="border-b border-slate-100 dark:border-slate-800 pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="rounded-2xl sm:rounded-[28px] bg-white/85 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-8 space-y-6 sm:space-y-8 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors">
+            <div className="border-b border-slate-100 dark:border-slate-800 pb-4 sm:pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
               <div>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
                   Personal Identity & Academic Records
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
@@ -1394,9 +1346,10 @@ export function ProfileSettingsHub() {
                 </p>
               </div>
               <button
+                type="button"
                 onClick={handleSavePersonal}
                 disabled={isSaving}
-                className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white font-bold text-xs shadow-md shadow-indigo-600/20 transition-all flex items-center gap-2 self-start cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                className="w-full sm:w-auto justify-center px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white font-bold text-xs shadow-md shadow-indigo-600/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50 whitespace-nowrap"
               >
                 {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 <span>{isSaving ? 'Saving...' : 'Save Profile'}</span>
@@ -1573,10 +1526,10 @@ export function ProfileSettingsHub() {
         {/* TAB 3: STUDY GOALS & IMPROVED NEXT CORE EXAM TARGET       */}
         {/* ========================================================= */}
         {activeTab === 'curriculum' && (
-          <div className="rounded-[28px] bg-white/85 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-9 space-y-8 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors">
-            <div className="border-b border-slate-100 dark:border-slate-800 pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="rounded-2xl sm:rounded-[28px] bg-white/85 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-8 space-y-6 sm:space-y-8 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors">
+            <div className="border-b border-slate-100 dark:border-slate-800 pb-4 sm:pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
               <div>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
                   Study Goals & Next Core Exam Target
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
@@ -1584,9 +1537,10 @@ export function ProfileSettingsHub() {
                 </p>
               </div>
               <button
+                type="button"
                 onClick={handleSaveGoals}
                 disabled={isSavingGoals}
-                className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white font-bold text-xs shadow-md shadow-indigo-600/20 transition-all flex items-center gap-2 self-start cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                className="w-full sm:w-auto justify-center px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white font-bold text-xs shadow-md shadow-indigo-600/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50 whitespace-nowrap"
               >
                 {isSavingGoals ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 <span>{isSavingGoals ? 'Saving...' : 'Save Goals'}</span>

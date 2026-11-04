@@ -23,7 +23,8 @@ import {
   Check,
   Sliders,
   Trash2,
-  Link2
+  Link2,
+  Share2
 } from 'lucide-react';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import { useMicrophoneWaveform } from '../../hooks/useMicrophoneWaveform';
@@ -36,6 +37,7 @@ import { loadStoredWorkspaces } from '../../utils/workspaceStorage';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import { toValidUuid } from '../../utils/uuid';
 import AITutorAvatar from './AITutorAvatar';
+import { ShareContentModal, triggerNativeDeviceShare } from './ShareContentModal';
 
 export type TutorPersona = string;
 
@@ -143,12 +145,21 @@ export default function WorkspaceChat({
 
   useEffect(() => {
     if (propUserId) setResolvedUserId(propUserId);
-    if (supabase) {
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session?.user?.id) setResolvedUserId(session.user.id);
-        if (session?.access_token) setAccessToken(session.access_token);
-      });
-    }
+    if (!supabase) return;
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user?.id) setResolvedUserId(session.user.id);
+      setAccessToken(session?.access_token || null);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user?.id) setResolvedUserId(session.user.id);
+      setAccessToken(session?.access_token || null);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [propUserId]);
   // Chat input and state
   const [inputValue, setInputValue] = useState('');
@@ -795,6 +806,8 @@ export default function WorkspaceChat({
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isThinking, attachedDrafts]);
+
+  const [shareModalData, setShareModalData] = useState<{ answer: string; question?: string } | null>(null);
 
   // Record AI Tutor session entry in real time
   useEffect(() => {
@@ -2153,7 +2166,7 @@ export default function WorkspaceChat({
           
 
           {/* Conversation Stream */}
-          {messages.map((msg) => {
+          {messages.map((msg, msgIdx) => {
             if (msg.isFileReadyBadge) {
               return (
                 <div key={msg.id} className="flex items-center justify-center my-1">
@@ -2436,6 +2449,32 @@ export default function WorkspaceChat({
                           <span>Copy</span>
                         </>
                       )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        let prevQuestion: string | undefined = msg.originalQuery;
+                        if (!prevQuestion && msgIdx > 0) {
+                          for (let i = msgIdx - 1; i >= 0; i--) {
+                            if (messages[i]?.sender === 'user' && messages[i]?.text) {
+                              prevQuestion = messages[i].text;
+                              break;
+                            }
+                          }
+                        }
+                        triggerNativeDeviceShare({
+                          type: 'ai-answer',
+                          aiAnswerText: msg.text,
+                          questionText: prevQuestion,
+                          workspaceName: workspace.name,
+                        });
+                      }}
+                      className="hover:text-indigo-600 dark:hover:text-indigo-300 flex items-center gap-1.5 cursor-pointer transition-colors px-2.5 py-1 rounded-xl text-xs border border-transparent hover:bg-slate-100 dark:hover:bg-slate-800 hover:border-slate-200 dark:hover:border-slate-750"
+                      title="Share this AI Tutor answer"
+                    >
+                      <Share2 className="w-3.5 h-3.5 text-indigo-500" />
+                      <span>Share</span>
                     </button>
                   </div>
                 )}
@@ -2725,6 +2764,15 @@ export default function WorkspaceChat({
         fileName={chatUploadOverlay.fileName}
         stepText={chatUploadOverlay.stepText}
         fileType={chatUploadOverlay.fileType}
+      />
+
+      <ShareContentModal
+        isOpen={!!shareModalData}
+        onClose={() => setShareModalData(null)}
+        type="ai-answer"
+        aiAnswerText={shareModalData?.answer || ''}
+        questionText={shareModalData?.question}
+        workspaceName={workspace.name}
       />
 
     </div>

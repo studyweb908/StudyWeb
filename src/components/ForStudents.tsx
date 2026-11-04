@@ -128,18 +128,18 @@ export default function ForStudents() {
   ];
 
   return (
-    <section id="for-students" className="py-24 relative overflow-hidden bg-brand-bg-light dark:bg-brand-bg-dark transition-colors duration-300">
+    <section id="for-students" className="py-fluid-section relative overflow-hidden bg-brand-bg-light dark:bg-brand-bg-dark transition-colors duration-300">
       
       {/* Decorative Blur Blobs */}
       <div className="absolute top-1/4 right-1/4 w-[400px] h-[400px] bg-brand-primary/5 rounded-full blur-[120px] pointer-events-none -z-10" />
       <div className="absolute bottom-1/4 left-1/4 w-[500px] h-[500px] bg-brand-secondary/5 rounded-full blur-[150px] pointer-events-none -z-10" />
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+      <div className="responsive-container relative z-10">
         
         {/* ==========================================================
             HEADER
            ========================================================== */}
-        <div className="text-center max-w-3xl mx-auto mb-16 space-y-4">
+        <div className="text-center max-w-3xl mx-auto mb-10 sm:mb-14 space-y-4">
           <motion.div
             initial={{ opacity: 0, y: 15 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -154,9 +154,10 @@ export default function ForStudents() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ delay: 0.1 }}
-            className="text-4xl md:text-5xl font-extrabold font-display text-brand-text tracking-tight"
+            className="text-fluid-h2 font-extrabold font-display text-brand-text tracking-tight"
+            style={{ textWrap: 'balance' }}
           >
-            Everything You Need to <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-primary via-brand-secondary to-brand-accent animate-pulse">Study Smarter.</span>
+            Everything You Need to <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-primary via-brand-secondary to-brand-accent">Study Smarter.</span>
           </motion.h2>
           
           <motion.p 
@@ -164,16 +165,16 @@ export default function ForStudents() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ delay: 0.2 }}
-            className="text-base sm:text-lg text-brand-text-light max-w-2xl mx-auto"
+            className="text-sm sm:text-base md:text-lg text-brand-text-light max-w-2xl mx-auto leading-relaxed"
           >
             Ditch the chaos of juggling five different apps. StudyWeb brings your calendar, notes, AI tutor, and self-testing simulators together into a unified learning environment.
           </motion.p>
         </div>
 
         {/* ==========================================================
-            TABS NAVIGATION (PILL STYLING)
+            TABS NAVIGATION
            ========================================================== */}
-        <div className="flex flex-wrap justify-center gap-2 mb-12 max-w-4xl mx-auto">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap justify-center gap-2 sm:gap-2.5 mb-10 sm:mb-12 max-w-4xl mx-auto">
           {tabs.map((tab, idx) => (
             <button
               key={tab.id}
@@ -181,14 +182,14 @@ export default function ForStudents() {
                 setActiveTab(idx);
                 setFlashCardFlipped(false); // Reset flashcard flip on switch
               }}
-              className={`flex items-center gap-2 px-5 py-3 rounded-2xl text-xs sm:text-sm font-semibold border transition-all duration-300 cursor-pointer ${
+              className={`flex items-center justify-center gap-2 px-3 sm:px-5 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-semibold border transition-all duration-300 cursor-pointer ${
                 activeTab === idx
-                  ? 'bg-brand-primary border-brand-primary text-white shadow-lg shadow-brand-primary/20 scale-[1.02]'
+                  ? 'bg-brand-primary border-brand-primary text-white shadow-lg shadow-brand-primary/20'
                   : 'bg-card-bg/80 border-card-border text-brand-text hover:border-brand-primary/30'
               }`}
             >
-              {tab.icon}
-              <span>{tab.label}</span>
+              <span className="shrink-0">{tab.icon}</span>
+              <span className="truncate">{tab.label}</span>
             </button>
           ))}
         </div>
@@ -196,25 +197,25 @@ export default function ForStudents() {
         {/* ==========================================================
             TWO-COLUMN INTERACTIVE SWITCHER LAYOUT
            ========================================================== */}
-        <div className="grid lg:grid-cols-12 gap-12 items-center mb-24">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center mb-16 sm:mb-24">
           
-          {/* LEFT COLUMN: INTERACTIVE WORKSPACE MOCKUP (55%) */}
-          <div className="lg:col-span-6 relative flex justify-center items-center">
+          {/* LEFT COLUMN: INTERACTIVE WORKSPACE MOCKUP */}
+          <div className="lg:col-span-6 relative flex justify-center items-center w-full">
             
             {/* Background Glow Wrapper */}
             <div className="absolute inset-0 bg-gradient-to-tr from-brand-primary/10 to-brand-secondary/15 rounded-full blur-[80px] pointer-events-none -z-10" />
 
-            <div className="w-full max-w-lg min-h-[380px] sm:min-h-0 sm:aspect-square bg-card-bg/60 backdrop-blur-2xl border border-card-border rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-2xl flex flex-col justify-between overflow-hidden relative group hover:border-brand-primary/20 transition-all duration-500">
+            <div className="w-full max-w-lg min-h-[340px] sm:min-h-[410px] bg-card-bg/60 backdrop-blur-2xl border border-card-border rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-2xl flex flex-col justify-between overflow-hidden relative group hover:border-brand-primary/20 transition-all duration-500">
               
               {/* Device Window Header */}
-              <div className="flex justify-between items-center border-b border-card-border pb-3 mb-4 flex-shrink-0">
-                <div className="flex gap-1.5">
+              <div className="flex justify-between items-center border-b border-card-border pb-3 mb-4 flex-shrink-0 gap-2">
+                <div className="flex gap-1.5 shrink-0">
                   <div className="w-2.5 h-2.5 rounded-full bg-rose-400" />
                   <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
                   <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
                 </div>
-                <div className="text-[10px] font-mono text-brand-text-light uppercase tracking-wider bg-card-border/40 px-2.5 py-0.5 rounded-full">
-                  studyweb_desktop // {tabs[activeTab].label}
+                <div className="text-[10px] font-mono text-brand-text-light uppercase tracking-wider bg-card-border/40 px-2.5 py-0.5 rounded-full truncate">
+                  studyweb_workspace · {tabs[activeTab].label}
                 </div>
               </div>
 
@@ -607,10 +608,10 @@ export default function ForStudents() {
                 Join StudyWeb Now <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </button>
               <a 
-                href="#demo"
+                href="#interactive-demo"
                 className="px-5 py-3 rounded-xl border border-card-border hover:bg-card-border/30 text-brand-text text-xs sm:text-sm font-bold transition-colors"
               >
-                Watch 1 Min Demo
+                Try Interactive Demo
               </a>
             </div>
 

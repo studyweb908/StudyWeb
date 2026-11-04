@@ -12,11 +12,30 @@ export const studyMaterialRouter = express.Router();
 const DEFAULT_SUPABASE_URL = 'https://fzutrlzeyystbaiueker.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ6dXRybHpleXlzdGJhaXVla2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzOTg1MDMsImV4cCI6MjA5ODk3NDUwM30.usJ97CqSdQOAhYC8nXGvKg42xiKrjsmlJiGSTIYSLF4';
 
+function sanitizeBearerHeader(authHeader?: string): string | undefined {
+  if (!authHeader || typeof authHeader !== 'string' || authHeader.length >= 4000) return undefined;
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) return undefined;
+  const trimmed = authHeader.trim();
+  const token = trimmed.replace(/^Bearer\s+/i, '').trim();
+  if (!token || token === 'undefined' || token === 'null') return undefined;
+  const parts = token.split('.');
+  if (parts.length !== 3) return undefined;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    if (payload && typeof payload.exp === 'number' && payload.exp * 1000 <= Date.now() + 10_000) {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return /^Bearer\s+/i.test(trimmed) ? trimmed : `Bearer ${token}`;
+}
+
 export function getSupabaseServer(authHeader?: string) {
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || DEFAULT_SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseKey) return null;
-  const safeAuth = authHeader && authHeader.length < 4000 ? authHeader : undefined;
+  const safeAuth = sanitizeBearerHeader(authHeader);
   const options = safeAuth ? { global: { headers: { Authorization: safeAuth } } } : {};
   return createClient(supabaseUrl, supabaseKey, options);
 }

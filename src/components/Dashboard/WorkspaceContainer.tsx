@@ -2,6 +2,7 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../../lib/supabase';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
+import { StudyTrackerService } from '../../services/StudyTrackerService';
 import { recordUserActivity } from '../../utils/userActivity';
 import { cleanNotebookLMTitle } from '../../utils/notebookTitle';
 import { 
@@ -130,7 +131,19 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
 
   useEffect(() => {
     if (activeTab === 'chat') setHasVisitedChat(true);
-  }, [activeTab]);
+    const subj = workspace?.subject || workspace?.name || 'General Study';
+    const actType =
+      activeTab === 'chat'
+        ? 'tutor'
+        : activeTab === 'flashcards'
+        ? 'flashcard'
+        : activeTab === 'quiz'
+        ? 'quiz'
+        : activeTab === 'notes'
+        ? 'note'
+        : 'workspace';
+    StudyTrackerService.recordStudyAction(actType, subj);
+  }, [activeTab, workspace?.id, workspace?.subject, workspace?.name]);
 
   // Unified update helper
   const updateWorkspaceState = (changes: Partial<Workspace>) => {

@@ -224,6 +224,34 @@ class AITutorBackgroundManager {
         FileUploadService.sanitizeBrowserCookies();
       } catch {}
 
+      // Ensure accessToken is fresh (not expired) before sending to backend
+      let freshAccessToken: string | undefined = accessToken || undefined;
+      try {
+        const { supabase } = await import('../lib/supabase');
+        if (supabase) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.access_token) {
+            const isExpiringSoon = session.expires_at ? (session.expires_at * 1000 <= Date.now() + 30_000) : false;
+            if (isExpiringSoon) {
+              const { data: refreshed } = await supabase.auth.refreshSession();
+              freshAccessToken = refreshed.session?.access_token || undefined;
+            } else {
+              freshAccessToken = session.access_token;
+            }
+          }
+        }
+        // Final client-side check: never send an already-expired JWT
+        if (freshAccessToken) {
+          const parts = freshAccessToken.split('.');
+          if (parts.length === 3) {
+            const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+            if (payload && typeof payload.exp === 'number' && payload.exp * 1000 <= Date.now() + 10_000) {
+              freshAccessToken = undefined;
+            }
+          }
+        }
+      } catch {}
+
       // Multi-attempt POST to /api/ai-tutor
       for (let attempt = 0; attempt < 2 && !data; attempt++) {
         if (attempt > 0) {
@@ -244,7 +272,7 @@ class AITutorBackgroundManager {
               workspaceId,
               workspaceName,
               userId,
-              supabaseToken: accessToken || undefined,
+              supabaseToken: freshAccessToken,
               attachedFiles: compactAttachedFiles,
               allWorkspaces,
               allowOutsideResearch,

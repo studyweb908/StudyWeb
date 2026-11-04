@@ -394,18 +394,18 @@ export default function Navigation() {
             : 'bg-transparent py-5'
         }`}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <a href="#" className="flex items-center gap-2.5 group">
-                <img src="/logo-inner.png" alt="StudyWeb Logo" className="w-8 h-8 sm:w-9 sm:h-9 object-contain select-none shrink-0 group-hover:scale-105 transition-transform" />
-                <span className="font-extrabold font-display text-lg sm:text-xl tracking-tight text-brand-text">StudyWeb</span>
+        <div className="responsive-container">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              <a href="#" className="flex items-center gap-2 sm:gap-2.5 group">
+                <img src="/logo-inner.png" alt="StudyWeb Logo" className="w-7 h-7 sm:w-9 sm:h-9 object-contain select-none shrink-0 group-hover:scale-105 transition-transform" />
+                <span className="font-extrabold font-display text-base sm:text-xl tracking-tight text-brand-text whitespace-nowrap">StudyWeb</span>
               </a>
             </div>
 
-            {/* Desktop Navigation Links */}
-            <div className="hidden md:flex items-center gap-8">
-              <div className="flex gap-2 bg-slate-50 dark:bg-slate-900/60 p-1.5 rounded-full border border-slate-100 dark:border-slate-800/40">
+            {/* Desktop & Tablet Navigation Links (Responsive across 768px iPad Portrait -> 2560px) */}
+            <div className="hidden md:flex items-center md:gap-2.5 lg:gap-6 xl:gap-8 min-w-0">
+              <div className="flex items-center gap-1 lg:gap-1.5 bg-slate-50 dark:bg-slate-900/60 p-1 lg:p-1.5 rounded-full border border-slate-100 dark:border-slate-800/40">
                 {navLinks.map((link) => {
                   const isActive = activeSection === link.key;
                   return (
@@ -415,7 +415,7 @@ export default function Navigation() {
                       onClick={(e) => handleLinkClick(e, link.href, link.key)}
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.96 }}
-                      className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all relative isolate group cursor-pointer ${
+                      className={`flex items-center gap-1.5 lg:gap-2 px-2.5 lg:px-3.5 py-1.5 rounded-full text-[11px] lg:text-xs font-bold transition-all relative isolate group cursor-pointer whitespace-nowrap ${
                         isActive 
                           ? `${link.colorClass} font-extrabold` 
                           : 'text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
@@ -428,7 +428,7 @@ export default function Navigation() {
                           transition={{ type: "spring", stiffness: 380, damping: 30 }}
                         />
                       )}
-                      <span className={`flex items-center justify-center transition-colors duration-200 ${
+                      <span className={`hidden lg:flex items-center justify-center transition-colors duration-200 ${
                         isActive
                           ? link.colorClass
                           : 'text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300'
@@ -440,13 +440,13 @@ export default function Navigation() {
                   );
                 })}
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2.5 lg:gap-4 shrink-0">
                 <ThemeToggle />
                 <motion.button 
                   onClick={() => { setIsAuthModalOpen(true); setAuthMode('login'); }}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  className="text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer focus:outline-none"
+                  className="text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer focus:outline-none whitespace-nowrap"
                 >
                   Login
                 </motion.button>
@@ -454,7 +454,7 @@ export default function Navigation() {
                   onClick={() => { setIsAuthModalOpen(true); setAuthMode('signup'); }}
                   whileHover={{ y: -1, scale: 1.02 }}
                   whileTap={{ scale: 0.96 }}
-                  className="bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white px-5 py-2 rounded-full text-xs font-bold transition-all shadow-sm shadow-indigo-600/10 dark:shadow-indigo-500/15 hover:shadow-md hover:shadow-indigo-600/20 dark:hover:shadow-indigo-500/30 cursor-pointer border border-indigo-600/10 dark:border-indigo-400/20 focus:outline-none"
+                  className="bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white px-3.5 lg:px-5 py-2 rounded-full text-xs font-bold transition-all shadow-sm shadow-indigo-600/10 dark:shadow-indigo-500/15 hover:shadow-md hover:shadow-indigo-600/20 dark:hover:shadow-indigo-500/30 cursor-pointer border border-indigo-600/10 dark:border-indigo-400/20 focus:outline-none whitespace-nowrap"
                 >
                   Sign Up
                 </motion.button>
@@ -462,13 +462,13 @@ export default function Navigation() {
             </div>
 
             {/* Mobile Actions Header (Theme toggle & Sign Up CTA) */}
-            <div className="md:hidden flex items-center gap-2.5">
+            <div className="md:hidden flex items-center gap-2 shrink-0">
               <ThemeToggle />
               <motion.button 
                 onClick={() => { setIsAuthModalOpen(true); setAuthMode('signup'); }}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.96 }}
-                className="bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white px-4 py-1.5 rounded-full text-xs font-bold transition-all shadow-sm shadow-indigo-600/20 focus:outline-none cursor-pointer"
+                className="bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white px-3.5 py-1.5 rounded-full text-xs font-bold transition-all shadow-sm shadow-indigo-600/20 focus:outline-none cursor-pointer whitespace-nowrap"
               >
                 Sign Up
               </motion.button>
@@ -479,20 +479,20 @@ export default function Navigation() {
 
       {/* Fixed Docked Mobile Bottom Navigation Bar */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/95 dark:bg-slate-950/95 backdrop-blur-2xl border-t border-slate-200/80 dark:border-slate-800/80 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.3)] w-full max-w-full overflow-hidden">
-        <div className="flex items-center justify-around max-w-md mx-auto px-1 pt-2 pb-[max(0.75rem,calc(env(safe-area-inset-bottom,0px)+0.5rem))]">
+        <div className="flex items-center justify-around max-w-md mx-auto px-1 pt-1.5 pb-[max(0.6rem,calc(env(safe-area-inset-bottom,0px)+0.4rem))]">
           {bottomNavLinks.map((link) => {
             const isActive = link.key === 'login' ? isAuthModalOpen : activeSection === link.key;
             
             const content = (
-              <div className="flex flex-col items-center justify-center gap-1 py-1">
+              <div className="flex flex-col items-center justify-center gap-0.5 py-0.5 min-w-[44px]">
                 <motion.div 
-                  animate={{ scale: isActive ? 1.15 : 1, y: isActive ? -1 : 0 }}
+                  animate={{ scale: isActive ? 1.12 : 1, y: isActive ? -1 : 0 }}
                   transition={{ type: "spring", stiffness: 450, damping: 20 }}
                   className="flex items-center justify-center"
                 >
                   {link.getIcon(isActive)}
                 </motion.div>
-                <span className={`text-[10px] tracking-tight transition-colors duration-200 ${
+                <span className={`text-[10px] tracking-tight transition-colors duration-200 truncate max-w-[58px] ${
                   isActive 
                     ? `${link.activeColor} font-black` 
                     : 'text-slate-400 dark:text-slate-500 font-semibold'
@@ -507,7 +507,7 @@ export default function Navigation() {
                 <button
                   key={link.name}
                   onClick={link.onClick}
-                  className="flex-1 flex flex-col items-center justify-center cursor-pointer focus:outline-none py-1"
+                  className="flex-1 flex flex-col items-center justify-center cursor-pointer focus:outline-none py-1 min-h-[44px]"
                 >
                   {content}
                 </button>
@@ -519,7 +519,7 @@ export default function Navigation() {
                 key={link.name}
                 href={link.href}
                 onClick={(e) => handleLinkClick(e, link.href, link.key)}
-                className="flex-1 flex flex-col items-center justify-center cursor-pointer py-1"
+                className="flex-1 flex flex-col items-center justify-center cursor-pointer py-1 min-h-[44px]"
               >
                 {content}
               </a>
@@ -531,7 +531,7 @@ export default function Navigation() {
       {/* Auth Modal Overlay */}
       <AnimatePresence>
         {isAuthModalOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-2.5 sm:p-4">
             {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
@@ -547,7 +547,7 @@ export default function Navigation() {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.98 }}
               transition={{ duration: 0.15 }}
-              className="relative w-full max-w-[380px] bg-card-bg dark:bg-brand-bg-dark border border-card-border rounded-2xl p-3.5 sm:p-5 shadow-2xl overflow-hidden z-10 transition-colors duration-300"
+              className="relative w-full max-w-[380px] max-h-[92dvh] overflow-y-auto landscape-scroll-modal bg-card-bg dark:bg-brand-bg-dark border border-card-border rounded-2xl p-3.5 sm:p-5 shadow-2xl z-10 transition-colors duration-300"
             >
               {/* Top decoration glow */}
               <div className="absolute -top-24 -left-24 w-40 h-40 bg-brand-primary/15 rounded-full blur-[50px] pointer-events-none" />

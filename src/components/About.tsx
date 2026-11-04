@@ -131,12 +131,12 @@ export default function About() {
       {/* =================================================
           SECTION 1 — HERO INTRODUCTION
          ================================================= */}
-      <section className="relative pt-32 pb-24 overflow-hidden">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid lg:grid-cols-12 gap-12 items-center">
+      <section className="relative py-fluid-section overflow-hidden">
+        <div className="responsive-container">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
             
             {/* Left Column: Text Content */}
-            <div className="lg:col-span-6 text-left space-y-6">
+            <div className="lg:col-span-6 text-left space-y-5 sm:space-y-6">
               <motion.div
                 initial={{ opacity: 0, y: 15 }}
                 whileInView={{ opacity: 1, y: 0 }}
@@ -151,7 +151,8 @@ export default function About() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ delay: 0.1 }}
-                className="text-4xl sm:text-5xl lg:text-6xl font-bold font-display tracking-tight text-brand-text leading-none"
+                className="text-fluid-h2 font-bold font-display tracking-tight text-brand-text leading-tight"
+                style={{ textWrap: 'balance' }}
               >
                 Helping Every Student Learn <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-primary via-brand-secondary to-brand-accent">Smarter, Not Harder.</span>
               </motion.h2>
@@ -161,7 +162,7 @@ export default function About() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ delay: 0.2 }}
-                className="text-lg text-brand-text-light max-w-xl leading-relaxed"
+                className="text-sm sm:text-base md:text-lg text-brand-text-light max-w-xl leading-relaxed"
               >
                 StudyWeb is an AI-powered learning platform that makes studying organized, engaging, and stress-free. From planning your study schedule to using AI for instant learning support, everything you need is in one place.
               </motion.p>
@@ -171,7 +172,7 @@ export default function About() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ delay: 0.3 }}
-                className="flex flex-wrap items-center gap-4 pt-2"
+                className="flex flex-wrap items-center gap-3.5 sm:gap-4 pt-2"
               >
                 <button
                   onClick={() => (window as any).openStudyWebAuth?.('signup')}
@@ -194,14 +195,14 @@ export default function About() {
                 initial={{ opacity: 0, scale: 0.9 }}
                 whileInView={{ opacity: 1, scale: 1 }}
                 viewport={{ once: true }}
-                className="relative w-full max-w-sm sm:max-w-lg aspect-square"
+                className="relative w-full max-w-sm sm:max-w-lg min-h-[300px] sm:aspect-square flex items-center justify-center"
               >
                 {/* Orbital Rings & Glowing Blobs */}
                 <div className="absolute inset-0 bg-gradient-to-tr from-brand-primary/10 to-brand-secondary/10 rounded-full animate-spin duration-30000 pointer-events-none" />
-                <div className="absolute inset-8 sm:inset-12 bg-gradient-to-bl from-brand-accent/5 to-brand-primary/5 rounded-full animate-spin duration-20000 pointer-events-none" />
+                <div className="absolute inset-6 sm:inset-10 bg-gradient-to-bl from-brand-accent/5 to-brand-primary/5 rounded-full animate-spin duration-20000 pointer-events-none" />
                 
-                {/* Central Device representation */}
-                <div className="absolute inset-4 sm:inset-12 md:inset-20 lg:inset-24 bg-card-bg/90 backdrop-blur-xl border border-card-border rounded-2xl sm:rounded-[32px] shadow-2xl p-4 sm:p-6 flex flex-col justify-between overflow-hidden group hover:border-brand-primary/30 transition-all duration-500">
+                {/* Central Device representation (Proportional insets across all viewports) */}
+                <div className="relative sm:absolute sm:inset-8 md:inset-10 lg:inset-12 w-full sm:w-auto bg-card-bg/90 backdrop-blur-xl border border-card-border rounded-2xl sm:rounded-[32px] shadow-2xl p-4 sm:p-6 flex flex-col justify-between overflow-hidden group hover:border-brand-primary/30 transition-all duration-500">
                   <div className="flex justify-between items-center border-b border-card-border pb-2.5 sm:pb-3">
                     <div className="flex gap-1.5">
                       <div className="w-2.5 h-2.5 rounded-full bg-rose-400" />
@@ -211,7 +212,7 @@ export default function About() {
                     <span className="text-[10px] font-mono text-brand-text-light tracking-widest uppercase">studyweb_ai_os</span>
                   </div>
                   
-                  <div className="flex-1 py-2 sm:py-4 flex flex-col justify-center space-y-2 sm:space-y-3">
+                  <div className="flex-1 py-3 sm:py-4 flex flex-col justify-center space-y-2.5 sm:space-y-3">
                     <div className="flex items-center gap-2.5 sm:gap-3">
                       <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-brand-primary/10 flex items-center justify-center text-brand-primary shrink-0">
                         <Bot className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -221,10 +222,10 @@ export default function About() {
                         <div className="w-14 sm:w-16 h-1.5 bg-brand-text-light rounded-full" />
                       </div>
                     </div>
-                    <div className="w-full p-2.5 sm:p-3 rounded-xl bg-card-border/40 text-[10px] sm:text-[11px] font-medium text-brand-text border border-card-border leading-snug">
+                    <div className="w-full p-2.5 sm:p-3 rounded-xl bg-card-border/40 text-[11px] font-medium text-brand-text border border-card-border leading-snug">
                       "Explain photosynthesis like I'm 10."
                     </div>
-                    <div className="w-full p-2.5 sm:p-3 rounded-xl bg-brand-primary/5 text-[10px] sm:text-[11px] text-brand-primary border border-brand-primary/15 font-medium leading-snug">
+                    <div className="w-full p-2.5 sm:p-3 rounded-xl bg-brand-primary/5 text-[11px] text-brand-primary border border-brand-primary/15 font-medium leading-snug">
                       🤖 Answer: "Think of a leaf like a tiny solar-powered food factory!"
                     </div>
                   </div>
@@ -232,11 +233,11 @@ export default function About() {
                   <div className="h-1.5 sm:h-2 bg-gradient-to-r from-brand-primary via-brand-secondary to-brand-accent rounded-full" />
                 </div>
 
-                {/* Floating Workspace Icons (hidden on extra small to prevent horizontal tilt) */}
+                {/* Floating Workspace Icons */}
                 <motion.div
                   animate={{ y: [-8, 8, -8] }}
                   transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                  className="hidden sm:flex absolute top-4 left-6 p-2.5 sm:p-3 rounded-2xl bg-card-bg/95 backdrop-blur-lg border border-card-border shadow-xl items-center gap-2"
+                  className="hidden sm:flex absolute top-2 left-4 p-2.5 rounded-2xl bg-card-bg/95 backdrop-blur-lg border border-card-border shadow-xl items-center gap-2"
                 >
                   <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-500">
                     <GraduationCap className="w-4 h-4" />
@@ -381,10 +382,10 @@ export default function About() {
           </div>
 
           {/* Interactive timeline cards */}
-          <div className="grid md:grid-cols-4 gap-6 relative">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 sm:gap-6 relative">
             
             {/* Connector Line in Desktop */}
-            <div className="hidden md:block absolute top-1/2 left-0 right-0 h-[2px] bg-gradient-to-r from-rose-400 via-brand-primary to-emerald-400 -translate-y-1/2 z-0 opacity-40" />
+            <div className="hidden lg:block absolute top-1/2 left-0 right-0 h-[2px] bg-gradient-to-r from-rose-400 via-brand-primary to-emerald-400 -translate-y-1/2 z-0 opacity-40" />
 
             {timelineSteps.map((step, idx) => (
               <motion.div

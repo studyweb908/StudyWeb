@@ -4,7 +4,7 @@ import { StudyTrackerService } from '../../services/StudyTrackerService';
 import { saveProfileToSupabase } from '../../utils/profileStorage';
 
 export function formatMinutesHuman(totalMins: number): string {
-  const clean = Math.max(1, Math.round(totalMins || 45));
+  const clean = Math.max(1, Math.round(totalMins || 60));
   const hrs = Math.floor(clean / 60);
   const mins = clean % 60;
   if (hrs > 0 && mins > 0) return `${hrs}h ${mins}m (${clean}m)`;
@@ -19,7 +19,7 @@ interface CustomDailyGoalSelectorProps {
   compact?: boolean;
 }
 
-const GOAL_PRESETS = [15, 25, 30, 45, 60, 90, 120, 180];
+export const GOAL_PRESETS = [15, 30, 45, 60, 90, 120, 180, 240];
 
 export const CustomDailyGoalSelector: React.FC<CustomDailyGoalSelectorProps> = ({
   dailyGoalMinutes,
@@ -27,28 +27,44 @@ export const CustomDailyGoalSelector: React.FC<CustomDailyGoalSelectorProps> = (
   onGoalChange,
   compact = false,
 }) => {
-  const [customHours, setCustomHours] = useState<number>(() => Math.floor((dailyGoalMinutes || 45) / 60));
-  const [customMins, setCustomMins] = useState<number>(() => (dailyGoalMinutes || 45) % 60);
+  const [customHours, setCustomHours] = useState<number>(() => Math.floor((dailyGoalMinutes || 60) / 60));
+  const [customMins, setCustomMins] = useState<number>(() => (dailyGoalMinutes || 60) % 60);
   const [showCustomInputs, setShowCustomInputs] = useState<boolean>(
     () => !GOAL_PRESETS.includes(dailyGoalMinutes)
   );
+  const [justSavedGoal, setJustSavedGoal] = useState<boolean>(false);
 
   useEffect(() => {
-    setCustomHours(Math.floor((dailyGoalMinutes || 45) / 60));
-    setCustomMins((dailyGoalMinutes || 45) % 60);
+    setCustomHours(Math.floor((dailyGoalMinutes || 60) / 60));
+    setCustomMins((dailyGoalMinutes || 60) % 60);
   }, [dailyGoalMinutes]);
 
   const applyMinutes = async (mins: number) => {
-    const clamped = Math.max(1, Math.min(720, Math.round(mins || 45)));
+    const clamped = Math.max(5, Math.min(720, Math.round(mins || 60)));
     onGoalChange(clamped);
     StudyTrackerService.setDailyGoalMinutes(clamped);
+    setJustSavedGoal(true);
     await saveProfileToSupabase({ dailyGoalMinutes: clamped });
+    window.dispatchEvent(
+      new CustomEvent('studyweb-toast', {
+        detail: {
+          title: 'Daily Focus Target Saved',
+          badge: 'Synced',
+          message: `Your daily focus target is now set to ${formatMinutesHuman(clamped)}.`,
+          type: 'success',
+          duration: 2400,
+        },
+      })
+    );
+    setTimeout(() => {
+      setJustSavedGoal(false);
+    }, 2200);
   };
 
   const handleApplyCustom = async () => {
     const hrs = Math.max(0, Math.min(12, Math.floor(Number(customHours) || 0)));
     const mins = Math.max(0, Math.min(59, Math.floor(Number(customMins) || 0)));
-    const total = Math.max(1, Math.min(720, hrs * 60 + mins));
+    const total = Math.max(5, Math.min(720, hrs * 60 + mins));
     await applyMinutes(total);
   };
 
@@ -56,24 +72,30 @@ export const CustomDailyGoalSelector: React.FC<CustomDailyGoalSelectorProps> = (
 
   return (
     <div className="space-y-2.5">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs">
         <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-          <Clock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+          <Clock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
           <span>Daily Focus Target</span>
+          {justSavedGoal && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">
+              <Check className="w-2.5 h-2.5" />
+              Saved
+            </span>
+          )}
         </span>
-        <span className="font-mono font-bold tabular-nums text-indigo-600 dark:text-indigo-400">
-          {formatMinutesHuman(dailyGoalMinutes)} / day ({todayMinutes}m logged today)
+        <span className="font-mono font-bold tabular-nums text-[11px] sm:text-xs text-indigo-600 dark:text-indigo-400">
+          {formatMinutesHuman(dailyGoalMinutes)} / day ({todayMinutes}m today)
         </span>
       </div>
 
       {/* Quick Presets + Custom Toggle */}
-      <div className={`grid ${compact ? 'grid-cols-4 sm:grid-cols-5' : 'grid-cols-4 sm:grid-cols-9'} gap-1.5 sm:gap-2`}>
+      <div className={`grid ${compact ? 'grid-cols-3 sm:grid-cols-5' : 'grid-cols-3 sm:grid-cols-5 lg:grid-cols-9'} gap-1.5 sm:gap-2`}>
         {(compact ? [15, 30, 45, 60] : GOAL_PRESETS).map((mins) => (
           <button
             key={mins}
             type="button"
             onClick={() => applyMinutes(mins)}
-            className={`py-2 px-2 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+            className={`py-2 px-2 rounded-xl border text-xs font-bold font-mono tabular-nums transition-all cursor-pointer whitespace-nowrap ${
               dailyGoalMinutes === mins
                 ? 'bg-indigo-600 text-white border-indigo-500 shadow-xs'
                 : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10'
@@ -86,7 +108,7 @@ export const CustomDailyGoalSelector: React.FC<CustomDailyGoalSelectorProps> = (
         <button
           type="button"
           onClick={() => setShowCustomInputs((v) => !v)}
-          className={`py-2 px-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+          className={`py-2 px-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer whitespace-nowrap ${
             isCustomActive || showCustomInputs
               ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
               : 'bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10'
@@ -132,15 +154,15 @@ export const CustomDailyGoalSelector: React.FC<CustomDailyGoalSelectorProps> = (
 
             <div className="space-y-1">
               <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Or Total Mins (1–720)
+                Or Total Mins (5–720)
               </label>
               <input
                 type="number"
-                min={1}
+                min={5}
                 max={720}
-                value={Math.max(1, customHours * 60 + customMins)}
+                value={Math.max(5, customHours * 60 + customMins)}
                 onChange={(e) => {
-                  const total = Math.max(1, Math.min(720, parseInt(e.target.value, 10) || 1));
+                  const total = Math.max(5, Math.min(720, parseInt(e.target.value, 10) || 5));
                   setCustomHours(Math.floor(total / 60));
                   setCustomMins(total % 60);
                 }}
@@ -155,7 +177,7 @@ export const CustomDailyGoalSelector: React.FC<CustomDailyGoalSelectorProps> = (
             className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
           >
             <Check className="w-3.5 h-3.5" />
-            <span>Apply Custom Goal ({Math.max(1, customHours * 60 + customMins)}m)</span>
+            <span>Apply Custom Goal ({Math.max(5, customHours * 60 + customMins)}m)</span>
           </button>
         </div>
       )}
@@ -184,6 +206,17 @@ export const LiveStudyCountdownTimer: React.FC<LiveStudyCountdownTimerProps> = (
   const [inputSeconds, setInputSeconds] = useState<number>(0);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!isRunning) {
+      const nextRemMins = Math.max(5, dailyGoalMinutes - todayMinutes);
+      setTargetSeconds(nextRemMins * 60);
+      setRemainingSeconds(nextRemMins * 60);
+      setInputHours(Math.floor(nextRemMins / 60));
+      setInputMinutes(nextRemMins % 60);
+      setInputSeconds(0);
+    }
+  }, [dailyGoalMinutes]);
 
   useEffect(() => {
     if (!isRunning) {

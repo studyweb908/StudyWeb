@@ -20,7 +20,6 @@ import DashboardSidebar from './components/Dashboard/DashboardSidebar';
 import DashboardHeader from './components/Dashboard/DashboardHeader';
 import DashboardHome from './components/Dashboard/DashboardHome';
 import OfflineNotice from './components/OfflineNotice';
-import GlobalVoiceListener from './components/GlobalVoiceListener';
 import { playDopaminePopSound } from './utils/audioEffects';
 import { useThemeMode } from './hooks/useThemeMode';
 
@@ -81,7 +80,8 @@ import { toValidUuid } from './utils/uuid.ts';
 import { WorkspaceSyncService } from './services/WorkspaceSyncService.ts';
 import { StudyTrackerService } from './services/StudyTrackerService';
 import { ProductTourService } from './services/ProductTourService';
-import GuidedProductTour from './components/Dashboard/GuidedProductTour';
+const GuidedProductTour = lazyWithRetry(() => import('./components/Dashboard/GuidedProductTour'));
+const GlobalVoiceListener = lazyWithRetry(() => import('./components/GlobalVoiceListener'));
 import { loadStoredWorkspaces, saveStoredWorkspaces, clearGuestWorkspaces } from './utils/workspaceStorage';
 import { recordUserActivity } from './utils/userActivity';
 import {
@@ -90,6 +90,7 @@ import {
   clearProfileMemoryCache
 } from './utils/profileStorage';
 import { ProfileSettingsHub } from './components/Dashboard/ProfileSettingsHub';
+import { StreakCelebrationModal } from './components/Dashboard/StreakCelebrationModal';
 import WorkspaceSelector from './components/Dashboard/WorkspaceSelector';
 import WorkspaceContainer from './components/Dashboard/WorkspaceContainer';
 import WorkspaceChat from './components/Dashboard/WorkspaceChat';
@@ -99,7 +100,6 @@ const StudyPlannerView = lazyWithRetry(() => import('./components/Dashboard/Auxi
 const SubjectsView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.SubjectsView })));
 const ResourcesView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.ResourcesView })));
 const AnalyticsView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.AnalyticsView })));
-const AchievementsView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.AchievementsView })));
 const LeaderboardView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.LeaderboardView })));
 const ParentDashboardView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.ParentDashboardView })));
 
@@ -862,7 +862,6 @@ export default function App() {
           {activeTab === 'subjects' && <SubjectsView />}
           {activeTab === 'resources' && <ResourcesView workspaces={workspaces} isLoading={isLoadingWorkspaces} />}
           {activeTab === 'analytics' && <AnalyticsView />}
-          {activeTab === 'achievements' && <AchievementsView />}
           {activeTab === 'leaderboard' && <LeaderboardView />}
           {activeTab === 'parent-dashboard' && <ParentDashboardView />}
           {activeTab === 'pdf-chat' && (
@@ -897,7 +896,7 @@ export default function App() {
         />
 
         {/* Workspace body Area */}
-        <div className={`${isFocusMode ? 'md:pl-0' : isSidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} flex flex-col flex-1 min-w-0 h-[100dvh] overflow-hidden relative`}>
+        <div className={`${isFocusMode ? 'md:pl-0' : isSidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} flex flex-col flex-1 min-w-0 h-[100dvh] overflow-hidden relative transition-[padding] duration-200 ease-out`}>
           
           {/* Header Bar */}
           <DashboardHeader 
@@ -1426,6 +1425,7 @@ export default function App() {
             />
           )}
         </Suspense>
+        <StreakCelebrationModal />
         <OfflineNotice />
         <ToastContainer />
         <SEOManager activeTask={activeTab} isLoggedIn={isLoggedIn} />

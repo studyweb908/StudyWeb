@@ -1,13 +1,33 @@
 import { createClient } from '@supabase/supabase-js';
 import { generateEmbedding } from '../utils/embeddings.js';
 
+function sanitizeBearerHeader(authHeader?: string): string | undefined {
+  if (!authHeader || typeof authHeader !== 'string' || authHeader.length >= 4000) return undefined;
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) return undefined;
+  const trimmed = authHeader.trim();
+  const token = trimmed.replace(/^Bearer\s+/i, '').trim();
+  if (!token || token === 'undefined' || token === 'null') return undefined;
+  const parts = token.split('.');
+  if (parts.length !== 3) return undefined;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    if (payload && typeof payload.exp === 'number' && payload.exp * 1000 <= Date.now() + 10_000) {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return /^Bearer\s+/i.test(trimmed) ? trimmed : `Bearer ${token}`;
+}
+
 function getSupabaseClient(authHeader?: string) {
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-  const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseKey) {
     throw new Error('Supabase credentials not configured.');
   }
-  const options = authHeader ? { global: { headers: { Authorization: authHeader } } } : {};
+  const safeAuth = sanitizeBearerHeader(authHeader);
+  const options = safeAuth ? { global: { headers: { Authorization: safeAuth } } } : {};
   return createClient(supabaseUrl, supabaseKey, options);
 }
 

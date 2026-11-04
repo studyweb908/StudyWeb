@@ -117,7 +117,7 @@ const TOUR_STEPS: WalkthroughStepConfig[] = [
     selectors: [
       '[data-tour="profile-save-btn"]',
       '[data-tour="profile-tabs-bar"]',
-      '[data-tour="restart-tour-profile"]'
+      '[data-tour="profile-customization-card"]'
     ],
     requiredTab: 'profile',
     workspaceSubTab: null,

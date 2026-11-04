@@ -28,7 +28,8 @@ import {
   Trash2,
   FileText,
   X,
-  Copy
+  Copy,
+  Share2
 } from 'lucide-react';
 import { useMicrophoneWaveform } from '../../hooks/useMicrophoneWaveform';
 import { useTaskContext } from '../../context/TaskContext';
@@ -38,6 +39,7 @@ import { FullScreenUploadOverlay } from './FullScreenUploadOverlay';
 import { loadStoredWorkspaces, saveStoredWorkspaces } from '../../utils/workspaceStorage';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import AITutorAvatar from './AITutorAvatar';
+import { ShareContentModal, triggerNativeDeviceShare } from './ShareContentModal';
 
 interface Message {
   id: string;
@@ -349,6 +351,7 @@ export default function AITutorWorkspace() {
   });
   const [timerSoundMuted, setTimerSoundMuted] = useState(true);
   const [focusAmbiance, setFocusAmbiance] = useState('Deep Focus Lo-Fi');
+  const [shareModalData, setShareModalData] = useState<{ answer: string; question?: string } | null>(null);
 
   // Motivational Focus quotes
   const focusQuotes = [
@@ -1308,7 +1311,7 @@ export default function AITutorWorkspace() {
 
         {/* Main Chat Feed */}
         <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-3 sm:py-6 space-y-4 sm:space-y-6 custom-scrollbar bg-slate-50/30 dark:bg-slate-950/5">
-          {messages.map((msg) => (
+          {messages.map((msg, msgIdx) => (
             <div 
               key={msg.id}
               className={`flex gap-2.5 sm:gap-4 max-w-3xl ${msg.sender === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}
@@ -1505,19 +1508,48 @@ export default function AITutorWorkspace() {
                 <div className="flex items-center gap-2 px-1 mt-0.5">
                   <span className="text-[10px] text-slate-400 dark:text-slate-500">{msg.time}</span>
                   {msg.sender === 'ai' && (
-                    <button
-                      type="button"
-                      onClick={() => handleSpeakTutor(msg.id, msg.text)}
-                      className={`text-[10px] font-semibold flex items-center gap-1 cursor-pointer transition-colors px-2 py-0.5 rounded-md ${
-                        speakingMsgId === msg.id
-                          ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/70 font-bold'
-                          : 'text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-300'
-                      }`}
-                      title="Listen to Socratic tutor response aloud"
-                    >
-                      <Volume2 className="w-3 h-3" />
-                      <span>{speakingMsgId === msg.id ? 'Stop Audio' : 'Listen'}</span>
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleSpeakTutor(msg.id, msg.text)}
+                        className={`text-[10px] font-semibold flex items-center gap-1 cursor-pointer transition-colors px-2 py-0.5 rounded-md ${
+                          speakingMsgId === msg.id
+                            ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/70 font-bold'
+                            : 'text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-300'
+                        }`}
+                        title="Listen to Socratic tutor response aloud"
+                      >
+                        <Volume2 className="w-3 h-3" />
+                        <span>{speakingMsgId === msg.id ? 'Stop Audio' : 'Listen'}</span>
+                      </button>
+                      {!msg.isError && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            let prevQuestion: string | undefined = msg.originalQuery;
+                            if (!prevQuestion && msgIdx > 0) {
+                              for (let i = msgIdx - 1; i >= 0; i--) {
+                                if (messages[i]?.sender === 'user' && messages[i]?.text) {
+                                  prevQuestion = messages[i].text;
+                                  break;
+                                }
+                              }
+                            }
+                            triggerNativeDeviceShare({
+                              type: 'ai-answer',
+                              aiAnswerText: msg.text,
+                              questionText: prevQuestion,
+                              workspaceName: activeWorkspace?.name || 'AI Tutor',
+                            });
+                          }}
+                          className="text-[10px] font-semibold flex items-center gap-1 cursor-pointer transition-colors px-2 py-0.5 rounded-md text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          title="Share this AI Tutor answer"
+                        >
+                          <Share2 className="w-3 h-3 text-indigo-500" />
+                          <span>Share</span>
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -2073,6 +2105,15 @@ export default function AITutorWorkspace() {
         fileName={tutorUploadOverlay.fileName}
         stepText={tutorUploadOverlay.stepText}
         fileType={tutorUploadOverlay.fileType}
+      />
+
+      <ShareContentModal
+        isOpen={!!shareModalData}
+        onClose={() => setShareModalData(null)}
+        type="ai-answer"
+        aiAnswerText={shareModalData?.answer || ''}
+        questionText={shareModalData?.question}
+        workspaceName={activeWorkspace?.name || 'AI Tutor'}
       />
     </div>
   );
