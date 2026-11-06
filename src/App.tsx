@@ -43,7 +43,6 @@ function lazyWithRetry<T extends ComponentType<any>>(
 }
 
 // Lazy-loaded Heavy & Secondary Views (Code-Split with Automatic Retry)
-const InteractiveDemo = lazyWithRetry(() => import('./components/InteractiveDemo'));
 const Pricing = lazyWithRetry(() => import('./components/Pricing'));
 const About = lazyWithRetry(() => import('./components/About'));
 const Contact = lazyWithRetry(() => import('./components/Contact'));
@@ -1451,7 +1450,6 @@ export default function App() {
         <ForStudents />
         <StudyTools />
         <Suspense fallback={null}>
-          <InteractiveDemo />
           <Pricing />
           <About />
           <Contact />
