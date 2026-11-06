@@ -27,7 +27,8 @@ import {
   Edit3,
   Award,
   Plus,
-  BarChart3
+  BarChart3,
+  AlertTriangle
 } from 'lucide-react';
 import { useThemeMode } from '../../hooks/useThemeMode';
 import { useStudyStats } from '../../hooks/useStudyStats';
@@ -93,8 +94,65 @@ export function ProfileSettingsHub() {
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [showRemovePhotoConfirm, setShowRemovePhotoConfirm] = useState(false);
   const [isRemovingPhoto, setIsRemovingPhoto] = useState(false);
+  const [showDeleteProfileConfirm, setShowDeleteProfileConfirm] = useState(false);
+  const [isDeletingProfile, setIsDeletingProfile] = useState(false);
   const [customAvatarUrlInput, setCustomAvatarUrlInput] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDeleteProfileCompletely = async () => {
+    if (isDeletingProfile) return;
+    setIsDeletingProfile(true);
+    try {
+      let userId = localStorage.getItem('studyweb_active_user_id') || 'local-user';
+      let token: string | undefined;
+      if (supabase) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+          userId = session.user.id;
+          token = session.access_token;
+        }
+      }
+
+      try {
+        await fetch('/api/profile/delete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            'x-studyweb-user-id': userId
+          },
+          body: JSON.stringify({ userId })
+        });
+      } catch {}
+
+      if (supabase && userId && userId !== 'local-user') {
+        await Promise.allSettled([
+          supabase.from('workspace_files').delete().eq('user_id', userId),
+          supabase.from('study_notes').delete().eq('user_id', userId),
+          supabase.from('workspaces').delete().eq('user_id', userId),
+          supabase.from('study_streak_settings').delete().eq('user_id', userId),
+          supabase.from('user_streaks').delete().eq('user_id', userId),
+          supabase.from('profiles').delete().eq('id', userId)
+        ]);
+        try {
+          await supabase.auth.signOut();
+        } catch {}
+      }
+
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch {}
+
+      setShowDeleteProfileConfirm(false);
+      setIsDeletingProfile(false);
+      window.dispatchEvent(new CustomEvent('studyweb-account-deleted'));
+    } catch {
+      setIsDeletingProfile(false);
+      setShowDeleteProfileConfirm(false);
+      window.dispatchEvent(new CustomEvent('studyweb-account-deleted'));
+    }
+  };
 
   // Interactive Crop & Zoom Modal State
   const [imageToCrop, setImageToCrop] = useState<string | null>(null);
@@ -1746,6 +1804,36 @@ export function ProfileSettingsHub() {
             </form>
           </div>
         )}
+
+        {/* ========================================================= */}
+        {/* COMPLETE PROFILE DELETION SECTION (BOTTOM OF PROFILE)     */}
+        {/* ========================================================= */}
+        <div className="rounded-[26px] border border-rose-200/80 dark:border-rose-900/50 bg-white dark:bg-slate-900 p-5 sm:p-6 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200/70 dark:border-rose-800/50 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                  Delete Profile Completely
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-xl">
+                  Permanently delete your StudyWeb profile, workspaces, uploaded study materials, AI Tutor chat history, notes, flashcards, and streak records. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowDeleteProfileConfirm(true)}
+              className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-98 text-white font-bold text-xs shadow-xs shadow-rose-600/20 transition-all inline-flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Delete Profile Completely</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* ========================================================= */}
@@ -2161,6 +2249,74 @@ export function ProfileSettingsHub() {
                     <>
                       <Trash2 className="w-4 h-4" />
                       <span>Reset Monogram</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showDeleteProfileConfirm && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                if (!isDeletingProfile) setShowDeleteProfileConfirm(false);
+              }}
+              className="absolute inset-0 bg-slate-950/60 dark:bg-slate-950/80 backdrop-blur-md"
+            />
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 12 }}
+              className="relative w-full max-w-md overflow-hidden rounded-[32px] border border-rose-200/80 dark:border-rose-900/50 bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl p-6 sm:p-8 shadow-2xl text-left z-10 space-y-5"
+            >
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 shadow-xs">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                    Delete Profile Completely?
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    This action is permanent and cannot be undone.
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed bg-rose-50/60 dark:bg-rose-950/30 border border-rose-100 dark:border-rose-900/40 p-3.5 rounded-2xl">
+                Are you sure you want to permanently delete your profile, workspaces, uploaded study materials, AI Tutor chats, notes, flashcards, and quizzes?
+              </p>
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  disabled={isDeletingProfile}
+                  onClick={() => setShowDeleteProfileConfirm(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-white font-bold text-xs cursor-pointer transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingProfile}
+                  onClick={handleDeleteProfileCompletely}
+                  className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-98 text-white font-bold text-xs shadow-md shadow-rose-600/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isDeletingProfile ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Deleting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4" />
+                      <span>Delete Completely</span>
                     </>
                   )}
                 </button>

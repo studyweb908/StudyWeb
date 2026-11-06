@@ -8,6 +8,7 @@ import { knowledgeRouter } from "./src/knowledge-engine/api.js";
 import { studyMaterialRouter, extractYouTubeInfo, scrapeWebPage, isRawUrlOrPlaceholderName } from "./src/services/studyMaterialPipeline.js";
 import { TranscriptProcessor } from "./src/services/TranscriptProcessor.js";
 import { cleanNotebookLMTitle } from "./src/utils/notebookTitle.js";
+import { toValidUuid } from "./src/utils/uuid.js";
 import { getServerGeminiApiKey } from "./src/utils/serverEnv.js";
 import { createClient } from "@supabase/supabase-js";
 import { streakRouter, setServerUserDailyGoal, getServerUserDailyGoal } from "./src/services/streakEngineServer.js";
@@ -405,6 +406,47 @@ async function startServer() {
       return res.status(200).json({
         success: false,
         error: err?.message || "Failed to save profile",
+      });
+    }
+  });
+
+  // API Route: Complete Profile & Account Data Deletion (/api/profile/delete)
+  app.post("/api/profile/delete", async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    try {
+      const body = req.body || {};
+      const userId = String(
+        body.userId ||
+          req.headers["x-studyweb-user-id"] ||
+          extractUserIdFromAuthHeader(req.headers.authorization) ||
+          ""
+      ).trim();
+
+      if (userId) {
+        serverProfileStore.delete(userId);
+      }
+
+      const supabase = getSupabaseServerClient(req.headers.authorization);
+      if (supabase && userId && userId !== "local-user") {
+        await Promise.allSettled([
+          supabase.from("workspace_files").delete().eq("user_id", userId),
+          supabase.from("study_notes").delete().eq("user_id", userId),
+          supabase.from("workspaces").delete().eq("user_id", userId),
+          supabase.from("study_streak_settings").delete().eq("user_id", userId),
+          supabase.from("user_streaks").delete().eq("user_id", userId),
+          supabase.from("profiles").delete().eq("id", userId),
+        ]);
+      }
+
+      return res.json({
+        success: true,
+        deleted: true,
+      });
+    } catch (err: any) {
+      return res.status(200).json({
+        success: true,
+        deleted: true,
+        warning: err?.message,
       });
     }
   });
@@ -905,10 +947,30 @@ async function startServer() {
    * Slices active workspace documents (PDFs, notes, OCR screenshots, audio transcripts) into
    * granular passages and scores them against the user's specific query.
    */
+  const DEFAULT_DEMO_STUB_IDS = new Set([
+    "11111111-1111-4111-8111-111111111101",
+    "11111111-1111-4111-8111-111111111102",
+    "22222222-2222-4222-8222-222222222201",
+    "33333333-3333-4333-8333-333333333301"
+  ]);
+  const DEFAULT_DEMO_STUB_NAMES = new Set([
+    "newton_laws_and_friction_formulae.pdf",
+    "rotational_dynamics_summary.pdf",
+    "fundamental_theorems_of_calculus.pdf",
+    "nucleophilic_substitution_mechanisms.pdf"
+  ]);
+
+  function isDefaultDemoStubFile(file: any): boolean {
+    if (!file) return false;
+    const idStr = String(file.id || "").trim().toLowerCase();
+    const nameStr = String(file.name || "").trim().toLowerCase();
+    return DEFAULT_DEMO_STUB_IDS.has(idStr) || DEFAULT_DEMO_STUB_NAMES.has(nameStr);
+  }
+
   function extractRelevantDocumentSegments(
     query: string,
     files: any[],
-    topK: number = 6,
+    topK: number = 10,
     forceIncludeWhenZeroScore: boolean = false
   ): {
     segments: ExtractedSegment[];
@@ -922,26 +984,19 @@ async function startServer() {
     const qLower = query.toLowerCase();
     const stopWords = new Set([
       "what", "is", "the", "are", "tell", "me", "about", "how", "why", "does", "do",
-      "explain", "please", "can", "you", "in", "my", "notes", "files", "document", "documents",
-      "this", "that", "there", "and", "or", "for", "with", "from", "into", "give", "question",
-      "answer", "help", "understand", "solve", "find", "show", "write", "make", "like", "work",
-      "works", "working", "mean", "means", "meaning", "define", "definition", "describe",
-      "description", "example", "examples", "image", "images", "picture", "pictures", "diagram",
-      "diagrams", "draw", "drawing", "create", "generate", "illustrate", "illustration", "photo",
-      "visual", "concept", "concepts", "topic", "topics", "thing", "things", "something",
-      "anything", "everything", "someone", "suppose", "imagine", "detail", "details", "simple",
-      "words", "short", "long", "full", "complete", "step", "steps", "way", "ways", "part",
-      "parts", "type", "types", "kind", "kinds", "use", "used", "using", "have", "has", "had",
-      "was", "were", "been", "being", "will", "would", "could", "should", "may", "might", "must",
-      "need", "want", "know", "think", "good", "best", "better", "first", "second", "also",
-      "very", "much", "more", "most", "some", "any", "all", "other", "another", "such", "only",
-      "own", "same", "than", "too", "just", "now", "here", "where", "when", "who", "whom",
-      "whose", "which", "workspace", "workspaces", "uploaded", "upload", "study", "tutor", "bro",
-      "material", "materials", "file", "files", "document", "documents", "resource", "resources",
-      "note", "notes", "content", "contents", "breakdown", "summary", "summarize"
+      "please", "can", "you", "in", "my", "this", "that", "there", "and", "or", "for",
+      "with", "from", "into", "give", "help", "show", "make", "like", "have", "has",
+      "had", "was", "were", "been", "being", "will", "would", "could", "should", "may",
+      "might", "must", "need", "want", "very", "much", "more", "most", "some", "any",
+      "all", "other", "another", "such", "only", "own", "same", "than", "too", "just",
+      "now", "here", "where", "when", "who", "whom", "whose", "which", "workspace",
+      "workspaces", "uploaded", "upload", "study", "tutor", "bro", "files", "file",
+      "documents", "document", "notes", "note", "materials", "material"
     ]);
 
-    const rawTokens = qLower.split(/[^a-z0-9_-]+/).filter(w => w.length > 2 && !stopWords.has(w));
+    const rawTokens = qLower
+      .split(/[^a-z0-9_-]+/)
+      .filter(w => (w.length >= 2 || /^\d+$/.test(w)) && !stopWords.has(w));
     const queryTokens = Array.from(new Set(rawTokens));
 
     const allSegments: ExtractedSegment[] = [];
@@ -950,20 +1005,76 @@ async function startServer() {
       const fileName = file.name || `Document #${fileIdx + 1}`;
       const fileType = file.type || 'doc';
       const totalPages = file.pages || 1;
+      const isUserFile = !isDefaultDemoStubFile(file);
       const rawUnits: Array<{ text: string; approxPage: number; type: string }> = [];
 
-      // 1. From transcription or contentText (audio/video captions or OCR of screenshots/images)
-      const combinedTranscript = [file.transcription, file.contentText].filter(Boolean).join('\n\n');
+      // 1. From transcription or contentText (audio/video captions, PDF text, or OCR of screenshots/images)
+      const combinedTranscript = [file.transcription, file.contentText, file.content_text]
+        .filter(Boolean)
+        .filter((v, i, arr) => arr.indexOf(v) === i)
+        .join('\n\n');
       if (combinedTranscript && typeof combinedTranscript === 'string' && combinedTranscript.trim()) {
         const cleanedTranscript = cleanMultilineText(combinedTranscript);
         const paras = cleanedTranscript
-          .split(/\n\s*\n|\n(?=\[\d{1,2}:\d{2})|\.\s+(?=[A-Z0-9])/)
+          .split(/\n\s*\n|\n(?=#{1,4}\s)|\n(?=\[\d{1,2}:\d{2})|(?<=[.!?])\s+(?=[A-Z0-9])/)
           .map((p: string) => p.trim())
-          .filter((p: string) => p.length > 20 && !isDummyMetadataLine(p));
+          .filter((p: string) => p.length > 15 && !isDummyMetadataLine(p));
+
+        // Group very short adjacent lines into richer ~400-char chunks so context isn't fragmented
+        let buffer = '';
+        let bufferStartIdx = 0;
         paras.forEach((p: string, pIdx: number) => {
-          const pageNum = Math.min(totalPages, Math.floor((pIdx / Math.max(1, paras.length)) * totalPages) + 1);
-          rawUnits.push({ text: p, approxPage: pageNum, type: 'Transcription / OCR' });
+          if (!buffer) {
+            buffer = p;
+            bufferStartIdx = pIdx;
+          } else if (buffer.length + p.length < 480) {
+            buffer += `\n${p}`;
+          } else {
+            const pageNum = Math.min(totalPages, Math.floor((bufferStartIdx / Math.max(1, paras.length)) * totalPages) + 1);
+            rawUnits.push({ text: buffer, approxPage: pageNum, type: 'Transcription / Document Text' });
+            buffer = p;
+            bufferStartIdx = pIdx;
+          }
         });
+        if (buffer) {
+          const pageNum = Math.min(totalPages, Math.floor((bufferStartIdx / Math.max(1, paras.length)) * totalPages) + 1);
+          rawUnits.push({ text: buffer, approxPage: pageNum, type: 'Transcription / Document Text' });
+        }
+      }
+
+      // 1b. From structured extractedDiagrams / extracted_diagrams if present
+      const rawDiagrams = file.extractedDiagrams || file.extracted_diagrams;
+      if (rawDiagrams) {
+        try {
+          const diagObj = typeof rawDiagrams === 'string'
+            ? JSON.parse(rawDiagrams)
+            : (Array.isArray(rawDiagrams) && typeof rawDiagrams[0] === 'string' ? JSON.parse(rawDiagrams[0]) : rawDiagrams);
+          if (diagObj && typeof diagObj === 'object') {
+            if (diagObj.detailedNotes && typeof diagObj.detailedNotes === 'string') {
+              rawUnits.push({ text: cleanMultilineText(diagObj.detailedNotes.slice(0, 2500)), approxPage: 1, type: 'Detailed Notes' });
+            }
+            if (Array.isArray(diagObj.conceptsAndDefinitions)) {
+              const defsText = diagObj.conceptsAndDefinitions
+                .map((cd: any) => `${cd.concept || ''}: ${cd.definition || ''}`)
+                .filter((s: string) => s.length > 5)
+                .join('\n');
+              if (defsText) {
+                rawUnits.push({ text: defsText, approxPage: 1, type: 'Concepts & Definitions' });
+              }
+            }
+            if (Array.isArray(diagObj.practiceQuestions)) {
+              const pqText = diagObj.practiceQuestions
+                .map((pq: any) => `Q: ${pq.question || ''} A: ${pq.answer || ''} (${pq.explanation || ''})`)
+                .filter((s: string) => s.length > 10)
+                .join('\n');
+              if (pqText) {
+                rawUnits.push({ text: pqText, approxPage: 1, type: 'Practice Questions' });
+              }
+            }
+          }
+        } catch {
+          // ignore malformed JSON
+        }
       }
 
       // 2. From chunks
@@ -1003,7 +1114,7 @@ async function startServer() {
 
       // 6. Always include a title & workspace metadata unit so topic queries matching a file's title or subject always match
       rawUnits.push({
-        text: `${fileName}${file.workspaceName ? ` (Workspace: ${file.workspaceName})` : ''}${file.summary && !isDummyMetadataLine(file.summary) ? ` — ${file.summary.slice(0, 300)}` : ''}`,
+        text: `${fileName}${file.workspaceName ? ` (Workspace: ${file.workspaceName})` : ''}${file.summary && !isDummyMetadataLine(file.summary) ? ` — ${file.summary.slice(0, 400)}` : ''}`,
         approxPage: 1,
         type: 'Title & Overview'
       });
@@ -1013,13 +1124,23 @@ async function startServer() {
         const uText = unit.text;
         const uLower = uText.toLowerCase();
         const fnLower = fileName.toLowerCase();
-        let score = 0;
+        let score = isUserFile ? 2 : 0;
+        if (file.isDirectAttachment) {
+          score += 4;
+        }
 
         queryTokens.forEach(t => {
-          if (new RegExp(`\\b${t}\\b`, 'i').test(uText) || new RegExp(`\\b${t}\\b`, 'i').test(fileName)) {
+          const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          if (new RegExp(`\\b${escaped}\\b`, 'i').test(uText) || new RegExp(`\\b${escaped}\\b`, 'i').test(fileName)) {
             score += 6;
           } else if (t.length >= 3 && (uLower.includes(t) || fnLower.includes(t))) {
             score += 5;
+          } else if (t.length >= 5) {
+            // Prefix/stem match for inflected words (e.g., photosynthesize vs photosynthesis)
+            const stem = t.slice(0, Math.max(4, t.length - 2));
+            if (uLower.includes(stem) || fnLower.includes(stem)) {
+              score += 3;
+            }
           }
         });
 
@@ -1039,7 +1160,7 @@ async function startServer() {
 
         // Snippet generation
         let snippet = uText;
-        if (snippet.length > 180) {
+        if (snippet.length > 220) {
           let firstMatchIdx = -1;
           for (const t of queryTokens) {
             const idx = uLower.indexOf(t);
@@ -1048,11 +1169,11 @@ async function startServer() {
             }
           }
           if (firstMatchIdx !== -1) {
-            const start = Math.max(0, firstMatchIdx - 40);
-            const end = Math.min(uText.length, start + 160);
+            const start = Math.max(0, firstMatchIdx - 50);
+            const end = Math.min(uText.length, start + 200);
             snippet = (start > 0 ? "..." : "") + uText.slice(start, end).trim() + (end < uText.length ? "..." : "");
           } else {
-            snippet = uText.slice(0, 160).trim() + "...";
+            snippet = uText.slice(0, 200).trim() + "...";
           }
         }
 
@@ -1075,12 +1196,20 @@ async function startServer() {
     let selectedSegments: ExtractedSegment[] = [];
 
     if (hasHighRelevance) {
-      selectedSegments = allSegments.filter(s => s.score >= 5).slice(0, topK);
+      selectedSegments = allSegments.filter(s => s.score >= 4).slice(0, topK);
+      if (selectedSegments.length < 3 && forceIncludeWhenZeroScore) {
+        for (const seg of allSegments) {
+          if (!selectedSegments.includes(seg)) {
+            selectedSegments.push(seg);
+            if (selectedSegments.length >= topK) break;
+          }
+        }
+      }
     } else if (forceIncludeWhenZeroScore) {
       const fileSeen = new Map<string, number>();
       for (const seg of allSegments) {
         const count = fileSeen.get(seg.sourceName) || 0;
-        if (count < 2) {
+        if (count < 4) {
           selectedSegments.push(seg);
           fileSeen.set(seg.sourceName, count + 1);
           if (selectedSegments.length >= topK) break;
@@ -1090,7 +1219,6 @@ async function startServer() {
         selectedSegments = allSegments.slice(0, topK);
       }
     } else {
-      // Do not inject unrelated zero-score segments when the user is asking a general question
       return { segments: [], contextString: "", hasHighRelevance: false };
     }
 
@@ -1099,10 +1227,10 @@ async function startServer() {
     }
 
     let contextString = "=== RETRIEVED WORKSPACE DOCUMENT SEGMENTS ===\n";
-    contextString += "Use these passages from the student's workspace documents ONLY if they are relevant to answering the student's exact question:\n\n";
+    contextString += "Below are the highest-priority passages retrieved from the student's uploaded workspace materials:\n\n";
 
     selectedSegments.forEach((seg, idx) => {
-      contextString += `[Segment ${idx + 1} | Source: "${seg.sourceName}" | Page ${seg.page} | Relevance: ${seg.score >= 5 ? 'Matched' : 'Overview'}]\n`;
+      contextString += `[Segment ${idx + 1} | Source: "${seg.sourceName}" | Page ${seg.page} | Relevance: ${seg.score >= 5 ? 'High Match' : 'Workspace Context'}]\n`;
       contextString += `"${seg.text}"\n\n`;
     });
 
@@ -1682,13 +1810,21 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       };
 
       const isRealWorkspaceId = Boolean(workspaceId && workspaceId !== 'general-study');
+      const normalizedActiveWsUuid = workspaceId ? toValidUuid(String(workspaceId)) : '';
+      const matchesActiveWorkspaceId = (candidateWsId: any): boolean => {
+        if (!isRealWorkspaceId) return true;
+        if (!candidateWsId) return true;
+        const cStr = String(candidateWsId);
+        if (cStr === String(workspaceId)) return true;
+        return Boolean(normalizedActiveWsUuid && toValidUuid(cStr) === normalizedActiveWsUuid);
+      };
 
       // Seed allWorkspacesMap from clientAllWorkspaces, but ONLY add files from the ACTIVE workspace into effectiveFiles!
       clientAllWorkspaces.forEach((cws: any) => {
         if (!cws || !cws.id) return;
         const wsName = cws.name || 'Workspace';
         const wsFiles: any[] = [];
-        const isCurrentWs = !isRealWorkspaceId || String(cws.id) === String(workspaceId);
+        const isCurrentWs = matchesActiveWorkspaceId(cws.id);
         (Array.isArray(cws.files) ? cws.files : []).forEach((cf: any) => {
           upsertFileIntoList(wsFiles, cf, wsName, cws.id);
           if (isCurrentWs) {
@@ -1730,17 +1866,17 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
               resolvedUserId
                 ? client.from('workspaces').select('id, name, subject, description, files, notes, flashcards, quizzes').eq('user_id', resolvedUserId)
                 : (isRealWorkspaceId
-                    ? client.from('workspaces').select('id, name, subject, description, files, notes, flashcards, quizzes').eq('id', workspaceId)
+                    ? client.from('workspaces').select('id, name, subject, description, files, notes, flashcards, quizzes').eq('id', normalizedActiveWsUuid || workspaceId)
                     : Promise.resolve({ data: null, error: null })),
               resolvedUserId
                 ? client.from('workspace_files').select('*').eq('user_id', resolvedUserId)
                 : (isRealWorkspaceId
-                    ? client.from('workspace_files').select('*').eq('workspace_id', workspaceId)
+                    ? client.from('workspace_files').select('*').eq('workspace_id', normalizedActiveWsUuid || workspaceId)
                     : Promise.resolve({ data: null, error: null })),
               resolvedUserId
                 ? client.from('study_notes').select('id, title, content, workspace_id').eq('user_id', resolvedUserId).limit(30)
                 : (isRealWorkspaceId
-                    ? client.from('study_notes').select('id, title, content, workspace_id').eq('workspace_id', workspaceId).limit(20)
+                    ? client.from('study_notes').select('id, title, content, workspace_id').eq('workspace_id', normalizedActiveWsUuid || workspaceId).limit(20)
                     : Promise.resolve({ data: null, error: null }))
             ]);
 
@@ -1785,7 +1921,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
             dbWsRows.forEach((wsRow: any) => {
               const wsIdStr = String(wsRow.id);
               const wsTitle = wsRow.name || 'Workspace';
-              const isCurrentWs = !isRealWorkspaceId || wsIdStr === String(workspaceId);
+              const isCurrentWs = matchesActiveWorkspaceId(wsIdStr);
               const existingWs = allWorkspacesMap.get(wsIdStr) || {
                 id: wsIdStr,
                 name: wsTitle,
@@ -1822,7 +1958,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
               fileRows.forEach((sf: any) => {
                 const targetWsId = String(sf.workspace_id || workspaceId || 'general-study');
                 const targetWsName = wsIdToName.get(targetWsId) || workspaceName || 'Workspace';
-                const isCurrentWs = !isRealWorkspaceId || targetWsId === String(workspaceId);
+                const isCurrentWs = matchesActiveWorkspaceId(targetWsId);
 
                 if (isCurrentWs) {
                   upsertFileIntoList(effectiveFiles, {
@@ -1859,7 +1995,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
             const activeWsEntry = isRealWorkspaceId ? allWorkspacesMap.get(String(workspaceId)) : null;
             const relevantNotes = isRealWorkspaceId
               ? [
-                  ...noteRows.filter((n: any) => String(n.workspace_id) === String(workspaceId)),
+                  ...noteRows.filter((n: any) => matchesActiveWorkspaceId(n.workspace_id)),
                   ...(Array.isArray(activeWsEntry?.notes) ? activeWsEntry.notes : [])
                 ]
               : [
@@ -2050,12 +2186,39 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       // Strictly filter effectiveFiles to the ACTIVE workspace (plus any direct turn attachments) so files from other workspaces never bleed in!
       if (isRealWorkspaceId) {
         effectiveFiles = effectiveFiles.filter(
-          (f: any) => Boolean(f.isDirectAttachment) || !f.workspaceId || String(f.workspaceId) === String(workspaceId)
+          (f: any) => Boolean(f.isDirectAttachment) || !f.workspaceId || matchesActiveWorkspaceId(f.workspaceId)
         );
       }
 
+      // If the user has uploaded ANY real file of their own, remove the 4 hardcoded initial demo stub files
+      // so default sample stubs (Newton's Laws, Rotational Dynamics, Calculus, SN1/SN2) never override or contaminate the user's uploaded material!
+      const hasUserUploadedFilesInActive = effectiveFiles.some((f: any) => !isDefaultDemoStubFile(f));
+      if (hasUserUploadedFilesInActive) {
+        effectiveFiles = effectiveFiles.filter((f: any) => !isDefaultDemoStubFile(f));
+      } else {
+        // Check if the user uploaded files in any workspace when workspaceId wasn't matched
+        const allUploadedUserFiles = Array.from(allWorkspacesMap.values())
+          .flatMap(w => w.files || [])
+          .filter((f: any) => !isDefaultDemoStubFile(f));
+        if (allUploadedUserFiles.length > 0 && (!isRealWorkspaceId || effectiveFiles.every((f: any) => isDefaultDemoStubFile(f)))) {
+          effectiveFiles = [...allUploadedUserFiles];
+        }
+      }
+
+      // Sort effectiveFiles so direct attachments and user-uploaded files with rich content come first
+      effectiveFiles.sort((a: any, b: any) => {
+        const aDirect = a.isDirectAttachment ? 1 : 0;
+        const bDirect = b.isDirectAttachment ? 1 : 0;
+        if (aDirect !== bDirect) return bDirect - aDirect;
+        const aUser = !isDefaultDemoStubFile(a) ? 1 : 0;
+        const bUser = !isDefaultDemoStubFile(b) ? 1 : 0;
+        return bUser - aUser;
+      });
+
+      const hasUserUploadedFiles = effectiveFiles.some((f: any) => !isDefaultDemoStubFile(f));
+
       const activeWorkspaceNotesOnly = isRealWorkspaceId
-        ? allCrossWorkspaceNotes.filter(n => String(n.workspaceId) === String(workspaceId))
+        ? allCrossWorkspaceNotes.filter(n => matchesActiveWorkspaceId(n.workspaceId))
         : allCrossWorkspaceNotes;
 
       const searchableMaterials = [
@@ -2070,26 +2233,34 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       const isDeepStudyMaterialAnalysisQuery =
         /\b(study\s+materials?|this\s+image|the\s+image|this\s+picture|this\s+photo|this\s+diagram|this\s+screenshot|explain|analyze|breakdown|break\s+down|summarize|tell\s+me\s+about)\b/i.test(qLower);
 
-      // Check if any file in the active workspace has an image binary (`fileBase64` or `data:image/` URL)
+      // Check if any file in the active workspace has an image or PDF binary (`fileBase64` or `data:` URL)
       const hasInlineImageInActiveWorkspace = effectiveFiles.some((f: any) => {
-        const isImg =
+        const isImgOrPdf =
           String(f.type || '').toLowerCase().includes('image') ||
+          String(f.type || '').toLowerCase().includes('pdf') ||
           String(f.fileMimeType || '').toLowerCase().startsWith('image/') ||
-          (typeof f.url === 'string' && f.url.startsWith('data:image/')) ||
-          /\.(png|jpg|jpeg|webp|gif|svg|bmp)$/i.test(String(f.name || ''));
-        const hasBinary = Boolean(f.fileBase64 || (typeof f.url === 'string' && f.url.startsWith('data:image/')));
-        return isImg && hasBinary;
+          String(f.fileMimeType || '').toLowerCase() === 'application/pdf' ||
+          (typeof f.url === 'string' && (f.url.startsWith('data:image/') || f.url.startsWith('data:application/pdf'))) ||
+          /\.(png|jpg|jpeg|webp|gif|svg|bmp|pdf)$/i.test(String(f.name || ''));
+        const hasBinary = Boolean(f.fileBase64 || (typeof f.url === 'string' && f.url.startsWith('data:')));
+        return isImgOrPdf && hasBinary;
       });
 
       // Check initial semantic relevance against active workspace materials
       const initialRagCheck = (searchableMaterials.length > 0)
-        ? extractRelevantDocumentSegments(prompt, searchableMaterials, 10, isExplicitMaterialQuery)
+        ? extractRelevantDocumentSegments(
+            prompt,
+            searchableMaterials,
+            12,
+            isExplicitMaterialQuery || hasUserUploadedFiles || hasInlineImageInActiveWorkspace
+          )
         : { segments: [], contextString: '', hasHighRelevance: false };
 
       const shouldUseWorkspaceFiles = Boolean(
         !allowOutsideResearch &&
+        !isCasualGreeting &&
         searchableMaterials.length > 0 &&
-        (isExplicitMaterialQuery || initialRagCheck.hasHighRelevance || hasInlineImageInActiveWorkspace)
+        (hasUserUploadedFiles || isExplicitMaterialQuery || initialRagCheck.hasHighRelevance || hasInlineImageInActiveWorkspace)
       );
 
       if (shouldUseWorkspaceFiles && effectiveFiles && effectiveFiles.length > 0) {
@@ -2195,11 +2366,15 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         const ragResult = extractRelevantDocumentSegments(
           prompt,
           searchableMaterials,
-          10,
-          isExplicitMaterialQuery || hasInlineImageInActiveWorkspace
+          12,
+          hasUserUploadedFiles || isExplicitMaterialQuery || hasInlineImageInActiveWorkspace
         );
         retrievedSegments = ragResult.segments;
-        hasRelevantWorkspaceMaterial = isExplicitMaterialQuery || ragResult.hasHighRelevance || hasInlineImageInActiveWorkspace;
+        hasRelevantWorkspaceMaterial =
+          hasUserUploadedFiles ||
+          isExplicitMaterialQuery ||
+          ragResult.hasHighRelevance ||
+          hasInlineImageInActiveWorkspace;
 
         if (hasRelevantWorkspaceMaterial) {
           groundedSourceContext = ragResult.contextString;
@@ -2207,17 +2382,33 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
           // Prioritize files that matched in retrievedSegments first, then remaining files in the active workspace
           const matchedNames = new Set(retrievedSegments.map(s => s.sourceName));
           const prioritizedFiles = [
-            ...searchableMaterials.filter((f: any) => matchedNames.has(f.name)),
-            ...searchableMaterials.filter((f: any) => !matchedNames.has(f.name))
+            ...searchableMaterials.filter((f: any) => !isDefaultDemoStubFile(f) && matchedNames.has(f.name)),
+            ...searchableMaterials.filter((f: any) => !isDefaultDemoStubFile(f) && !matchedNames.has(f.name)),
+            ...searchableMaterials.filter((f: any) => isDefaultDemoStubFile(f) && matchedNames.has(f.name)),
+            ...searchableMaterials.filter((f: any) => isDefaultDemoStubFile(f) && !matchedNames.has(f.name))
           ].slice(0, 8);
 
           const fullSourceBlocks = prioritizedFiles.map((f: any, idx: number) => {
-            const textBody = (f.transcription || f.contentText || f.content_text || f.summary || '').trim();
-            const fallbackBody = textBody && !isDummyMetadataLine(textBody)
-              ? textBody
+            const parts: string[] = [];
+            if (f.summary && !isDummyMetadataLine(f.summary)) {
+              parts.push(`Summary:\n${f.summary.trim()}`);
+            }
+            if (Array.isArray(f.highlights) && f.highlights.length > 0) {
+              parts.push(`Key Takeaways / Highlights:\n- ${f.highlights.join('\n- ')}`);
+            }
+            if (Array.isArray(f.formulas) && f.formulas.length > 0) {
+              parts.push(`Formulas:\n- ${f.formulas.join('\n- ')}`);
+            }
+            const textBody = (f.transcription || f.contentText || f.content_text || '').trim();
+            if (textBody && !isDummyMetadataLine(textBody)) {
+              parts.push(`Full Extracted Content / Transcription:\n${textBody.slice(0, 18000)}`);
+            }
+            const combinedBody = parts.join('\n\n').trim();
+            const fallbackBody = combinedBody
+              ? combinedBody
               : `Uploaded study material titled "${f.name}" in workspace "${f.workspaceName || workspaceName || 'Active Workspace'}" (Type: ${f.type || 'document'}). Inspect the attached image/file inlineData directly to answer the student's question.`;
             const header = `--- ACTIVE WORKSPACE MATERIAL #${idx + 1}: "${f.name || 'Study Resource'}" (Workspace: "${f.workspaceName || workspaceName || 'Active Workspace'}" | Type: ${f.type || 'resource'}${f.url && !String(f.url).startsWith('data:') ? ` | URL: ${f.url}` : ''}) ---`;
-            return `${header}\n${fallbackBody.slice(0, 12000)}`;
+            return `${header}\n${fallbackBody}`;
           }).filter(Boolean);
 
           if (fullSourceBlocks.length > 0) {
@@ -2486,11 +2677,11 @@ Include a clear, structured comparison (using a markdown table or side-by-side b
 
       let fileOverviewContext = "";
       if (hasRelevantWorkspaceMaterial && searchableMaterials.length > 0) {
-        fileOverviewContext = `\nUPLOADED WORKSPACE STUDY MATERIALS (${searchableMaterials.length} item${searchableMaterials.length === 1 ? '' : 's'} across workspaces):\n`;
+        fileOverviewContext = `\nUPLOADED WORKSPACE STUDY MATERIALS (${searchableMaterials.length} item${searchableMaterials.length === 1 ? '' : 's'} in active context):\n`;
         searchableMaterials.slice(0, 12).forEach((f: any, idx: number) => {
           fileOverviewContext += `- Material #${idx + 1}: "${f.name}" (Workspace: "${f.workspaceName || 'Workspace'}", Type: ${f.type || 'document'}${f.url && f.url.startsWith('http') ? `, URL: ${f.url}` : ''})\n`;
           if (f.summary && !isDummyMetadataLine(f.summary)) {
-            fileOverviewContext += `  Summary: ${f.summary.slice(0, 600)}\n`;
+            fileOverviewContext += `  Summary: ${f.summary.slice(0, 800)}\n`;
           }
         });
       }
@@ -2502,15 +2693,18 @@ Include a clear, structured comparison (using a markdown table or side-by-side b
      [FOLLOW_UP: Second follow-up question?]
      [FOLLOW_UP: Third follow-up question?]`;
 
-      const coreSystemInstruction = `You are StudyWeb's AI Tutor, providing students with clear, accurate, and comprehensive academic explanations across science, math, humanities, documents, videos, websites, and images.
+      const coreSystemInstruction = `You are StudyWeb's AI Tutor, providing students with clear, accurate, and comprehensive academic explanations grounded strictly in their uploaded study materials.
 CRITICAL INSTRUCTION DIRECTIVES:
-1. DIRECT, PRECISE & COMPLETE: Read the student's question attentively and deliver the exact answer, definition, derivation, literary analysis, or scientific explanation directly.
-2. REAL KNOWLEDGE & EXAMPLES: Every answer must contain real, substantive academic content (definitions, mechanisms, structures, formulas, and examples) tailored to the exact topic asked. Never output generic filler templates.
-3. SMART WORKSPACE RELEVANCE (WORKSPACE FIRST):
+1. STRICT RAG GROUNDING IN UPLOADED FILES (HIGHEST PRIORITY):
+   - Carefully read the "=== RETRIEVED WORKSPACE DOCUMENT SEGMENTS ===" and "=== FULL UPLOADED WORKSPACE MATERIALS & NOTES ===" provided below, as well as any attached inlineData (PDF/image/video).
+   - When the student asks about their uploaded document, image, video, link, or any concept/question/topic present in their uploaded workspace files, base your answer 100% on the exact facts, text, figures, definitions, and details inside their uploaded material(s).
+   - NEVER hallucinate unrelated subjects, and NEVER replace the contents of the student's uploaded file with generic or unrelated textbook topics.
+2. DIRECT, PRECISE & COMPLETE: Read the student's question attentively and deliver the exact answer, definition, derivation, analysis, or explanation directly from their uploaded material.
+3. SMART WORKSPACE RELEVANCE:
    - Always give first priority to the student's uploaded workspace files in "${workspaceName || 'Active Workspace'}".
-   - If the student asks about a topic NOT in their uploaded workspace files, clearly state which workspace context was checked, ask if they want to research outside their workspace, and provide a helpful explanation without mixing in unrelated workspace files.
+   - Only if the student explicitly asks about a topic that has zero connection to their uploaded workspace files, clearly state what your uploaded files cover and then answer their question without mixing up the two.
 4. MULTIMODAL ANALYSIS (VIDEOS, WEBSITES, DOCUMENTS, IMAGES, TEXT):
-   - When analyzing an uploaded or linked video, website, PDF, document, or image, provide a thorough, structured breakdown of its contents, key concepts, formulas, arguments, and takeaways.
+   - When analyzing an uploaded or linked video, website, PDF, document, or image, provide a thorough, structured breakdown of its actual contents, key concepts, formulas, arguments, and takeaways.
 5. STRICT AVOIDANCE:
    - NEVER generate any image, SVG, or picture. If the user asks you to generate, create, draw, or make an image or picture, reply: "I cannot generate image. I can help you with your study tasks."
    - NEVER mention "Document 1246", "Enjoy the videos", "music you love", or "Mix".
@@ -2543,11 +2737,17 @@ ${citationGuideline}`;
       let responseSource = "";
       let lastError: any = null;
 
-      // Build currentTurnParts: ONLY attach workspace binary/video parts when they are relevant to the student's question!
+      // Build currentTurnParts: attach user-uploaded workspace binary/video/PDF parts first!
       const currentTurnParts: any[] = [{ text: prompt }];
 
       if (hasRelevantWorkspaceMaterial && effectiveFiles && effectiveFiles.length > 0) {
-        const candidateAttachmentFiles = effectiveFiles.slice(0, 2);
+        const matchedSourceSet = new Set(retrievedSegments.map(s => s.sourceName));
+        const candidateAttachmentFiles = [
+          ...effectiveFiles.filter((f: any) => Boolean(f.isDirectAttachment)),
+          ...effectiveFiles.filter((f: any) => !f.isDirectAttachment && !isDefaultDemoStubFile(f) && matchedSourceSet.has(f.name)),
+          ...effectiveFiles.filter((f: any) => !f.isDirectAttachment && !isDefaultDemoStubFile(f) && !matchedSourceSet.has(f.name)),
+          ...effectiveFiles.filter((f: any) => !f.isDirectAttachment && isDefaultDemoStubFile(f))
+        ].slice(0, 3);
 
         for (const file of candidateAttachmentFiles) {
           let rawBase64 = "";

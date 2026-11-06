@@ -320,6 +320,9 @@ export const DEFAULT_FILE_VALIDATION: FileValidationConfig = {
   maxSizeBytes: 50 * 1024 * 1024, // 50MB
   allowedMimeTypes: [
     'application/pdf',
+    'application/zip',
+    'application/x-zip-compressed',
+    'multipart/x-zip',
     'application/msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'application/vnd.ms-powerpoint',
@@ -337,7 +340,7 @@ export const DEFAULT_FILE_VALIDATION: FileValidationConfig = {
     'video/webm'
   ],
   allowedExtensions: [
-    '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.txt', '.md', '.csv',
+    '.pdf', '.zip', '.doc', '.docx', '.ppt', '.pptx', '.txt', '.md', '.csv',
     '.jpg', '.jpeg', '.png', '.webp', '.mp3', '.wav', '.mp4', '.webm'
   ]
 };

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Image as ImageIcon, Globe, Sparkles, ArrowRight, Upload, Link, Video, HardDrive, Clipboard, X, Loader2, Clock, Check, ChevronDown, Search, Trash2, FileText, Music, Lightbulb, BookOpen, HelpCircle, Info, Eye, ExternalLink, Calendar, Tag, SlidersHorizontal, Plus, Play } from 'lucide-react';
+import { Image as ImageIcon, Globe, Sparkles, ArrowRight, Upload, Download, Link, Video, HardDrive, Clipboard, X, Loader2, Clock, Check, ChevronDown, Search, Trash2, FileText, Music, Lightbulb, BookOpen, HelpCircle, Info, Eye, ExternalLink, Calendar, Tag, SlidersHorizontal, Plus, Play } from 'lucide-react';
 import { Workspace, WorkspaceFile, WorkspaceNote } from './WorkspaceTypes';
 import { supabase } from '../../lib/supabase';
 import { fileUploadService, FileUploadService, FileUploadError } from '../../services/FileUploadService';
@@ -15,6 +15,12 @@ import {
 } from '../../utils/notebookTitle';
 import QuickPreviewModal from './QuickPreviewModal';
 import { FullScreenUploadOverlay } from './FullScreenUploadOverlay';
+import {
+  exportAllUserWorkspaceDataAtOnce,
+  exportSingleUserFile,
+  isUserUploadedFile,
+  parseWorkspaceZipFile
+} from '../../utils/workspaceExport';
 
 interface WorkspaceLibraryProps {
   workspace: Workspace;
@@ -28,6 +34,7 @@ interface WorkspaceLibraryProps {
 export default function WorkspaceLibrary({
   workspace,
   onAddFile,
+  onAddMultipleFiles,
   onRemoveFile,
   onClearAllFiles,
   onUpdateWorkspace
@@ -514,12 +521,126 @@ export default function WorkspaceLibrary({
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
+  const handleZipFileImport = async (zipFile: File) => {
+    if (isUploading) return;
+    setIsUploading(true);
+    setUploadFileName(zipFile.name);
+    setUploadPercent(15);
+    setUploadType('doc');
+    const steps = [
+      'Reading ZIP archive structure...',
+      'Extracting study materials from ZIP archive...',
+      'Indexing extracted materials into your workspace...',
+      'ZIP archive materials imported successfully!'
+    ];
+    setCurrentSteps(steps);
+    setCurrentStepIdx(0);
+    setUploadStep(steps[0]);
+
+    try {
+      const parsed = await parseWorkspaceZipFile(zipFile);
+      setUploadPercent(60);
+      setCurrentStepIdx(1);
+      setUploadStep(steps[1]);
+
+      if (parsed.restoredWorkspaceFiles.length > 0) {
+        setUploadPercent(90);
+        setCurrentStepIdx(2);
+        setUploadStep(steps[2]);
+
+        for (const item of parsed.restoredWorkspaceFiles) {
+          WorkspaceSyncService.saveWorkspaceFile(workspace.id, item).catch(() => {});
+        }
+
+        if (onAddMultipleFiles) {
+          onAddMultipleFiles(parsed.restoredWorkspaceFiles);
+        } else {
+          parsed.restoredWorkspaceFiles.forEach(f => onAddFile(f));
+        }
+
+        setUploadPercent(100);
+        setCurrentStepIdx(3);
+        setUploadStep(steps[3]);
+
+        setTimeout(() => {
+          setIsUploading(false);
+          setPreviewFile(parsed.restoredWorkspaceFiles[0]);
+          window.dispatchEvent(
+            new CustomEvent('studyweb-toast', {
+              detail: {
+                message: `Imported ${parsed.restoredWorkspaceFiles.length} study material${parsed.restoredWorkspaceFiles.length === 1 ? '' : 's'} from "${zipFile.name}"!`,
+                type: 'success'
+              }
+            })
+          );
+        }, 220);
+        return;
+      }
+
+      if (parsed.standaloneFiles.length > 0) {
+        setIsUploading(false);
+        for (const extractedFile of parsed.standaloneFiles) {
+          const lowerName = extractedFile.name.toLowerCase();
+          let type: any = 'pdf';
+          if (extractedFile.type.startsWith('audio/') || lowerName.match(/\.(mp3|wav|m4a|ogg|aac|flac)$/)) {
+            type = 'audio';
+          } else if (extractedFile.type.startsWith('video/') || lowerName.match(/\.(mp4|webm|mov|mkv|avi|m4v)$/)) {
+            type = 'video';
+          } else if (extractedFile.type.startsWith('image/') || lowerName.match(/\.(png|jpg|jpeg|webp|gif|svg|bmp)$/)) {
+            type = 'image';
+          } else if (extractedFile.type.includes('pdf') || lowerName.endsWith('.pdf')) {
+            type = 'pdf';
+          } else if (lowerName.endsWith('.pptx') || lowerName.endsWith('.ppt')) {
+            type = 'ppt';
+          } else if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls') || lowerName.endsWith('.csv')) {
+            type = 'excel';
+          } else {
+            type = 'doc';
+          }
+          await analyzeAndAddResource(
+            extractedFile.name,
+            type,
+            formatFileSize(extractedFile.size),
+            undefined,
+            extractedFile
+          );
+        }
+        return;
+      }
+
+      setIsUploading(false);
+      window.dispatchEvent(
+        new CustomEvent('studyweb-toast', {
+          detail: {
+            message: `No supported study files were found inside "${zipFile.name}".`,
+            type: 'error'
+          }
+        })
+      );
+    } catch (err: any) {
+      setIsUploading(false);
+      window.dispatchEvent(
+        new CustomEvent('studyweb-toast', {
+          detail: {
+            message: `Could not extract ZIP file "${zipFile.name}". Please ensure it is a valid .zip archive.`,
+            type: 'error'
+          }
+        })
+      );
+    }
+  };
+
   useEffect(() => {
     const handleGlobalDropEvent = (e: any) => {
       const customEvent = e;
       if (customEvent.detail?.files && customEvent.detail.files.length > 0) {
         const file = customEvent.detail.files[0];
         const lowerName = (file.name || '').toLowerCase();
+
+        if (lowerName.endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed') {
+          handleZipFileImport(file);
+          return;
+        }
 
         let type: any = 'pdf';
         if (file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg|bmp)$/i.test(lowerName)) {
@@ -575,6 +696,11 @@ export default function WorkspaceLibrary({
     const file = e.dataTransfer.files[0];
     const lowerName = (file.name || '').toLowerCase();
 
+    if (lowerName.endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed') {
+      handleZipFileImport(file);
+      return;
+    }
+
     let type: any = 'pdf';
     if (file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg|bmp)$/i.test(lowerName)) {
       type = 'image';
@@ -609,6 +735,12 @@ export default function WorkspaceLibrary({
     if (!e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
     const lowerName = file.name.toLowerCase();
+
+    if (lowerName.endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed') {
+      handleZipFileImport(file);
+      e.target.value = '';
+      return;
+    }
     
     let type: any = 'pdf';
     if (file.type.startsWith('audio/') || lowerName.match(/\.(mp3|wav|m4a|ogg|aac|flac)$/)) {
@@ -1267,10 +1399,10 @@ export default function WorkspaceLibrary({
                 </div>
                 <div>
                   <h4 className="font-bold text-base text-slate-900 dark:text-white">
-                    Drag and drop your study files here
+                    Drag and drop your study files or .ZIP archive here
                   </h4>
                   <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
-                    Supports PDF textbooks, Word documents (DOCX), lecture slides (PPTX), images, audio recordings, and video files.
+                    Supports PDF textbooks, Word documents (DOCX), lecture slides (PPTX), images, audio recordings, video files, and exported <strong>.zip</strong> archives.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
@@ -1294,10 +1426,10 @@ export default function WorkspaceLibrary({
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="font-bold text-sm text-slate-900">
-                    Add Direct Website, PDF Link, or YouTube Video URL
+                    Add Any Website, YouTube, X (Twitter), Facebook, or PDF URL
                   </h4>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Paste any public YouTube video link, direct PDF URL, or educational article URL to index it into your workspace.
+                    Paste any public link from YouTube, X (Twitter), Facebook, Wikipedia, news sites, blogs, or any website across the internet to deeply analyze and index it into your workspace.
                   </p>
                 </div>
               </div>
@@ -1305,7 +1437,7 @@ export default function WorkspaceLibrary({
                 <input
                   type="url"
                   required
-                  placeholder="https://www.youtube.com/watch?v=... or https://example.com/notes.pdf"
+                  placeholder="https://www.youtube.com/watch?v=..., https://x.com/..., https://facebook.com/..., or any URL"
                   value={pastedUrl}
                   onChange={(e) => setPastedUrl(e.target.value)}
                   className="flex-1 h-11 px-4 rounded-xl border border-slate-200 bg-slate-50 text-xs sm:text-sm font-semibold text-slate-900 focus:outline-none focus:bg-white focus:border-indigo-600"
@@ -1418,7 +1550,29 @@ export default function WorkspaceLibrary({
               Click any stored PDF, video lecture, or web resource to open its interactive player and extracted study notes.
             </p>
           </div>
-          <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                const res = exportAllUserWorkspaceDataAtOnce(workspace);
+                window.dispatchEvent(
+                  new CustomEvent('studyweb-toast', {
+                    detail: {
+                      message:
+                        res.filesCount > 0
+                          ? `Exported ${res.filesCount} uploaded material${res.filesCount === 1 ? '' : 's'} into ${res.fileName}!`
+                          : `Exported workspace ZIP archive (${res.fileName}).`,
+                      type: 'success'
+                    }
+                  })
+                );
+              }}
+              className="text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-1 rounded-xl border border-emerald-200/80 inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Export all of your uploaded materials in this workspace as a .zip file"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export (.ZIP)</span>
+            </button>
             <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-xl border border-indigo-200/60 tabular-nums">
               {filteredFiles.length} of {workspace.files?.length || 0} Materials
             </span>
@@ -1640,6 +1794,19 @@ export default function WorkspaceLibrary({
                         <Eye className="w-3 h-3" />
                         <span>Open</span>
                       </span>
+                      {isUserUploadedFile(file) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            exportSingleUserFile(file);
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                          title="Export this material"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       {file.url && file.url.startsWith('http') && (
                         <a
                           href={file.url}

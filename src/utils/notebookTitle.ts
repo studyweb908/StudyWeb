@@ -93,6 +93,24 @@ export function extractFallbackTitleFromUrl(urlString?: string | null, type?: st
       }
     }
 
+    // X / Twitter URLs: x.com/<user>/status/<id>
+    if (host === 'x.com' || host.endsWith('.x.com') || host === 'twitter.com' || host.endsWith('.twitter.com')) {
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      if (parts.length >= 1 && !['home', 'explore', 'search', 'i', 'intent'].includes(parts[0].toLowerCase())) {
+        return `X Post by @${parts[0]}`;
+      }
+      return 'X (Twitter) Post Analysis';
+    }
+
+    // Facebook URLs
+    if (host.includes('facebook.com') || host.includes('fb.com') || host.includes('fb.watch')) {
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      if (parts.length >= 1 && !['watch', 'share', 'sharer', 'permalink.php', 'story.php', 'photo', 'reel'].includes(parts[0].toLowerCase())) {
+        return `Facebook – ${toTitleCase(parts[0].replace(/[-_.]+/g, ' '))}`;
+      }
+      return 'Facebook Resource Analysis';
+    }
+
     // Check readable path segments (skipping generic segments like 'watch', 'embed', 'shorts', 'v', 'articles')
     const segments = parsed.pathname
       .split('/')
@@ -100,8 +118,9 @@ export function extractFallbackTitleFromUrl(urlString?: string | null, type?: st
       .filter(
         s =>
           s.length > 2 &&
-          !/^(watch|embed|shorts|live|v|p|index|home|view|file|download|api|rest_v1|page|pdf)$/i.test(s) &&
-          !/^[a-zA-Z0-9_-]{11}$/.test(s) // skip raw 11-char YouTube IDs
+          !/^(watch|embed|shorts|live|v|p|status|statuses|posts|reel|reels|index|home|view|file|download|api|rest_v1|page|pdf)$/i.test(s) &&
+          !/^[a-zA-Z0-9_-]{11}$/.test(s) &&
+          !/^\d+$/.test(s)
       );
 
     if (segments.length > 0) {
@@ -173,11 +192,14 @@ export function cleanNotebookLMTitle(
 
   // 2. Strip common platform suffixes
   title = title
-    .replace(/\s*[-|–—•·]\s*YouTube$/i, '')
-    .replace(/\s*[-|–—•·]\s*Wikipedia(\s*,\s*the free encyclopedia)?$/i, '')
-    .replace(/\s*[-|–—•·]\s*Khan Academy$/i, '')
-    .replace(/\s*[-|–—•·]\s*Vimeo$/i, '')
-    .replace(/\s*[-|–—•·]\s*Loom$/i, '')
+    .replace(/\s*[-|–—•·/]\s*YouTube$/i, '')
+    .replace(/\s*[-|–—•·/]\s*Wikipedia(\s*,\s*the free encyclopedia)?$/i, '')
+    .replace(/\s*[-|–—•·/]\s*Khan Academy$/i, '')
+    .replace(/\s*[-|–—•·/]\s*Vimeo$/i, '')
+    .replace(/\s*[-|–—•·/]\s*Loom$/i, '')
+    .replace(/\s*[-|–—•·/]\s*X$/i, '')
+    .replace(/\s*[-|–—•·/]\s*Twitter$/i, '')
+    .replace(/\s*[-|–—•·/]\s*Facebook$/i, '')
     .trim();
 
   // 3. Remove hashtags (#shorts, #cbse, #viral, etc.)

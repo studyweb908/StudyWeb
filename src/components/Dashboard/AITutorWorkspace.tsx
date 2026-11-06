@@ -824,6 +824,8 @@ export default function AITutorWorkspace() {
 
     let summary: string | undefined = undefined;
     let contentText: string | undefined = transcription;
+    let highlights: string[] = [];
+    let formulas: string[] = [];
     const activeUserId = typeof window !== 'undefined' ? localStorage.getItem('studyweb_active_user_id') : null;
     const fileId = `file-tutor-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
@@ -833,23 +835,32 @@ export default function AITutorWorkspace() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fileId,
+          materialId: fileId,
           workspaceId: targetWsId,
           userId: activeUserId || undefined,
+          name: file.name,
           fileName: file.name,
+          type: typeLabel.toLowerCase(),
           fileType: typeLabel,
+          size: formatFileSize(file.size),
           fileSize: formatFileSize(file.size),
+          url: isImg ? dataUrl : undefined,
           fileUrl: isImg ? dataUrl : undefined,
           fileBase64: fileBase64 && fileBase64.length < 4000000 ? fileBase64 : undefined,
           fileMimeType: mimeType,
+          content: transcription || '',
           rawText: transcription || ''
         })
       });
       if (res.ok) {
         const parsed = await res.json().catch(() => null);
-        if (parsed?.file) {
-          summary = parsed.file.summary || summary;
-          transcription = parsed.file.transcription || parsed.file.contentText || transcription;
-          contentText = parsed.file.contentText || parsed.file.transcription || contentText;
+        const mat = parsed?.material || parsed?.file;
+        if (mat) {
+          summary = mat.summary || summary;
+          transcription = mat.transcription || mat.contentText || transcription;
+          contentText = mat.contentText || mat.transcription || contentText;
+          if (Array.isArray(mat.highlights)) highlights = mat.highlights;
+          if (Array.isArray(mat.formulas)) formulas = mat.formulas;
         }
       } else {
         const errBody = await res.json().catch(() => ({}));
@@ -872,7 +883,10 @@ export default function AITutorWorkspace() {
       fileMimeType: mimeType,
       summary,
       transcription,
-      contentText
+      contentText,
+      highlights,
+      formulas,
+      isDirectAttachment: true
     };
 
     // Persist to activeWorkspace & Supabase

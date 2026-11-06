@@ -700,7 +700,20 @@ ${selectedHighlights}`;
           deepResearch: true,
           citationMode: true,
           workspaceId: workspace?.id,
-          attachedFiles: selectedDocs.map(d => ({ name: d.name, type: "PDF Document" })),
+          workspaceName: workspace?.name,
+          attachedFiles: selectedDocs.map((d: any) => ({
+            id: d.id,
+            name: d.name,
+            type: d.type || "pdf",
+            summary: d.summary,
+            transcription: d.transcription || d.contentText,
+            contentText: d.contentText || d.transcription,
+            highlights: d.highlights,
+            url: d.url,
+            fileBase64: d.fileBase64,
+            fileMimeType: d.fileMimeType,
+            isDirectAttachment: true
+          })),
           model: "auto"
         })
       });
@@ -710,18 +723,16 @@ ${selectedHighlights}`;
       }
 
       const data = await response.json();
-      setAiChatLogs(prev => [...prev, { sender: 'ai', text: data.text || "No response received." }]);
+      setAiChatLogs(prev => [...prev, { sender: 'ai', text: data.text || data.reply || "No response received." }]);
     } catch (err) {
-      console.warn("Falling back to simulated answers because:", err);
-      let result = '';
-      if (action === 'summary') {
-        result = `### Executive Summary: ${selectedNames}\n\nHere is a comprehensive conceptual synthesis compiled from your selected sources:\n\n* **Primary Directives & Core Models**: Detailed analysis of inheritance segregations (AP Biology) and thermal kinetics spontaneity laws (AP Chemistry).\n* **Mathematical & Visual Proofs**: Independent assortment ratios verify the 9:3:3:1 phenotypic standard, while Gibbs free energy ($ΔG = ΔH - TΔS$) proves non-equilibrium spontaneous system shifts.\n* **Essential Formula Pacing**: Exothermic interactions satisfy entropy trends dynamically at ambient temperatures.\n\n*This summary is linked directly to your AP Exam targets.*`;
-      } else if (action === 'formulas') {
-        result = `### Extracted Formulas & Axioms 📐\n\nIdentified in active workspace documents:\n\n* **AP Biology Heredity**: Phenotypic crosses represented by $P(A \\cup B) = P(A) + P(B) - P(A \\cap B)$.\n* **AP Chemistry Thermodynamics**: \n  $$ΔG^\\circ = -RT \\ln(K)$$\n  Determines chemical equilibrium constants mathematically using absolute gas variables ($R = 8.314\\text{ J/mol}\\cdot\\text{K}$).\n* **Mechanical Torque & Vectors**: Angular momentum values given by $L = I\\omega$.`;
-      } else if (action === 'flashcards') {
-        result = `### Custom Study Flashcards Generated 🚀\n\n1. **Q**: What causes pink snapdragons to inherit their blended color pattern?\n   **A**: Incomplete dominance where neither allele is fully dominant over the other, creating a pink phenotype in heterozygotes.\n\n2. **Q**: What specific value does absolute zero represent for a perfect crystal's entropy?\n   **A**: Under the Third Law of Thermodynamics, its entropy is exactly equal to zero.\n\n*These flashcards have been dynamically added to your global AP Deck!*`;
-      }
-      setAiChatLogs(prev => [...prev, { sender: 'ai', text: result }]);
+      console.warn("AI Tutor action fallback:", err);
+      const docSummaries = selectedDocs
+        .map((d: any) => `**${d.name}**: ${(d.summary || d.transcription || (Array.isArray(d.highlights) ? d.highlights.join(' ') : '') || 'Document loaded in workspace.').slice(0, 600)}`)
+        .join('\n\n');
+      setAiChatLogs(prev => [...prev, {
+        sender: 'ai',
+        text: `### ${action === 'summary' ? 'Executive Summary' : action === 'formulas' ? 'Extracted Key Concepts & Formulas' : 'Study Flashcards'}: ${selectedNames}\n\n${docSummaries}`
+      }]);
     } finally {
       setLoadingAction(null);
     }
@@ -739,15 +750,11 @@ ${selectedHighlights}`;
     try {
       const activeDocs = documents.filter(d => selectedDocIds.includes(d.id));
       const activeNames = activeDocs.map(d => d.name).join(', ');
-      const activeHighlights = activeDocs.flatMap(d => d.highlights).join('\n');
+      const activeHighlights = activeDocs.flatMap(d => d.highlights || []).join('\n');
 
-      const fullPrompt = `The student is asking a question specifically about these active documents: "${activeNames}".
-      
-Selected Highlights / Passages for reference:
-${activeHighlights}
-
-Student Question:
-"${userText}"`;
+      const fullPrompt = activeDocs.length > 0
+        ? `Answer the student's question based on the uploaded document(s): "${activeNames}".\n${activeHighlights ? `\nReference Passages:\n${activeHighlights}\n` : ''}\nStudent Question: "${userText}"`
+        : userText;
 
       const response = await fetch("/api/ai-tutor", {
         method: "POST",
@@ -760,7 +767,20 @@ Student Question:
           deepResearch: true,
           citationMode: true,
           workspaceId: workspace?.id,
-          attachedFiles: activeDocs.map(d => ({ name: d.name, type: "PDF Document" })),
+          workspaceName: workspace?.name,
+          attachedFiles: activeDocs.map((d: any) => ({
+            id: d.id,
+            name: d.name,
+            type: d.type || "pdf",
+            summary: d.summary,
+            transcription: d.transcription || d.contentText,
+            contentText: d.contentText || d.transcription,
+            highlights: d.highlights,
+            url: d.url,
+            fileBase64: d.fileBase64,
+            fileMimeType: d.fileMimeType,
+            isDirectAttachment: true
+          })),
           model: "auto"
         })
       });
@@ -772,14 +792,19 @@ Student Question:
       const data = await response.json();
       setAiChatLogs(prev => [...prev, {
         sender: 'ai',
-        text: data.text || "No response received."
+        text: data.text || data.reply || "No response received."
       }]);
     } catch (err) {
-      console.warn("Falling back on simulated answer because:", err);
-      const activeNames = documents.filter(d => selectedDocIds.includes(d.id)).map(d => d.name.replace('.pdf', '')).join(', ');
+      console.warn("AI Tutor chat fallback:", err);
+      const activeDocs = documents.filter(d => selectedDocIds.includes(d.id));
+      const contextPreview = activeDocs
+        .map((d: any) => `**${d.name}**: ${(d.summary || d.transcription || (Array.isArray(d.highlights) ? d.highlights.join(' ') : '') || '').slice(0, 500)}`)
+        .join('\n\n');
       setAiChatLogs(prev => [...prev, {
         sender: 'ai',
-        text: `Based on your selected materials (${activeNames}), here is the direct contextual answer:\n\n* **Answer Synthesis**: The materials highlight that a process becomes thermodynamically favored and spontaneous when $ΔG < 0$. Under extreme conditions, molecular separation speeds up, which is critical for AP Biology replication sequences.\n* **Exact Citation**: Refer to AP Chemistry Chapter 12: Section 3, subsection 2.2 on thermal molecular reactions.\n\nWould you like me to generate a set of practice questions matching this topic?`
+        text: contextPreview
+          ? `Based on your uploaded material:\n\n${contextPreview}`
+          : `Unable to reach the AI Tutor right now. Please try your question again.`
       }]);
     } finally {
       setLoadingAction(null);

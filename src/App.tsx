@@ -676,6 +676,14 @@ export default function App() {
     window.dispatchEvent(new Event('studyweb_profile_updated'));
   };
 
+  useEffect(() => {
+    const handleAccountDeleted = () => {
+      executeLogout();
+    };
+    window.addEventListener('studyweb-account-deleted', handleAccountDeleted);
+    return () => window.removeEventListener('studyweb-account-deleted', handleAccountDeleted);
+  }, []);
+
   const handleLogout = () => {
     setShowLogoutConfirm(true);
   };
