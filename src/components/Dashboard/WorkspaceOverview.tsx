@@ -47,7 +47,6 @@ import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import {
   exportAllUserWorkspaceDataAtOnce,
   exportSingleUserFile,
-  getUserWorkspaceDataSummary,
   isUserUploadedFile
 } from '../../utils/workspaceExport';
 
@@ -84,9 +83,6 @@ export default function WorkspaceOverview({
   const cardCount = flashcards.length;
   const quizCount = quizzes.length;
   const noteCount = notes.length;
-
-  const userSummary = getUserWorkspaceDataSummary(workspace);
-  const userUploadedFiles = files.filter(isUserUploadedFile);
 
   const handleExportAllUserData = () => {
     const result = exportAllUserWorkspaceDataAtOnce(workspace);
@@ -517,86 +513,6 @@ export default function WorkspaceOverview({
                 </div>
               </div>
             ))}
-          </div>
-        )}
-      </div>
-
-      {/* ================= STUDY MATERIAL ZIP EXPORT SECTION ================= */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-6 rounded-[24px] space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
-                <Download className="w-4 h-4" />
-              </div>
-              <h3 className="font-black text-slate-900 dark:text-white tracking-tight text-lg">
-                Study Material Export (.ZIP)
-              </h3>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-2xl">
-              Export all of the study materials that you have uploaded in this workspace (PDFs, documents, videos, images, and links) into a single <strong>.zip</strong> file. You can also import <strong>.zip</strong> files anytime via <button type="button" onClick={() => setActiveWorkspaceTab('library')} className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer">Upload Material</button>.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={handleExportAllUserData}
-              className="h-10 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all inline-flex items-center justify-center gap-2 whitespace-nowrap shadow-xs shadow-emerald-600/20 cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5 shrink-0" />
-              <span>Export Uploaded Materials (.ZIP)</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="p-3.5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-800">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Your PDFs &amp; Docs</p>
-            <p className="text-base font-black text-slate-900 dark:text-white mt-0.5">{userSummary.pdfsCount}</p>
-          </div>
-          <div className="p-3.5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-800">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Your Videos</p>
-            <p className="text-base font-black text-slate-900 dark:text-white mt-0.5">{userSummary.videosCount}</p>
-          </div>
-          <div className="p-3.5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-800">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Your Images</p>
-            <p className="text-base font-black text-slate-900 dark:text-white mt-0.5">{userSummary.imagesCount}</p>
-          </div>
-          <div className="p-3.5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200/60 dark:border-slate-800">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Your Web Links</p>
-            <p className="text-base font-black text-slate-900 dark:text-white mt-0.5">{userSummary.linksCount}</p>
-          </div>
-        </div>
-
-        {userUploadedFiles.length > 0 && (
-          <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2.5">
-              Your Uploaded Workspace Materials ({userUploadedFiles.length})
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {userUploadedFiles.slice(0, 6).map((uFile) => (
-                <div
-                  key={uFile.id}
-                  className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800"
-                >
-                  <div className="min-w-0 flex items-center gap-2">
-                    <FileText className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
-                      {getNotebookLMDisplayTitle(uFile)}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => exportSingleUserFile(uFile)}
-                    className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-slate-200 dark:border-slate-700 text-[11px] font-bold inline-flex items-center gap-1 shrink-0 cursor-pointer transition-colors"
-                  >
-                    <Download className="w-3 h-3" />
-                    <span>Export .ZIP</span>
-                  </button>
-                </div>
-              ))}
-            </div>
           </div>
         )}
       </div>
