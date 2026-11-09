@@ -532,6 +532,7 @@ export async function extractYouTubeInfo(
   description: string;
   chapters: string[];
   hasCaptions: boolean;
+  hasRealCaptions: boolean;
   wordCount: number;
   isValidWordCount: boolean;
   validationStatus: TranscriptValidationStatus;
@@ -551,6 +552,7 @@ export async function extractYouTubeInfo(
     description: transcriptResult.description,
     chapters: transcriptResult.chapters.map(ch => `[${ch.timestamp}] ${ch.title}`),
     hasCaptions: transcriptResult.hasCaptions,
+    hasRealCaptions: Boolean(transcriptResult.hasRealCaptions),
     wordCount: transcriptResult.wordCount,
     isValidWordCount: transcriptResult.isValidWordCount,
     validationStatus: transcriptResult.validationStatus,
@@ -757,11 +759,7 @@ Instructions:
 3. Provide 5-6 specific factual "keyTakeaways" and 4-5 content-based "practiceQuestions" (with answers and explanations) so a student can be quizzed on this video.
 4. In "transcription", preserve a comprehensive, timestamped section-by-section lecture walkthrough and spoken transcript covering the concepts taught in the video.`;
 
-    const alreadyHasValidatedTranscript = Boolean(
-      enrichedSourceText && enrichedSourceText.includes('Full Timestamped Video Transcript')
-    );
-
-    if (ytId && !alreadyHasValidatedTranscript) {
+    if (ytId) {
       contents = [
         {
           fileData: {

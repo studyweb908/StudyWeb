@@ -22,12 +22,14 @@ import {
   Flame,
   Calendar,
   Check,
-  AlertCircle
+  AlertCircle,
+  Share2
 } from 'lucide-react';
 import { useThemeMode } from '../../hooks/useThemeMode';
 import { readSyncProfileSnapshot, fetchAndReconcileSupabaseProfile } from '../../utils/profileStorage';
 import { ProductTourService } from '../../services/ProductTourService';
 import { StudyTrackerService, getLocalDateString, getPreviousDateString } from '../../services/StudyTrackerService';
+import { triggerNativeDeviceShare } from './ShareContentModal';
 
 const tabLabels: Record<string, string> = {
   'dashboard': 'Home',
@@ -832,14 +834,30 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setIsStreakCalendarOpen(false)}
-                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
-                aria-label="Close Streak Calendar"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() =>
+                    triggerNativeDeviceShare({
+                      type: 'streak',
+                      streakCount: Math.max(1, streakStats.currentStreak || 1),
+                    })
+                  }
+                  className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-sm shadow-orange-500/20 transition-all cursor-pointer"
+                  title="Share your streak"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>Share</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsStreakCalendarOpen(false)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+                  aria-label="Close Streak Calendar"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Scrollable Body */}

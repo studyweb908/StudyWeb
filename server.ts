@@ -5,7 +5,7 @@ import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import { knowledgeRouter } from "./src/knowledge-engine/api.js";
-import { studyMaterialRouter, extractYouTubeInfo, scrapeWebPage, isRawUrlOrPlaceholderName } from "./src/services/studyMaterialPipeline.js";
+import { studyMaterialRouter, extractYouTubeInfo, scrapeWebPage, enrichUrlWithGeminiWebGrounding, isRawUrlOrPlaceholderName } from "./src/services/studyMaterialPipeline.js";
 import { TranscriptProcessor } from "./src/services/TranscriptProcessor.js";
 import { cleanNotebookLMTitle } from "./src/utils/notebookTitle.js";
 import { toValidUuid } from "./src/utils/uuid.js";
@@ -2108,12 +2108,18 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         qLower.includes("what is this video about") ||
         qLower.includes("what is the video about") ||
         qLower.includes("what is in this link") ||
+        qLower.includes("what is in the link") ||
+        qLower.includes("what's in the link") ||
+        qLower.includes("what is the link about") ||
         qLower.includes("what is this link about") ||
+        qLower.includes("what is in this url") ||
+        qLower.includes("what is in the url") ||
         qLower.includes("tell me what is in") ||
         qLower.includes("analyze what i uploaded") ||
         qLower.includes("analyze this video") ||
         qLower.includes("analyze the video") ||
         qLower.includes("analyze this link") ||
+        qLower.includes("analyze the link") ||
         qLower.includes("what do my documents say") ||
         qLower.includes("what is in my files") ||
         qLower.includes("what's in my files") ||
@@ -2134,7 +2140,11 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         qLower.includes('this video') ||
         qLower.includes('the video') ||
         qLower.includes('this link') ||
+        qLower.includes('the link') ||
+        qLower.includes('this url') ||
+        qLower.includes('the url') ||
         qLower.includes('this website') ||
+        qLower.includes('the website') ||
         qLower.includes('this webpage') ||
         qLower.includes('this article') ||
         qLower.includes('my file') ||
@@ -2231,7 +2241,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         /\b(all\s+(my\s+|our\s+|the\s+|of\s+the\s+)?workspaces|what\s+workspaces\s+do\s+(i|we)\s+have|list\s+(all\s+)?(my\s+|our\s+)?workspaces|every\s+workspace)\b/i.test(qLower);
 
       const isDeepStudyMaterialAnalysisQuery =
-        /\b(study\s+materials?|this\s+image|the\s+image|this\s+picture|this\s+photo|this\s+diagram|this\s+screenshot|explain|analyze|breakdown|break\s+down|summarize|tell\s+me\s+about)\b/i.test(qLower);
+        /\b(study\s+materials?|this\s+image|the\s+image|this\s+picture|this\s+photo|this\s+diagram|this\s+screenshot|this\s+link|the\s+link|my\s+link|this\s+url|the\s+url|this\s+video|the\s+video|my\s+video|this\s+website|the\s+website|this\s+article|the\s+article|this\s+post|the\s+post|this\s+pdf|the\s+pdf|this\s+document|the\s+document|this\s+file|the\s+file|explain|analyze|breakdown|break\s+down|summarize|tell\s+me\s+about|watch|what\s+is\s+in\s+(the|this|my)\s+(link|url|video|website|webpage|article|post|file|document|pdf|image))\b/i.test(qLower);
 
       // Check if any file in the active workspace has an image or PDF binary (`fileBase64` or `data:` URL)
       const hasInlineImageInActiveWorkspace = effectiveFiles.some((f: any) => {
@@ -2269,6 +2279,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
           ? effectiveFiles.filter((f: any) => promptUrls.includes(f.url || f.name))
           : effectiveFiles.slice(0, 3);
 
+        let anyFileNeedsLiveEnrichment = false;
         const enrichmentPromise = Promise.all(
           targetFiles.map(async (f: any) => {
             const candidateUrl =
@@ -2291,6 +2302,10 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
               isRawUrlOrPlaceholderName(f.name) ||
               !f.summary ||
               lacksCaptionsInTranscript;
+
+            if (needsEnrichment) {
+              anyFileNeedsLiveEnrichment = true;
+            }
 
             if (isVideo && needsEnrichment) {
               try {
@@ -2340,6 +2355,23 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
                     scraped.text ? `Webpage Content:\n${scraped.text.slice(0, 16000)}` : ''
                   ].filter(Boolean).join('\n\n');
                 }
+                const apiKey = getGeminiApiKey();
+                if (apiKey && (!f.transcription || f.transcription.length < 800)) {
+                  const aiClient = new GoogleGenAI({
+                    apiKey,
+                    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+                  });
+                  const grounded = await enrichUrlWithGeminiWebGrounding(aiClient, candidateUrl, f.name, f.transcription);
+                  if (grounded.groundedTitle && isRawUrlOrPlaceholderName(f.name)) {
+                    f.name = cleanNotebookLMTitle(grounded.groundedTitle, candidateUrl, 'url');
+                  }
+                  if (grounded.groundedContent) {
+                    f.transcription = [
+                      f.transcription,
+                      `=== LIVE WEB & URL CONTEXT GROUNDING (${candidateUrl}) ===\n${grounded.groundedContent}`
+                    ].filter(Boolean).join('\n\n');
+                  }
+                }
               } catch (webErr: any) {
                 console.warn('[AI Tutor] Webpage live enrichment notice:', webErr?.message);
               }
@@ -2347,7 +2379,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
           })
         );
 
-        const enrichmentTimeoutMs = hasDirectTurnAttachment || promptUrls.length > 0 ? 2500 : 700;
+        const enrichmentTimeoutMs = anyFileNeedsLiveEnrichment || hasDirectTurnAttachment || promptUrls.length > 0 ? 8500 : 1200;
         await Promise.race([
           enrichmentPromise,
           new Promise(resolve => setTimeout(resolve, enrichmentTimeoutMs))
@@ -2785,13 +2817,8 @@ ${citationGuideline}`;
               });
             }
           } else {
-            const hasRealCaptions = Boolean(
-              file.transcription &&
-              (file.transcription.includes('[00:') ||
-               file.transcription.includes('Full Timestamped Video Transcript') ||
-               file.transcription.length > 2500)
-            );
-            const ytId = !hasRealCaptions ? TranscriptProcessor.extractYouTubeId(file.url || file.name || '') : null;
+            // Always attach YouTube video URLs as native Gemini fileData so Gemini watches the whole video directly like NotebookLM
+            const ytId = TranscriptProcessor.extractYouTubeId(file.url || file.name || '');
             if (ytId) {
               currentTurnParts.push({
                 fileData: {
@@ -2878,9 +2905,10 @@ ${citationGuideline}`;
             let response: any = null;
             let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
             try {
-              const activeParts = pass === 0 ? currentTurnParts : [{ text: prompt }];
-              const contentsPayload = pass === 0 ? buildContentsPayload(activeParts, 6) : prompt;
-              const timeoutMs = 9500;
+              const activeParts = pass <= 1 ? currentTurnParts : [{ text: prompt }];
+              const contentsPayload = pass <= 1 ? buildContentsPayload(activeParts, 6) : prompt;
+              const hasMediaOrVideoPart = activeParts.some((p: any) => Boolean(p?.fileData || p?.inlineData));
+              const timeoutMs = hasMediaOrVideoPart ? 22000 : 12000;
 
               const supportsMinimalThinking = currentModel.startsWith("gemini-3");
 
@@ -2890,7 +2918,7 @@ ${citationGuideline}`;
                 config: {
                   systemInstruction: pass <= 1
                     ? systemInstruction
-                    : [coreSystemInstruction, outOfWorkspaceInstruction].filter(Boolean).join('\n\n'),
+                    : [coreSystemInstruction, outOfWorkspaceInstruction, fileOverviewContext, groundedSourceContext].filter(Boolean).join('\n\n'),
                   temperature: 0.6,
                   ...(supportsMinimalThinking
                     ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }

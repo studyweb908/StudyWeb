@@ -1174,36 +1174,41 @@ export default function WorkspaceChat({
       let fullText = '';
       let summaryText = '';
       let highlightsList: string[] = [];
+      let processedMaterialId = `file-link-${Date.now()}`;
 
-      if (isYt) {
-        const res = await fetch('/api/fetch-transcript', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: normalizedUrl })
-        });
-        if (res.ok) {
-          const data = await res.json().catch(() => null);
-          if (data) {
-            analyzedTitle = (data.title || '').trim();
-            fullText = (data.transcript || data.summary || '').trim();
-            summaryText = (data.summary || '').trim();
-            if (Array.isArray(data.highlights)) highlightsList = data.highlights;
-          }
+      let token: string | undefined;
+      let userId: string | undefined;
+      try {
+        if (supabase) {
+          const { data: sessionData } = await supabase.auth.getSession();
+          token = sessionData?.session?.access_token;
+          userId = sessionData?.session?.user?.id;
         }
-      } else {
-        const res = await fetch('/api/scrape-url', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: normalizedUrl })
-        });
-        if (res.ok) {
-          const data = await res.json().catch(() => null);
-          if (data) {
-            analyzedTitle = (data.title || '').trim();
-            fullText = (data.content || data.summary || '').trim();
-            summaryText = (data.summary || '').trim();
-            if (Array.isArray(data.highlights)) highlightsList = data.highlights;
-          }
+      } catch {}
+
+      const res = await fetch('/api/study-materials/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: toValidUuid(workspace.id),
+          userId: userId || undefined,
+          supabaseToken: token || undefined,
+          name: normalizedUrl,
+          type: isYt ? 'video' : 'url',
+          size: isYt ? 'Full Video' : 'Web Link',
+          url: normalizedUrl
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        const mat = data?.material || data?.file || data;
+        if (mat) {
+          if (mat.id) processedMaterialId = mat.id;
+          analyzedTitle = (mat.name || mat.title || '').trim();
+          fullText = (mat.transcription || mat.contentText || mat.content_text || mat.summary || '').trim();
+          summaryText = (mat.summary || '').trim();
+          if (Array.isArray(mat.highlights)) highlightsList = mat.highlights;
         }
       }
 
@@ -1229,12 +1234,12 @@ export default function WorkspaceChat({
       // Save analyzed link into workspace and show compact File Ready badge in chat without summarizing
       if (onUpdateWorkspace) {
         const wsLinkFile: WorkspaceFile = {
-          id: `file-link-${Date.now()}`,
+          id: processedMaterialId,
           name: analyzedTitle,
           size: newDraft.size,
-          type: isYt ? 'video' : 'doc',
+          type: isYt ? 'video' : 'url',
           uploadDate: new Date().toISOString(),
-          status: 'indexed',
+          status: 'completed',
           tags: [isYt ? 'Video Study Guide' : 'Web Resource'],
           summary: newDraft.summary,
           transcription: newDraft.content,
@@ -1243,7 +1248,7 @@ export default function WorkspaceChat({
         };
         onUpdateWorkspace({
           ...workspace,
-          files: [wsLinkFile, ...(workspace.files || [])]
+          files: [wsLinkFile, ...(workspace.files || []).filter(f => f.id !== processedMaterialId)]
         });
       }
 

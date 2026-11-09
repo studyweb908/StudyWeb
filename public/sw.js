@@ -1,9 +1,10 @@
 // StudyWeb Offline Service Worker
-const CACHE_NAME = 'studyweb-cache-v5';
+const CACHE_NAME = 'studyweb-cache-v6';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',
   '/logo.png',
+  '/logo-inner.png',
   '/favicon.png',
   '/favicon.ico',
   '/favicon-32x32.png',
@@ -49,10 +50,15 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // CRITICAL: NEVER intercept /api/ endpoints or backend services
+  // CRITICAL: NEVER intercept /api/, /auth/, or Vite source/module scripts
   try {
     const requestUrl = new URL(event.request.url);
-    if (requestUrl.pathname.startsWith('/api/') || requestUrl.pathname.startsWith('/auth/')) {
+    if (
+      requestUrl.pathname.startsWith('/api/') ||
+      requestUrl.pathname.startsWith('/auth/') ||
+      requestUrl.pathname.startsWith('/src/') ||
+      requestUrl.pathname.startsWith('/node_modules/')
+    ) {
       return;
     }
   } catch {

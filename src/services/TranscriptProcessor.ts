@@ -56,6 +56,8 @@ export interface TranscriptResult {
   language: string;
   /** Whether actual timed spoken captions were retrieved */
   hasCaptions: boolean;
+  /** Whether verbatim timed captions were directly extracted */
+  hasRealCaptions?: boolean;
   /** Source strategy that provided the transcript */
   sourceStrategy:
     | 'innertube_captions'
@@ -1307,6 +1309,11 @@ export class TranscriptProcessor {
       // Validation Step: Check if fetched transcript exceeds minimum word count threshold
       const validation = this.validateTranscript(plainText, minWordCount);
 
+      const hasRealCaptions =
+        validation.isValid &&
+        segments.length > 0 &&
+        sourceStrategy !== 'metadata_and_chapters_synthesis';
+
       const result: TranscriptResult = {
         videoId: ytId,
         normalizedUrl,
@@ -1320,6 +1327,7 @@ export class TranscriptProcessor {
         chapters,
         language,
         hasCaptions: validation.isValid,
+        hasRealCaptions,
         wordCount: validation.wordCount,
         isValidWordCount: validation.isValid,
         validationStatus: validation.status,
@@ -1364,31 +1372,40 @@ export class TranscriptProcessor {
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
 
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 14000);
+      const streamModels = ['gemini-3.8-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
+      let text = '';
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: [
-          {
-            fileData: {
-              fileUri: normalizedUrl,
-              mimeType: 'video/mp4'
-            }
-          },
-          {
-            text: `Extract a detailed, accurate, chronological timestamped transcript and section-by-section spoken breakdown of this video${knownTitle ? ` ("${knownTitle}")` : ''}.
+      for (const model of streamModels) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 22000);
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: [
+              {
+                fileData: {
+                  fileUri: normalizedUrl,
+                  mimeType: 'video/mp4'
+                }
+              },
+              {
+                text: `Watch this entire YouTube video from start to finish and extract a detailed, accurate, chronological timestamped transcript and section-by-section spoken & visual walkthrough${knownTitle ? ` ("${knownTitle}")` : ''}.
 Format each line strictly with a timestamp in brackets at the start of the line, like:
-[00:00] Exact spoken introduction and core premise explained in the opening...
-[00:45] Next key concept, example, story, or mechanism discussed by the speaker...
-[01:30] Subsequent explanation, key definitions, and details...
-Include all specific examples, stories, facts, definitions, formulas, and conclusions from start to finish. Output ONLY the timestamped lines.`
-          }
-        ]
-      });
-      clearTimeout(timeout);
+[00:00] Exact spoken introduction, visual context, and core premise explained in the opening...
+[00:45] Next key concept, example, demonstration, story, or mechanism discussed by the speaker...
+[01:30] Subsequent explanation, key definitions, visual slides/code/diagrams, and details...
+Include all specific examples, names, numbers, stories, facts, definitions, formulas, and conclusions from start to finish. Output ONLY the timestamped lines.`
+              }
+            ]
+          });
+          clearTimeout(timeout);
+          text = response?.text?.trim() || '';
+          if (text && text.length > 80) break;
+        } catch {
+          clearTimeout(timeout);
+        }
+      }
 
-      const text = response?.text?.trim() || '';
       if (!text) return [];
 
       const segments: TranscriptSegment[] = [];

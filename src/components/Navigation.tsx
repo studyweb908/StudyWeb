@@ -143,12 +143,24 @@ export default function Navigation() {
       setIsAuthModalOpen(true);
     };
 
-    // Check URL hash or query parameters for password recovery link
+    // Check URL hash, query parameters, or social invite referral for password recovery or login modal
     const checkHashRecovery = () => {
       const hash = window.location.hash || window.location.search;
+      const referrer = typeof document !== 'undefined' ? (document.referrer || '').toLowerCase() : '';
+      const isSocialInviteReferral =
+        referrer.includes('whatsapp') ||
+        referrer.includes('facebook') ||
+        referrer.includes('instagram') ||
+        referrer.includes('t.co') ||
+        referrer.includes('telegram');
+
       if (hash.includes('type=recovery') || hash.includes('reset-password')) {
         setAuthError('');
         setAuthMode('reset-password');
+        setIsAuthModalOpen(true);
+      } else if (hash.includes('login') || hash.includes('invite') || isSocialInviteReferral) {
+        setAuthError('');
+        setAuthMode('login');
         setIsAuthModalOpen(true);
       }
     };
