@@ -1,5 +1,5 @@
 // StudyWeb Offline Service Worker
-const CACHE_NAME = 'studyweb-cache-v6';
+const CACHE_NAME = 'studyweb-cache-v7';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',

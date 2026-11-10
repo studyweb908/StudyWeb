@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { readSyncProfileSnapshot } from '../../utils/profileStorage';
 
 export const STUDYWEB_SHARE_URL = 'https://studywebai.vercel.app';
 
@@ -57,13 +58,41 @@ if (typeof window !== 'undefined') {
   ensureLogoLoaded();
 }
 
+function resolveStreakUserHandle(): string {
+  try {
+    const profile = readSyncProfileSnapshot();
+    const storedName =
+      typeof window !== 'undefined' ? localStorage.getItem('studyweb_profile_name') || '' : '';
+    const emailPrefix = profile.email && profile.email.includes('@')
+      ? profile.email.split('@')[0].trim()
+      : '';
+    const candidateName = (profile.fullName || storedName || emailPrefix || 'StudyWebUser').trim();
+    // Create a clean @handle without spaces (e.g. "Mohammad Rayan" -> "@MohammadRayan")
+    const compactHandle = candidateName
+      .replace(/^@+/, '')
+      .replace(/\s+/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '');
+    return `@${compactHandle || emailPrefix.replace(/[^a-zA-Z0-9._-]/g, '') || 'StudyWebUser'}`;
+  } catch {
+    return '@StudyWebUser';
+  }
+}
+
+function formatStreakCardDate(date: Date = new Date()): string {
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
 /**
- * Generates a high-resolution Duolingo-style vertical streak share image (PNG data URL)
- * featuring ONLY:
+ * Generates a high-resolution 9:16 vertical streak share image (PNG data URL)
+ * matching the reference layout:
  * - StudyWeb Logo + "Study Web" header at the top
  * - Vibrant layered 3D-style streak flame in the center
  * - Oversized bold streak number + "day streak"
- * (All invite text is kept outside the image)
+ * - "@username  Mon D, YYYY" footer at the bottom of the card
  */
 export function generateStreakShareCardDataUrl(
   streakCount: number = 1,
@@ -74,7 +103,7 @@ export function generateStreakShareCardDataUrl(
 
   const canvas = document.createElement('canvas');
   const width = 900;
-  const height = 940;
+  const height = 1600;
   canvas.width = width;
   canvas.height = height;
 
@@ -94,13 +123,13 @@ export function generateStreakShareCardDataUrl(
       : null);
 
   ctx.save();
-  ctx.font = '900 52px "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif';
+  ctx.font = '900 54px "Plus Jakarta Sans", "Nunito", "Inter", system-ui, -apple-system, sans-serif';
   ctx.textBaseline = 'middle';
 
   const brandText = 'Study Web';
   const textMetrics = ctx.measureText(brandText);
   const textWidth = textMetrics.width;
-  const headerY = 78;
+  const headerY = 235;
   const logoSize = 68;
   const gap = 18;
   const totalHeaderWidth = logoSize + gap + textWidth;
@@ -134,7 +163,7 @@ export function generateStreakShareCardDataUrl(
     ctx.fillText('S', emblemX + logoSize / 2, headerY + 2);
   }
 
-  ctx.font = '900 52px "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif';
+  ctx.font = '900 54px "Plus Jakarta Sans", "Nunito", "Inter", system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'left';
   ctx.fillStyle = '#311B92';
   ctx.fillText(brandText, startX + logoSize + gap, headerY + 2);
@@ -142,31 +171,31 @@ export function generateStreakShareCardDataUrl(
 
   // 3. Center Flame Graphic (Duolingo-inspired vibrant red-orange flame with inner highlight & base glow)
   const cx = width / 2;
-  const flameTopY = 175;
+  const flameTopY = 345;
 
   // Soft pink/red elliptical base shadow beneath the flame
   ctx.save();
   ctx.beginPath();
-  ctx.ellipse(cx, flameTopY + 345, 96, 36, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, flameTopY + 365, 108, 40, 0, 0, Math.PI * 2);
   ctx.fillStyle = '#FFD0D6';
   ctx.fill();
   ctx.restore();
 
   // Outer Main Red/Coral Flame Silhouette
   ctx.save();
-  const outerGrad = ctx.createLinearGradient(cx, flameTopY, cx, flameTopY + 345);
+  const outerGrad = ctx.createLinearGradient(cx, flameTopY, cx, flameTopY + 365);
   outerGrad.addColorStop(0, '#FF2E3B');
   outerGrad.addColorStop(0.65, '#FF2A38');
   outerGrad.addColorStop(1, '#E61E2E');
 
   ctx.beginPath();
-  ctx.moveTo(cx, flameTopY + 345);
-  ctx.bezierCurveTo(cx - 145, flameTopY + 345, cx - 155, flameTopY + 195, cx - 122, flameTopY + 75);
-  ctx.quadraticCurveTo(cx - 114, flameTopY + 48, cx - 90, flameTopY + 66);
-  ctx.quadraticCurveTo(cx - 66, flameTopY + 84, cx - 50, flameTopY + 62);
-  ctx.quadraticCurveTo(cx - 16, flameTopY + 14, cx + 10, flameTopY);
-  ctx.quadraticCurveTo(cx + 28, flameTopY - 6, cx + 44, flameTopY + 18);
-  ctx.bezierCurveTo(cx + 145, flameTopY + 150, cx + 150, flameTopY + 345, cx, flameTopY + 345);
+  ctx.moveTo(cx, flameTopY + 365);
+  ctx.bezierCurveTo(cx - 155, flameTopY + 365, cx - 165, flameTopY + 205, cx - 130, flameTopY + 80);
+  ctx.quadraticCurveTo(cx - 122, flameTopY + 50, cx - 96, flameTopY + 70);
+  ctx.quadraticCurveTo(cx - 70, flameTopY + 90, cx - 52, flameTopY + 66);
+  ctx.quadraticCurveTo(cx - 18, flameTopY + 14, cx + 10, flameTopY);
+  ctx.quadraticCurveTo(cx + 30, flameTopY - 6, cx + 46, flameTopY + 20);
+  ctx.bezierCurveTo(cx + 155, flameTopY + 158, cx + 160, flameTopY + 365, cx, flameTopY + 365);
   ctx.closePath();
   ctx.fillStyle = outerGrad;
   ctx.fill();
@@ -174,17 +203,17 @@ export function generateStreakShareCardDataUrl(
 
   // Inner Warm Orange-Gold Flame Layer
   ctx.save();
-  const midGrad = ctx.createLinearGradient(cx - 80, flameTopY + 70, cx + 60, flameTopY + 315);
+  const midGrad = ctx.createLinearGradient(cx - 86, flameTopY + 74, cx + 64, flameTopY + 335);
   midGrad.addColorStop(0, '#FFB020');
   midGrad.addColorStop(0.35, '#FF6B2B');
   midGrad.addColorStop(1, '#FF3342');
 
   ctx.beginPath();
-  ctx.moveTo(cx, flameTopY + 322);
-  ctx.bezierCurveTo(cx - 106, flameTopY + 322, cx - 118, flameTopY + 200, cx - 86, flameTopY + 112);
-  ctx.quadraticCurveTo(cx - 76, flameTopY + 88, cx - 52, flameTopY + 104);
-  ctx.quadraticCurveTo(cx - 14, flameTopY + 58, cx + 12, flameTopY + 76);
-  ctx.bezierCurveTo(cx + 98, flameTopY + 142, cx + 106, flameTopY + 322, cx, flameTopY + 322);
+  ctx.moveTo(cx, flameTopY + 340);
+  ctx.bezierCurveTo(cx - 114, flameTopY + 340, cx - 126, flameTopY + 210, cx - 92, flameTopY + 118);
+  ctx.quadraticCurveTo(cx - 80, flameTopY + 92, cx - 55, flameTopY + 110);
+  ctx.quadraticCurveTo(cx - 14, flameTopY + 62, cx + 14, flameTopY + 80);
+  ctx.bezierCurveTo(cx + 104, flameTopY + 150, cx + 112, flameTopY + 340, cx, flameTopY + 340);
   ctx.closePath();
   ctx.fillStyle = midGrad;
   ctx.fill();
@@ -193,21 +222,21 @@ export function generateStreakShareCardDataUrl(
   // Deep Crimson Bottom Inner Shadow Arc inside flame base
   ctx.save();
   ctx.beginPath();
-  ctx.ellipse(cx, flameTopY + 292, 74, 34, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, flameTopY + 308, 78, 36, 0, 0, Math.PI * 2);
   ctx.fillStyle = '#B81442';
   ctx.fill();
   ctx.restore();
 
   // Glossy Golden-Orange Left Highlight Ribbon
   ctx.save();
-  const glossGrad = ctx.createLinearGradient(cx - 78, flameTopY + 95, cx - 10, flameTopY + 215);
+  const glossGrad = ctx.createLinearGradient(cx - 82, flameTopY + 100, cx - 10, flameTopY + 228);
   glossGrad.addColorStop(0, 'rgba(255, 214, 102, 0.92)');
   glossGrad.addColorStop(1, 'rgba(255, 115, 64, 0.15)');
   ctx.beginPath();
-  ctx.moveTo(cx - 78, flameTopY + 115);
-  ctx.quadraticCurveTo(cx - 28, flameTopY + 75, cx + 2, flameTopY + 102);
-  ctx.quadraticCurveTo(cx - 42, flameTopY + 155, cx - 72, flameTopY + 215);
-  ctx.quadraticCurveTo(cx - 95, flameTopY + 165, cx - 78, flameTopY + 115);
+  ctx.moveTo(cx - 82, flameTopY + 122);
+  ctx.quadraticCurveTo(cx - 30, flameTopY + 80, cx + 2, flameTopY + 108);
+  ctx.quadraticCurveTo(cx - 45, flameTopY + 164, cx - 76, flameTopY + 228);
+  ctx.quadraticCurveTo(cx - 100, flameTopY + 174, cx - 82, flameTopY + 122);
   ctx.closePath();
   ctx.fillStyle = glossGrad;
   ctx.fill();
@@ -216,9 +245,9 @@ export function generateStreakShareCardDataUrl(
   // Center Crisp White Teardrop Core
   ctx.save();
   ctx.beginPath();
-  ctx.moveTo(cx, flameTopY + 178);
-  ctx.bezierCurveTo(cx + 46, flameTopY + 222, cx + 48, flameTopY + 286, cx, flameTopY + 286);
-  ctx.bezierCurveTo(cx - 48, flameTopY + 286, cx - 46, flameTopY + 222, cx, flameTopY + 178);
+  ctx.moveTo(cx, flameTopY + 188);
+  ctx.bezierCurveTo(cx + 48, flameTopY + 234, cx + 52, flameTopY + 302, cx, flameTopY + 302);
+  ctx.bezierCurveTo(cx - 52, flameTopY + 302, cx - 48, flameTopY + 234, cx, flameTopY + 188);
   ctx.closePath();
   ctx.fillStyle = '#FFFFFF';
   ctx.fill();
@@ -229,15 +258,22 @@ export function generateStreakShareCardDataUrl(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
   const streakStr = String(safeStreak);
-  const numberFontSize = streakStr.length >= 4 ? 175 : 215;
-  ctx.font = `900 ${numberFontSize}px "Plus Jakarta Sans", "Nunito", "Inter", system-ui, -apple-system, sans-serif`;
+  const numberFontSize = streakStr.length >= 4 ? 195 : 240;
+  ctx.font = `900 ${numberFontSize}px "Nunito", "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif`;
   ctx.fillStyle = '#FF2A38';
-  ctx.fillText(streakStr, cx, 765);
+  ctx.fillText(streakStr, cx, 1030);
 
   // 5. "day streak" label below the number
-  ctx.font = '800 58px "Plus Jakarta Sans", "Nunito", "Inter", system-ui, -apple-system, sans-serif';
+  ctx.font = '800 64px "Nunito", "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif';
   ctx.fillStyle = '#FF2A38';
-  ctx.fillText('day streak', cx, 855);
+  ctx.fillText('day streak', cx, 1135);
+
+  // 6. Bottom Footer: "@username  Mon D, YYYY" (matching the reference image)
+  const userHandle = resolveStreakUserHandle();
+  const formattedDate = formatStreakCardDate();
+  ctx.font = '800 40px "Nunito", "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = '#52656D';
+  ctx.fillText(`${userHandle}  ${formattedDate}`, cx, 1455);
   ctx.restore();
 
   return canvas.toDataURL('image/png');
