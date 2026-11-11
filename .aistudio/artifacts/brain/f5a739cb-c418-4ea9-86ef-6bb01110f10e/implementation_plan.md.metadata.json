@@ -1,6 +1,0 @@
-{
-  "summary": "Implementation plan for adding an in-app Share Modal with preview cards to AI Tutor answers (with automatic StudyWeb attribution and app link) and enhancing the full-screen Daily Streak Completion animation with a post-animation Share option that includes the completion message, app link, and an automatic positive StudyWeb review.",
-  "updatedAt": "2026-11-04T06:10:14.106061650Z",
-  "requestFeedback": true,
-  "userFacing": true
-}

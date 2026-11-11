@@ -468,10 +468,89 @@ export default function AITutorWorkspace() {
     setSessionGoals(prev => prev.filter(g => g.id !== id));
   };
 
+  // Progressive ChatGPT-style word-by-word streaming state
+  const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
+  const [streamedWordCount, setStreamedWordCount] = useState<number>(0);
+  const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chatFeedRef = useRef<HTMLDivElement | null>(null);
+
+  const stopStreamingAnimation = () => {
+    if (streamTimerRef.current) {
+      clearInterval(streamTimerRef.current);
+      streamTimerRef.current = null;
+    }
+    setStreamingMsgId(null);
+  };
+
+  const scrollChatToBottom = (behavior: ScrollBehavior = 'smooth', force = false) => {
+    const container = chatFeedRef.current;
+    if (container) {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      if (force || distanceFromBottom < 320) {
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior
+        });
+      }
+      return;
+    }
+    chatEndRef.current?.scrollIntoView({ behavior, block: 'end' });
+  };
+
+  const startStreamingMessage = (msg: Message) => {
+    if (!msg || msg.sender !== 'ai' || msg.isError || msg.id === 'welcome-msg' || msg.id.startsWith('welcome-')) {
+      return;
+    }
+    if (streamTimerRef.current) {
+      clearInterval(streamTimerRef.current);
+      streamTimerRef.current = null;
+    }
+
+    const tokens = String(msg.text || '').match(/\S+\s*|\n+/g) || [String(msg.text || '')];
+    if (tokens.length <= 2) {
+      setStreamingMsgId(null);
+      requestAnimationFrame(() => scrollChatToBottom('smooth', true));
+      return;
+    }
+
+    const wordsPerTick = Math.max(1, Math.min(4, Math.ceil(tokens.length / 90)));
+    let currentCount = Math.min(tokens.length, wordsPerTick);
+    setStreamingMsgId(msg.id);
+    setStreamedWordCount(currentCount);
+    requestAnimationFrame(() => scrollChatToBottom('smooth', true));
+
+    streamTimerRef.current = setInterval(() => {
+      currentCount += wordsPerTick;
+      if (currentCount >= tokens.length) {
+        if (streamTimerRef.current) {
+          clearInterval(streamTimerRef.current);
+          streamTimerRef.current = null;
+        }
+        setStreamedWordCount(tokens.length);
+        setStreamingMsgId(null);
+        requestAnimationFrame(() => {
+          scrollChatToBottom('smooth', true);
+          setTimeout(() => scrollChatToBottom('smooth', false), 120);
+        });
+      } else {
+        setStreamedWordCount(currentCount);
+        scrollChatToBottom('smooth', false);
+      }
+    }, 22);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (streamTimerRef.current) {
+        clearInterval(streamTimerRef.current);
+      }
+    };
+  }, []);
+
   // Auto-scroll to bottom
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isThinking]);
+    scrollChatToBottom('smooth', true);
+  }, [messages.length, isThinking]);
 
 
 
@@ -523,6 +602,7 @@ export default function AITutorWorkspace() {
       };
       
       setMessages(prev => [...prev, aiMsg]);
+      startStreamingMessage(aiMsg);
     } catch (err: any) {
       console.warn("Semantic search failed:", err);
       const errorMsg: Message = {
@@ -539,6 +619,7 @@ export default function AITutorWorkspace() {
 
   const handleClearChat = (showNotification = true) => {
     stopTutorSpeech();
+    stopStreamingAnimation();
     setInputValue('');
     setSearchQuery('');
     setIsThinking(false);
@@ -743,6 +824,7 @@ export default function AITutorWorkspace() {
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setMessages(prev => [...prev, aiMsg]);
+      startStreamingMessage(aiMsg);
     } catch (error: any) {
       const errCode = error?.code || 'AI_TUTOR_ERR';
       const cleanError = error?.message && !error.message.includes("<!doctype") && !error.message.includes("<html")
@@ -1328,8 +1410,16 @@ export default function AITutorWorkspace() {
         </div>
 
         {/* Main Chat Feed */}
-        <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-3 sm:py-6 space-y-4 sm:space-y-6 custom-scrollbar bg-slate-50/30 dark:bg-slate-950/5">
-          {messages.map((msg, msgIdx) => (
+        <div
+          ref={chatFeedRef}
+          className="flex-1 overflow-y-auto px-3 sm:px-6 py-3 sm:py-6 space-y-4 sm:space-y-6 custom-scrollbar bg-slate-50/30 dark:bg-slate-950/5 scroll-smooth"
+        >
+          {messages.map((msg, msgIdx) => {
+            const isMsgStreaming = streamingMsgId === msg.id && msg.sender === 'ai' && !msg.isError;
+            const visibleMsgText = isMsgStreaming
+              ? (String(msg.text || '').match(/\S+\s*|\n+/g) || [String(msg.text || '')]).slice(0, streamedWordCount).join('')
+              : msg.text;
+            return (
             <div 
               key={msg.id}
               className={`flex gap-2.5 sm:gap-4 max-w-3xl ${msg.sender === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}
@@ -1363,7 +1453,7 @@ export default function AITutorWorkspace() {
                   )}
                   {/* Simulated Markdown renderer */}
                   <div className="space-y-3 sm:space-y-4 whitespace-pre-wrap break-words">
-                    {msg.text.split(/(?=\n\n###|\n\n```|\n\n- )/g).map((block, idx) => {
+                    {visibleMsgText.split(/(?=\n\n###|\n\n```|\n\n- )/g).map((block, idx) => {
                       const paragraph = block.trim();
                       if (!paragraph) return null;
                       
@@ -1416,10 +1506,13 @@ export default function AITutorWorkspace() {
                         </div>
                       );
                     })}
+                    {isMsgStreaming && (
+                      <span className="inline-block w-2 h-2 ml-1 align-middle rounded-full bg-indigo-600 dark:bg-indigo-400 animate-pulse" />
+                    )}
                   </div>
 
                   {/* Citations block */}
-                  {msg.citations && msg.citations.length > 0 && (
+                  {!isMsgStreaming && msg.citations && msg.citations.length > 0 && (
                     <div className="flex flex-wrap items-center gap-1.5 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 mt-2.5">
                       <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Citations:</span>
                       {msg.citations.map((cite, idx) => {
@@ -1515,7 +1608,7 @@ export default function AITutorWorkspace() {
                     </div>
                   )}
 
-                  {msg.sender === 'ai' && !msg.isError && msg.followUpQuestions && msg.followUpQuestions.length > 0 && (
+                  {msg.sender === 'ai' && !isMsgStreaming && !msg.isError && msg.followUpQuestions && msg.followUpQuestions.length > 0 && (
                     <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 mt-2.5 flex flex-col gap-1.5">
                       <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-0.5">
                         <Sparkles className="w-3 h-3 text-indigo-500" />
@@ -1589,7 +1682,8 @@ export default function AITutorWorkspace() {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
 
           {/* Crisp Boxless StudyWeb Brand Logo Subtle Scale Indicator */}
           <AnimatePresence>

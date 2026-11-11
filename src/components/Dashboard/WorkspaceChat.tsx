@@ -672,6 +672,92 @@ export default function WorkspaceChat({
     }];
   });
 
+  // Progressive ChatGPT-style word-by-word streaming state
+  const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
+  const [streamedWordCount, setStreamedWordCount] = useState<number>(0);
+  const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamedMessageIdsRef = useRef<Set<string>>(new Set());
+  const chatScrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const stopStreamingAnimation = useCallback(() => {
+    if (streamTimerRef.current) {
+      clearInterval(streamTimerRef.current);
+      streamTimerRef.current = null;
+    }
+    setStreamingMsgId(null);
+  }, []);
+
+  const scrollChatToBottom = useCallback((behavior: ScrollBehavior = 'smooth', force = false) => {
+    const container = chatScrollContainerRef.current;
+    if (container) {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      if (force || distanceFromBottom < 320) {
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior
+        });
+      }
+      return;
+    }
+    chatEndRef.current?.scrollIntoView({ behavior, block: 'end' });
+  }, []);
+
+  const startStreamingMessage = useCallback((msg: Message) => {
+    if (!msg || msg.sender !== 'ai' || msg.isError || msg.isFileReadyBadge || msg.id === 'welcome-msg' || msg.id.startsWith('welcome-')) {
+      return;
+    }
+    if (streamedMessageIdsRef.current.has(msg.id)) {
+      return;
+    }
+    streamedMessageIdsRef.current.add(msg.id);
+
+    if (streamTimerRef.current) {
+      clearInterval(streamTimerRef.current);
+      streamTimerRef.current = null;
+    }
+
+    const tokens = String(msg.text || '').match(/\S+\s*|\n+/g) || [String(msg.text || '')];
+    if (tokens.length <= 2) {
+      setStreamingMsgId(null);
+      requestAnimationFrame(() => scrollChatToBottom('smooth', true));
+      return;
+    }
+
+    // Fast, natural ChatGPT-style word-by-word cadence
+    const wordsPerTick = Math.max(1, Math.min(4, Math.ceil(tokens.length / 90)));
+    let currentCount = Math.min(tokens.length, wordsPerTick);
+    setStreamingMsgId(msg.id);
+    setStreamedWordCount(currentCount);
+    requestAnimationFrame(() => scrollChatToBottom('smooth', true));
+
+    streamTimerRef.current = setInterval(() => {
+      currentCount += wordsPerTick;
+      if (currentCount >= tokens.length) {
+        if (streamTimerRef.current) {
+          clearInterval(streamTimerRef.current);
+          streamTimerRef.current = null;
+        }
+        setStreamedWordCount(tokens.length);
+        setStreamingMsgId(null);
+        requestAnimationFrame(() => {
+          scrollChatToBottom('smooth', true);
+          setTimeout(() => scrollChatToBottom('smooth', false), 120);
+        });
+      } else {
+        setStreamedWordCount(currentCount);
+        scrollChatToBottom('smooth', false);
+      }
+    }, 22);
+  }, [scrollChatToBottom]);
+
+  useEffect(() => {
+    return () => {
+      if (streamTimerRef.current) {
+        clearInterval(streamTimerRef.current);
+      }
+    };
+  }, []);
+
   // When switching workspaces to open a new chat, delete older chat history and start fresh
   // (Ignore initial hydration transition from fallback 'general-study' so startup never flashes or wipes)
   useEffect(() => {
@@ -679,6 +765,7 @@ export default function WorkspaceChat({
       const wasInitialFallback = prevWorkspaceIdRef.current === 'general-study';
       prevWorkspaceIdRef.current = workspace.id;
       if (!wasInitialFallback) {
+        stopStreamingAnimation();
         const freshWelcome = [buildWelcomeMessage(false)];
         AITutorBackgroundService.resetWorkspaceChat(workspace.id, resolvedUserId, freshWelcome as any);
         setMessages(freshWelcome);
@@ -696,6 +783,7 @@ export default function WorkspaceChat({
         if (Array.isArray(parsed)) {
           const cleanMsgs = parsed.filter((m: Message) => !m.isError && !isLegacyDummyMessage(m));
           if (cleanMsgs.length > 0) {
+            cleanMsgs.forEach((m: Message) => streamedMessageIdsRef.current.add(m.id));
             setMessages(cleanMsgs);
             return;
           }
@@ -703,7 +791,7 @@ export default function WorkspaceChat({
       }
     } catch {}
     setMessages([buildWelcomeMessage(false)]);
-  }, [chatHistoryKey, workspace.id, resolvedUserId, buildWelcomeMessage]);
+  }, [chatHistoryKey, workspace.id, resolvedUserId, buildWelcomeMessage, stopStreamingAnimation]);
 
   // Listen for background AI Tutor query events, chat resets, and window focus/visibility changes
   useEffect(() => {
@@ -723,6 +811,7 @@ export default function WorkspaceChat({
         if (prev.some(m => m.id === newMsg.id)) return prev;
         return [...prev, newMsg];
       });
+      startStreamingMessage(newMsg);
 
       if (autoSpeak && !newMsg.isError) {
         handleSpeakMessage(newMsg.id, newMsg.text);
@@ -734,6 +823,7 @@ export default function WorkspaceChat({
       const resetMsgs = Array.isArray(detail?.messages) && detail.messages.length > 0
         ? detail.messages
         : [buildWelcomeMessage(true)];
+      stopStreamingAnimation();
       setIsThinking(false);
       setInputValue('');
       setAttachedDrafts([]);
@@ -791,7 +881,7 @@ export default function WorkspaceChat({
       window.removeEventListener('focus', handleVisibilityOrFocus);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
     };
-  }, [workspace.id, chatHistoryKey, autoSpeak, handleSpeakMessage, buildWelcomeMessage]);
+  }, [workspace.id, chatHistoryKey, autoSpeak, handleSpeakMessage, buildWelcomeMessage, startStreamingMessage, stopStreamingAnimation]);
 
   // Keep WorkspaceChatCache and localStorage synchronized with current messages
   useEffect(() => {
@@ -804,8 +894,8 @@ export default function WorkspaceChat({
 
   // Scroll to bottom on new message
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isThinking, attachedDrafts]);
+    scrollChatToBottom('smooth', true);
+  }, [messages.length, isThinking, attachedDrafts.length, scrollChatToBottom]);
 
   const [shareModalData, setShareModalData] = useState<{ answer: string; question?: string } | null>(null);
 
@@ -821,6 +911,7 @@ export default function WorkspaceChat({
   // Clear chat thread ("Clear Chat"): completely delete older chat from cache & storage while keeping workspace open
   const handleResetChat = () => {
     stopSpeech();
+    stopStreamingAnimation();
     setInputValue('');
     setAttachedDrafts([]);
     setIsThinking(false);
@@ -1652,6 +1743,7 @@ export default function WorkspaceChat({
         if (prev.some(m => m.id === aiMsg.id)) return prev;
         return [...prev, aiMsg as Message];
       });
+      startStreamingMessage(aiMsg as Message);
 
       if (autoSpeak && !aiMsg.isError) {
         handleSpeakMessage(aiMsg.id, aiMsg.text);
@@ -1691,6 +1783,7 @@ export default function WorkspaceChat({
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           };
           setMessages(prev => [...prev, userMsg, aiMsg]);
+          startStreamingMessage(aiMsg);
         } else {
           handleSend(question);
         }
@@ -1698,7 +1791,7 @@ export default function WorkspaceChat({
     };
     window.addEventListener('studyweb_ask_ai_tutor', handleVoiceAsk);
     return () => window.removeEventListener('studyweb_ask_ai_tutor', handleVoiceAsk);
-  }, [handleSend]);
+  }, [handleSend, startStreamingMessage, workspace.name]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1710,13 +1803,24 @@ export default function WorkspaceChat({
     }
   };
 
-  // Minimalist Markdown Formatter
-  const renderMessageContent = (text: string) => {
+  // Minimalist Markdown Formatter with live ChatGPT-style streaming cursor support
+  const renderMessageContent = (text: string, isStreaming = false) => {
     const lines = text.split('\n');
+    const lastNonEmptyIdx = (() => {
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].trim()) return i;
+      }
+      return lines.length - 1;
+    })();
+    const cursorHtml = isStreaming
+      ? ' <span class="inline-block w-2 h-2 ml-0.5 align-middle rounded-full bg-indigo-600 dark:bg-indigo-400 animate-pulse"></span>'
+      : '';
+
     return (
       <div className="space-y-2 text-sm sm:text-[15px] leading-relaxed">
         {lines.map((line, idx) => {
           const trimmed = line.trim();
+          const isLastLine = isStreaming && idx === lastNonEmptyIdx;
           if (!trimmed) return <div key={idx} className="h-1.5" />;
 
           // Heading 3
@@ -1724,6 +1828,7 @@ export default function WorkspaceChat({
             return (
               <h4 key={idx} className="font-extrabold text-base text-slate-900 dark:text-white pt-1">
                 {trimmed.replace('### ', '')}
+                {isLastLine && <span className="inline-block w-2 h-2 ml-1 align-middle rounded-full bg-indigo-600 dark:bg-indigo-400 animate-pulse" />}
               </h4>
             );
           }
@@ -1732,6 +1837,7 @@ export default function WorkspaceChat({
             return (
               <h3 key={idx} className="font-extrabold text-base sm:text-lg text-slate-900 dark:text-white pt-1">
                 {trimmed.replace(/^#+\s*/, '')}
+                {isLastLine && <span className="inline-block w-2 h-2 ml-1 align-middle rounded-full bg-indigo-600 dark:bg-indigo-400 animate-pulse" />}
               </h3>
             );
           }
@@ -1747,7 +1853,7 @@ export default function WorkspaceChat({
                   dangerouslySetInnerHTML={{ 
                     __html: content
                       .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>')
-                      .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
+                      .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>') + (isLastLine ? cursorHtml : '')
                   }} 
                 />
               </div>
@@ -1767,7 +1873,7 @@ export default function WorkspaceChat({
                   dangerouslySetInnerHTML={{ 
                     __html: numMatch[2]
                       .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>')
-                      .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
+                      .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>') + (isLastLine ? cursorHtml : '')
                   }} 
                 />
               </div>
@@ -1781,7 +1887,7 @@ export default function WorkspaceChat({
               dangerouslySetInnerHTML={{ 
                 __html: trimmed
                   .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>')
-                  .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
+                  .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>') + (isLastLine ? cursorHtml : '')
               }} 
             />
           );
@@ -1950,39 +2056,39 @@ export default function WorkspaceChat({
             </button>
 
             {showVoiceSettings && (
-              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-4 z-50 space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
+              <div className="fixed inset-x-3 top-14 sm:absolute sm:inset-x-auto sm:top-full sm:right-0 sm:mt-2 w-auto sm:w-96 max-w-[calc(100vw-1.5rem)] max-h-[calc(100dvh-5rem)] overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-3 sm:p-4 z-50 space-y-3 sm:space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
                 {/* Header */}
-                <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold shrink-0">
                       <Volume2 className="w-4 h-4" />
                     </div>
-                    <div>
-                      <h4 className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white leading-tight">
+                    <div className="min-w-0">
+                      <h4 className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white leading-tight truncate">
                         Tutor Voice Settings
                       </h4>
-                      <p className="text-[10px] text-slate-400 font-medium">Auditory Socratic feedback & profiles</p>
+                      <p className="text-[10px] text-slate-400 font-medium truncate">Auditory Socratic feedback & profiles</p>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setShowVoiceSettings(false)}
-                    className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
+                    className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer shrink-0"
                   >
                     <X className="w-4 h-4" />
                   </button>
                 </div>
 
                 {/* Auto-Speech Toggle Switch */}
-                <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200/70 dark:border-slate-800/70">
-                  <div>
-                    <div className="font-bold text-xs text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                <div className="flex items-center justify-between gap-2.5 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200/70 dark:border-slate-800/70">
+                  <div className="min-w-0">
+                    <div className="font-bold text-xs text-slate-800 dark:text-slate-100 flex flex-wrap items-center gap-1.5">
                       <span>Auto-Speak Responses</span>
                       {autoSpeak && (
                         <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded uppercase">Active</span>
                       )}
                     </div>
-                    <p className="text-[10px] text-slate-400 mt-0.5">Read tutor feedback aloud automatically</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5 leading-snug">Read tutor feedback aloud automatically</p>
                   </div>
                   <button
                     type="button"
@@ -1992,7 +2098,7 @@ export default function WorkspaceChat({
                       try { localStorage.setItem('study_tutor_auto_speak', String(next)); } catch {}
                       if (!next) stopSpeech();
                     }}
-                    className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
+                    className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors shrink-0 ${
                       autoSpeak ? 'bg-indigo-600 justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'
                     }`}
                   >
@@ -2022,20 +2128,20 @@ export default function WorkspaceChat({
                             setSelectedVoiceProfile(vKey);
                             try { localStorage.setItem('study_tutor_voice_profile', vKey); } catch {}
                           }}
-                          className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2.5 ${
+                          className={`p-2 sm:p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
                             isSelected
                               ? 'bg-indigo-50/70 dark:bg-indigo-950/60 border-indigo-400/80 dark:border-indigo-600/80 shadow-xs'
                               : 'bg-white dark:bg-slate-800/40 border-slate-200/80 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
                           }`}
                         >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <span className="text-xl shrink-0 select-none">{v.icon}</span>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <span className="text-lg sm:text-xl shrink-0 select-none">{v.icon}</span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-1">
                                 <span className="font-extrabold text-xs text-slate-900 dark:text-white">
                                   {v.name}
                                 </span>
-                                <span className={`text-[9.5px] font-bold px-1.5 py-0.2 rounded-md ${
+                                <span className={`text-[9px] sm:text-[9.5px] font-bold px-1.5 py-0.2 rounded-md ${
                                   v.genderLabel.includes('Female')
                                     ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
                                     : v.genderLabel.includes('Male')
@@ -2047,21 +2153,21 @@ export default function WorkspaceChat({
                                   {v.genderLabel}
                                 </span>
                               </div>
-                              <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate leading-tight mt-0.5">
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-2 sm:truncate leading-tight mt-0.5">
                                 {v.description}
                               </p>
                             </div>
                           </div>
 
                           {/* Sample button & checkmark */}
-                          <div className="flex items-center gap-1.5 shrink-0">
+                          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handlePreviewVoice(v);
                               }}
-                              className={`p-1.5 rounded-lg border text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer ${
+                              className={`px-2 py-1.5 rounded-lg border text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer ${
                                 isPreviewing
                                   ? 'bg-indigo-600 text-white border-indigo-600'
                                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-950 border-slate-200 dark:border-slate-700'
@@ -2098,12 +2204,12 @@ export default function WorkspaceChat({
                     <span>Speech Pace</span>
                     <span className="text-indigo-600 dark:text-indigo-400 font-bold">{speechRate}x Speed</span>
                   </div>
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-4 gap-1 sm:gap-1.5">
                     {[
-                      { rate: 0.85, label: '0.85x' },
-                      { rate: 1.0, label: '1.0x (Normal)' },
-                      { rate: 1.15, label: '1.15x' },
-                      { rate: 1.25, label: '1.25x' }
+                      { rate: 0.85, label: '0.85x', mobileLabel: '0.85x' },
+                      { rate: 1.0, label: '1.0x (Normal)', mobileLabel: '1.0x' },
+                      { rate: 1.15, label: '1.15x', mobileLabel: '1.15x' },
+                      { rate: 1.25, label: '1.25x', mobileLabel: '1.25x' }
                     ].map(item => (
                       <button
                         key={item.rate}
@@ -2112,13 +2218,14 @@ export default function WorkspaceChat({
                           setSpeechRate(item.rate);
                           try { localStorage.setItem('study_tutor_speech_rate', String(item.rate)); } catch {}
                         }}
-                        className={`py-1 px-1.5 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer text-center ${
+                        className={`py-1.5 px-1 sm:px-1.5 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer text-center ${
                           speechRate === item.rate
                             ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
                             : 'bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
                         }`}
                       >
-                        {item.label}
+                        <span className="sm:hidden">{item.mobileLabel}</span>
+                        <span className="hidden sm:inline">{item.label}</span>
                       </button>
                     ))}
                   </div>
@@ -2166,7 +2273,10 @@ export default function WorkspaceChat({
       {/* ============================================================== */}
       {/* 2. FULL-WIDTH CONVERSATION AREA                                */}
       {/* ============================================================== */}
-      <div className="flex-1 overflow-y-auto px-3 sm:px-6 md:px-8 py-3.5 sm:py-6 space-y-4 sm:space-y-6 custom-scrollbar">
+      <div
+        ref={chatScrollContainerRef}
+        className="flex-1 overflow-y-auto px-3 sm:px-6 md:px-8 py-3.5 sm:py-6 space-y-4 sm:space-y-6 custom-scrollbar scroll-smooth"
+      >
         <div className="max-w-3xl mx-auto space-y-4 sm:space-y-6">
           
 
@@ -2187,6 +2297,11 @@ export default function WorkspaceChat({
                 </div>
               );
             }
+
+            const isMsgStreaming = streamingMsgId === msg.id && msg.sender === 'ai' && !msg.isError;
+            const visibleMsgText = isMsgStreaming
+              ? (String(msg.text || '').match(/\S+\s*|\n+/g) || [String(msg.text || '')]).slice(0, streamedWordCount).join('')
+              : msg.text;
 
             return (
             <div
@@ -2305,11 +2420,11 @@ export default function WorkspaceChat({
                       )}
                     </div>
                   ) : (
-                    renderMessageContent(msg.text)
+                    renderMessageContent(visibleMsgText, isMsgStreaming)
                   )}
 
                   {/* Automatically Generated Image / Educational Diagram */}
-                  {msg.sender === 'ai' && msg.generatedImageUrl && (
+                  {msg.sender === 'ai' && !isMsgStreaming && msg.generatedImageUrl && (
                     <div className="mt-4 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950 shadow-sm">
                       <img
                         src={msg.generatedImageUrl}
@@ -2332,7 +2447,7 @@ export default function WorkspaceChat({
                   )}
 
                   {/* Clean Citation Footnotes */}
-                  {msg.citations && msg.citations.length > 0 && (
+                  {!isMsgStreaming && msg.citations && msg.citations.length > 0 && (
                     <div className="mt-3.5 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-1.5 text-xs">
                       <span className="text-[11px] font-bold text-slate-400">Sources:</span>
                       {msg.citations.map((c, cIdx) => (
@@ -2349,7 +2464,7 @@ export default function WorkspaceChat({
                   )}
 
                   {/* Clickable Follow-Up Question Chips Inside Each AI Message Bubble */}
-                  {msg.sender === 'ai' && !msg.isError && !msg.isFileReadyBadge && msg.id !== 'welcome-msg' && !msg.id.startsWith('welcome-') && (() => {
+                  {msg.sender === 'ai' && !isMsgStreaming && !msg.isError && !msg.isFileReadyBadge && msg.id !== 'welcome-msg' && !msg.id.startsWith('welcome-') && (() => {
                     const effectiveFollowUps = (msg.followUpQuestions && msg.followUpQuestions.length > 0)
                       ? msg.followUpQuestions
                       : [
@@ -2358,7 +2473,7 @@ export default function WorkspaceChat({
                           `Create 3 practice quiz questions to test my understanding`
                         ];
                     return (
-                      <div className="mt-4 pt-3.5 border-t border-slate-100 dark:border-slate-800/80 space-y-2">
+                      <div className="mt-4 pt-3.5 border-t border-slate-100 dark:border-slate-800/80 space-y-2 animate-in fade-in duration-200">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
                             <Sparkles className="w-3 h-3 text-indigo-500 shrink-0" />
@@ -2401,7 +2516,7 @@ export default function WorkspaceChat({
                 </div>
 
                 {/* AI Bubble Actions: Listen (TTS) & Copy */}
-                {msg.sender === 'ai' && !msg.isError && (
+                {msg.sender === 'ai' && !isMsgStreaming && !msg.isError && (
                   <div className="flex items-center gap-2 pl-2 text-xs text-slate-400 mt-1">
                     <button
                       type="button"
