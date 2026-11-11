@@ -388,11 +388,14 @@ export default function App() {
           }
 
           // Reconcile mandatory onboarding status for this specific user account
-          const metaCompleted = user.user_metadata?.onboarding_completed === true;
-          const metaDataComplete = isOnboardingDataComplete(user.user_metadata?.onboarding_data);
-          const localUserComplete = localStorage.getItem(`studyweb_onboarding_complete_${userId}`) === 'true';
+          const accountWasDeleted = user.user_metadata?.account_deleted === true;
+          const metaCompleted = !accountWasDeleted && user.user_metadata?.onboarding_completed === true;
+          const metaDataComplete = !accountWasDeleted && isOnboardingDataComplete(user.user_metadata?.onboarding_data);
+          const localUserComplete =
+            !accountWasDeleted && localStorage.getItem(`studyweb_onboarding_complete_${userId}`) === 'true';
           const hasProfileAcademicFields = Boolean(
-            reconciledProfile &&
+            !accountWasDeleted &&
+              reconciledProfile &&
               reconciledProfile.className?.trim() &&
               reconciledProfile.targetAim?.trim() &&
               reconciledProfile.studentBio?.trim()
@@ -407,6 +410,7 @@ export default function App() {
             setShowOnboarding(false);
           } else {
             localStorage.removeItem('studyweb_onboarding_complete');
+            localStorage.removeItem(`studyweb_onboarding_complete_${userId}`);
             ProductTourService.markNewUserTourPending();
             setShowWelcomeBack(false);
             setShowOnboarding(true);
@@ -644,6 +648,7 @@ export default function App() {
     setShowOnboarding(false);
     clearProfileMemoryCache();
     WorkspaceSyncService.clearCache();
+    StudyTrackerService.resetAllUserData();
     
     // Clear Supabase Session
     try {

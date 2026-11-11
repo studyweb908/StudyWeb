@@ -904,7 +904,13 @@ export default function Navigation() {
                           options: {
                             data: {
                               full_name: fullName.trim(),
-                              avatar_url: profilePic || ''
+                              name: fullName.trim(),
+                              avatar_url: profilePic || '',
+                              account_deleted: false,
+                              deleted_at: null,
+                              onboarding_completed: false,
+                              onboarding_data: null,
+                              onboarding_draft: null
                             }
                           }
                         });
@@ -923,13 +929,92 @@ export default function Navigation() {
                           if (!signInError && signInData?.user) {
                             const user = signInData.user;
                             localStorage.setItem('studyweb_active_user_id', user.id);
-                            let resolvedName = user?.user_metadata?.full_name || user?.user_metadata?.name || fullName.trim() || '';
+
+                            // Check if this account was previously deleted or has no active profile in Supabase
+                            let hasExistingActiveProfile = false;
+                            try {
+                              const { data: profRow } = await supabase
+                                .from('profiles')
+                                .select('id, class_name, target_aim, onboarding_data')
+                                .eq('id', user.id)
+                                .maybeSingle();
+                              if (
+                                profRow &&
+                                profRow.onboarding_data?.account_deleted !== true &&
+                                (profRow.class_name || profRow.target_aim || profRow.onboarding_data?.completedAt)
+                              ) {
+                                hasExistingActiveProfile = true;
+                              }
+                            } catch {}
+
+                            const wasDeletedAccount =
+                              user?.user_metadata?.account_deleted === true || !hasExistingActiveProfile;
+
+                            let resolvedName =
+                              fullName.trim() ||
+                              (!wasDeletedAccount ? user?.user_metadata?.full_name || user?.user_metadata?.name : '') ||
+                              '';
                             if (!resolvedName && user?.email) {
                               const emailPrefix = user.email.split('@')[0];
                               resolvedName = emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1);
                             }
                             if (!resolvedName) resolvedName = 'Scholar';
                             localStorage.setItem('studyweb_profile_name', resolvedName);
+
+                            if (wasDeletedAccount) {
+                              // Treat as a brand-new user registration with fresh onboarding
+                              localStorage.removeItem('studyweb_onboarding_complete');
+                              localStorage.removeItem(`studyweb_onboarding_complete_${user.id}`);
+                              localStorage.removeItem('studyweb_onboarding_draft');
+                              localStorage.removeItem(`studyweb_onboarding_draft_${user.id}`);
+
+                              try {
+                                await Promise.allSettled([
+                                  supabase.auth.updateUser({
+                                    data: {
+                                      full_name: resolvedName,
+                                      name: resolvedName,
+                                      avatar_url: profilePic || null,
+                                      account_deleted: false,
+                                      deleted_at: null,
+                                      onboarding_completed: false,
+                                      onboarding_data: null,
+                                      onboarding_draft: null,
+                                      school_name: null,
+                                      academic_institution: null,
+                                      school: null,
+                                      class_name: null,
+                                      grade: null,
+                                      subject: null,
+                                      target_aim: null,
+                                      primary_goal: null,
+                                      learning_goal: null,
+                                      scholar_bio: null,
+                                      bio: null
+                                    }
+                                  }),
+                                  supabase.from('profiles').upsert({
+                                    id: user.id,
+                                    email: user.email || email.trim(),
+                                    full_name: resolvedName,
+                                    avatar_url: profilePic || '',
+                                    school_name: null,
+                                    class_name: null,
+                                    target_aim: null,
+                                    scholar_bio: null,
+                                    onboarding_data: {},
+                                    updated_at: new Date().toISOString()
+                                  })
+                                ]);
+                              } catch {}
+
+                              localStorage.setItem('studyweb_is_logged_in', 'true');
+                              (window as any).showToast?.('Welcome! Your new StudyWeb account has been created.', 'success');
+                              window.dispatchEvent(new CustomEvent('studyweb-signup-success'));
+                              setIsAuthModalOpen(false);
+                              return;
+                            }
+
                             const isUserOnboarded =
                               user?.user_metadata?.onboarding_completed === true ||
                               localStorage.getItem(`studyweb_onboarding_complete_${user.id}`) === 'true';
@@ -956,18 +1041,21 @@ export default function Navigation() {
                         if (data.session) {
                           localStorage.setItem('studyweb_is_logged_in', 'true');
                           localStorage.removeItem('studyweb_onboarding_complete');
+                          localStorage.removeItem('studyweb_onboarding_draft');
                           if (fullName.trim()) {
                             localStorage.setItem('studyweb_profile_name', fullName.trim());
                           }
                           if (data.user) {
                             localStorage.setItem('studyweb_active_user_id', data.user.id);
                             localStorage.removeItem(`studyweb_onboarding_complete_${data.user.id}`);
+                            localStorage.removeItem(`studyweb_onboarding_draft_${data.user.id}`);
                             try {
                               await supabase.from('profiles').upsert({
                                 id: data.user.id,
                                 email: data.user.email || email.trim(),
                                 full_name: fullName.trim(),
-                                avatar_url: profilePic || ''
+                                avatar_url: profilePic || '',
+                                onboarding_data: {}
                               });
                             } catch (pErr) {
                               console.warn('Profile initial record sync notice:', pErr);
@@ -993,7 +1081,10 @@ export default function Navigation() {
                         if (user?.id) {
                           localStorage.setItem('studyweb_active_user_id', user.id);
                         }
-                        let resolvedName = user?.user_metadata?.full_name || user?.user_metadata?.name || '';
+                        const wasAccountDeleted = user?.user_metadata?.account_deleted === true;
+                        let resolvedName = !wasAccountDeleted
+                          ? user?.user_metadata?.full_name || user?.user_metadata?.name || ''
+                          : '';
                         if (!resolvedName && user?.email) {
                           const emailPrefix = user.email.split('@')[0];
                           resolvedName = emailPrefix.charAt(0).toUpperCase() + emailPrefix.slice(1);
@@ -1002,17 +1093,25 @@ export default function Navigation() {
                         localStorage.setItem('studyweb_profile_name', resolvedName);
 
                         const isUserOnboarded =
-                          user?.user_metadata?.onboarding_completed === true ||
-                          (user?.id ? localStorage.getItem(`studyweb_onboarding_complete_${user.id}`) === 'true' : false);
+                          !wasAccountDeleted &&
+                          (user?.user_metadata?.onboarding_completed === true ||
+                            (user?.id ? localStorage.getItem(`studyweb_onboarding_complete_${user.id}`) === 'true' : false));
                         if (isUserOnboarded && user?.id) {
                           localStorage.setItem('studyweb_onboarding_complete', 'true');
                           localStorage.setItem(`studyweb_onboarding_complete_${user.id}`, 'true');
-                        } else if (!isUserOnboarded) {
+                        } else {
                           localStorage.removeItem('studyweb_onboarding_complete');
+                          if (user?.id) {
+                            localStorage.removeItem(`studyweb_onboarding_complete_${user.id}`);
+                            localStorage.removeItem(`studyweb_onboarding_draft_${user.id}`);
+                          }
+                          localStorage.removeItem('studyweb_onboarding_draft');
                         }
                         localStorage.setItem('studyweb_is_logged_in', 'true');
                         (window as any).showToast?.('Successfully logged in to StudyWeb!', 'success');
-                        window.dispatchEvent(new CustomEvent('studyweb-login-success'));
+                        window.dispatchEvent(
+                          new CustomEvent(wasAccountDeleted ? 'studyweb-signup-success' : 'studyweb-login-success')
+                        );
                         setIsAuthModalOpen(false);
                       }
                     } catch (err: any) {

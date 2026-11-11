@@ -220,6 +220,7 @@ ALTER TABLE retrieval_logs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Public profiles reading" ON profiles FOR SELECT USING (true);
 CREATE POLICY "Users insert profiles" ON profiles FOR INSERT WITH CHECK (true);
 CREATE POLICY "Users update profiles" ON profiles FOR UPDATE USING (true);
+CREATE POLICY "Users delete profiles" ON profiles FOR DELETE USING (true);
 
 -- Workspaces Policies
 CREATE POLICY "Workspaces select" ON workspaces FOR SELECT USING (true);
@@ -263,6 +264,34 @@ CREATE POLICY "Generated notes delete" ON generated_notes FOR DELETE USING (true
 -- Retrieval Logs Policies
 CREATE POLICY "Retrieval logs select" ON retrieval_logs FOR SELECT USING (true);
 CREATE POLICY "Retrieval logs insert" ON retrieval_logs FOR INSERT WITH CHECK (true);
+CREATE POLICY "Retrieval logs delete" ON retrieval_logs FOR DELETE USING (true);
+
+-- Complete User Account & Data Deletion RPC (SECURITY DEFINER)
+CREATE OR REPLACE FUNCTION public.delete_user_account()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_uid UUID;
+BEGIN
+  v_uid := auth.uid();
+  IF v_uid IS NULL THEN
+    RETURN;
+  END IF;
+
+  DELETE FROM public.embeddings WHERE user_id = v_uid OR workspace_id IN (SELECT id FROM public.workspaces WHERE user_id = v_uid);
+  DELETE FROM public.document_chunks WHERE user_id = v_uid OR workspace_id IN (SELECT id FROM public.workspaces WHERE user_id = v_uid);
+  DELETE FROM public.processing_jobs WHERE user_id = v_uid OR workspace_id IN (SELECT id FROM public.workspaces WHERE user_id = v_uid);
+  DELETE FROM public.generated_notes WHERE user_id = v_uid OR workspace_id IN (SELECT id FROM public.workspaces WHERE user_id = v_uid);
+  DELETE FROM public.retrieval_logs WHERE user_id = v_uid OR workspace_id IN (SELECT id FROM public.workspaces WHERE user_id = v_uid);
+  DELETE FROM public.documents WHERE user_id = v_uid OR workspace_id IN (SELECT id FROM public.workspaces WHERE user_id = v_uid);
+  DELETE FROM public.workspace_files WHERE workspace_id IN (SELECT id FROM public.workspaces WHERE user_id = v_uid);
+  DELETE FROM public.workspaces WHERE user_id = v_uid;
+  DELETE FROM public.profiles WHERE id = v_uid;
+  DELETE FROM auth.users WHERE id = v_uid;
+END;
+$$;
 
 -- ============================================================================
 -- RPC Stored Procedure: match_documents

@@ -459,6 +459,14 @@ export async function fetchAndReconcileSupabaseProfile(forceRefresh = false): Pr
         }
       } catch {}
 
+      const isAccountDeleted = Boolean(
+        meta.account_deleted === true || dbRow?.onboarding_data?.account_deleted === true
+      );
+      if (isAccountDeleted) {
+        dbRow = null;
+        serverProfile = null;
+      }
+
       const email = user.email || localSnap.email || '';
       const emailFallbackName = formatEmailPrefixAsName(email) || (email ? email.split('@')[0] : '');
 
@@ -470,8 +478,8 @@ export async function fetchAndReconcileSupabaseProfile(forceRefresh = false): Pr
           serverProfile?.fullName,
           dbRow?.full_name,
           dbRow?.name,
-          meta.full_name,
-          meta.name,
+          !isAccountDeleted ? meta.full_name : '',
+          !isAccountDeleted ? meta.name : '',
           localSnap.fullName,
           emailFallbackName
         ) || emailFallbackName;
@@ -690,6 +698,8 @@ export async function saveProfileToSupabase(
             : null;
 
         const metaPayload = {
+          account_deleted: false,
+          deleted_at: null,
           full_name: merged.fullName,
           name: merged.fullName,
           avatar_url: compactAvatarForJwt,

@@ -11,7 +11,7 @@ import { cleanNotebookLMTitle } from "./src/utils/notebookTitle.js";
 import { toValidUuid } from "./src/utils/uuid.js";
 import { getServerGeminiApiKey } from "./src/utils/serverEnv.js";
 import { createClient } from "@supabase/supabase-js";
-import { streakRouter, setServerUserDailyGoal, getServerUserDailyGoal } from "./src/services/streakEngineServer.js";
+import { streakRouter, setServerUserDailyGoal, getServerUserDailyGoal, clearServerUserStreakData } from "./src/services/streakEngineServer.js";
 
 // Load environment variables
 dotenv.config();
@@ -424,18 +424,101 @@ async function startServer() {
 
       if (userId) {
         serverProfileStore.delete(userId);
+        clearServerUserStreakData(userId);
       }
+      workspaceFilesResponseCache.clear();
 
       const supabase = getSupabaseServerClient(req.headers.authorization);
       if (supabase && userId && userId !== "local-user") {
+        // 1. Collect all workspace IDs owned by this user so child tables keyed by workspace_id are deleted completely
+        let wsIds: string[] = [];
+        try {
+          const { data: wsRows } = await supabase
+            .from("workspaces")
+            .select("id")
+            .eq("user_id", userId);
+          if (Array.isArray(wsRows)) {
+            wsIds = wsRows.map((r: any) => String(r.id)).filter(Boolean);
+          }
+        } catch {}
+
+        if (wsIds.length > 0) {
+          await Promise.allSettled([
+            supabase.from("embeddings").delete().in("workspace_id", wsIds),
+            supabase.from("document_chunks").delete().in("workspace_id", wsIds),
+            supabase.from("processing_jobs").delete().in("workspace_id", wsIds),
+            supabase.from("generated_notes").delete().in("workspace_id", wsIds),
+            supabase.from("retrieval_logs").delete().in("workspace_id", wsIds),
+            supabase.from("documents").delete().in("workspace_id", wsIds),
+            supabase.from("workspace_files").delete().in("workspace_id", wsIds),
+            supabase.from("study_materials").delete().in("workspace_id", wsIds),
+          ]);
+        }
+
+        // 2. Delete all user-scoped records across every Supabase table
         await Promise.allSettled([
+          supabase.from("embeddings").delete().eq("user_id", userId),
+          supabase.from("document_chunks").delete().eq("user_id", userId),
+          supabase.from("processing_jobs").delete().eq("user_id", userId),
+          supabase.from("generated_notes").delete().eq("user_id", userId),
+          supabase.from("retrieval_logs").delete().eq("user_id", userId),
+          supabase.from("documents").delete().eq("user_id", userId),
           supabase.from("workspace_files").delete().eq("user_id", userId),
+          supabase.from("study_materials").delete().eq("user_id", userId),
           supabase.from("study_notes").delete().eq("user_id", userId),
-          supabase.from("workspaces").delete().eq("user_id", userId),
           supabase.from("study_streak_settings").delete().eq("user_id", userId),
           supabase.from("user_streaks").delete().eq("user_id", userId),
-          supabase.from("profiles").delete().eq("id", userId),
+          supabase.from("workspaces").delete().eq("user_id", userId),
         ]);
+
+        // 3. Clear all fields on profiles first (in case RLS restricts row delete) and then delete the profiles row
+        try {
+          await supabase
+            .from("profiles")
+            .update({
+              name: null,
+              full_name: null,
+              avatar_url: null,
+              bio: null,
+              scholar_bio: null,
+              school_name: null,
+              academic_institution: null,
+              class_name: null,
+              curriculum_board: null,
+              current_study: null,
+              subject: null,
+              target_aim: null,
+              primary_goal: null,
+              study_goals: [],
+              learning_goals: [],
+              preferred_study_times: [],
+              onboarding_data: { account_deleted: true },
+              updated_at: new Date().toISOString(),
+            } as any)
+            .eq("id", userId);
+        } catch {}
+
+        await supabase.from("profiles").delete().eq("id", userId);
+
+        // 4. Delete user's uploaded files in Supabase Storage (avatars bucket)
+        try {
+          const { data: userAvatarFiles } = await supabase.storage.from("avatars").list(userId);
+          if (Array.isArray(userAvatarFiles) && userAvatarFiles.length > 0) {
+            const paths = userAvatarFiles.map((f: any) => `${userId}/${f.name}`);
+            await supabase.storage.from("avatars").remove(paths);
+          }
+        } catch {}
+
+        // 5. Invoke delete_user_account RPC and admin.deleteUser if service role key is present
+        try {
+          await supabase.rpc("delete_user_account");
+        } catch {}
+
+        if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+          try {
+            await supabase.auth.admin.deleteUser(userId);
+          } catch {}
+        }
       }
 
       return res.json({

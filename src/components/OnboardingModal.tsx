@@ -157,10 +157,23 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
 
     const hydrateRemoteDraft = async () => {
       try {
+        // If local draft was explicitly cleared (e.g., fresh signup after account deletion), reset state to step 0
+        const currentLocalDraft = localStorage.getItem('studyweb_onboarding_draft');
+        if (!currentLocalDraft) {
+          setStep(0);
+          setFormData({ ...DEFAULT_FORM_DATA });
+        }
+
         if (!supabase) return;
         const { data: { session } } = await supabase.auth.getSession();
         const user = session?.user;
         if (!user || isCancelled) return;
+
+        if (user.user_metadata?.account_deleted === true) {
+          setStep(0);
+          setFormData({ ...DEFAULT_FORM_DATA });
+          return;
+        }
 
         const userDraftKey = `studyweb_onboarding_draft_${user.id}`;
         const localUserRaw = localStorage.getItem(userDraftKey);
@@ -434,6 +447,8 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
           await Promise.allSettled([
             supabase.auth.updateUser({
               data: {
+                account_deleted: false,
+                deleted_at: null,
                 onboarding_completed: true,
                 onboarding_data: formData,
                 onboarding_draft: null

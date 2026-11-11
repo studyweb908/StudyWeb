@@ -90,6 +90,11 @@ export const ALLOWED_DAILY_GOALS = [15, 30, 45, 60, 90, 120, 180, 240];
 // Server-side in-memory authoritative cache backed by Supabase persistence
 const userStreakStore = new Map<string, UserStreakServerState>();
 
+export function clearServerUserStreakData(userId: string): void {
+  if (!userId) return;
+  userStreakStore.delete(userId);
+}
+
 const DEFAULT_SUPABASE_URL = "https://fzutrlzeyystbaiueker.supabase.co";
 const DEFAULT_SUPABASE_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ6dXRybHpleXlzdGJhaXVla2VyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzOTg1MDMsImV4cCI6MjA5ODk3NDUwM30.usJ97CqSdQOAhYC8nXGvKg42xiKrjsmlJiGSTIYSLF4";

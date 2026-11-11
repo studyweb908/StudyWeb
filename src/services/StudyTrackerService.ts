@@ -625,6 +625,20 @@ class StudyTrackerManager {
     };
   }
 
+  public resetAllUserData(): void {
+    try {
+      localStorage.removeItem(this.getScopedStorageKey());
+      localStorage.removeItem('studyweb_profile_daily_goal');
+    } catch {}
+    this.activeUserId = null;
+    try {
+      localStorage.removeItem(this.getScopedStorageKey());
+    } catch {}
+    this.dailyGoalMinutes = DEFAULT_DAILY_GOAL_MINUTES;
+    this.resetInMemoryStatsForDay(this.getTodayStr());
+    this.broadcastUpdate();
+  }
+
   /**
    * Ensures logged study time refreshes to 0 at the start of every new calendar day in the user's timezone.
    */

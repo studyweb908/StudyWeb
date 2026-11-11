@@ -33,10 +33,12 @@ import {
 import { useThemeMode } from '../../hooks/useThemeMode';
 import { useStudyStats } from '../../hooks/useStudyStats';
 import { StudyTrackerService } from '../../services/StudyTrackerService';
+import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import {
   readSyncProfileSnapshot,
   fetchAndReconcileSupabaseProfile,
   saveProfileToSupabase,
+  clearProfileMemoryCache,
   getMonogramAvatar,
   getCuratedMonogramPresets
 } from '../../utils/profileStorage';
@@ -126,20 +128,136 @@ export function ProfileSettingsHub() {
       } catch {}
 
       if (supabase && userId && userId !== 'local-user') {
+        // 1. Collect all workspace IDs owned by this user so workspace-scoped records are deleted completely
+        let wsIds: string[] = [];
+        try {
+          const { data: wsRows } = await supabase
+            .from('workspaces')
+            .select('id')
+            .eq('user_id', userId);
+          if (Array.isArray(wsRows)) {
+            wsIds = wsRows.map((w: any) => String(w.id)).filter(Boolean);
+          }
+        } catch {}
+
+        if (wsIds.length > 0) {
+          await Promise.allSettled([
+            supabase.from('embeddings').delete().in('workspace_id', wsIds),
+            supabase.from('document_chunks').delete().in('workspace_id', wsIds),
+            supabase.from('processing_jobs').delete().in('workspace_id', wsIds),
+            supabase.from('generated_notes').delete().in('workspace_id', wsIds),
+            supabase.from('retrieval_logs').delete().in('workspace_id', wsIds),
+            supabase.from('documents').delete().in('workspace_id', wsIds),
+            supabase.from('workspace_files').delete().in('workspace_id', wsIds),
+            supabase.from('study_materials').delete().in('workspace_id', wsIds)
+          ]);
+        }
+
+        // 2. Delete all user-scoped records across every Supabase table
         await Promise.allSettled([
+          supabase.from('embeddings').delete().eq('user_id', userId),
+          supabase.from('document_chunks').delete().eq('user_id', userId),
+          supabase.from('processing_jobs').delete().eq('user_id', userId),
+          supabase.from('generated_notes').delete().eq('user_id', userId),
+          supabase.from('retrieval_logs').delete().eq('user_id', userId),
+          supabase.from('documents').delete().eq('user_id', userId),
           supabase.from('workspace_files').delete().eq('user_id', userId),
+          supabase.from('study_materials').delete().eq('user_id', userId),
           supabase.from('study_notes').delete().eq('user_id', userId),
-          supabase.from('workspaces').delete().eq('user_id', userId),
           supabase.from('study_streak_settings').delete().eq('user_id', userId),
           supabase.from('user_streaks').delete().eq('user_id', userId),
+          supabase.from('workspaces').delete().eq('user_id', userId)
+        ]);
+
+        // 3. Wipe and delete the user's profile row
+        try {
+          await supabase
+            .from('profiles')
+            .update({
+              full_name: null,
+              avatar_url: null,
+              school_name: null,
+              academic_institution: null,
+              school: null,
+              class_name: null,
+              grade: null,
+              current_study: null,
+              curriculum_board: null,
+              subject: null,
+              target_aim: null,
+              primary_goal: null,
+              learning_goal: null,
+              scholar_bio: null,
+              bio: null,
+              study_hours: 0,
+              streak_days: 0,
+              daily_goal_minutes: 60,
+              exam_name: null,
+              exam_date: null,
+              onboarding_data: { account_deleted: true, deleted_at: new Date().toISOString() },
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', userId);
+        } catch {}
+
+        await Promise.allSettled([
           supabase.from('profiles').delete().eq('id', userId)
         ]);
+
+        // 4. Remove uploaded avatars in Supabase Storage
+        try {
+          const { data: avatarFiles } = await supabase.storage.from('avatars').list(userId);
+          if (Array.isArray(avatarFiles) && avatarFiles.length > 0) {
+            const paths = avatarFiles.map((f) => `${userId}/${f.name}`);
+            await supabase.storage.from('avatars').remove(paths);
+          }
+        } catch {}
+
+        // 5. Clear Supabase Auth user_metadata so re-registering with the same email starts as a fresh user
+        try {
+          await supabase.auth.updateUser({
+            data: {
+              account_deleted: true,
+              deleted_at: new Date().toISOString(),
+              onboarding_completed: false,
+              onboarding_data: null,
+              onboarding_draft: null,
+              full_name: null,
+              name: null,
+              avatar_url: null,
+              picture: null,
+              school_name: null,
+              academic_institution: null,
+              school: null,
+              class_name: null,
+              grade: null,
+              subject: null,
+              target_aim: null,
+              primary_goal: null,
+              learning_goal: null,
+              scholar_bio: null,
+              bio: null,
+              daily_goal_minutes: null,
+              exam_name: null,
+              exam_date: null
+            }
+          });
+        } catch {}
+
+        // 6. Invoke self-deletion RPC if installed in Supabase
+        try {
+          await supabase.rpc('delete_user_account');
+        } catch {}
+
         try {
           await supabase.auth.signOut();
         } catch {}
       }
 
       try {
+        StudyTrackerService.resetAllUserData();
+        WorkspaceSyncService.clearCache();
+        clearProfileMemoryCache();
         localStorage.clear();
         sessionStorage.clear();
       } catch {}
@@ -148,6 +266,13 @@ export function ProfileSettingsHub() {
       setIsDeletingProfile(false);
       window.dispatchEvent(new CustomEvent('studyweb-account-deleted'));
     } catch {
+      try {
+        StudyTrackerService.resetAllUserData();
+        WorkspaceSyncService.clearCache();
+        clearProfileMemoryCache();
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch {}
       setIsDeletingProfile(false);
       setShowDeleteProfileConfirm(false);
       window.dispatchEvent(new CustomEvent('studyweb-account-deleted'));
