@@ -170,18 +170,9 @@ export default function App() {
     return null;
   });
 
-  const [workspaces, setWorkspaces] = useState<Workspace[]>(() => {
-    if (typeof window === 'undefined') return [];
-    const savedLogin = localStorage.getItem('studyweb_is_logged_in');
-    const savedUid = localStorage.getItem('studyweb_active_user_id');
-    if (savedLogin === 'true' && savedUid) {
-      const userCached = loadStoredWorkspaces(savedUid);
-      if (userCached && userCached.length > 0) return userCached;
-    }
-    return loadStoredWorkspaces(null);
-  });
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
 
-  const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState<boolean>(false);
+  const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState<boolean>(true);
   const [hasVisitedAITutor, setHasVisitedAITutor] = useState<boolean>(() => activeTab === 'ai-tutor');
 
   useEffect(() => {
@@ -192,17 +183,20 @@ export default function App() {
 
   // Workspace context handles persistance, but we still need to manage workspaces array locally.
   const handleUpdateWorkspace = (updated: Workspace) => {
+    const normalizedWs: Workspace = { ...updated, id: toValidUuid(updated.id) };
     setWorkspaces(prev => {
-      const exists = prev.some(w => w.id === updated.id);
+      const exists = prev.some(w => w.id === normalizedWs.id || w.id === updated.id);
       const next = exists
-        ? prev.map(w => w.id === updated.id ? updated : w)
-        : [updated, ...prev];
+        ? prev.map(w => (w.id === normalizedWs.id || w.id === updated.id) ? normalizedWs : w)
+        : [normalizedWs, ...prev];
       saveStoredWorkspaces(next, currentUserId);
       return next;
     });
-    setActiveWorkspace(prev => (prev && prev.id === updated.id ? updated : prev));
+    setActiveWorkspace(prev =>
+      prev && (prev.id === normalizedWs.id || prev.id === updated.id) ? normalizedWs : prev
+    );
     // Synchronize updates directly to Supabase with user_id attached
-    WorkspaceSyncService.saveWorkspace(updated, currentUserId || undefined);
+    WorkspaceSyncService.saveWorkspace(normalizedWs, currentUserId || undefined);
   };
 
   const handleSelectWorkspace = (ws: Workspace | null) => {
@@ -217,19 +211,20 @@ export default function App() {
   };
 
   const handleCreateWorkspace = (ws: Workspace) => {
-    const next = [ws, ...workspaces];
+    const normalizedWs: Workspace = { ...ws, id: toValidUuid(ws.id) };
+    const next = [normalizedWs, ...workspaces];
     setWorkspaces(next);
     saveStoredWorkspaces(next, currentUserId);
-    setActiveWorkspace(ws);
+    setActiveWorkspace(normalizedWs);
     recordUserActivity({
-      title: `Created workspace: ${ws.name}`,
-      detail: ws.subject ? `Subject: ${ws.subject}` : 'New course workspace created',
+      title: `Created workspace: ${normalizedWs.name}`,
+      detail: normalizedWs.subject ? `Subject: ${normalizedWs.subject}` : 'New course workspace created',
       iconType: 'workspace-create'
     }, currentUserId);
     // Persist new workspace directly in Supabase with user_id attached
-    WorkspaceSyncService.saveWorkspace(ws, currentUserId || undefined);
+    WorkspaceSyncService.saveWorkspace(normalizedWs, currentUserId || undefined);
     (window as any).showToast?.(
-      `"${ws.name}" has been created and initialized as your active study workspace.`,
+      `"${normalizedWs.name}" has been created and initialized as your active study workspace.`,
       'success',
       3200,
       'Workspace Created'
@@ -245,7 +240,7 @@ export default function App() {
     const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
     const newWorkspace: Workspace = {
-      id: `ws-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      id: toValidUuid(`ws-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`),
       name: cleanName,
       subject: cleanSubject,
       description: `Course and study materials for ${cleanName}`,
@@ -313,10 +308,11 @@ export default function App() {
     if (!workspacePendingDelete) return;
     const target = workspacePendingDelete;
     const id = target.id;
-    const next = workspaces.filter(w => w.id !== id);
+    const validId = toValidUuid(id);
+    const next = workspaces.filter(w => w.id !== id && toValidUuid(w.id) !== validId);
     setWorkspaces(next);
     saveStoredWorkspaces(next, currentUserId);
-    if (activeWorkspace && activeWorkspace.id === id) {
+    if (activeWorkspace && (activeWorkspace.id === id || toValidUuid(activeWorkspace.id) === validId)) {
       setActiveWorkspace(null);
     }
     recordUserActivity({
@@ -344,10 +340,10 @@ export default function App() {
     saveStoredWorkspaces(newWorkspaces, currentUserId);
   };
 
-  // Synchronize with Supabase on mount and on authentication changes
+  // Synchronize strictly from Supabase backend on mount and on authentication changes (never trust frontend cache)
   useEffect(() => {
     const syncFromSupabase = async () => {
-      setIsLoadingWorkspaces(prev => (workspaces.length > 0 ? false : prev));
+      setIsLoadingWorkspaces(true);
       try {
         if (!supabase) return;
         const { data: { session } } = await supabase.auth.getSession();
@@ -359,24 +355,13 @@ export default function App() {
         }
 
         if (userId && user) {
-          // Immediately hydrate from user's local cache before awaiting remote sync
-          const userCachedImmediate = loadStoredWorkspaces(userId);
-          if (userCachedImmediate && userCachedImmediate.length > 0) {
-            setWorkspaces(prev => (prev.length === 0 ? userCachedImmediate : prev));
-            setIsLoadingWorkspaces(false);
-          }
+          // Clear any leftover guest workspaces so stale local guest data is never pushed to the user's account
+          clearGuestWorkspaces();
 
-          // 1. Claim any guest workspaces that were created in this browser prior to logging in
-          const guestWorkspaces = loadStoredWorkspaces(null);
-          if (guestWorkspaces && guestWorkspaces.length > 0) {
-            await WorkspaceSyncService.claimWorkspacesForUser(guestWorkspaces, userId);
-            clearGuestWorkspaces();
-          }
-
-          // 2. Fetch user's profile and workspaces in parallel strictly from Supabase
+          // Fetch user's profile and workspaces in parallel strictly from the Supabase backend (forceRefresh = true)
           const [remoteWorkspaces, reconciledProfileRes] = await Promise.all([
-            WorkspaceSyncService.fetchWorkspaces(userId),
-            fetchAndReconcileSupabaseProfile()
+            WorkspaceSyncService.fetchWorkspaces(userId, true),
+            fetchAndReconcileSupabaseProfile(true)
           ]);
 
           const reconciledProfile = reconciledProfileRes?.profile;
@@ -389,12 +374,10 @@ export default function App() {
             }
           }
 
-          // Reconcile mandatory onboarding status for this specific user account
+          // Reconcile mandatory onboarding status strictly from backend data (never trust frontend localStorage)
           const accountWasDeleted = user.user_metadata?.account_deleted === true;
           const metaCompleted = !accountWasDeleted && user.user_metadata?.onboarding_completed === true;
           const metaDataComplete = !accountWasDeleted && isOnboardingDataComplete(user.user_metadata?.onboarding_data);
-          const localUserComplete =
-            !accountWasDeleted && localStorage.getItem(`studyweb_onboarding_complete_${userId}`) === 'true';
           const hasProfileAcademicFields = Boolean(
             !accountWasDeleted &&
               reconciledProfile &&
@@ -404,7 +387,7 @@ export default function App() {
           );
 
           const isFullyOnboarded =
-            metaCompleted || metaDataComplete || localUserComplete || hasProfileAcademicFields;
+            metaCompleted || metaDataComplete || hasProfileAcademicFields;
 
           if (isFullyOnboarded) {
             localStorage.setItem('studyweb_onboarding_complete', 'true');
@@ -418,57 +401,20 @@ export default function App() {
             setShowOnboarding(true);
           }
 
-          const userCached = loadStoredWorkspaces(userId) || [];
-          if (Array.isArray(remoteWorkspaces) && remoteWorkspaces.length > 0) {
-            // Merge remote workspaces with local cached workspaces so no locally uploaded files/notes are lost
-            const mergedMap = new Map<string, Workspace>();
-            remoteWorkspaces.forEach(rw => mergedMap.set(rw.id, rw));
-            userCached.forEach(lw => {
-              const existing = mergedMap.get(lw.id);
-              if (!existing) {
-                mergedMap.set(lw.id, lw);
-              } else {
-                const fileMap = new Map<string, any>();
-                (existing.files || []).forEach(f => fileMap.set(String(f.id || f.name).toLowerCase(), f));
-                (lw.files || []).forEach(f => {
-                  const key = String(f.id || f.name).toLowerCase();
-                  const hasByName = Array.from(fileMap.values()).some(
-                    ef => ef.name && f.name && ef.name.trim().toLowerCase() === f.name.trim().toLowerCase()
-                  );
-                  if (!fileMap.has(key) && !hasByName) {
-                    fileMap.set(key, f);
-                  }
-                });
-                const noteMap = new Map<string, any>();
-                (existing.notes || []).forEach(n => noteMap.set(String(n.id || n.title).toLowerCase(), n));
-                (lw.notes || []).forEach(n => {
-                  const key = String(n.id || n.title).toLowerCase();
-                  if (!noteMap.has(key)) noteMap.set(key, n);
-                });
-                mergedMap.set(lw.id, {
-                  ...existing,
-                  files: Array.from(fileMap.values()),
-                  notes: Array.from(noteMap.values()),
-                  flashcards: (existing.flashcards && existing.flashcards.length > 0) ? existing.flashcards : (lw.flashcards || []),
-                  quizzes: (existing.quizzes && existing.quizzes.length > 0) ? existing.quizzes : (lw.quizzes || [])
-                });
-              }
-            });
-            const mergedList = Array.from(mergedMap.values());
-            setWorkspaces(mergedList);
-            saveStoredWorkspaces(mergedList, userId);
-            setActiveWorkspace(prev => {
-              if (!prev) return prev;
-              const match = mergedList.find(w => w.id === prev.id);
-              return match || prev;
-            });
-          } else {
-            setWorkspaces(userCached);
-          }
+          // Backend is the single source of truth: overwrite frontend state & localStorage with exact remoteWorkspaces
+          const authoritativeWorkspaces = Array.isArray(remoteWorkspaces) ? remoteWorkspaces : [];
+          setWorkspaces(authoritativeWorkspaces);
+          saveStoredWorkspaces(authoritativeWorkspaces, userId);
+          setActiveWorkspace(prev => {
+            if (!prev) return null;
+            const match = authoritativeWorkspaces.find(
+              w => w.id === prev.id || toValidUuid(w.id) === toValidUuid(prev.id)
+            );
+            return match || null;
+          });
         } else {
-          // Unauthenticated guest user: strictly load local guest workspaces
-          const guestWs = loadStoredWorkspaces(null);
-          setWorkspaces(guestWs);
+          setWorkspaces([]);
+          setActiveWorkspace(null);
         }
       } catch (err) {
         console.debug('Supabase workspace sync notice:', err);

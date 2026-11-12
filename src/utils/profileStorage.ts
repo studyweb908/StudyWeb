@@ -428,16 +428,11 @@ export async function fetchAndReconcileSupabaseProfile(forceRefresh = false): Pr
           .catch(() => {});
       }
 
-      // Read user-scoped cache now that we definitely have user.id
-      let scopedCache: Partial<ScholarProfileData> = {};
-      try {
-        const rawScoped = localStorage.getItem(`studyweb_profile_cache_${user.id}`);
-        if (rawScoped) scopedCache = JSON.parse(rawScoped) || {};
-      } catch {}
-
-      // Query public.profiles table and server /api/profile in parallel
+      // Query public.profiles table, server /api/profile, and live auth.getUser() in parallel
       let dbRow: Record<string, any> | null = null;
       let serverProfile: Record<string, any> | null = null;
+      let apiAccountDeleted = false;
+      let liveMeta: Record<string, any> = meta;
       try {
         const headers: Record<string, string> = {
           'x-studyweb-user-id': user.id,
@@ -445,42 +440,94 @@ export async function fetchAndReconcileSupabaseProfile(forceRefresh = false): Pr
         if (session.access_token) {
           headers['Authorization'] = `Bearer ${session.access_token}`;
         }
-        const [supaRes, apiRes] = await Promise.allSettled([
+        const [supaRes, apiRes, authUserRes] = await Promise.allSettled([
           supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
           fetch(`/api/profile?userId=${encodeURIComponent(user.id)}`, { headers }).then((r) =>
             r.ok ? r.json() : null
           ),
+          supabase.auth.getUser(),
         ]);
         if (supaRes.status === 'fulfilled' && !supaRes.value.error && supaRes.value.data) {
           dbRow = supaRes.value.data;
         }
-        if (apiRes.status === 'fulfilled' && apiRes.value?.profile) {
-          serverProfile = apiRes.value.profile;
+        if (apiRes.status === 'fulfilled' && apiRes.value) {
+          if (apiRes.value.accountDeleted === true) {
+            apiAccountDeleted = true;
+          }
+          if (apiRes.value.profile) {
+            serverProfile = apiRes.value.profile;
+          }
+        }
+        if (authUserRes.status === 'fulfilled' && authUserRes.value?.data?.user?.user_metadata) {
+          liveMeta = authUserRes.value.data.user.user_metadata;
         }
       } catch {}
 
       const isAccountDeleted = Boolean(
-        meta.account_deleted === true || dbRow?.onboarding_data?.account_deleted === true
+        apiAccountDeleted ||
+          liveMeta.account_deleted === true ||
+          meta.account_deleted === true ||
+          dbRow?.onboarding_data?.account_deleted === true
       );
-      if (isAccountDeleted) {
-        dbRow = null;
-        serverProfile = null;
-      }
 
       const email = user.email || localSnap.email || '';
       const emailFallbackName = formatEmailPrefixAsName(email) || (email ? email.split('@')[0] : '');
 
-      // Note: StudyTrackerService updates `profiles.updated_at` every 60s when syncing study_hours,
-      // so we always respect non-empty user-saved fields in scopedCache / serverProfile before falling back to dbRow or JWT metadata.
+      if (isAccountDeleted) {
+        dbRow = null;
+        serverProfile = null;
+        try {
+          const keysToClear = [
+            `studyweb_profile_cache_${user.id}`,
+            'studyweb_profile_cache_latest',
+            'studyweb_profile_name',
+            'studyweb_profile_school',
+            'studyweb_profile_class',
+            'studyweb_profile_grade',
+            'studyweb_profile_subject',
+            'studyweb_profile_aim',
+            'studyweb_profile_goal',
+            'studyweb_profile_bio',
+            'studyweb_profile_exam_name',
+            'studyweb_profile_exam_date',
+            'studyweb_profile_daily_goal',
+            `studyweb_onboarding_completed_${user.id}`,
+          ];
+          keysToClear.forEach((k) => localStorage.removeItem(k));
+        } catch {}
+
+        const emptyDeletedProfile: ScholarProfileData = {
+          userId: user.id,
+          email,
+          fullName: emailFallbackName,
+          avatarUrl: getMonogramAvatar(emailFallbackName || email || 'User'),
+          schoolName: '',
+          className: '',
+          subject: '',
+          targetAim: '',
+          studentBio: '',
+          dailyGoalMinutes: 60,
+          examName: '',
+          examDate: '',
+          activeMascot: 'athena',
+          voiceStyle: 'calm',
+          updatedAt: new Date().toISOString(),
+        };
+
+        lastRemoteFetchTime = Date.now();
+        memoryProfileCache = emptyDeletedProfile;
+        window.dispatchEvent(new CustomEvent('studyweb_profile_updated', { detail: emptyDeletedProfile }));
+        return { profile: emptyDeletedProfile, isCloudSynced: true };
+      }
+
+      // Strictly trust backend sources (dbRow, serverProfile, and live user_metadata) over frontend localStorage
       const fullName =
         pickFirstRealName(
-          scopedCache.fullName,
-          serverProfile?.fullName,
           dbRow?.full_name,
           dbRow?.name,
-          !isAccountDeleted ? meta.full_name : '',
-          !isAccountDeleted ? meta.name : '',
-          localSnap.fullName,
+          serverProfile?.fullName,
+          liveMeta.full_name,
+          liveMeta.name,
           emailFallbackName
         ) || emailFallbackName;
 
@@ -490,119 +537,88 @@ export async function fetchAndReconcileSupabaseProfile(forceRefresh = false): Pr
           ? serverProfile.avatarUrl
           : '';
       const metaAvatar =
-        meta.avatar_url && !isLegacyDummyAvatar(meta.avatar_url)
-          ? meta.avatar_url
-          : meta.picture && !isLegacyDummyAvatar(meta.picture)
-          ? meta.picture
+        liveMeta.avatar_url && !isLegacyDummyAvatar(liveMeta.avatar_url)
+          ? liveMeta.avatar_url
+          : liveMeta.picture && !isLegacyDummyAvatar(liveMeta.picture)
+          ? liveMeta.picture
           : '';
-      const cacheAvatar =
-        scopedCache.avatarUrl && !isLegacyDummyAvatar(scopedCache.avatarUrl) ? scopedCache.avatarUrl : '';
 
-      const resolvedAvatar = pickFirstNonEmpty(cacheAvatar, serverAvatar, dbAvatar, metaAvatar);
+      const resolvedAvatar = pickFirstNonEmpty(dbAvatar, serverAvatar, metaAvatar);
       const avatarUrl = resolvedAvatar || getMonogramAvatar(fullName || email || 'User');
 
       const schoolName = pickFirstNonEmpty(
-        scopedCache.schoolName,
-        serverProfile?.schoolName,
         dbRow?.school_name,
         dbRow?.academic_institution,
         dbRow?.school,
-        meta.school_name,
-        meta.academic_institution,
-        meta.school,
-        localSnap.schoolName
+        serverProfile?.schoolName,
+        liveMeta.school_name,
+        liveMeta.academic_institution,
+        liveMeta.school
       );
 
       const className = pickFirstNonEmpty(
-        scopedCache.className,
-        serverProfile?.className,
         dbRow?.class_name,
         dbRow?.grade,
-        meta.class_name,
-        meta.grade,
-        localSnap.className
+        serverProfile?.className,
+        liveMeta.class_name,
+        liveMeta.grade
       );
 
       const subject = pickFirstNonEmpty(
-        scopedCache.subject,
-        serverProfile?.subject,
         dbRow?.subject,
-        meta.subject,
-        localSnap.subject
+        serverProfile?.subject,
+        liveMeta.subject
       );
 
       const targetAim = pickFirstNonEmpty(
-        scopedCache.targetAim,
-        serverProfile?.targetAim,
         dbRow?.target_aim,
         dbRow?.primary_goal,
         dbRow?.learning_goal,
-        meta.target_aim,
-        meta.primary_goal,
-        meta.learning_goal,
-        localSnap.targetAim
+        serverProfile?.targetAim,
+        liveMeta.target_aim,
+        liveMeta.primary_goal,
+        liveMeta.learning_goal
       );
 
       const studentBio = pickFirstNonEmpty(
-        scopedCache.studentBio,
-        serverProfile?.studentBio,
         dbRow?.scholar_bio,
         dbRow?.bio,
-        meta.scholar_bio,
-        meta.bio,
-        localSnap.studentBio
+        serverProfile?.studentBio,
+        liveMeta.scholar_bio,
+        liveMeta.bio
       );
 
-      let explicitLocalGoal: number | undefined;
-      try {
-        const storedGoal = Number(localStorage.getItem('studyweb_profile_daily_goal'));
-        if (Number.isFinite(storedGoal) && storedGoal >= 5) {
-          explicitLocalGoal = Math.round(storedGoal);
-        }
-      } catch {}
-
       const rawGoal =
-        explicitLocalGoal ??
-        (Number(scopedCache.dailyGoalMinutes) >= 5 ? Number(scopedCache.dailyGoalMinutes) : undefined) ??
-        (Number(serverProfile?.dailyGoalMinutes) >= 5 ? Number(serverProfile?.dailyGoalMinutes) : undefined) ??
         (Number(dbRow?.daily_goal_minutes) >= 5 ? Number(dbRow?.daily_goal_minutes) : undefined) ??
-        (Number(meta.daily_goal_minutes) >= 5 ? Number(meta.daily_goal_minutes) : undefined) ??
-        (Number(localSnap.dailyGoalMinutes) >= 5 ? Number(localSnap.dailyGoalMinutes) : undefined) ??
+        (Number(serverProfile?.dailyGoalMinutes) >= 5 ? Number(serverProfile?.dailyGoalMinutes) : undefined) ??
+        (Number(liveMeta.daily_goal_minutes) >= 5 ? Number(liveMeta.daily_goal_minutes) : undefined) ??
         60;
       const dailyGoalMinutes =
         Number.isFinite(Number(rawGoal)) && Number(rawGoal) >= 5 ? Math.round(Number(rawGoal)) : 60;
 
       const examName = pickFirstNonEmpty(
-        scopedCache.examName,
-        serverProfile?.examName,
         dbRow?.exam_name,
-        meta.exam_name,
-        localSnap.examName
+        serverProfile?.examName,
+        liveMeta.exam_name
       );
 
       const examDate = pickFirstNonEmpty(
-        scopedCache.examDate,
-        serverProfile?.examDate,
         dbRow?.exam_date,
-        meta.exam_date,
-        localSnap.examDate
+        serverProfile?.examDate,
+        liveMeta.exam_date
       );
 
       const activeMascot = pickFirstNonEmpty(
-        scopedCache.activeMascot,
-        serverProfile?.activeMascot,
-        meta.active_mascot,
         dbRow?.active_mascot,
-        localSnap.activeMascot,
+        serverProfile?.activeMascot,
+        liveMeta.active_mascot,
         'athena'
       );
 
       const voiceStyle = pickFirstNonEmpty(
-        scopedCache.voiceStyle,
-        serverProfile?.voiceStyle,
-        meta.voice_style,
         dbRow?.voice_style,
-        localSnap.voiceStyle,
+        serverProfile?.voiceStyle,
+        liveMeta.voice_style,
         'calm'
       );
 
@@ -622,11 +638,9 @@ export async function fetchAndReconcileSupabaseProfile(forceRefresh = false): Pr
         activeMascot,
         voiceStyle,
         updatedAt: pickFirstNonEmpty(
-          scopedCache.updatedAt,
-          serverProfile?.updatedAt,
-          meta.updated_at,
           dbRow?.updated_at,
-          localSnap.updatedAt
+          serverProfile?.updatedAt,
+          liveMeta.updated_at
         ),
       };
 

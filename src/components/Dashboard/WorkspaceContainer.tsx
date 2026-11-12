@@ -385,14 +385,9 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
   };
 
   const handleRemoveFile = async (fileId: string) => {
-    // 1. Delete from Supabase Database
-    try {
-      await WorkspaceSyncService.deleteWorkspaceFile(fileId);
-    } catch (e) {
-      console.error("Failed to delete from Supabase:", e);
-    }
-    
-    // 2. Update local state
+    const targetFile = (workspace.files || []).find(f => f.id === fileId);
+
+    // 1. Update local state & parent workspace immediately
     const updatedFiles = (workspace.files || []).filter(f => f.id !== fileId);
     const updatedNodes = workspace.nodes.filter(n => n.id !== `n-${fileId}`);
     const updatedLinks = workspace.links.filter(l => l.target !== `n-${fileId}`);
@@ -401,7 +396,14 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
       nodes: updatedNodes,
       links: updatedLinks
     });
-    
+
+    // 2. Delete permanently from Supabase & backend tables
+    try {
+      await WorkspaceSyncService.deleteWorkspaceFile(fileId, workspace.id, targetFile?.name);
+    } catch (e) {
+      console.error("Failed to delete from Supabase:", e);
+    }
+
     // 3. Notify success
     window.dispatchEvent(
       new CustomEvent('studyweb-toast', {
@@ -415,7 +417,7 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
     );
   };
 
-  const handleClearAllFiles = () => {
+  const handleClearAllFiles = async () => {
     const fileNodeIds = new Set((workspace.files || []).map(f => `n-${f.id}`));
     const updatedNodes = workspace.nodes.filter(n => !fileNodeIds.has(n.id));
     const updatedLinks = workspace.links.filter(l => !fileNodeIds.has(l.target));
@@ -424,6 +426,13 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
       nodes: updatedNodes,
       links: updatedLinks
     });
+
+    try {
+      await WorkspaceSyncService.deleteAllWorkspaceFiles(workspace.id);
+    } catch (e) {
+      console.error("Failed to clear workspace files from Supabase:", e);
+    }
+
     window.dispatchEvent(
       new CustomEvent('studyweb-toast', {
         detail: {

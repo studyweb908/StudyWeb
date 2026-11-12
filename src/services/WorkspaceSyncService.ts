@@ -269,27 +269,117 @@ export class WorkspaceSyncService {
   }
 
   /**
-   * Deletes a file from Supabase 'workspace_files' strictly owned by the current user.
+   * Deletes a file from Supabase 'workspace_files', child RAG tables, and parent 'workspaces.files' JSONB strictly owned by the current user.
    */
-  public static async deleteWorkspaceFile(fileId: string): Promise<boolean> {
+  public static async deleteWorkspaceFile(
+    fileId: string,
+    workspaceId?: string,
+    fileName?: string
+  ): Promise<boolean> {
     if (!supabase) return false;
 
     try {
-      const userId = await this.getUserId();
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id || (await this.getUserId());
+      const accessToken = session?.access_token || '';
       if (!userId) return false;
       this.clearCache(userId);
 
       const validFileId = toValidUuid(fileId);
-      const { error } = await supabase
-        .from('workspace_files')
-        .delete()
-        .eq('id', validFileId)
-        .eq('user_id', userId);
+      const validWsId = workspaceId ? toValidUuid(workspaceId) : undefined;
 
-      if (error) {
-        reportSupabaseError('deleteWorkspaceFile', error, true);
-        return false;
+      // 1. Call authoritative backend deletion route
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'x-studyweb-user-id': userId
+      };
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
       }
+
+      fetch('/api/workspaces/files/delete', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          userId,
+          workspaceId: validWsId,
+          fileId: validFileId,
+          rawFileId: fileId,
+          fileName: fileName || ''
+        })
+      }).catch(() => {});
+
+      // 2. Delete from all Supabase file & RAG tables directly
+      await Promise.allSettled([
+        supabase.from('embeddings').delete().eq('document_id', validFileId),
+        supabase.from('document_chunks').delete().eq('document_id', validFileId),
+        supabase.from('documents').delete().eq('id', validFileId).eq('user_id', userId),
+        supabase.from('study_materials').delete().eq('id', validFileId).eq('user_id', userId),
+        supabase.from('workspace_files').delete().eq('id', validFileId).eq('user_id', userId)
+      ]);
+
+      // 3. Also purge the file from parent workspaces.files JSONB array in Supabase so it can never resurrect
+      if (validWsId) {
+        try {
+          const { data: wsRow } = await supabase
+            .from('workspaces')
+            .select('id, files, nodes, links')
+            .eq('id', validWsId)
+            .eq('user_id', userId)
+            .maybeSingle();
+
+          if (wsRow) {
+            const targetIds = new Set([
+              String(fileId).trim().toLowerCase(),
+              String(validFileId).trim().toLowerCase()
+            ]);
+            const targetName = (fileName || '').trim().toLowerCase();
+
+            const updatedFiles = Array.isArray(wsRow.files)
+              ? wsRow.files.filter((f: any) => {
+                  const fId = String(f?.id || '').trim().toLowerCase();
+                  const fUuid = f?.id ? String(toValidUuid(f.id)).trim().toLowerCase() : '';
+                  const fName = String(f?.name || '').trim().toLowerCase();
+                  if ((fId && targetIds.has(fId)) || (fUuid && targetIds.has(fUuid))) return false;
+                  if (targetName && fName && fName === targetName) return false;
+                  return true;
+                })
+              : [];
+
+            const updatedNodes = Array.isArray(wsRow.nodes)
+              ? wsRow.nodes.filter((n: any) => {
+                  const nid = String(n?.id || '').trim().toLowerCase();
+                  for (const tid of targetIds) {
+                    if (nid === `n-${tid}`) return false;
+                  }
+                  return true;
+                })
+              : [];
+
+            const updatedLinks = Array.isArray(wsRow.links)
+              ? wsRow.links.filter((l: any) => {
+                  const tgt = String(l?.target || '').trim().toLowerCase();
+                  for (const tid of targetIds) {
+                    if (tgt === `n-${tid}`) return false;
+                  }
+                  return true;
+                })
+              : [];
+
+            await supabase
+              .from('workspaces')
+              .update({
+                files: updatedFiles,
+                nodes: updatedNodes,
+                links: updatedLinks,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', validWsId)
+              .eq('user_id', userId);
+          }
+        } catch {}
+      }
+
       return true;
     } catch (err) {
       reportSupabaseError('deleteWorkspaceFile', err, true);
@@ -298,23 +388,105 @@ export class WorkspaceSyncService {
   }
 
   /**
-   * Deletes a workspace and its associated files from Supabase strictly owned by the current user.
+   * Deletes all files in a workspace from Supabase 'workspace_files', child RAG tables, and clears 'workspaces.files' JSONB.
    */
-  public static async deleteWorkspace(workspaceId: string): Promise<boolean> {
+  public static async deleteAllWorkspaceFiles(workspaceId: string): Promise<boolean> {
     if (!supabase) return false;
 
     try {
-      const userId = await this.getUserId();
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id || (await this.getUserId());
+      const accessToken = session?.access_token || '';
       if (!userId) return false;
       this.clearCache(userId);
 
       const validWsId = toValidUuid(workspaceId);
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'x-studyweb-user-id': userId
+      };
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+
+      fetch('/api/workspaces/files/delete', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          userId,
+          workspaceId: validWsId,
+          clearAll: true
+        })
+      }).catch(() => {});
+
+      await Promise.allSettled([
+        supabase.from('embeddings').delete().eq('workspace_id', validWsId),
+        supabase.from('document_chunks').delete().eq('workspace_id', validWsId),
+        supabase.from('documents').delete().eq('workspace_id', validWsId).eq('user_id', userId),
+        supabase.from('study_materials').delete().eq('workspace_id', validWsId).eq('user_id', userId),
+        supabase.from('workspace_files').delete().eq('workspace_id', validWsId).eq('user_id', userId)
+      ]);
+
       await supabase
-        .from('workspace_files')
-        .delete()
-        .eq('workspace_id', validWsId)
+        .from('workspaces')
+        .update({
+          files: [],
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', validWsId)
         .eq('user_id', userId);
+
+      return true;
+    } catch (err) {
+      reportSupabaseError('deleteAllWorkspaceFiles', err, true);
+      return false;
+    }
+  }
+
+  /**
+   * Deletes a workspace and all its associated files, embeddings, and notes from Supabase strictly owned by the current user.
+   */
+  public static async deleteWorkspace(workspaceId: string): Promise<boolean> {
+    if (!supabase) return false;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id || (await this.getUserId());
+      const accessToken = session?.access_token || '';
+      if (!userId) return false;
+      this.clearCache(userId);
+
+      const validWsId = toValidUuid(workspaceId);
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'x-studyweb-user-id': userId
+      };
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+
+      fetch('/api/workspaces/delete', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          userId,
+          workspaceId: validWsId,
+          rawWorkspaceId: workspaceId
+        })
+      }).catch(() => {});
+
+      await Promise.allSettled([
+        supabase.from('embeddings').delete().eq('workspace_id', validWsId),
+        supabase.from('document_chunks').delete().eq('workspace_id', validWsId),
+        supabase.from('processing_jobs').delete().eq('workspace_id', validWsId),
+        supabase.from('generated_notes').delete().eq('workspace_id', validWsId),
+        supabase.from('retrieval_logs').delete().eq('workspace_id', validWsId),
+        supabase.from('documents').delete().eq('workspace_id', validWsId).eq('user_id', userId),
+        supabase.from('study_materials').delete().eq('workspace_id', validWsId).eq('user_id', userId),
+        supabase.from('workspace_files').delete().eq('workspace_id', validWsId).eq('user_id', userId)
+      ]);
 
       const { error } = await supabase
         .from('workspaces')

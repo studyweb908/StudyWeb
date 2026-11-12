@@ -12,43 +12,13 @@ import {
   Check,
   Sparkles,
   RotateCcw,
-  FileText,
-  SlidersHorizontal
+  FileText
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import { toValidUuid } from '../../utils/uuid';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import { OCRService } from '../../services/OCRService';
-
-export type ScanDocumentFilter = 'original' | 'magic_color' | 'grayscale' | 'bw';
-
-const SCAN_FILTER_OPTIONS: Array<{
-  id: ScanDocumentFilter;
-  label: string;
-  cssFilter: string;
-}> = [
-  {
-    id: 'original',
-    label: 'Original',
-    cssFilter: 'none'
-  },
-  {
-    id: 'magic_color',
-    label: 'Magic Color',
-    cssFilter: 'contrast(1.32) saturate(1.25) brightness(1.06)'
-  },
-  {
-    id: 'grayscale',
-    label: 'Grayscale',
-    cssFilter: 'grayscale(1) contrast(1.38) brightness(1.05)'
-  },
-  {
-    id: 'bw',
-    label: 'B&W',
-    cssFilter: 'grayscale(1) contrast(2.35) brightness(1.12)'
-  }
-];
 
 export interface ScannedNoteDraftPayload {
   id: string;
@@ -94,96 +64,6 @@ interface CameraNoteScannerModalProps {
   ) => void;
 }
 
-/**
- * Applies the selected document readability filter (Magic Color, Grayscale, or B&W)
- * directly to the cropped canvas pixels before OCR extraction.
- */
-function applyDocumentFilterToCanvas(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  filter: ScanDocumentFilter
-) {
-  if (filter === 'original' || w <= 0 || h <= 0) return;
-
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const data = imgData.data;
-  const totalPixels = w * h;
-
-  let lumSum = 0;
-  for (let i = 0; i < totalPixels; i++) {
-    const idx = i * 4;
-    lumSum += (data[idx] * 77 + data[idx + 1] * 150 + data[idx + 2] * 29) >> 8;
-  }
-  const meanLum = lumSum / Math.max(1, totalPixels);
-
-  if (filter === 'magic_color') {
-    // Whiten paper background while boosting ink contrast and color saturation
-    const paperWhiteCutoff = Math.min(235, Math.max(175, meanLum * 1.12));
-    for (let i = 0; i < totalPixels; i++) {
-      const idx = i * 4;
-      let r = data[idx];
-      let g = data[idx + 1];
-      let b = data[idx + 2];
-
-      const lum = (r * 77 + g * 150 + b * 29) >> 8;
-      const maxC = Math.max(r, g, b);
-      const minC = Math.min(r, g, b);
-      const sat = maxC - minC;
-
-      if (lum >= paperWhiteCutoff && sat < 38) {
-        // Clean paper background to crisp bright white
-        r = Math.min(255, Math.round(r + (255 - r) * 0.72));
-        g = Math.min(255, Math.round(g + (255 - g) * 0.72));
-        b = Math.min(255, Math.round(b + (255 - b) * 0.72));
-      } else {
-        // S-curve contrast + saturation boost for ink & highlighters
-        const factor = 1.32;
-        r = Math.max(0, Math.min(255, Math.round((r - 128) * factor + 132)));
-        g = Math.max(0, Math.min(255, Math.round((g - 128) * factor + 132)));
-        b = Math.max(0, Math.min(255, Math.round((b - 128) * factor + 132)));
-      }
-
-      data[idx] = r;
-      data[idx + 1] = g;
-      data[idx + 2] = b;
-    }
-  } else if (filter === 'grayscale') {
-    // High-contrast monochrome grayscale for crisp pencil/pen legibility
-    const contrast = 1.42;
-    for (let i = 0; i < totalPixels; i++) {
-      const idx = i * 4;
-      const lum = (data[idx] * 77 + data[idx + 1] * 150 + data[idx + 2] * 29) >> 8;
-      let gray = Math.round((lum - meanLum) * contrast + 148);
-      if (gray > 228) gray = Math.min(255, Math.round(gray + (255 - gray) * 0.65));
-      gray = Math.max(0, Math.min(255, gray));
-      data[idx] = gray;
-      data[idx + 1] = gray;
-      data[idx + 2] = gray;
-    }
-  } else if (filter === 'bw') {
-    // Adaptive document thresholding for sharp black text on pure white background
-    const threshold = Math.min(205, Math.max(110, meanLum * 0.92));
-    for (let i = 0; i < totalPixels; i++) {
-      const idx = i * 4;
-      const lum = (data[idx] * 77 + data[idx + 1] * 150 + data[idx + 2] * 29) >> 8;
-      // Soft anti-aliased transition band around threshold so handwriting strokes stay smooth
-      let bwVal: number;
-      if (lum > threshold + 14) {
-        bwVal = 255;
-      } else if (lum < threshold - 14) {
-        bwVal = 12;
-      } else {
-        bwVal = Math.round(((lum - (threshold - 14)) / 28) * 243 + 12);
-      }
-      data[idx] = bwVal;
-      data[idx + 1] = bwVal;
-      data[idx + 2] = bwVal;
-    }
-  }
-
-  ctx.putImageData(imgData, 0, 0);
-}
 
 /**
  * Strictly detects the boundaries of a real paper document / notebook page with written or printed text
@@ -407,13 +287,9 @@ export default function CameraNoteScannerModal({
   const [scanProgress, setScanProgress] = useState(0);
   const [ocrPreviewSnippet, setOcrPreviewSnippet] = useState<string | null>(null);
   const [autoCropEnabled, setAutoCropEnabled] = useState<boolean>(true);
-  const [selectedFilter, setSelectedFilter] = useState<ScanDocumentFilter>('magic_color');
   const [detectedBounds, setDetectedBounds] = useState<NormalizedDocBounds | null>(null);
   const [scanResult, setScanResult] = useState<CompletedScanResult | null>(null);
   const [isCopied, setIsCopied] = useState(false);
-
-  const activeFilterConfig =
-    SCAN_FILTER_OPTIONS.find((f) => f.id === selectedFilter) || SCAN_FILTER_OPTIONS[0];
 
   const stopCameraStream = useCallback(() => {
     if (streamRef.current) {
@@ -614,11 +490,10 @@ export default function CameraNoteScannerModal({
     setScanProgress(0);
   };
 
-  // Automatically crop to detected paper boundaries, apply selected document filter, compress, and normalize image to JPEG DataURL + Base64
+  // Automatically crop to detected paper boundaries, compress, and normalize image to JPEG DataURL + Base64
   const normalizeAndCompressImage = (
     rawDataUrl: string,
-    preDetectedBounds?: NormalizedDocBounds | null,
-    filterToApply: ScanDocumentFilter = selectedFilter
+    preDetectedBounds?: NormalizedDocBounds | null
   ): Promise<{ dataUrl: string; base64: string; sizeFormatted: string; wasCropped: boolean }> => {
     return new Promise((resolve) => {
       const img = new Image();
@@ -678,11 +553,6 @@ export default function CameraNoteScannerModal({
         ctx.fillRect(0, 0, outW, outH);
         ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
 
-        // Apply selected readability filter (Magic Color, Grayscale, B&W)
-        try {
-          applyDocumentFilterToCanvas(ctx, outW, outH, filterToApply);
-        } catch {}
-
         let outUrl = canvas.toDataURL('image/jpeg', 0.84);
         if (outUrl.length > 290_000) {
           outUrl = canvas.toDataURL('image/jpeg', 0.66);
@@ -705,7 +575,7 @@ export default function CameraNoteScannerModal({
     });
   };
 
-  // Automatically crop via paper boundary detection, apply document filter, process via OCRService, upload, and show OCR result view
+  // Automatically crop via paper boundary detection, process via OCRService, upload, and show OCR result view
   const processAndUploadScannedImage = async (
     rawDataUrl: string,
     originalFileName?: string,
@@ -720,22 +590,21 @@ export default function CameraNoteScannerModal({
     setScanProgress(18);
     setScanStepText(
       autoCropEnabled
-        ? `Auto-cropping & applying ${activeFilterConfig.label} filter...`
-        : `Applying ${activeFilterConfig.label} filter & optimizing for OCR...`
+        ? 'Auto-cropping paper boundaries & optimizing image...'
+        : 'Optimizing scanned note image for OCR...'
     );
 
     try {
       const { dataUrl, base64, sizeFormatted, wasCropped } = await normalizeAndCompressImage(
         rawDataUrl,
-        lockedBounds,
-        selectedFilter
+        lockedBounds
       );
-      // Display the cleanly auto-cropped & filtered document page in the preview
+      // Display the cleanly auto-cropped document page in the preview
       setCapturedDataUrl(dataUrl);
 
       if (wasCropped) {
         setScanProgress(30);
-        setScanStepText('Document page cropped & enhanced! Running OCR text extraction...');
+        setScanStepText('Document page cropped! Running OCR text extraction...');
       }
 
       // Resolve target workspace (activeWorkspace -> first workspace -> create new workspace)
@@ -1003,7 +872,7 @@ export default function CameraNoteScannerModal({
                   <div className="lg:col-span-5 flex flex-col bg-slate-900/90 border border-white/10 rounded-3xl p-4 overflow-hidden">
                     <div className="flex items-center justify-between mb-3">
                       <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        Scanned Page ({activeFilterConfig.label})
+                        Scanned Page
                       </span>
                       <span className="text-[11px] font-semibold text-indigo-300 truncate max-w-[60%]">
                         {scanResult.targetWs.name}
@@ -1118,8 +987,7 @@ export default function CameraNoteScannerModal({
                   playsInline
                   muted
                   autoPlay
-                  style={{ filter: activeFilterConfig.cssFilter }}
-                  className={`w-full h-full object-cover transition-[filter] duration-200 ${cameraReady ? 'opacity-100' : 'opacity-0'}`}
+                  className={`w-full h-full object-cover ${cameraReady ? 'opacity-100' : 'opacity-0'}`}
                 />
 
                 {/* Only show Auto-Crop boundary overlay when real paper with text is detected */}
@@ -1175,9 +1043,9 @@ export default function CameraNoteScannerModal({
             )}
           </div>
 
-          {/* Bottom Full-Screen Dock (Result Actions vs Filter Panel + Camera Shutter) */}
+          {/* Bottom Full-Screen Dock (Result Actions vs Camera Shutter) */}
           {!isProcessing && (
-            <div className="absolute bottom-0 left-0 right-0 z-30 px-4 sm:px-8 pt-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] bg-gradient-to-t from-black/95 via-black/75 to-transparent flex flex-col items-center gap-3.5">
+            <div className="absolute bottom-0 left-0 right-0 z-30 px-4 sm:px-8 pt-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] bg-gradient-to-t from-black/95 via-black/75 to-transparent flex flex-col items-center gap-3">
               {scanResult ? (
                 <div className="flex flex-wrap items-center justify-center gap-3 w-full max-w-2xl">
                   <button
@@ -1228,92 +1096,59 @@ export default function CameraNoteScannerModal({
                   </button>
                 </div>
               ) : (
-                <>
-                  {/* Document Readability Filter Selection Panel */}
-                  <div
-                    role="radiogroup"
-                    aria-label="Document Readability Filter"
-                    className="flex items-center gap-1.5 p-1.5 rounded-2xl bg-slate-900/80 border border-white/15 backdrop-blur-md shadow-xl max-w-full overflow-x-auto"
+                <div className="flex items-center justify-center gap-6 sm:gap-10 w-full max-w-md">
+                  {/* Gallery / Upload Photo Button */}
+                  <button
+                    type="button"
+                    onClick={() => galleryInputRef.current?.click()}
+                    className="flex flex-col items-center gap-1.5 text-white/85 hover:text-white transition-all cursor-pointer active:scale-95"
                   >
-                    <div className="flex items-center gap-1 pl-2 pr-1 text-[10px] font-bold uppercase tracking-wider text-white/60 shrink-0">
-                      <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-400" />
-                      <span className="hidden sm:inline">Filter</span>
+                    <div className="w-12 h-12 rounded-2xl bg-white/15 hover:bg-white/25 border border-white/20 backdrop-blur-md flex items-center justify-center">
+                      <Upload className="w-5 h-5" />
                     </div>
-                    {SCAN_FILTER_OPTIONS.map((option) => {
-                      const isActive = selectedFilter === option.id;
-                      return (
-                        <button
-                          key={option.id}
-                          type="button"
-                          role="radio"
-                          aria-checked={isActive}
-                          onClick={() => setSelectedFilter(option.id)}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 whitespace-nowrap ${
-                            isActive
-                              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/35 border border-indigo-400/50'
-                              : 'text-white/75 hover:text-white hover:bg-white/10 border border-transparent'
-                          }`}
-                        >
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
+                    <span className="text-[10px] font-bold tracking-wide">Upload Photo</span>
+                  </button>
 
-                  <div className="flex items-center justify-center gap-6 sm:gap-10 w-full max-w-md">
-                    {/* Gallery / Upload Photo Button */}
-                    <button
-                      type="button"
-                      onClick={() => galleryInputRef.current?.click()}
-                      className="flex flex-col items-center gap-1.5 text-white/85 hover:text-white transition-all cursor-pointer active:scale-95"
-                    >
-                      <div className="w-12 h-12 rounded-2xl bg-white/15 hover:bg-white/25 border border-white/20 backdrop-blur-md flex items-center justify-center">
-                        <Upload className="w-5 h-5" />
-                      </div>
-                      <span className="text-[10px] font-bold tracking-wide">Upload Photo</span>
-                    </button>
-
-                    {/* Primary Circular Camera Shutter Button */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (cameraReady) {
-                          handleCaptureFromVideo();
-                        } else {
-                          nativeCameraInputRef.current?.click();
-                        }
-                      }}
-                      aria-label="Capture and scan study notes"
-                      className={`w-20 h-20 rounded-full p-1.5 border-4 flex items-center justify-center hover:scale-105 active:scale-95 transition-all cursor-pointer ${
+                  {/* Primary Circular Camera Shutter Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (cameraReady) {
+                        handleCaptureFromVideo();
+                      } else {
+                        nativeCameraInputRef.current?.click();
+                      }
+                    }}
+                    aria-label="Capture and scan study notes"
+                    className={`w-20 h-20 rounded-full p-1.5 border-4 flex items-center justify-center hover:scale-105 active:scale-95 transition-all cursor-pointer ${
+                      detectedBounds && autoCropEnabled
+                        ? 'border-emerald-400 shadow-[0_0_32px_rgba(52,211,153,0.6)]'
+                        : 'border-white shadow-[0_0_30px_rgba(99,102,241,0.5)]'
+                    }`}
+                  >
+                    <div
+                      className={`w-full h-full rounded-full flex items-center justify-center text-white transition-colors ${
                         detectedBounds && autoCropEnabled
-                          ? 'border-emerald-400 shadow-[0_0_32px_rgba(52,211,153,0.6)]'
-                          : 'border-white shadow-[0_0_30px_rgba(99,102,241,0.5)]'
+                          ? 'bg-emerald-600 hover:bg-emerald-500'
+                          : 'bg-indigo-600 hover:bg-indigo-500'
                       }`}
                     >
-                      <div
-                        className={`w-full h-full rounded-full flex items-center justify-center text-white transition-colors ${
-                          detectedBounds && autoCropEnabled
-                            ? 'bg-emerald-600 hover:bg-emerald-500'
-                            : 'bg-indigo-600 hover:bg-indigo-500'
-                        }`}
-                      >
-                        <Camera className="w-8 h-8" />
-                      </div>
-                    </button>
+                      <Camera className="w-8 h-8" />
+                    </div>
+                  </button>
 
-                    {/* Native Device Camera Trigger */}
-                    <button
-                      type="button"
-                      onClick={() => nativeCameraInputRef.current?.click()}
-                      className="flex flex-col items-center gap-1.5 text-white/85 hover:text-white transition-all cursor-pointer active:scale-95"
-                    >
-                      <div className="w-12 h-12 rounded-2xl bg-white/15 hover:bg-white/25 border border-white/20 backdrop-blur-md flex items-center justify-center">
-                        <Camera className="w-5 h-5" />
-                      </div>
-                      <span className="text-[10px] font-bold tracking-wide">Device Camera</span>
-                    </button>
-                  </div>
-                </>
+                  {/* Native Device Camera Trigger */}
+                  <button
+                    type="button"
+                    onClick={() => nativeCameraInputRef.current?.click()}
+                    className="flex flex-col items-center gap-1.5 text-white/85 hover:text-white transition-all cursor-pointer active:scale-95"
+                  >
+                    <div className="w-12 h-12 rounded-2xl bg-white/15 hover:bg-white/25 border border-white/20 backdrop-blur-md flex items-center justify-center">
+                      <Camera className="w-5 h-5" />
+                    </div>
+                    <span className="text-[10px] font-bold tracking-wide">Device Camera</span>
+                  </button>
+                </div>
               )}
             </div>
           )}

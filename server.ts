@@ -252,6 +252,7 @@ async function startServer() {
       const supabase = getSupabaseServerClient(req.headers.authorization);
       let dbRow: Record<string, any> | null = null;
       let streakRow: Record<string, any> | null = null;
+      let dbQueried = false;
 
       if (supabase) {
         try {
@@ -259,8 +260,9 @@ async function startServer() {
             supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
             supabase.from("study_streak_settings").select("*").eq("user_id", userId).maybeSingle(),
           ]);
-          if (profRes.status === "fulfilled" && profRes.value.data) {
-            dbRow = profRes.value.data;
+          if (profRes.status === "fulfilled" && !profRes.value.error) {
+            dbQueried = true;
+            dbRow = profRes.value.data || null;
           }
           if (stRes.status === "fulfilled" && stRes.value.data) {
             streakRow = stRes.value.data;
@@ -268,27 +270,32 @@ async function startServer() {
         } catch {}
       }
 
+      if (dbQueried && (!dbRow || dbRow?.onboarding_data?.account_deleted === true)) {
+        serverProfileStore.delete(userId);
+        return res.json({ success: true, profile: null, accountDeleted: Boolean(dbRow?.onboarding_data?.account_deleted) });
+      }
+
       const resolvedGoal =
-        cached.dailyGoalMinutes ??
-        streakGoal ??
         (Number(streakRow?.daily_goal_minutes) >= 5 ? Number(streakRow?.daily_goal_minutes) : undefined) ??
-        (Number(dbRow?.daily_goal_minutes) >= 5 ? Number(dbRow?.daily_goal_minutes) : undefined);
+        (Number(dbRow?.daily_goal_minutes) >= 5 ? Number(dbRow?.daily_goal_minutes) : undefined) ??
+        cached.dailyGoalMinutes ??
+        streakGoal;
 
       const profile = {
         userId,
-        fullName: cached.fullName || dbRow?.full_name || dbRow?.name || "",
-        avatarUrl: cached.avatarUrl || dbRow?.avatar_url || "",
-        schoolName: cached.schoolName || dbRow?.school_name || dbRow?.school || "",
-        className: cached.className || dbRow?.class_name || dbRow?.grade || "",
-        subject: cached.subject || dbRow?.subject || "",
-        targetAim: cached.targetAim || dbRow?.target_aim || dbRow?.learning_goal || "",
-        studentBio: cached.studentBio || dbRow?.scholar_bio || dbRow?.bio || "",
+        fullName: dbRow ? (dbRow.full_name ?? dbRow.name ?? "") : (cached.fullName || ""),
+        avatarUrl: dbRow ? (dbRow.avatar_url ?? "") : (cached.avatarUrl || ""),
+        schoolName: dbRow ? (dbRow.school_name ?? dbRow.school ?? "") : (cached.schoolName || ""),
+        className: dbRow ? (dbRow.class_name ?? dbRow.grade ?? "") : (cached.className || ""),
+        subject: dbRow ? (dbRow.subject ?? "") : (cached.subject || ""),
+        targetAim: dbRow ? (dbRow.target_aim ?? dbRow.learning_goal ?? "") : (cached.targetAim || ""),
+        studentBio: dbRow ? (dbRow.scholar_bio ?? dbRow.bio ?? "") : (cached.studentBio || ""),
         dailyGoalMinutes: resolvedGoal,
-        examName: cached.examName || dbRow?.exam_name || "",
-        examDate: cached.examDate || dbRow?.exam_date || "",
-        activeMascot: cached.activeMascot || dbRow?.active_mascot || "",
-        voiceStyle: cached.voiceStyle || dbRow?.voice_style || "",
-        updatedAt: cached.updatedAt || dbRow?.updated_at || "",
+        examName: dbRow ? (dbRow.exam_name ?? "") : (cached.examName || ""),
+        examDate: dbRow ? (dbRow.exam_date ?? "") : (cached.examDate || ""),
+        activeMascot: dbRow ? (dbRow.active_mascot ?? cached.activeMascot ?? "") : (cached.activeMascot || ""),
+        voiceStyle: dbRow ? (dbRow.voice_style ?? cached.voiceStyle ?? "") : (cached.voiceStyle || ""),
+        updatedAt: dbRow?.updated_at || cached.updatedAt || "",
       };
 
       return res.json({ success: true, profile });
@@ -348,8 +355,8 @@ async function startServer() {
         const candidatePayloads: Record<string, any>[] = [
           {
             id: userId,
-            ...(updatedProfile.fullName ? { full_name: updatedProfile.fullName } : {}),
-            ...(updatedProfile.avatarUrl ? { avatar_url: updatedProfile.avatarUrl } : {}),
+            ...(updatedProfile.fullName !== undefined ? { full_name: updatedProfile.fullName } : {}),
+            ...(updatedProfile.avatarUrl !== undefined ? { avatar_url: updatedProfile.avatarUrl } : {}),
             ...(updatedProfile.schoolName !== undefined ? { school: updatedProfile.schoolName } : {}),
             ...(updatedProfile.className !== undefined ? { grade: updatedProfile.className } : {}),
             ...(updatedProfile.subject !== undefined ? { subject: updatedProfile.subject } : {}),
@@ -362,8 +369,8 @@ async function startServer() {
           },
           {
             id: userId,
-            ...(updatedProfile.fullName ? { full_name: updatedProfile.fullName } : {}),
-            ...(updatedProfile.avatarUrl ? { avatar_url: updatedProfile.avatarUrl } : {}),
+            ...(updatedProfile.fullName !== undefined ? { full_name: updatedProfile.fullName } : {}),
+            ...(updatedProfile.avatarUrl !== undefined ? { avatar_url: updatedProfile.avatarUrl } : {}),
             ...(updatedProfile.schoolName !== undefined ? { school: updatedProfile.schoolName } : {}),
             ...(updatedProfile.className !== undefined ? { grade: updatedProfile.className } : {}),
             ...(updatedProfile.targetAim !== undefined ? { learning_goal: updatedProfile.targetAim } : {}),
@@ -372,8 +379,8 @@ async function startServer() {
           },
           {
             id: userId,
-            ...(updatedProfile.fullName ? { full_name: updatedProfile.fullName } : {}),
-            ...(updatedProfile.avatarUrl ? { avatar_url: updatedProfile.avatarUrl } : {}),
+            ...(updatedProfile.fullName !== undefined ? { full_name: updatedProfile.fullName } : {}),
+            ...(updatedProfile.avatarUrl !== undefined ? { avatar_url: updatedProfile.avatarUrl } : {}),
             ...(updatedProfile.schoolName !== undefined ? { school: updatedProfile.schoolName } : {}),
             ...(updatedProfile.className !== undefined ? { grade: updatedProfile.className } : {}),
             ...(updatedProfile.targetAim !== undefined ? { learning_goal: updatedProfile.targetAim } : {}),
@@ -381,8 +388,8 @@ async function startServer() {
           },
           {
             id: userId,
-            ...(updatedProfile.fullName ? { full_name: updatedProfile.fullName } : {}),
-            ...(updatedProfile.avatarUrl ? { avatar_url: updatedProfile.avatarUrl } : {}),
+            ...(updatedProfile.fullName !== undefined ? { full_name: updatedProfile.fullName } : {}),
+            ...(updatedProfile.avatarUrl !== undefined ? { avatar_url: updatedProfile.avatarUrl } : {}),
             updated_at: nowIso,
           },
         ];
@@ -544,6 +551,190 @@ async function startServer() {
         deleted: true,
         warning: err?.message,
       });
+    }
+  });
+
+  // API Route: Authoritative Workspace Deletion (/api/workspaces/delete)
+  app.post("/api/workspaces/delete", async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    try {
+      const body = req.body || {};
+      const userId = String(
+        body.userId ||
+          req.headers["x-studyweb-user-id"] ||
+          extractUserIdFromAuthHeader(req.headers.authorization) ||
+          ""
+      ).trim();
+
+      const candidateIds = Array.from(
+        new Set(
+          [body.workspaceId, body.rawWorkspaceId]
+            .map((v) => String(v || "").trim())
+            .filter(Boolean)
+        )
+      );
+
+      workspaceFilesResponseCache.clear();
+
+      const supabase = getSupabaseServerClient(req.headers.authorization);
+      if (supabase && candidateIds.length > 0) {
+        for (const wsId of candidateIds) {
+          await Promise.allSettled([
+            supabase.from("embeddings").delete().eq("workspace_id", wsId),
+            supabase.from("document_chunks").delete().eq("workspace_id", wsId),
+            supabase.from("processing_jobs").delete().eq("workspace_id", wsId),
+            supabase.from("generated_notes").delete().eq("workspace_id", wsId),
+            supabase.from("retrieval_logs").delete().eq("workspace_id", wsId),
+            supabase.from("documents").delete().eq("workspace_id", wsId),
+            supabase.from("study_materials").delete().eq("workspace_id", wsId),
+            supabase.from("workspace_files").delete().eq("workspace_id", wsId),
+            userId
+              ? supabase.from("workspaces").delete().eq("id", wsId).eq("user_id", userId)
+              : supabase.from("workspaces").delete().eq("id", wsId),
+          ]);
+        }
+      }
+
+      return res.json({ success: true, deleted: true });
+    } catch (err: any) {
+      return res.status(200).json({ success: false, error: err?.message });
+    }
+  });
+
+  // API Route: Authoritative Workspace File Deletion (/api/workspaces/files/delete)
+  app.post("/api/workspaces/files/delete", async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    try {
+      const body = req.body || {};
+      const userId = String(
+        body.userId ||
+          req.headers["x-studyweb-user-id"] ||
+          extractUserIdFromAuthHeader(req.headers.authorization) ||
+          ""
+      ).trim();
+
+      const workspaceId = String(body.workspaceId || "").trim();
+      const fileIds = Array.from(
+        new Set(
+          [body.fileId, body.rawFileId]
+            .map((v) => String(v || "").trim())
+            .filter(Boolean)
+        )
+      );
+      const fileName = String(body.fileName || "").trim().toLowerCase();
+      const clearAll = Boolean(body.clearAll);
+
+      workspaceFilesResponseCache.clear();
+
+      const supabase = getSupabaseServerClient(req.headers.authorization);
+      if (supabase) {
+        if (clearAll && workspaceId) {
+          await Promise.allSettled([
+            supabase.from("embeddings").delete().eq("workspace_id", workspaceId),
+            supabase.from("document_chunks").delete().eq("workspace_id", workspaceId),
+            supabase.from("documents").delete().eq("workspace_id", workspaceId),
+            supabase.from("study_materials").delete().eq("workspace_id", workspaceId),
+            supabase.from("workspace_files").delete().eq("workspace_id", workspaceId),
+          ]);
+
+          try {
+            const { data: wsRow } = await supabase
+              .from("workspaces")
+              .select("id, nodes, links")
+              .eq("id", workspaceId)
+              .maybeSingle();
+
+            if (wsRow) {
+              const filteredNodes = Array.isArray(wsRow.nodes)
+                ? wsRow.nodes.filter((n: any) => n?.type !== "file")
+                : [];
+              const validNodeIds = new Set(filteredNodes.map((n: any) => n?.id));
+              const filteredLinks = Array.isArray(wsRow.links)
+                ? wsRow.links.filter((l: any) => validNodeIds.has(l?.target))
+                : [];
+
+              await supabase
+                .from("workspaces")
+                .update({
+                  files: [],
+                  nodes: filteredNodes,
+                  links: filteredLinks,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", workspaceId);
+            }
+          } catch {}
+        } else {
+          for (const fId of fileIds) {
+            await Promise.allSettled([
+              supabase.from("embeddings").delete().eq("document_id", fId),
+              supabase.from("document_chunks").delete().eq("document_id", fId),
+              supabase.from("documents").delete().eq("id", fId),
+              supabase.from("study_materials").delete().eq("id", fId),
+              userId
+                ? supabase.from("workspace_files").delete().eq("id", fId).eq("user_id", userId)
+                : supabase.from("workspace_files").delete().eq("id", fId),
+            ]);
+          }
+
+          if (workspaceId) {
+            try {
+              const { data: wsRow } = await supabase
+                .from("workspaces")
+                .select("id, files, nodes, links")
+                .eq("id", workspaceId)
+                .maybeSingle();
+
+              if (wsRow) {
+                const fileIdSet = new Set(fileIds.map((id) => id.toLowerCase()));
+                const updatedFiles = Array.isArray(wsRow.files)
+                  ? wsRow.files.filter((f: any) => {
+                      const candId = String(f?.id || "").trim().toLowerCase();
+                      const candName = String(f?.name || "").trim().toLowerCase();
+                      if (candId && fileIdSet.has(candId)) return false;
+                      if (fileName && candName && candName === fileName) return false;
+                      return true;
+                    })
+                  : [];
+
+                const updatedNodes = Array.isArray(wsRow.nodes)
+                  ? wsRow.nodes.filter((n: any) => {
+                      const nid = String(n?.id || "").trim().toLowerCase();
+                      for (const fid of fileIdSet) {
+                        if (nid === `n-${fid}`) return false;
+                      }
+                      return true;
+                    })
+                  : [];
+
+                const updatedLinks = Array.isArray(wsRow.links)
+                  ? wsRow.links.filter((l: any) => {
+                      const tgt = String(l?.target || "").trim().toLowerCase();
+                      for (const fid of fileIdSet) {
+                        if (tgt === `n-${fid}`) return false;
+                      }
+                      return true;
+                    })
+                  : [];
+
+                await supabase
+                  .from("workspaces")
+                  .update({
+                    files: updatedFiles,
+                    nodes: updatedNodes,
+                    links: updatedLinks,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("id", workspaceId);
+              }
+            } catch {}
+          }
+        }
+      }
+
+      return res.json({ success: true, deleted: true });
+    } catch (err: any) {
+      return res.status(200).json({ success: false, error: err?.message });
     }
   });
 
