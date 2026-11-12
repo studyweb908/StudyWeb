@@ -980,13 +980,13 @@ export default function App() {
               <span className="text-[10px] font-bold">Spaces</span>
             </button>
 
-            {/* 3. Center Create Action Button */}
+            {/* 3. Center Camera Scan Action Button */}
             <button
-              onClick={() => setIsBottomSheetOpen(true)}
-              aria-label="Open creation menu"
+              onClick={() => setShowQuickScan(true)}
+              aria-label="Scan notes with camera"
               className="w-12 h-12 rounded-full bg-indigo-600 dark:bg-indigo-500 text-white flex items-center justify-center shadow-lg shadow-indigo-600/30 -mt-5 hover:scale-110 active:scale-95 transition-all cursor-pointer border-4 border-slate-50 dark:border-slate-950 z-45 shrink-0"
             >
-              <Plus className="w-6 h-6 stroke-[3]" />
+              <Camera className="w-6 h-6 stroke-[2.5]" />
             </button>
 
             {/* 4. AI Tutor */}

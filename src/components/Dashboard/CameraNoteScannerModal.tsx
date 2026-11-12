@@ -3,14 +3,16 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Camera,
   X,
-  RefreshCw,
   Upload,
-  Sparkles,
-  CheckCircle2,
   Loader2,
-  FileText,
-  AlertCircle,
-  SwitchCamera
+  SwitchCamera,
+  Crop,
+  CheckCircle2,
+  Copy,
+  Check,
+  Sparkles,
+  RotateCcw,
+  FileText
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
@@ -31,6 +33,23 @@ export interface ScannedNoteDraftPayload {
   mimeType: string;
 }
 
+export interface NormalizedDocBounds {
+  x: number; // 0..1 left
+  y: number; // 0..1 top
+  width: number; // 0..1 width
+  height: number; // 0..1 height
+  confidence: number; // 0..1
+}
+
+interface CompletedScanResult {
+  targetWs: Workspace;
+  wsFileObj: WorkspaceFile;
+  draftPayload: ScannedNoteDraftPayload;
+  extractedText: string;
+  title: string;
+  summary: string;
+}
+
 interface CameraNoteScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -43,6 +62,124 @@ interface CameraNoteScannerModalProps {
     scannedFile: WorkspaceFile,
     draftPayload: ScannedNoteDraftPayload
   ) => void;
+}
+
+/**
+ * Detects the boundaries of a paper document / notebook page inside an image or video frame
+ * using adaptive luminance thresholding, low-saturation paper filtering, and edge-density projection.
+ */
+function detectPaperBoundsFromImageData(
+  imageData: ImageData,
+  w: number,
+  h: number
+): NormalizedDocBounds | null {
+  const data = imageData.data;
+  const totalPixels = w * h;
+  if (totalPixels === 0) return null;
+
+  const lum = new Uint8Array(totalPixels);
+  const sat = new Uint8Array(totalPixels);
+  let lumSum = 0;
+
+  for (let i = 0; i < totalPixels; i++) {
+    const idx = i * 4;
+    const r = data[idx];
+    const g = data[idx + 1];
+    const b = data[idx + 2];
+
+    const yVal = (r * 77 + g * 150 + b * 29) >> 8;
+    lum[i] = yVal;
+    lumSum += yVal;
+
+    const maxC = Math.max(r, g, b);
+    const minC = Math.min(r, g, b);
+    sat[i] = maxC === 0 ? 0 : Math.round(((maxC - minC) / maxC) * 255);
+  }
+
+  const meanLum = lumSum / totalPixels;
+  // Paper is typically brighter than the surrounding surface and relatively low saturation
+  const lumThreshold = Math.min(225, Math.max(115, meanLum * 1.08));
+  const satThreshold = 110;
+
+  const rowPaperCounts = new Uint16Array(h);
+  const colPaperCounts = new Uint16Array(w);
+  let paperPixelCount = 0;
+
+  // Exclude outer 2% border noise
+  const marginX = Math.max(2, Math.floor(w * 0.02));
+  const marginY = Math.max(2, Math.floor(h * 0.02));
+
+  for (let y = marginY; y < h - marginY; y++) {
+    const rowOffset = y * w;
+    for (let x = marginX; x < w - marginX; x++) {
+      const i = rowOffset + x;
+      if (lum[i] >= lumThreshold && sat[i] <= satThreshold) {
+        rowPaperCounts[y]++;
+        colPaperCounts[x]++;
+        paperPixelCount++;
+      }
+    }
+  }
+
+  const coverage = paperPixelCount / totalPixels;
+  // If almost the entire frame is uniform or virtually no paper pixels exist, skip cropping
+  if (coverage < 0.1 || coverage > 0.94) {
+    return null;
+  }
+
+  // Find dominant contiguous horizontal & vertical span of the paper region
+  const minRowDensity = Math.max(4, Math.floor(w * 0.18));
+  const minColDensity = Math.max(4, Math.floor(h * 0.18));
+
+  let topY = -1;
+  let bottomY = -1;
+  for (let y = marginY; y < h - marginY; y++) {
+    if (rowPaperCounts[y] >= minRowDensity) {
+      if (topY === -1) topY = y;
+      bottomY = y;
+    }
+  }
+
+  let leftX = -1;
+  let rightX = -1;
+  for (let x = marginX; x < w - marginX; x++) {
+    if (colPaperCounts[x] >= minColDensity) {
+      if (leftX === -1) leftX = x;
+      rightX = x;
+    }
+  }
+
+  if (topY === -1 || bottomY === -1 || leftX === -1 || rightX === -1) {
+    return null;
+  }
+
+  // Add a small 2% safety padding around detected paper edges so handwriting near margins is never clipped
+  const padX = Math.round(w * 0.02);
+  const padY = Math.round(h * 0.02);
+
+  const finalLeft = Math.max(0, leftX - padX);
+  const finalTop = Math.max(0, topY - padY);
+  const finalRight = Math.min(w, rightX + padX);
+  const finalBottom = Math.min(h, bottomY + padY);
+
+  const normW = (finalRight - finalLeft) / w;
+  const normH = (finalBottom - finalTop) / h;
+
+  if (normW < 0.25 || normH < 0.25) {
+    return null;
+  }
+
+  // Compute rectangular fill confidence inside the candidate box
+  const boxArea = Math.max(1, (finalRight - finalLeft) * (finalBottom - finalTop));
+  const fillRatio = Math.min(1, paperPixelCount / boxArea);
+
+  return {
+    x: finalLeft / w,
+    y: finalTop / h,
+    width: normW,
+    height: normH,
+    confidence: Math.min(0.99, Math.max(0.5, fillRatio))
+  };
 }
 
 export default function CameraNoteScannerModal({
@@ -58,6 +195,8 @@ export default function CameraNoteScannerModal({
   const streamRef = useRef<MediaStream | null>(null);
   const nativeCameraInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const analysisCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const smoothedBoundsRef = useRef<NormalizedDocBounds | null>(null);
 
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraReady, setCameraReady] = useState(false);
@@ -67,6 +206,10 @@ export default function CameraNoteScannerModal({
   const [scanStepText, setScanStepText] = useState('Initializing camera...');
   const [scanProgress, setScanProgress] = useState(0);
   const [ocrPreviewSnippet, setOcrPreviewSnippet] = useState<string | null>(null);
+  const [autoCropEnabled, setAutoCropEnabled] = useState<boolean>(true);
+  const [detectedBounds, setDetectedBounds] = useState<NormalizedDocBounds | null>(null);
+  const [scanResult, setScanResult] = useState<CompletedScanResult | null>(null);
+  const [isCopied, setIsCopied] = useState(false);
 
   const stopCameraStream = useCallback(() => {
     if (streamRef.current) {
@@ -81,6 +224,8 @@ export default function CameraNoteScannerModal({
       videoRef.current.srcObject = null;
     }
     setCameraReady(false);
+    setDetectedBounds(null);
+    smoothedBoundsRef.current = null;
   }, []);
 
   const startCameraStream = useCallback(async (mode: 'environment' | 'user') => {
@@ -88,7 +233,7 @@ export default function CameraNoteScannerModal({
     setCameraError(null);
 
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-      setCameraError('Live viewfinder is unavailable in this browser. Use the button below to snap or upload your notes.');
+      setCameraError('Live viewfinder is unavailable in this browser. Tap the camera button below to snap or upload your notes.');
       return;
     }
 
@@ -98,8 +243,8 @@ export default function CameraNoteScannerModal({
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { ideal: mode },
-            width: { ideal: 1600 },
-            height: { ideal: 1200 }
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
           },
           audio: false
         });
@@ -118,12 +263,12 @@ export default function CameraNoteScannerModal({
       }
     } catch (err: any) {
       console.warn('Camera access notice:', err?.message || err);
-      setCameraError('Camera access was blocked or not found. Tap "Take Photo / Upload Note" below to scan directly from your device.');
+      setCameraError('Camera access was blocked or not found. Tap the camera button below to scan directly from your device.');
     }
   }, [stopCameraStream]);
 
   useEffect(() => {
-    if (isOpen && !capturedDataUrl && !isProcessing) {
+    if (isOpen && !capturedDataUrl && !isProcessing && !scanResult) {
       startCameraStream(facingMode);
     } else if (!isOpen) {
       stopCameraStream();
@@ -132,75 +277,232 @@ export default function CameraNoteScannerModal({
       setScanProgress(0);
       setCameraError(null);
       setOcrPreviewSnippet(null);
+      setDetectedBounds(null);
+      setScanResult(null);
+      setIsCopied(false);
+      smoothedBoundsRef.current = null;
     }
     return () => {
       stopCameraStream();
     };
-  }, [isOpen, facingMode, capturedDataUrl, isProcessing, startCameraStream, stopCameraStream]);
+  }, [isOpen, facingMode, capturedDataUrl, isProcessing, scanResult, startCameraStream, stopCameraStream]);
+
+  // Real-time paper boundary detection loop on live camera feed (~8 FPS)
+  useEffect(() => {
+    if (!isOpen || !cameraReady || capturedDataUrl || isProcessing || scanResult || !autoCropEnabled) {
+      setDetectedBounds(null);
+      smoothedBoundsRef.current = null;
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      const video = videoRef.current;
+      if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
+
+      const sampleW = 200;
+      const sampleH = Math.max(120, Math.round((video.videoHeight / video.videoWidth) * sampleW));
+
+      if (!analysisCanvasRef.current) {
+        analysisCanvasRef.current = document.createElement('canvas');
+      }
+      const canvas = analysisCanvasRef.current;
+      canvas.width = sampleW;
+      canvas.height = sampleH;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return;
+
+      ctx.drawImage(video, 0, 0, sampleW, sampleH);
+      const imgData = ctx.getImageData(0, 0, sampleW, sampleH);
+      const rawBounds = detectPaperBoundsFromImageData(imgData, sampleW, sampleH);
+
+      if (rawBounds) {
+        const prev = smoothedBoundsRef.current;
+        const alpha = 0.38; // Smooth interpolation factor
+        const next: NormalizedDocBounds = prev
+          ? {
+              x: prev.x + (rawBounds.x - prev.x) * alpha,
+              y: prev.y + (rawBounds.y - prev.y) * alpha,
+              width: prev.width + (rawBounds.width - prev.width) * alpha,
+              height: prev.height + (rawBounds.height - prev.height) * alpha,
+              confidence: rawBounds.confidence
+            }
+          : rawBounds;
+        smoothedBoundsRef.current = next;
+        setDetectedBounds(next);
+      } else {
+        smoothedBoundsRef.current = null;
+        setDetectedBounds(null);
+      }
+    }, 125);
+
+    return () => clearInterval(intervalId);
+  }, [isOpen, cameraReady, capturedDataUrl, isProcessing, scanResult, autoCropEnabled]);
 
   const handleToggleCameraFacing = () => {
     setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'));
   };
 
-  // Compress and normalize any captured/selected image to clean JPEG DataURL + Base64
-  const normalizeAndCompressImage = (rawDataUrl: string): Promise<{ dataUrl: string; base64: string; sizeFormatted: string }> => {
+  // Copy the extracted OCR text from the result view to the user's clipboard
+  const handleCopyOcrText = async () => {
+    const textToCopy = scanResult?.extractedText?.trim();
+    if (!textToCopy) return;
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(textToCopy);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = textToCopy;
+        textArea.style.position = 'fixed';
+        textArea.style.opacity = '0';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setIsCopied(true);
+      (window as any).showToast?.(
+        'Extracted OCR text copied to clipboard!',
+        'success',
+        3000,
+        'Copied'
+      );
+      setTimeout(() => setIsCopied(false), 2500);
+    } catch {
+      (window as any).showToast?.(
+        'Could not copy text to clipboard.',
+        'error',
+        3000,
+        'Copy Error'
+      );
+    }
+  };
+
+  const handleRescan = () => {
+    setScanResult(null);
+    setCapturedDataUrl(null);
+    setOcrPreviewSnippet(null);
+    setIsCopied(false);
+    setScanProgress(0);
+  };
+
+  // Automatically crop to detected paper boundaries, compress, and normalize image to JPEG DataURL + Base64
+  const normalizeAndCompressImage = (
+    rawDataUrl: string,
+    preDetectedBounds?: NormalizedDocBounds | null
+  ): Promise<{ dataUrl: string; base64: string; sizeFormatted: string; wasCropped: boolean }> => {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
+        const srcW = img.width || 1200;
+        const srcH = img.height || 900;
+
+        let cropBounds: NormalizedDocBounds | null = preDetectedBounds || null;
+
+        // If no live bounds were passed (e.g., uploaded from device photo gallery), detect paper boundaries on the static image
+        if (autoCropEnabled && !cropBounds) {
+          try {
+            const detectW = 240;
+            const detectH = Math.max(140, Math.round((srcH / srcW) * detectW));
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = detectW;
+            tempCanvas.height = detectH;
+            const tempCtx = tempCanvas.getContext('2d');
+            if (tempCtx) {
+              tempCtx.drawImage(img, 0, 0, detectW, detectH);
+              const imgData = tempCtx.getImageData(0, 0, detectW, detectH);
+              cropBounds = detectPaperBoundsFromImageData(imgData, detectW, detectH);
+            }
+          } catch {}
+        }
+
+        const sx = autoCropEnabled && cropBounds ? Math.round(cropBounds.x * srcW) : 0;
+        const sy = autoCropEnabled && cropBounds ? Math.round(cropBounds.y * srcH) : 0;
+        const sw = autoCropEnabled && cropBounds ? Math.round(cropBounds.width * srcW) : srcW;
+        const sh = autoCropEnabled && cropBounds ? Math.round(cropBounds.height * srcH) : srcH;
+
         const maxDim = 1400;
-        let w = img.width || 1200;
-        let h = img.height || 900;
-        if (w > maxDim || h > maxDim) {
-          if (w >= h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
+        let outW = sw;
+        let outH = sh;
+        if (outW > maxDim || outH > maxDim) {
+          if (outW >= outH) {
+            outH = Math.round((outH * maxDim) / outW);
+            outW = maxDim;
           } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
+            outW = Math.round((outW * maxDim) / outH);
+            outH = maxDim;
           }
         }
+
         const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
+        canvas.width = outW;
+        canvas.height = outH;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
           const fallbackB64 = rawDataUrl.split(';base64,')[1] || '';
           const kb = Math.max(1, Math.round((fallbackB64.length * 0.75) / 1024));
-          resolve({ dataUrl: rawDataUrl, base64: fallbackB64, sizeFormatted: `${kb} KB` });
+          resolve({ dataUrl: rawDataUrl, base64: fallbackB64, sizeFormatted: `${kb} KB`, wasCropped: false });
           return;
         }
+
         ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, w, h);
-        ctx.drawImage(img, 0, 0, w, h);
-        let outUrl = canvas.toDataURL('image/jpeg', 0.82);
+        ctx.fillRect(0, 0, outW, outH);
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+
+        let outUrl = canvas.toDataURL('image/jpeg', 0.84);
         if (outUrl.length > 290_000) {
-          outUrl = canvas.toDataURL('image/jpeg', 0.65);
+          outUrl = canvas.toDataURL('image/jpeg', 0.66);
         }
         const b64 = outUrl.split(';base64,')[1] || '';
         const kb = Math.max(1, Math.round((b64.length * 0.75) / 1024));
-        resolve({ dataUrl: outUrl, base64: b64, sizeFormatted: `${kb} KB` });
+        resolve({
+          dataUrl: outUrl,
+          base64: b64,
+          sizeFormatted: `${kb} KB`,
+          wasCropped: Boolean(autoCropEnabled && cropBounds)
+        });
       };
       img.onerror = () => {
         const fallbackB64 = rawDataUrl.split(';base64,')[1] || '';
         const kb = Math.max(1, Math.round((fallbackB64.length * 0.75) / 1024));
-        resolve({ dataUrl: rawDataUrl, base64: fallbackB64, sizeFormatted: `${kb} KB` });
+        resolve({ dataUrl: rawDataUrl, base64: fallbackB64, sizeFormatted: `${kb} KB`, wasCropped: false });
       };
       img.src = rawDataUrl;
     });
   };
 
-  // Automatically process via OCRService, upload, create file in workspace, and open AI Tutor
-  const processAndUploadScannedImage = async (rawDataUrl: string, originalFileName?: string) => {
+  // Automatically crop via paper boundary detection, process via OCRService, upload, and show OCR result view
+  const processAndUploadScannedImage = async (
+    rawDataUrl: string,
+    originalFileName?: string,
+    lockedBounds?: NormalizedDocBounds | null
+  ) => {
     stopCameraStream();
     setCapturedDataUrl(rawDataUrl);
     setOcrPreviewSnippet(null);
+    setScanResult(null);
+    setIsCopied(false);
     setIsProcessing(true);
     setScanProgress(18);
-    setScanStepText('Optimizing scanned note image for OCR...');
+    setScanStepText(
+      autoCropEnabled
+        ? 'Auto-cropping paper boundaries & optimizing image...'
+        : 'Optimizing scanned note image for OCR...'
+    );
 
     try {
-      const { dataUrl, base64, sizeFormatted } = await normalizeAndCompressImage(rawDataUrl);
+      const { dataUrl, base64, sizeFormatted, wasCropped } = await normalizeAndCompressImage(
+        rawDataUrl,
+        lockedBounds
+      );
+      // Display the cleanly auto-cropped document page in the preview
       setCapturedDataUrl(dataUrl);
+
+      if (wasCropped) {
+        setScanProgress(30);
+        setScanStepText('Document page cropped! Running OCR text extraction...');
+      }
 
       // Resolve target workspace (activeWorkspace -> first workspace -> create new workspace)
       const targetWs: Workspace =
@@ -225,7 +527,7 @@ export default function CameraNoteScannerModal({
         ? originalFileName.replace(/\.[^/.]+$/, '')
         : `Scanned Notes (${dateLabel}, ${timestampLabel})`;
 
-      // Run OCRService on the scanned image to extract full text content, summary, highlights, and formulas
+      // Run OCRService on the auto-cropped scanned image
       const ocrResult = await OCRService.extractTextFromNoteImage(
         {
           fileBase64: base64,
@@ -254,7 +556,7 @@ export default function CameraNoteScannerModal({
       }
 
       setScanProgress(88);
-      setScanStepText('Saving OCR text & opening AI Tutor...');
+      setScanStepText('Saving OCR text to StudyWeb workspace...');
 
       const fileId = ocrResult.id || toValidUuid(`scan-${Date.now()}`);
       const resolvedName = ocrResult.title || defaultScanName;
@@ -294,11 +596,18 @@ export default function CameraNoteScannerModal({
       WorkspaceSyncService.saveWorkspaceFile(targetWs.id, wsFileObj, resolvedUid || undefined).catch(() => {});
 
       setScanProgress(100);
-      setScanStepText('OCR complete! Opening AI Tutor...');
+      setScanStepText('OCR complete!');
 
-      await new Promise((r) => setTimeout(r, 320));
+      await new Promise((r) => setTimeout(r, 240));
       setIsProcessing(false);
-      onScanComplete(targetWs, wsFileObj, draftPayload);
+      setScanResult({
+        targetWs,
+        wsFileObj,
+        draftPayload,
+        extractedText: ocrResult.extractedText || '',
+        title: resolvedName,
+        summary: ocrResult.summary || ''
+      });
     } catch (error: any) {
       console.error('Error scanning note:', error);
       setIsProcessing(false);
@@ -311,7 +620,7 @@ export default function CameraNoteScannerModal({
     }
   };
 
-  // Capture current video frame from live camera
+  // Capture current video frame from live camera and apply locked paper boundary crop
   const handleCaptureFromVideo = () => {
     if (!videoRef.current) return;
     const video = videoRef.current;
@@ -323,8 +632,9 @@ export default function CameraNoteScannerModal({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, w, h);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
-    processAndUploadScannedImage(dataUrl);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+    const activeBounds = smoothedBoundsRef.current || detectedBounds;
+    processAndUploadScannedImage(dataUrl, undefined, activeBounds);
   };
 
   // Handle photo captured via native mobile camera input or gallery picker
@@ -334,7 +644,7 @@ export default function CameraNoteScannerModal({
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
-        processAndUploadScannedImage(reader.result, file.name);
+        processAndUploadScannedImage(reader.result, file.name, null);
       }
     };
     reader.readAsDataURL(file);
@@ -344,219 +654,411 @@ export default function CameraNoteScannerModal({
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4">
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => {
-              if (!isProcessing) onClose();
-            }}
-            className="absolute inset-0 bg-slate-950/75 backdrop-blur-md"
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="fixed inset-0 w-screen h-[100dvh] z-[9999] bg-black flex flex-col overflow-hidden select-none"
+        >
+          {/* Hidden Native Camera & File Inputs */}
+          <input
+            ref={nativeCameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleFileInputChange}
+            className="hidden"
+          />
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleFileInputChange}
+            className="hidden"
           />
 
-          {/* Scanner Modal Card */}
-          <motion.div
-            initial={{ scale: 0.95, opacity: 0, y: 16 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.95, opacity: 0, y: 16 }}
-            transition={{ type: 'spring', damping: 24, stiffness: 280 }}
-            className="relative w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-2xl text-left space-y-4 z-10 overflow-hidden"
-          >
-            {/* Top Header */}
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-600/20 shrink-0">
-                  <Camera className="w-5 h-5" />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white truncate">
-                    Scan Study Notes
-                  </h3>
-                  <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate">
-                    Snap your notes to auto-create a file &amp; ask AI Tutor
-                  </p>
-                </div>
+          {/* Top Full-Screen Floating Header Bar */}
+          <div className="absolute top-0 left-0 right-0 z-30 flex items-center justify-between px-4 sm:px-6 pt-[calc(1rem+env(safe-area-inset-top,0px))] pb-4 bg-gradient-to-b from-black/80 via-black/40 to-transparent">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-2xl bg-indigo-600/90 backdrop-blur-md text-white flex items-center justify-center shadow-lg border border-white/15 shrink-0">
+                <Camera className="w-5 h-5" />
               </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm sm:text-base font-black text-white truncate">
+                    {scanResult ? 'Scanned Note OCR Result' : 'Scan Study Notes'}
+                  </h3>
+                  {cameraReady && !capturedDataUrl && !scanResult && (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-[10px] font-bold text-emerald-300">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      LIVE
+                    </span>
+                  )}
+                  {detectedBounds && autoCropEnabled && !capturedDataUrl && !scanResult && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-500/30 border border-indigo-400/40 text-[10px] font-bold text-indigo-200">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                      Paper Detected
+                    </span>
+                  )}
+                  {scanResult && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/25 border border-emerald-400/40 text-[10px] font-bold text-emerald-300">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                      Saved to Workspace
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] font-medium text-white/70 truncate">
+                  {scanResult
+                    ? scanResult.title
+                    : detectedBounds && autoCropEnabled
+                    ? 'Paper boundaries locked — tap shutter to auto-crop & scan'
+                    : 'Align your notes and tap the shutter to upload to StudyWeb'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {!capturedDataUrl && !isProcessing && !scanResult && (
+                <button
+                  type="button"
+                  onClick={() => setAutoCropEnabled((prev) => !prev)}
+                  className={`h-10 px-3 rounded-full border backdrop-blur-md flex items-center gap-1.5 text-xs font-bold transition-all cursor-pointer active:scale-95 ${
+                    autoCropEnabled
+                      ? 'bg-indigo-600/80 border-indigo-400/50 text-white shadow-md shadow-indigo-600/30'
+                      : 'bg-white/15 border-white/20 text-white/75 hover:bg-white/25'
+                  }`}
+                  title={autoCropEnabled ? 'Automatic Paper Cropping: ON' : 'Automatic Paper Cropping: OFF'}
+                  aria-label="Toggle Automatic Document Cropping"
+                >
+                  <Crop className="w-4 h-4" />
+                  <span className="hidden sm:inline">Auto-Crop</span>
+                </button>
+              )}
+
+              {cameraReady && !capturedDataUrl && !isProcessing && !scanResult && (
+                <button
+                  type="button"
+                  onClick={handleToggleCameraFacing}
+                  className="w-10 h-10 rounded-full bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-md flex items-center justify-center transition-all cursor-pointer active:scale-95"
+                  title="Switch Front/Back Camera"
+                  aria-label="Switch Camera"
+                >
+                  <SwitchCamera className="w-5 h-5" />
+                </button>
+              )}
 
               {!isProcessing && (
                 <button
                   type="button"
                   onClick={onClose}
-                  className="p-1.5 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 transition-colors cursor-pointer shrink-0"
-                  aria-label="Close scanner"
+                  className="w-10 h-10 rounded-full bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-md flex items-center justify-center transition-all cursor-pointer active:scale-95"
+                  aria-label="Close full-screen scanner"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-5 h-5" />
                 </button>
               )}
             </div>
+          </div>
 
-            {/* Hidden Native Camera & File Inputs */}
-            <input
-              ref={nativeCameraInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={handleFileInputChange}
-              className="hidden"
-            />
-            <input
-              ref={galleryInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleFileInputChange}
-              className="hidden"
-            />
-
-            {/* Viewfinder or Processing Preview */}
-            <div className="relative aspect-[4/3] w-full rounded-2xl bg-slate-950 overflow-hidden flex items-center justify-center border border-slate-800 shadow-inner">
-              {capturedDataUrl ? (
-                <>
-                  <img
-                    src={capturedDataUrl}
-                    alt="Scanned Note Preview"
-                    className="w-full h-full object-contain bg-slate-950"
-                  />
-                  {isProcessing && (
-                    <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-xs flex flex-col items-center justify-center p-5 text-center">
-                      {/* Animated Laser Scan Line */}
-                      <motion.div
-                        animate={{ top: ['10%', '88%', '10%'] }}
-                        transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
-                        className="absolute left-4 right-4 h-0.5 bg-gradient-to-r from-transparent via-indigo-400 to-transparent shadow-[0_0_12px_#6366f1]"
-                      />
-                      <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 mb-3">
-                        <Loader2 className="w-6 h-6 animate-spin" />
-                      </div>
-                      <p className="text-xs sm:text-sm font-extrabold text-white mb-1">
-                        {scanStepText}
-                      </p>
-                      <div className="w-48 h-1.5 bg-slate-800 rounded-full overflow-hidden mt-2">
-                        <motion.div
-                          className="h-full bg-indigo-500 rounded-full"
-                          animate={{ width: `${scanProgress}%` }}
-                          transition={{ duration: 0.3 }}
+          {/* Full-Screen Camera Viewport / OCR Result View */}
+          <div className="relative flex-1 w-full h-full flex items-center justify-center bg-black overflow-hidden">
+            {scanResult && !isProcessing ? (
+              <div className="w-full h-full flex flex-col pt-20 pb-28 px-4 sm:px-8 max-w-5xl mx-auto overflow-y-auto select-text">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 flex-1 min-h-0">
+                  {/* Left Column: Cropped Document Preview */}
+                  <div className="lg:col-span-5 flex flex-col bg-slate-900/90 border border-white/10 rounded-3xl p-4 overflow-hidden">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                        Scanned Page
+                      </span>
+                      <span className="text-[11px] font-semibold text-indigo-300 truncate max-w-[60%]">
+                        {scanResult.targetWs.name}
+                      </span>
+                    </div>
+                    <div className="relative flex-1 min-h-[180px] max-h-[340px] lg:max-h-none rounded-2xl overflow-hidden bg-black/60 border border-white/10 flex items-center justify-center">
+                      {capturedDataUrl && (
+                        <img
+                          src={capturedDataUrl}
+                          alt={scanResult.title}
+                          className="w-full h-full object-contain"
                         />
-                      </div>
-                      {ocrPreviewSnippet && (
-                        <div className="mt-3 px-3 py-2 rounded-xl bg-slate-900/90 border border-indigo-500/30 max-w-xs text-left">
-                          <p className="text-[9px] font-bold uppercase tracking-wider text-indigo-400 mb-0.5">
-                            OCR Extracted Text
-                          </p>
-                          <p className="text-[10px] text-slate-200 line-clamp-2 font-medium leading-snug">
-                            {ocrPreviewSnippet}
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right Column: Extracted OCR Text + Copy to Clipboard Button */}
+                  <div className="lg:col-span-7 flex flex-col bg-slate-900/95 border border-indigo-500/30 rounded-3xl p-4 sm:p-5 overflow-hidden shadow-2xl">
+                    <div className="flex items-center justify-between gap-3 pb-3 mb-3 border-b border-white/10 shrink-0">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 flex items-center justify-center shrink-0">
+                          <FileText className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className="text-xs sm:text-sm font-black text-white truncate">
+                            Extracted OCR Text
+                          </h4>
+                          <p className="text-[11px] text-slate-400 truncate">
+                            Ready to copy or study with AI Tutor
                           </p>
                         </div>
-                      )}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  <video
-                    ref={videoRef}
-                    playsInline
-                    muted
-                    autoPlay
-                    className={`w-full h-full object-cover ${cameraReady ? 'opacity-100' : 'opacity-0'}`}
-                  />
-
-                  {/* Scan Framing Guides */}
-                  <div className="absolute inset-4 border-2 border-dashed border-white/35 rounded-xl pointer-events-none" />
-
-                  {/* Live Indicator & Flip Camera Button */}
-                  {cameraReady && (
-                    <>
-                      <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900/75 backdrop-blur-md border border-white/10 text-[10px] font-bold text-white">
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                        <span>Live Camera</span>
                       </div>
+
                       <button
                         type="button"
-                        onClick={handleToggleCameraFacing}
-                        className="absolute top-3 right-3 p-2 rounded-full bg-slate-900/75 hover:bg-slate-900 text-white border border-white/15 backdrop-blur-md transition-all cursor-pointer"
-                        title="Switch Front/Back Camera"
-                        aria-label="Switch Camera"
+                        onClick={handleCopyOcrText}
+                        disabled={!scanResult.extractedText}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-all cursor-pointer active:scale-95 shrink-0 ${
+                          isCopied
+                            ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-300'
+                            : 'bg-indigo-600 hover:bg-indigo-500 border-indigo-400/40 text-white shadow-lg shadow-indigo-600/25'
+                        }`}
                       >
-                        <SwitchCamera className="w-4 h-4" />
+                        {isCopied ? (
+                          <>
+                            <Check className="w-4 h-4 text-emerald-400" />
+                            <span>Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-4 h-4" />
+                            <span>Copy OCR Text</span>
+                          </>
+                        )}
                       </button>
-                    </>
-                  )}
-
-                  {/* Fallback / Initializing Message inside Viewfinder */}
-                  {!cameraReady && (
-                    <div className="text-center space-y-2.5 z-10 p-5 max-w-xs">
-                      {cameraError ? (
-                        <>
-                          <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 flex items-center justify-center mx-auto">
-                            <Camera className="w-5 h-5" />
-                          </div>
-                          <p className="text-xs font-bold text-white/95 leading-snug">
-                            Ready to Capture Your Notes
-                          </p>
-                          <p className="text-[11px] text-white/65 font-medium leading-relaxed">
-                            {cameraError}
-                          </p>
-                        </>
-                      ) : (
-                        <>
-                          <Loader2 className="w-6 h-6 text-indigo-400 animate-spin mx-auto" />
-                          <p className="text-xs font-bold text-white/90">Starting Camera...</p>
-                          <p className="text-[10px] text-white/55 font-medium">
-                            Align your handwritten or printed study notes inside the frame
-                          </p>
-                        </>
-                      )}
                     </div>
-                  )}
-                </>
-              )}
-            </div>
 
-            {/* Action Buttons */}
-            <div className="space-y-2.5">
-              {cameraReady && !isProcessing && (
-                <button
-                  type="button"
-                  onClick={handleCaptureFromVideo}
-                  className="w-full py-3 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25 transition-all cursor-pointer"
-                >
-                  <Camera className="w-4 h-4" />
-                  <span>Capture &amp; Scan Note Now</span>
-                </button>
-              )}
+                    <div className="flex-1 min-h-[200px] overflow-y-auto rounded-2xl bg-slate-950/80 border border-white/10 p-4 text-xs sm:text-sm text-slate-200 font-medium leading-relaxed whitespace-pre-wrap">
+                      {scanResult.extractedText || 'No readable text was detected on this page.'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : capturedDataUrl ? (
+              <>
+                <img
+                  src={capturedDataUrl}
+                  alt="Scanned Note Fullscreen Preview"
+                  className="w-full h-full object-contain bg-black"
+                />
+                {isProcessing && (
+                  <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-20">
+                    {/* Full-Screen Animated Laser Scan Line */}
+                    <motion.div
+                      animate={{ top: ['12%', '86%', '12%'] }}
+                      transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
+                      className="absolute left-6 right-6 h-0.5 bg-gradient-to-r from-transparent via-indigo-400 to-transparent shadow-[0_0_16px_#6366f1]"
+                    />
+                    <div className="w-16 h-16 rounded-3xl bg-indigo-600/25 border border-indigo-500/40 flex items-center justify-center text-indigo-400 mb-4 shadow-xl">
+                      <Loader2 className="w-8 h-8 animate-spin" />
+                    </div>
+                    <p className="text-sm sm:text-base font-extrabold text-white mb-1.5">
+                      {scanStepText}
+                    </p>
+                    <p className="text-xs text-slate-300 font-medium mb-4">
+                      Uploading directly to your StudyWeb workspace &amp; AI Tutor
+                    </p>
+                    <div className="w-64 max-w-[80vw] h-2 bg-slate-800 rounded-full overflow-hidden">
+                      <motion.div
+                        className="h-full bg-indigo-500 rounded-full"
+                        animate={{ width: `${scanProgress}%` }}
+                        transition={{ duration: 0.3 }}
+                      />
+                    </div>
+                    {ocrPreviewSnippet && (
+                      <div className="mt-5 px-4 py-3 rounded-2xl bg-slate-900/90 border border-indigo-500/35 max-w-md text-left shadow-xl">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-1">
+                          OCR Extracted Text
+                        </p>
+                        <p className="text-xs text-slate-200 line-clamp-3 font-medium leading-relaxed">
+                          {ocrPreviewSnippet}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <video
+                  ref={videoRef}
+                  playsInline
+                  muted
+                  autoPlay
+                  className={`w-full h-full object-cover ${cameraReady ? 'opacity-100' : 'opacity-0'}`}
+                />
 
-              {!isProcessing && (
-                <div className="grid grid-cols-2 gap-2.5">
+                {/* Dynamic Auto-Detected Paper Boundary Box vs Static Framing Guide */}
+                {detectedBounds && autoCropEnabled && cameraReady ? (
+                  <div
+                    style={{
+                      left: `${detectedBounds.x * 100}%`,
+                      top: `${detectedBounds.y * 100}%`,
+                      width: `${detectedBounds.width * 100}%`,
+                      height: `${detectedBounds.height * 100}%`
+                    }}
+                    className="absolute border-2 border-emerald-400 bg-emerald-400/10 rounded-2xl pointer-events-none transition-all duration-150 ease-out shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]"
+                  >
+                    {/* Glowing Corner Brackets on Detected Paper */}
+                    <div className="absolute -top-1 -left-1 w-8 h-8 border-t-4 border-l-4 border-emerald-400 rounded-tl-xl" />
+                    <div className="absolute -top-1 -right-1 w-8 h-8 border-t-4 border-r-4 border-emerald-400 rounded-tr-xl" />
+                    <div className="absolute -bottom-1 -left-1 w-8 h-8 border-b-4 border-l-4 border-emerald-400 rounded-bl-xl" />
+                    <div className="absolute -bottom-1 -right-1 w-8 h-8 border-b-4 border-r-4 border-emerald-400 rounded-br-xl" />
+
+                    <div className="absolute -top-7 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black uppercase tracking-wider whitespace-nowrap shadow-md">
+                      Auto-Crop Locked
+                    </div>
+                  </div>
+                ) : (
+                  <div className="absolute inset-x-5 sm:inset-x-12 top-24 bottom-36 border-2 border-dashed border-white/35 rounded-3xl pointer-events-none">
+                    {/* Default Corner Brackets */}
+                    <div className="absolute -top-0.5 -left-0.5 w-8 h-8 border-t-4 border-l-4 border-indigo-400 rounded-tl-2xl" />
+                    <div className="absolute -top-0.5 -right-0.5 w-8 h-8 border-t-4 border-r-4 border-indigo-400 rounded-tr-2xl" />
+                    <div className="absolute -bottom-0.5 -left-0.5 w-8 h-8 border-b-4 border-l-4 border-indigo-400 rounded-bl-2xl" />
+                    <div className="absolute -bottom-0.5 -right-0.5 w-8 h-8 border-b-4 border-r-4 border-indigo-400 rounded-br-2xl" />
+                  </div>
+                )}
+
+                {/* Fallback / Initializing Message inside Full-Screen Viewfinder */}
+                {!cameraReady && (
+                  <div className="text-center space-y-3 z-10 p-6 max-w-sm">
+                    {cameraError ? (
+                      <>
+                        <div className="w-14 h-14 rounded-3xl bg-indigo-500/20 border border-indigo-500/35 text-indigo-400 flex items-center justify-center mx-auto shadow-lg">
+                          <Camera className="w-7 h-7" />
+                        </div>
+                        <p className="text-sm sm:text-base font-extrabold text-white">
+                          Ready to Scan Your Notes
+                        </p>
+                        <p className="text-xs text-white/70 font-medium leading-relaxed">
+                          {cameraError}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <Loader2 className="w-8 h-8 text-indigo-400 animate-spin mx-auto" />
+                        <p className="text-sm font-bold text-white">Opening Full-Screen Camera...</p>
+                        <p className="text-xs text-white/60 font-medium">
+                          Position your handwritten or printed study notes inside the frame
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Bottom Full-Screen Dock (Result Actions vs Camera Shutter) */}
+          {!isProcessing && (
+            <div className="absolute bottom-0 left-0 right-0 z-30 px-4 sm:px-8 pt-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] bg-gradient-to-t from-black/95 via-black/75 to-transparent flex flex-col items-center gap-3">
+              {scanResult ? (
+                <div className="flex flex-wrap items-center justify-center gap-3 w-full max-w-2xl">
                   <button
                     type="button"
-                    onClick={() => nativeCameraInputRef.current?.click()}
-                    className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                      !cameraReady
-                        ? 'col-span-2 py-3 bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-600/20 font-extrabold'
-                        : 'border border-slate-200 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/70 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'
-                    }`}
+                    onClick={handleRescan}
+                    className="px-4 py-3 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer active:scale-95"
                   >
-                    <Camera className="w-4 h-4 shrink-0" />
-                    <span>{!cameraReady ? 'Open Device Camera to Scan' : 'Device Camera'}</span>
+                    <RotateCcw className="w-4 h-4" />
+                    <span>Scan Another</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => galleryInputRef.current?.click()}
-                    className={`py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/70 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                      !cameraReady ? 'col-span-2' : ''
+                    onClick={handleCopyOcrText}
+                    disabled={!scanResult.extractedText}
+                    className={`px-5 py-3 rounded-2xl text-xs sm:text-sm font-bold flex items-center gap-2 border transition-all cursor-pointer active:scale-95 ${
+                      isCopied
+                        ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-300'
+                        : 'bg-white/15 hover:bg-white/25 border-white/20 text-white'
                     }`}
                   >
-                    <Upload className="w-4 h-4 shrink-0" />
-                    <span>Choose Photo from Device</span>
+                    {isCopied ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-400" />
+                        <span>Copied to Clipboard!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" />
+                        <span>Copy OCR Text</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onScanComplete(
+                        scanResult.targetWs,
+                        scanResult.wsFileObj,
+                        scanResult.draftPayload
+                      )
+                    }
+                    className="px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs sm:text-sm font-black flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all cursor-pointer active:scale-95"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Open in AI Tutor</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center gap-6 sm:gap-10 w-full max-w-md">
+                  {/* Gallery / Upload Photo Button */}
+                  <button
+                    type="button"
+                    onClick={() => galleryInputRef.current?.click()}
+                    className="flex flex-col items-center gap-1.5 text-white/85 hover:text-white transition-all cursor-pointer active:scale-95"
+                  >
+                    <div className="w-12 h-12 rounded-2xl bg-white/15 hover:bg-white/25 border border-white/20 backdrop-blur-md flex items-center justify-center">
+                      <Upload className="w-5 h-5" />
+                    </div>
+                    <span className="text-[10px] font-bold tracking-wide">Upload Photo</span>
+                  </button>
+
+                  {/* Primary Circular Camera Shutter Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (cameraReady) {
+                        handleCaptureFromVideo();
+                      } else {
+                        nativeCameraInputRef.current?.click();
+                      }
+                    }}
+                    aria-label="Capture and scan study notes"
+                    className={`w-20 h-20 rounded-full p-1.5 border-4 flex items-center justify-center hover:scale-105 active:scale-95 transition-all cursor-pointer ${
+                      detectedBounds && autoCropEnabled
+                        ? 'border-emerald-400 shadow-[0_0_32px_rgba(52,211,153,0.6)]'
+                        : 'border-white shadow-[0_0_30px_rgba(99,102,241,0.5)]'
+                    }`}
+                  >
+                    <div
+                      className={`w-full h-full rounded-full flex items-center justify-center text-white transition-colors ${
+                        detectedBounds && autoCropEnabled
+                          ? 'bg-emerald-600 hover:bg-emerald-500'
+                          : 'bg-indigo-600 hover:bg-indigo-500'
+                      }`}
+                    >
+                      <Camera className="w-8 h-8" />
+                    </div>
+                  </button>
+
+                  {/* Native Device Camera Trigger */}
+                  <button
+                    type="button"
+                    onClick={() => nativeCameraInputRef.current?.click()}
+                    className="flex flex-col items-center gap-1.5 text-white/85 hover:text-white transition-all cursor-pointer active:scale-95"
+                  >
+                    <div className="w-12 h-12 rounded-2xl bg-white/15 hover:bg-white/25 border border-white/20 backdrop-blur-md flex items-center justify-center">
+                      <Camera className="w-5 h-5" />
+                    </div>
+                    <span className="text-[10px] font-bold tracking-wide">Device Camera</span>
                   </button>
                 </div>
               )}
             </div>
-          </motion.div>
-        </div>
+          )}
+        </motion.div>
       )}
     </AnimatePresence>
   );
