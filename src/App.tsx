@@ -71,7 +71,8 @@ import {
   Plus,
   X,
   FileUp,
-  FileText
+  FileText,
+  Camera
 } from 'lucide-react';
 
 import { Workspace, INITIAL_WORKSPACES } from './components/Dashboard/WorkspaceTypes';
@@ -93,6 +94,7 @@ import { StreakCelebrationModal } from './components/Dashboard/StreakCelebration
 import WorkspaceSelector from './components/Dashboard/WorkspaceSelector';
 import WorkspaceContainer from './components/Dashboard/WorkspaceContainer';
 import WorkspaceChat from './components/Dashboard/WorkspaceChat';
+import CameraNoteScannerModal from './components/Dashboard/CameraNoteScannerModal';
 import ToastContainer from './components/ToastContainer';
 
 const StudyPlannerView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.StudyPlannerView })));
@@ -729,6 +731,16 @@ export default function App() {
     return () => window.removeEventListener('studyweb-navigate-to-tutor', handleNavigateToTutor);
   }, [workspaces]);
 
+  // Listen for global Camera Scanner open event from sidebar or top header
+  useEffect(() => {
+    const handleOpenCameraScanner = () => {
+      setIsBottomSheetOpen(false);
+      setShowQuickScan(true);
+    };
+    window.addEventListener('studyweb-open-camera-scanner', handleOpenCameraScanner);
+    return () => window.removeEventListener('studyweb-open-camera-scanner', handleOpenCameraScanner);
+  }, []);
+
   const [tourWorkspaceSubTab, setTourWorkspaceSubTab] = useState<'overview' | 'library' | null>(null);
 
   // Coordinate multi-screen guided product tour navigation across tabs and active Space views
@@ -905,6 +917,7 @@ export default function App() {
           setActiveWorkspace={handleSelectWorkspace}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          onOpenScanner={() => setShowQuickScan(true)}
         />
 
         {/* Workspace body Area */}
@@ -1125,16 +1138,19 @@ export default function App() {
                       </div>
                     </button>
 
-                    {/* Quick Scan */}
+                    {/* Quick Scan with Camera */}
                     <button
-                      disabled
-                      className="opacity-50 grayscale p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 text-left cursor-not-allowed transition-all flex flex-col gap-2 group"
+                      onClick={() => {
+                        setIsBottomSheetOpen(false);
+                        setShowQuickScan(true);
+                      }}
+                      className="p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 hover:bg-pink-50/20 dark:hover:bg-pink-950/20 text-left cursor-pointer transition-all flex flex-col gap-2 group active:scale-95"
                     >
                       <span className="w-9 h-9 rounded-xl bg-pink-500 text-white flex items-center justify-center shadow">
-                        <Terminal className="w-4.5 h-4.5" />
+                        <Camera className="w-4.5 h-4.5" />
                       </span>
                       <div>
-                        <p className="text-xs font-black text-slate-800 dark:text-slate-100">Quick Scan</p>
+                        <p className="text-xs font-black text-slate-800 dark:text-slate-100">Scan Notes</p>
                         <p className="text-[9px] text-slate-400 font-semibold mt-0.5 leading-tight">Scan notes with camera</p>
                       </div>
                     </button>
@@ -1161,68 +1177,50 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          {/* Quick Scan Simulator Dialog */}
-          <AnimatePresence>
-            {showQuickScan && (
-              <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  onClick={() => setShowQuickScan(false)}
-                  className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
-                />
+          {/* Real Camera Note Scanner Modal */}
+          <CameraNoteScannerModal
+            isOpen={showQuickScan}
+            onClose={() => setShowQuickScan(false)}
+            activeWorkspace={activeWorkspace}
+            workspaces={workspaces}
+            userId={currentUserId}
+            onCreateWorkspaceByName={handleCreateWorkspaceByName}
+            onScanComplete={(targetWs, scannedFile, draftPayload) => {
+              const updatedWs: Workspace = {
+                ...targetWs,
+                files: [
+                  scannedFile,
+                  ...(targetWs.files || []).filter((f) => f.id !== scannedFile.id)
+                ],
+                lastOpened: 'Just Now'
+              };
+              handleUpdateWorkspace(updatedWs);
+              setActiveWorkspace(updatedWs);
+              setHasVisitedAITutor(true);
+              setShowQuickScan(false);
 
-                <motion.div
-                  initial={{ scale: 0.95, opacity: 0, y: 15 }}
-                  animate={{ scale: 1, opacity: 1, y: 0 }}
-                  exit={{ scale: 0.95, opacity: 0, y: 15 }}
-                  className="relative w-full max-w-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-2xl text-left space-y-4"
-                >
-                  <button
-                    onClick={() => setShowQuickScan(false)}
-                    className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
+              const pendingPayload = {
+                workspaceId: updatedWs.id,
+                file: scannedFile,
+                draft: draftPayload
+              };
+              (window as any).__studywebPendingScannedNote = pendingPayload;
+              setActiveTab('ai-tutor');
 
-                  <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-                    <Terminal className="w-5 h-5 text-pink-500" />
-                    <span>Quick Scanner</span>
-                  </h3>
+              setTimeout(() => {
+                window.dispatchEvent(
+                  new CustomEvent('studyweb-scanned-note-ready', { detail: pendingPayload })
+                );
+              }, 80);
 
-                  {/* Camera view container mockup */}
-                  <div className="relative aspect-video w-full rounded-2xl bg-slate-950 overflow-hidden flex items-center justify-center border border-slate-800 shadow-inner group">
-                    <div className="absolute inset-4 border-2 border-dashed border-white/40 rounded-xl pointer-events-none animate-pulse" />
-                    <div className="w-1.5 h-1.5 bg-red-500 rounded-full absolute top-3 right-3 animate-ping" />
-                    
-                    <div className="text-center space-y-2 z-10 p-4">
-                      <p className="text-xs font-bold text-white/90">Simulated Scanner Camera</p>
-                      <p className="text-[10px] text-white/55 font-semibold">Align lecture notes or textbook diagrams inside the dotted lines</p>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end gap-2 text-xs">
-                    <button
-                      onClick={() => setShowQuickScan(false)}
-                      className="px-4 py-2 border border-slate-200 dark:border-slate-750 font-extrabold text-slate-500 rounded-xl"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowQuickScan(false);
-                        (window as any).showToast?.("Quick Scan complete! Handouts digitized as 'Scanned Document' inside library.", "success");
-                      }}
-                      className="px-5 py-2 bg-pink-600 hover:bg-pink-700 text-white font-extrabold rounded-xl shadow-lg shadow-pink-600/10"
-                    >
-                      Capture Photo
-                    </button>
-                  </div>
-                </motion.div>
-              </div>
-            )}
-          </AnimatePresence>
+              (window as any).showToast?.(
+                `"${scannedFile.name}" has been scanned, uploaded to "${updatedWs.name}", and attached in AI Tutor!`,
+                'success',
+                4200,
+                'Note Scanned & Ready'
+              );
+            }}
+          />
 
           {/* Paste Link Dialog */}
           <AnimatePresence>

@@ -863,10 +863,54 @@ export default function WorkspaceChat({
       setMessages(prev => [...prev, ...badgeMessages]);
     };
 
+    const applyScannedNotePayload = (payload: any) => {
+      if (!payload || !payload.draft) return;
+      if (payload.workspaceId && payload.workspaceId !== workspace.id && workspace.id !== 'general-study') {
+        return;
+      }
+      const draft = payload.draft;
+      setAttachedDrafts(prev => {
+        if (prev.some(d => d.id === draft.id)) return prev;
+        return [...prev, draft];
+      });
+      const badgeMsg: Message = {
+        id: `scan-ready-${draft.id}`,
+        sender: 'ai',
+        text: `File ready: ${draft.name || 'Scanned Note'}`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isFileReadyBadge: true,
+        readyFileName: draft.name || 'Scanned Note',
+        readyFileType: 'image'
+      };
+      setMessages(prev => {
+        if (prev.some(m => m.id === badgeMsg.id)) return prev;
+        return [...prev, badgeMsg];
+      });
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 150);
+    };
+
+    const handleScannedNoteEvent = (e: any) => {
+      applyScannedNotePayload(e.detail);
+      if ((window as any).__studywebPendingScannedNote?.draft?.id === e.detail?.draft?.id) {
+        delete (window as any).__studywebPendingScannedNote;
+      }
+    };
+
+    if ((window as any).__studywebPendingScannedNote) {
+      const pending = (window as any).__studywebPendingScannedNote;
+      if (!pending.workspaceId || pending.workspaceId === workspace.id || workspace.id === 'general-study') {
+        applyScannedNotePayload(pending);
+        delete (window as any).__studywebPendingScannedNote;
+      }
+    }
+
     window.addEventListener('studyweb-tutor-status-change', handleStatusChange);
     window.addEventListener('studyweb-tutor-message-completed', handleMessageCompleted);
     window.addEventListener('studyweb-tutor-chat-reset', handleChatReset);
     window.addEventListener('studyweb-workspace-file-ready', handleFileReadyEvent);
+    window.addEventListener('studyweb-scanned-note-ready', handleScannedNoteEvent);
     window.addEventListener('focus', handleVisibilityOrFocus);
     document.addEventListener('visibilitychange', handleVisibilityOrFocus);
 
@@ -878,6 +922,7 @@ export default function WorkspaceChat({
       window.removeEventListener('studyweb-tutor-message-completed', handleMessageCompleted);
       window.removeEventListener('studyweb-tutor-chat-reset', handleChatReset);
       window.removeEventListener('studyweb-workspace-file-ready', handleFileReadyEvent);
+      window.removeEventListener('studyweb-scanned-note-ready', handleScannedNoteEvent);
       window.removeEventListener('focus', handleVisibilityOrFocus);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
     };

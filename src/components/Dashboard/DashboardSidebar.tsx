@@ -24,6 +24,7 @@ import {
   Folder,
   ChevronRight,
   Image,
+  Camera,
 } from 'lucide-react';
 import { Workspace } from './WorkspaceTypes';
 
@@ -39,6 +40,7 @@ interface SidebarProps {
   setActiveWorkspace?: (workspace: Workspace | null) => void;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  onOpenScanner?: () => void;
 }
 
 export default function DashboardSidebar({ 
@@ -52,12 +54,14 @@ export default function DashboardSidebar({
   activeWorkspace = null,
   setActiveWorkspace,
   isCollapsed = false,
-  onToggleCollapse
+  onToggleCollapse,
+  onOpenScanner
 }: SidebarProps) {
   const menuItems = [
     { id: 'dashboard', label: 'Home', icon: <LayoutDashboard className="w-4 h-4" />, colorClass: 'text-blue-600 dark:text-blue-400', bgClass: 'bg-blue-50 dark:bg-blue-950' },
     { id: 'workspaces', label: 'Workspaces', icon: <Folder className="w-4 h-4" />, colorClass: 'text-orange-600 dark:text-orange-400', bgClass: 'bg-orange-50 dark:bg-orange-950' },
     { id: 'ai-tutor', label: 'Your AI Tutor', icon: <Sparkles className="w-4 h-4" />, highlight: true, colorClass: 'text-indigo-600 dark:text-indigo-400', bgClass: 'bg-indigo-50 dark:bg-indigo-950' },
+    { id: 'scan-notes', label: 'Scan Notes', icon: <Camera className="w-4 h-4" />, colorClass: 'text-pink-600 dark:text-pink-400', bgClass: 'bg-pink-50 dark:bg-pink-950' },
     { id: 'flashcards', label: 'Flashcards', icon: <Layers className="w-4 h-4" />, colorClass: 'text-emerald-600 dark:text-emerald-400', bgClass: 'bg-emerald-50 dark:bg-emerald-950', comingSoon: true },
     { id: 'quiz-center', label: 'Practice', icon: <Award className="w-4 h-4" />, colorClass: 'text-yellow-600 dark:text-yellow-400', bgClass: 'bg-yellow-50 dark:bg-yellow-950', comingSoon: true },
     { id: 'study-session', label: 'Study Session', icon: <Clock className="w-4 h-4" />, colorClass: 'text-amber-600 dark:text-amber-400', bgClass: 'bg-amber-50 dark:bg-amber-950', comingSoon: true },
@@ -137,6 +141,15 @@ export default function DashboardSidebar({
                 key={item.id}
                 data-tour={`nav-${item.id}`}
                 onClick={() => {
+                  if (item.id === 'scan-notes') {
+                    onClose();
+                    if (onOpenScanner) {
+                      onOpenScanner();
+                    } else {
+                      window.dispatchEvent(new CustomEvent('studyweb-open-camera-scanner'));
+                    }
+                    return;
+                  }
                   if (item.id === 'workspaces' && setActiveWorkspace) {
                     setActiveWorkspace(null);
                   }

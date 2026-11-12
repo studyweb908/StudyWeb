@@ -121,8 +121,20 @@ export default function SEOManager({ activeSection = 'home', activeTask, isLogge
       element.setAttribute('content', content);
     };
 
-    // Description
+    // Description & Domain Verification
     setMetaTag('meta[name="description"]', 'name', 'description', seo.description);
+    setMetaTag(
+      'meta[name="openai-business-profile"]',
+      'name',
+      'openai-business-profile',
+      'openai-business-profile=-bKgHQNTViWjD2SDVhNzq7EnfTZ4pif4-GSLhjU7eok'
+    );
+    setMetaTag(
+      'meta[name="openai-domain-verification"]',
+      'name',
+      'openai-domain-verification',
+      '-bKgHQNTViWjD2SDVhNzq7EnfTZ4pif4-GSLhjU7eok'
+    );
     setMetaTag('meta[property="og:title"]', 'property', 'og:title', seo.title);
     setMetaTag('meta[property="og:description"]', 'property', 'og:description', seo.description);
     setMetaTag('meta[property="og:url"]', 'property', 'og:url', seo.canonical);

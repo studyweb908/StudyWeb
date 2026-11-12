@@ -23,7 +23,8 @@ import {
   Calendar,
   Check,
   AlertCircle,
-  Share2
+  Share2,
+  Camera
 } from 'lucide-react';
 import { useThemeMode } from '../../hooks/useThemeMode';
 import { readSyncProfileSnapshot, fetchAndReconcileSupabaseProfile } from '../../utils/profileStorage';
@@ -465,12 +466,23 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
 
         {/* Quick Actions & Profile Area */}
         <div className="flex items-center gap-1 sm:gap-2 md:gap-2.5 ml-auto shrink-0">
-          {/* Quick Actions Shortcuts (Desktop Only) */}
-          <div className={`${isFocusMode ? 'hidden' : 'hidden md:flex'} items-center shrink-0`}>
+          {/* Quick Actions Shortcuts */}
+          <div className={`${isFocusMode ? 'hidden' : 'flex'} items-center gap-1.5 sm:gap-2 shrink-0`}>
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('studyweb-open-camera-scanner'))}
+              className="flex items-center justify-center gap-1.5 h-8 sm:h-9 px-2.5 sm:px-3 rounded-xl border border-pink-200 dark:border-pink-800/70 bg-pink-50/90 dark:bg-pink-950/40 hover:bg-pink-100/90 dark:hover:bg-pink-950/70 text-pink-600 dark:text-pink-400 text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0"
+              title="Scan Notes with Camera"
+              aria-label="Scan Notes with Camera"
+            >
+              <Camera className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+              <span className="hidden lg:inline">Scan Notes</span>
+            </button>
+
             <button
               data-tour="header-ai-tutor-btn"
               onClick={() => setActiveTab('ai-tutor')}
-              className="flex items-center gap-1.5 px-2.5 lg:px-3.5 py-1.5 rounded-xl bg-[#5145F5] hover:bg-[#4336E0] text-white text-xs font-bold transition-all shadow-md shadow-[#5145F5]/20 cursor-pointer whitespace-nowrap shrink-0"
+              className="hidden md:flex items-center gap-1.5 px-2.5 lg:px-3.5 py-1.5 rounded-xl bg-[#5145F5] hover:bg-[#4336E0] text-white text-xs font-bold transition-all shadow-md shadow-[#5145F5]/20 cursor-pointer whitespace-nowrap shrink-0"
             >
               <Sparkles className="w-3.5 h-3.5 shrink-0" />
               <span className="hidden lg:inline">Ask AI Tutor</span>

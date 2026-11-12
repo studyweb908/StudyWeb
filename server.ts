@@ -219,6 +219,19 @@ async function startServer() {
   app.use("/api/study-materials", studyMaterialRouter);
   app.use("/api/streaks", streakRouter);
 
+  // Domain Verification Route for OpenAI Business Profile (studywebai.vercel.app)
+  app.get(
+    [
+      "/.well-known/openai-business-profile",
+      "/openai-business-profile.txt",
+      "/openai-business-profile"
+    ],
+    (_req, res) => {
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.status(200).send("openai-business-profile=-bKgHQNTViWjD2SDVhNzq7EnfTZ4pif4-GSLhjU7eok");
+    }
+  );
+
   // API Route: Resilient Profile & Daily Focus Target Sync (/api/profile)
   app.get("/api/profile", async (req, res) => {
     res.setHeader("Content-Type", "application/json");
@@ -3354,6 +3367,165 @@ ${citationGuideline}`;
       return false;
     }
   }
+
+  // API Route: Dedicated Optical Character Recognition (OCR) for Camera-Scanned Study Notes
+  app.post("/api/ocr/scan-note", async (req, res) => {
+    try {
+      const { fileBase64, fileMimeType, name } = req.body || {};
+      if (!fileBase64) {
+        res.status(400).json({ error: "Scanned image base64 data is required." });
+        return;
+      }
+
+      let cleanBase64 = String(fileBase64);
+      if (cleanBase64.includes(";base64,")) {
+        cleanBase64 = cleanBase64.split(";base64,")[1];
+      }
+      cleanBase64 = cleanBase64.replace(/[\r\n\s]/g, "");
+
+      let normalizedMime = String(fileMimeType || "image/jpeg").toLowerCase().trim();
+      if (normalizedMime === "image/jpg" || normalizedMime === "image/pjpeg" || normalizedMime === "image/jfif") {
+        normalizedMime = "image/jpeg";
+      }
+
+      const defaultTitle = name || "Scanned Study Notes";
+      const apiKey = getGeminiApiKey();
+
+      if (!apiKey) {
+        res.json({
+          title: defaultTitle,
+          extractedText: `Scanned study note "${defaultTitle}".`,
+          summary: `Scanned study note "${defaultTitle}" uploaded for AI Tutor inspection.`,
+          highlights: [`Primary resource: ${defaultTitle}`],
+          formulas: [],
+          tags: ["Scanned Note", "OCR"]
+        });
+        return;
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build"
+          }
+        }
+      });
+
+      const ocrPrompt = `You are a high-precision academic Optical Character Recognition (OCR) and study note parser.
+Carefully inspect this scanned study note image ("${defaultTitle}") and extract ALL visible handwritten and printed text word-for-word.
+
+Instructions:
+1. "extractedText": Transcribe the complete, verbatim text from the image accurately. Preserve headings, bullet points, numbered lists, definitions, diagram labels, tables, and mathematical equations in clean Markdown format so the AI Tutor can answer any question directly from this text.
+2. "title": A concise, clear academic title (3 to 7 words) reflecting the actual topic or heading written on the scanned note.
+3. "summary": A clear, comprehensive summary explaining the core concepts and subject matter covered in the scanned note.
+4. "highlights": 4 to 6 key facts, definitions, or takeaways extracted directly from the scanned note.
+5. "formulas": Any mathematical, physics, chemistry, or scientific equations/formulas visible in the note (empty array if none).
+6. "tags": 3 to 5 specific subject/topic tags.`;
+
+      const ocrSchema = {
+        type: Type.OBJECT,
+        properties: {
+          title: { type: Type.STRING },
+          extractedText: { type: Type.STRING },
+          summary: { type: Type.STRING },
+          highlights: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING }
+          },
+          formulas: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING }
+          },
+          tags: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING }
+          }
+        },
+        required: ["title", "extractedText", "summary", "highlights", "tags"]
+      };
+
+      const candidateModels = [
+        "gemini-3.8-flash",
+        "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite-preview"
+      ];
+
+      let response: any = null;
+      for (const modelName of candidateModels) {
+        try {
+          const isGemini38 = modelName === "gemini-3.8-flash";
+          response = await ai.models.generateContent({
+            model: modelName,
+            contents: [
+              { text: ocrPrompt },
+              {
+                inlineData: {
+                  data: cleanBase64,
+                  mimeType: normalizedMime
+                }
+              }
+            ],
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: ocrSchema,
+              thinkingConfig: {
+                thinkingLevel: isGemini38 ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL
+              }
+            }
+          });
+          if (response && response.text) break;
+        } catch (modelErr: any) {
+          console.warn(`[OCR Endpoint] Model ${modelName} fallback:`, modelErr?.message || modelErr);
+        }
+      }
+
+      if (response && response.text) {
+        let rawText = response.text.trim();
+        if (rawText.startsWith("```")) {
+          rawText = rawText.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/, "").trim();
+        }
+        const parsed = JSON.parse(rawText);
+        const cleanTitle = cleanNotebookLMTitle(parsed.title || defaultTitle, "", "image");
+        const formattedDocument = [
+          `# ${cleanTitle}`,
+          parsed.summary ? `\n## Summary\n${parsed.summary}` : "",
+          parsed.extractedText ? `\n## Verbatim Scanned Notes (OCR)\n${parsed.extractedText}` : "",
+          Array.isArray(parsed.highlights) && parsed.highlights.length > 0
+            ? `\n## Key Highlights\n${parsed.highlights.map((h: string) => `- ${h}`).join("\n")}`
+            : "",
+          Array.isArray(parsed.formulas) && parsed.formulas.length > 0
+            ? `\n## Formulas & Equations\n${parsed.formulas.map((f: string) => `- ${f}`).join("\n")}`
+            : ""
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        res.json({
+          title: cleanTitle,
+          extractedText: formattedDocument,
+          rawOcrText: parsed.extractedText || "",
+          summary: parsed.summary || `Scanned notes on ${cleanTitle}.`,
+          highlights: Array.isArray(parsed.highlights) ? parsed.highlights : [],
+          formulas: Array.isArray(parsed.formulas) ? parsed.formulas : [],
+          tags: Array.isArray(parsed.tags) && parsed.tags.length > 0 ? parsed.tags : ["Scanned Note", "OCR"]
+        });
+        return;
+      }
+
+      res.json({
+        title: defaultTitle,
+        extractedText: `Scanned study note "${defaultTitle}".`,
+        summary: `Scanned study note "${defaultTitle}" ready for AI Tutor analysis.`,
+        highlights: [`Primary resource: ${defaultTitle}`],
+        formulas: [],
+        tags: ["Scanned Note", "OCR"]
+      });
+    } catch (error: any) {
+      console.error("[OCR Endpoint Error] /api/ocr/scan-note:", error?.message || error);
+      res.status(500).json({ error: "Failed to run OCR on scanned note", details: error?.message });
+    }
+  });
 
   // API Route: Process Study Material (URL, YouTube, PDF, Document) with smart title resolution and content extraction
   app.post("/api/study-materials/process", async (req, res) => {
