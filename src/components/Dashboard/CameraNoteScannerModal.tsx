@@ -186,8 +186,8 @@ function applyDocumentFilterToCanvas(
 }
 
 /**
- * Detects the boundaries of a paper document / notebook page inside an image or video frame
- * using adaptive luminance thresholding, low-saturation paper filtering, and edge-density projection.
+ * Strictly detects the boundaries of a real paper document / notebook page with written or printed text
+ * inside an image or video frame. Rejects blank walls, ceilings, faces, or uniform backgrounds.
  */
 function detectPaperBoundsFromImageData(
   imageData: ImageData,
@@ -218,17 +218,17 @@ function detectPaperBoundsFromImageData(
   }
 
   const meanLum = lumSum / totalPixels;
-  // Paper is typically brighter than the surrounding surface and relatively low saturation
-  const lumThreshold = Math.min(225, Math.max(115, meanLum * 1.08));
-  const satThreshold = 110;
+  // Real paper must be genuinely bright and low-saturation, standing out from the scene average
+  const lumThreshold = Math.min(232, Math.max(158, Math.round(meanLum + 24)));
+  const satThreshold = 65;
 
   const rowPaperCounts = new Uint16Array(h);
   const colPaperCounts = new Uint16Array(w);
   let paperPixelCount = 0;
 
-  // Exclude outer 2% border noise
-  const marginX = Math.max(2, Math.floor(w * 0.02));
-  const marginY = Math.max(2, Math.floor(h * 0.02));
+  // Exclude outer 3% border noise
+  const marginX = Math.max(3, Math.floor(w * 0.03));
+  const marginY = Math.max(3, Math.floor(h * 0.03));
 
   for (let y = marginY; y < h - marginY; y++) {
     const rowOffset = y * w;
@@ -243,34 +243,116 @@ function detectPaperBoundsFromImageData(
   }
 
   const coverage = paperPixelCount / totalPixels;
-  // If almost the entire frame is uniform or virtually no paper pixels exist, skip cropping
-  if (coverage < 0.1 || coverage > 0.94) {
+  // Reject if too small or if the entire frame is just a uniform bright wall/background
+  if (coverage < 0.16 || coverage > 0.84) {
     return null;
   }
 
-  // Find dominant contiguous horizontal & vertical span of the paper region
-  const minRowDensity = Math.max(4, Math.floor(w * 0.18));
-  const minColDensity = Math.max(4, Math.floor(h * 0.18));
+  // Find the longest contiguous vertical and horizontal span of dense paper rows/columns
+  const minRowDensity = Math.max(8, Math.floor(w * 0.28));
+  const minColDensity = Math.max(8, Math.floor(h * 0.28));
 
-  let topY = -1;
-  let bottomY = -1;
+  let bestTopY = -1;
+  let bestBottomY = -1;
+  let curStartY = -1;
   for (let y = marginY; y < h - marginY; y++) {
     if (rowPaperCounts[y] >= minRowDensity) {
-      if (topY === -1) topY = y;
-      bottomY = y;
+      if (curStartY === -1) curStartY = y;
+      if (bestTopY === -1 || y - curStartY > bestBottomY - bestTopY) {
+        bestTopY = curStartY;
+        bestBottomY = y;
+      }
+    } else {
+      curStartY = -1;
     }
   }
 
-  let leftX = -1;
-  let rightX = -1;
+  let bestLeftX = -1;
+  let bestRightX = -1;
+  let curStartX = -1;
   for (let x = marginX; x < w - marginX; x++) {
     if (colPaperCounts[x] >= minColDensity) {
-      if (leftX === -1) leftX = x;
-      rightX = x;
+      if (curStartX === -1) curStartX = x;
+      if (bestLeftX === -1 || x - curStartX > bestRightX - bestLeftX) {
+        bestLeftX = curStartX;
+        bestRightX = x;
+      }
+    } else {
+      curStartX = -1;
     }
   }
 
-  if (topY === -1 || bottomY === -1 || leftX === -1 || rightX === -1) {
+  if (bestTopY === -1 || bestBottomY === -1 || bestLeftX === -1 || bestRightX === -1) {
+    return null;
+  }
+
+  const rawBoxW = bestRightX - bestLeftX;
+  const rawBoxH = bestBottomY - bestTopY;
+  if (rawBoxW < w * 0.28 || rawBoxH < h * 0.28) {
+    return null;
+  }
+
+  // Verify interior paper uniformity, exterior background contrast, AND presence of dark ink/text strokes
+  let insidePaperCount = 0;
+  let insideLumSum = 0;
+  let textEdgeStrokeCount = 0;
+  let outsideLumSum = 0;
+  let outsideCount = 0;
+
+  for (let y = marginY; y < h - marginY; y++) {
+    const rowOffset = y * w;
+    const inY = y >= bestTopY && y <= bestBottomY;
+    for (let x = marginX; x < w - marginX; x++) {
+      const i = rowOffset + x;
+      const inBox = inY && x >= bestLeftX && x <= bestRightX;
+      const pixelLum = lum[i];
+
+      if (inBox) {
+        insideLumSum += pixelLum;
+        const isPaperPixel = pixelLum >= lumThreshold && sat[i] <= satThreshold;
+        if (isPaperPixel) {
+          insidePaperCount++;
+        }
+
+        // Detect sharp dark-ink-to-bright-paper transitions (handwriting or printed text strokes)
+        if (x < bestRightX - 1 && y < bestBottomY - 1) {
+          const rightLum = lum[i + 1];
+          const downLum = lum[i + w];
+          const diffH = Math.abs(pixelLum - rightLum);
+          const diffV = Math.abs(pixelLum - downLum);
+
+          if (diffH >= 34 || diffV >= 34) {
+            const maxLocalLum = Math.max(pixelLum, rightLum, downLum);
+            const minLocalLum = Math.min(pixelLum, rightLum, downLum);
+            if (maxLocalLum >= lumThreshold && minLocalLum <= lumThreshold - 30) {
+              textEdgeStrokeCount++;
+            }
+          }
+        }
+      } else {
+        outsideLumSum += pixelLum;
+        outsideCount++;
+      }
+    }
+  }
+
+  const boxArea = Math.max(1, rawBoxW * rawBoxH);
+  const fillRatio = insidePaperCount / boxArea;
+  // Require at least 64% of the candidate rectangle to be clean bright paper surface
+  if (fillRatio < 0.64) {
+    return null;
+  }
+
+  // Require the paper page to be distinctly brighter than the surrounding background outside the page
+  const insideMeanLum = insideLumSum / boxArea;
+  const outsideMeanLum = outsideCount > 0 ? outsideLumSum / outsideCount : insideMeanLum;
+  if (insideMeanLum - outsideMeanLum < 24) {
+    return null;
+  }
+
+  // Require genuine written/printed text or ink strokes inside the paper region
+  const textStrokeRatio = textEdgeStrokeCount / boxArea;
+  if (textStrokeRatio < 0.012 || textStrokeRatio > 0.35) {
     return null;
   }
 
@@ -278,28 +360,24 @@ function detectPaperBoundsFromImageData(
   const padX = Math.round(w * 0.02);
   const padY = Math.round(h * 0.02);
 
-  const finalLeft = Math.max(0, leftX - padX);
-  const finalTop = Math.max(0, topY - padY);
-  const finalRight = Math.min(w, rightX + padX);
-  const finalBottom = Math.min(h, bottomY + padY);
+  const finalLeft = Math.max(0, bestLeftX - padX);
+  const finalTop = Math.max(0, bestTopY - padY);
+  const finalRight = Math.min(w, bestRightX + padX);
+  const finalBottom = Math.min(h, bestBottomY + padY);
 
   const normW = (finalRight - finalLeft) / w;
   const normH = (finalBottom - finalTop) / h;
 
-  if (normW < 0.25 || normH < 0.25) {
+  if (normW < 0.28 || normH < 0.28 || normW > 0.94 || normH > 0.94) {
     return null;
   }
-
-  // Compute rectangular fill confidence inside the candidate box
-  const boxArea = Math.max(1, (finalRight - finalLeft) * (finalBottom - finalTop));
-  const fillRatio = Math.min(1, paperPixelCount / boxArea);
 
   return {
     x: finalLeft / w,
     y: finalTop / h,
     width: normW,
     height: normH,
-    confidence: Math.min(0.99, Math.max(0.5, fillRatio))
+    confidence: Math.min(0.99, Math.max(0.65, fillRatio))
   };
 }
 
@@ -318,6 +396,7 @@ export default function CameraNoteScannerModal({
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const analysisCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const smoothedBoundsRef = useRef<NormalizedDocBounds | null>(null);
+  const stableHitCountRef = useRef<number>(0);
 
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraReady, setCameraReady] = useState(false);
@@ -351,6 +430,7 @@ export default function CameraNoteScannerModal({
     setCameraReady(false);
     setDetectedBounds(null);
     smoothedBoundsRef.current = null;
+    stableHitCountRef.current = 0;
   }, []);
 
   const startCameraStream = useCallback(async (mode: 'environment' | 'user') => {
@@ -406,17 +486,19 @@ export default function CameraNoteScannerModal({
       setScanResult(null);
       setIsCopied(false);
       smoothedBoundsRef.current = null;
+      stableHitCountRef.current = 0;
     }
     return () => {
       stopCameraStream();
     };
   }, [isOpen, facingMode, capturedDataUrl, isProcessing, scanResult, startCameraStream, stopCameraStream]);
 
-  // Real-time paper boundary detection loop on live camera feed (~8 FPS)
+  // Real-time paper + text boundary detection loop on live camera feed (~8 FPS)
   useEffect(() => {
     if (!isOpen || !cameraReady || capturedDataUrl || isProcessing || scanResult || !autoCropEnabled) {
       setDetectedBounds(null);
       smoothedBoundsRef.current = null;
+      stableHitCountRef.current = 0;
       return;
     }
 
@@ -442,8 +524,21 @@ export default function CameraNoteScannerModal({
 
       if (rawBounds) {
         const prev = smoothedBoundsRef.current;
-        const alpha = 0.38; // Smooth interpolation factor
-        const next: NormalizedDocBounds = prev
+        const isConsistentWithPrev =
+          !prev ||
+          (Math.abs(rawBounds.x - prev.x) < 0.14 &&
+            Math.abs(rawBounds.y - prev.y) < 0.14 &&
+            Math.abs(rawBounds.width - prev.width) < 0.18 &&
+            Math.abs(rawBounds.height - prev.height) < 0.18);
+
+        if (isConsistentWithPrev) {
+          stableHitCountRef.current += 1;
+        } else {
+          stableHitCountRef.current = 1;
+        }
+
+        const alpha = 0.38;
+        const next: NormalizedDocBounds = prev && isConsistentWithPrev
           ? {
               x: prev.x + (rawBounds.x - prev.x) * alpha,
               y: prev.y + (rawBounds.y - prev.y) * alpha,
@@ -453,8 +548,15 @@ export default function CameraNoteScannerModal({
             }
           : rawBounds;
         smoothedBoundsRef.current = next;
-        setDetectedBounds(next);
+
+        // Only lock and show Auto-Crop UI after 3 consecutive stable detections of real paper with text
+        if (stableHitCountRef.current >= 3) {
+          setDetectedBounds(next);
+        } else {
+          setDetectedBounds(null);
+        }
       } else {
+        stableHitCountRef.current = 0;
         smoothedBoundsRef.current = null;
         setDetectedBounds(null);
       }
@@ -765,8 +867,7 @@ export default function CameraNoteScannerModal({
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, w, h);
     const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-    const activeBounds = smoothedBoundsRef.current || detectedBounds;
-    processAndUploadScannedImage(dataUrl, undefined, activeBounds);
+    processAndUploadScannedImage(dataUrl, undefined, detectedBounds);
   };
 
   // Handle photo captured via native mobile camera input or gallery picker
@@ -1021,8 +1122,8 @@ export default function CameraNoteScannerModal({
                   className={`w-full h-full object-cover transition-[filter] duration-200 ${cameraReady ? 'opacity-100' : 'opacity-0'}`}
                 />
 
-                {/* Dynamic Auto-Detected Paper Boundary Box vs Static Framing Guide */}
-                {detectedBounds && autoCropEnabled && cameraReady ? (
+                {/* Only show Auto-Crop boundary overlay when real paper with text is detected */}
+                {detectedBounds && autoCropEnabled && cameraReady && (
                   <div
                     style={{
                       left: `${detectedBounds.x * 100}%`,
@@ -1041,14 +1142,6 @@ export default function CameraNoteScannerModal({
                     <div className="absolute -top-7 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black uppercase tracking-wider whitespace-nowrap shadow-md">
                       Auto-Crop Locked
                     </div>
-                  </div>
-                ) : (
-                  <div className="absolute inset-x-5 sm:inset-x-12 top-24 bottom-44 border-2 border-dashed border-white/35 rounded-3xl pointer-events-none">
-                    {/* Default Corner Brackets */}
-                    <div className="absolute -top-0.5 -left-0.5 w-8 h-8 border-t-4 border-l-4 border-indigo-400 rounded-tl-2xl" />
-                    <div className="absolute -top-0.5 -right-0.5 w-8 h-8 border-t-4 border-r-4 border-indigo-400 rounded-tr-2xl" />
-                    <div className="absolute -bottom-0.5 -left-0.5 w-8 h-8 border-b-4 border-l-4 border-indigo-400 rounded-bl-2xl" />
-                    <div className="absolute -bottom-0.5 -right-0.5 w-8 h-8 border-b-4 border-r-4 border-indigo-400 rounded-br-2xl" />
                   </div>
                 )}
 
