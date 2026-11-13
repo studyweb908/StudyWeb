@@ -27,7 +27,6 @@ import {
   Edit3,
   Award,
   Plus,
-  BarChart3,
   AlertTriangle
 } from 'lucide-react';
 import { useThemeMode } from '../../hooks/useThemeMode';
@@ -44,7 +43,6 @@ import {
 } from '../../utils/profileStorage';
 import {
   CustomDailyGoalSelector,
-  LiveStudyCountdownTimer,
   formatMinutesHuman
 } from './CustomFocusGoalAndTimer';
 
@@ -54,10 +52,7 @@ export function ProfileSettingsHub() {
   useThemeMode();
   const {
     studyHoursFormatted,
-    todayMinutes,
-    isStudyingLive,
-    subjectBreakdown,
-    recentSessions
+    todayMinutes
   } = useStudyStats();
 
   // Synchronous initial snapshot (0ms load, zero dummy data)
@@ -1235,13 +1230,6 @@ export function ProfileSettingsHub() {
                     </div>
                   </div>
                 </div>
-
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                  <span className="font-mono truncate">{userEmail || displayIdentityName}</span>
-                  <span className="font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
-                    Synced: {lastSyncedTime}
-                  </span>
-                </div>
               </div>
 
               {/* Card B: Real Study Goals & Next Core Exam Countdown in Overview */}
@@ -1289,225 +1277,6 @@ export function ProfileSettingsHub() {
                     onGoalChange={(mins) => setDailyGoalMinutes(mins)}
                     compact
                   />
-
-                  {/* Next Core Exam Target Date & Name in Overview */}
-                  <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50/90 dark:bg-slate-950/50 border border-slate-200/70 dark:border-slate-800 space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                          Next Core Exam Name
-                        </label>
-                        <input
-                          type="text"
-                          value={examName}
-                          onChange={(e) => setExamName(e.target.value)}
-                          placeholder="e.g. AP Biology Final"
-                          className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                          Target Exam Date
-                        </label>
-                        <input
-                          type="date"
-                          value={examDate}
-                          onChange={(e) => setExamDate(e.target.value)}
-                          className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1 text-xs">
-                      <span className={`font-semibold ${examCountdown.phaseColor}`}>
-                        {examCountdown.phaseLabel}
-                      </span>
-                      <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white">
-                        {examCountdown.hasDate
-                          ? `${examCountdown.daysRemaining} Days Remaining`
-                          : 'No Target Date Set'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                  <span>
-                    {examCountdown.hasDate && examCountdown.projectedHours > 0
-                      ? `Projected study before exam: ${examCountdown.projectedHours} hrs`
-                      : 'Set an exam date to calculate projected study hours'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('curriculum')}
-                    className="font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer shrink-0"
-                  >
-                    Open Study Goals →
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Row 2: Personalized Study Hours & Subject Breakdown */}
-            <div className="rounded-2xl sm:rounded-[28px] bg-white/90 dark:bg-slate-900/65 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-6 space-y-4 sm:space-y-5 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors min-w-0">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3.5">
-                <div className="min-w-0">
-                  <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <BarChart3 className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
-                    <span className="truncate">Personalized Logged Study Hours ({displayIdentityName})</span>
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Real-time active study tracking & custom session logging for your daily routine
-                  </p>
-                </div>
-                <div className="grid grid-cols-4 sm:flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto shrink-0">
-                  {[15, 30, 45, 60].map((mins) => (
-                    <button
-                      key={mins}
-                      type="button"
-                      onClick={() => handleLogStudySession(mins)}
-                      className="px-2.5 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/60 border border-sky-200/80 dark:border-sky-800/60 text-sky-700 dark:text-sky-300 text-xs font-mono font-bold tabular-nums transition-colors cursor-pointer text-center"
-                    >
-                      +{mins}m
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-5 sm:gap-6 items-start">
-                {/* Left: Subject Breakdown & Daily Progress */}
-                <div className="md:col-span-7 space-y-4 min-w-0">
-                  <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-950/50 border border-slate-200/70 dark:border-slate-800 space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                          Today&apos;s Personalized Focus Progress
-                        </span>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          {isStudyingLive ? 'Live study session tracking active' : 'Automatically tracks while you study'}
-                        </p>
-                      </div>
-                      <span className="font-mono text-xs sm:text-sm font-extrabold tabular-nums text-indigo-600 dark:text-indigo-400">
-                        {todayMinutes}m / {dailyGoalMinutes}m ({dailyGoalProgressPct}%)
-                      </span>
-                    </div>
-                    <div className="w-full h-2.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-indigo-600 via-sky-500 to-emerald-500 rounded-full transition-all duration-300"
-                        style={{ width: `${dailyGoalProgressPct}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Per-Subject Breakdown */}
-                  <div className="space-y-2.5">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-bold text-slate-700 dark:text-slate-300">
-                        Study Time by Subject
-                      </span>
-                      <span className="font-mono text-slate-500 dark:text-slate-400">
-                        Total: {studyHoursFormatted} hrs
-                      </span>
-                    </div>
-                    {subjectBreakdown && subjectBreakdown.length > 0 ? (
-                      <div className="space-y-2">
-                        {subjectBreakdown.map((item) => (
-                          <div
-                            key={item.subject}
-                            className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800 space-y-1.5"
-                          >
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="font-bold text-slate-800 dark:text-slate-200 truncate">
-                                {item.subject}
-                              </span>
-                              <span className="font-mono font-semibold text-slate-600 dark:text-slate-400">
-                                {item.minutes >= 60 ? `${item.hours} hrs (${item.minutes}m)` : `${item.minutes} mins`}
-                              </span>
-                            </div>
-                            <div className="w-full h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                              <div
-                                className="h-full bg-indigo-500 rounded-full transition-all duration-300"
-                                style={{ width: `${item.percentage}%` }}
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="p-4 rounded-xl bg-slate-50/70 dark:bg-slate-950/40 border border-dashed border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400">
-                        Your study time is automatically logged by subject as you use workspaces, notes, and AI Tutor, or when you log a study session on the right.
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Right: Log Custom Study Session Form & Recent Sessions */}
-                <div className="md:col-span-5 p-4 rounded-2xl bg-slate-50/90 dark:bg-slate-950/50 border border-slate-200/70 dark:border-slate-800 space-y-3.5">
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                    <span>Log Custom Study Session</span>
-                  </h4>
-
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">
-                        Subject / Topic
-                      </label>
-                      <input
-                        type="text"
-                        value={customSessionSubject}
-                        onChange={(e) => setCustomSessionSubject(e.target.value)}
-                        placeholder={subject || 'e.g. Biology'}
-                        className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">
-                        Minutes Studied
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={600}
-                        value={customSessionMinutes}
-                        onChange={(e) => setCustomSessionMinutes(Math.max(1, parseInt(e.target.value, 10) || 15))}
-                        className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                      />
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handleLogStudySession()}
-                    className="w-full py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add to Logged Study Hours</span>
-                  </button>
-
-                  {recentSessions && recentSessions.length > 0 && (
-                    <div className="pt-2 border-t border-slate-200/70 dark:border-slate-800 space-y-1.5">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                        Recent Logged Sessions
-                      </span>
-                      <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
-                        {recentSessions.slice(0, 4).map((sess) => (
-                          <div
-                            key={sess.id}
-                            className="flex items-center justify-between text-[11px] py-1 px-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800"
-                          >
-                            <span className="font-semibold text-slate-700 dark:text-slate-300 truncate">
-                              {sess.subject}
-                            </span>
-                            <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
-                              +{sess.minutes}m
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
@@ -1762,7 +1531,7 @@ export function ProfileSettingsHub() {
                 </div>
               </div>
 
-              {/* 2. Customizable Daily Focus Goal Target + Live Countdown Timer */}
+              {/* 2. Customizable Daily Focus Goal Target */}
               <div className="space-y-5 p-5 rounded-2xl bg-slate-50/80 dark:bg-white/5 border border-slate-200/60 dark:border-white/5">
                 <CustomDailyGoalSelector
                   dailyGoalMinutes={dailyGoalMinutes}
@@ -1784,12 +1553,6 @@ export function ProfileSettingsHub() {
                     />
                   </div>
                 </div>
-
-                <LiveStudyCountdownTimer
-                  subjectName={subject || 'General Study'}
-                  dailyGoalMinutes={dailyGoalMinutes}
-                  todayMinutes={todayMinutes}
-                />
               </div>
 
               {/* 3. Upgraded Next Core Exam Target Date & Live Countdown Tracker */}
