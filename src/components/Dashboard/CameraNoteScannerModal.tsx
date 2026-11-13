@@ -20,7 +20,6 @@ import {
   Square,
   FolderPlus,
   BookOpen,
-  ListChecks,
   Calculator
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
@@ -109,7 +108,7 @@ function renderInlineSegments(text: string): React.ReactNode[] {
   return tokens.map((token, idx) => {
     if (token.startsWith('**') && token.endsWith('**') && token.length > 4) {
       return (
-        <strong key={idx} className="font-semibold text-white">
+        <strong key={idx} className="font-semibold text-slate-900 dark:text-white">
           {token.slice(2, -2)}
         </strong>
       );
@@ -118,7 +117,7 @@ function renderInlineSegments(text: string): React.ReactNode[] {
       return (
         <code
           key={idx}
-          className="px-1.5 py-0.5 rounded bg-slate-800 text-indigo-200 font-mono text-[0.85em]"
+          className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-slate-800 text-blue-700 dark:text-blue-300 font-mono text-[0.85em]"
         >
           {token.slice(1, -1)}
         </code>
@@ -131,7 +130,7 @@ function renderInlineSegments(text: string): React.ReactNode[] {
 function renderFormattedLensText(content: string): React.ReactNode {
   const lines = content.split('\n');
   return (
-    <div className="space-y-1.5 text-xs sm:text-sm text-slate-200 leading-relaxed">
+    <div className="space-y-1.5 text-xs sm:text-sm text-slate-700 dark:text-slate-200 leading-relaxed">
       {lines.map((rawLine, idx) => {
         const line = rawLine.trim();
         if (!line) {
@@ -140,7 +139,7 @@ function renderFormattedLensText(content: string): React.ReactNode {
         if (/^#{1,4}\s+/.test(line)) {
           const headingText = line.replace(/^#{1,4}\s+/, '');
           return (
-            <h5 key={idx} className="text-sm sm:text-[15px] font-bold text-white pt-1.5">
+            <h5 key={idx} className="text-sm sm:text-[15px] font-bold text-slate-900 dark:text-white pt-1.5">
               {renderInlineSegments(headingText)}
             </h5>
           );
@@ -149,7 +148,7 @@ function renderFormattedLensText(content: string): React.ReactNode {
           const itemText = line.replace(/^[-*•]\s+/, '');
           return (
             <div key={idx} className="flex items-start gap-2 pl-1">
-              <span className="text-indigo-400 font-bold leading-5 select-none">•</span>
+              <span className="text-blue-600 dark:text-blue-400 font-bold leading-5 select-none">•</span>
               <span className="flex-1">{renderInlineSegments(itemText)}</span>
             </div>
           );
@@ -159,7 +158,7 @@ function renderFormattedLensText(content: string): React.ReactNode {
           if (match) {
             return (
               <div key={idx} className="flex items-start gap-2 pl-1">
-                <span className="text-indigo-300 font-semibold tabular-nums shrink-0">{match[1]}</span>
+                <span className="text-blue-600 dark:text-blue-400 font-semibold tabular-nums shrink-0">{match[1]}</span>
                 <span className="flex-1">{renderInlineSegments(match[2])}</span>
               </div>
             );
@@ -890,7 +889,7 @@ export default function CameraNoteScannerModal({
 
   // Run Google Lens interactive actions directly inside Scan Notes (no workspace upload required)
   const runLensAction = async (
-    mode: 'ask' | 'solve' | 'explain' | 'summarize' | 'quiz',
+    mode: 'ask' | 'solve' | 'explain' | 'summarize',
     customQuestion?: string
   ) => {
     if (!scanResult || isLensLoading) return;
@@ -900,8 +899,7 @@ export default function CameraNoteScannerModal({
     const actionLabels: Record<string, string> = {
       solve: 'Solve step-by-step',
       explain: 'Explain concepts',
-      summarize: 'Summarize note',
-      quiz: 'Generate practice questions'
+      summarize: 'Summarize note'
     };
 
     const displayPrompt = mode === 'ask' ? questionText : actionLabels[mode];
@@ -1156,8 +1154,10 @@ export default function CameraNoteScannerModal({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
-          className={`fixed inset-0 w-screen h-[100dvh] z-[9999] bg-slate-950 flex flex-col overflow-hidden ${
-            scanResult ? 'select-text' : 'select-none'
+          className={`fixed inset-0 w-screen h-[100dvh] z-[9999] flex flex-col overflow-hidden ${
+            scanResult
+              ? 'bg-slate-50 dark:bg-slate-950 select-text'
+              : 'bg-black select-none'
           }`}
         >
           {/* Hidden Native Camera & File Inputs */}
@@ -1177,28 +1177,48 @@ export default function CameraNoteScannerModal({
             className="hidden"
           />
 
-          {/* Top Floating Header Bar */}
-          <div className="relative z-30 flex items-center justify-between gap-4 px-4 sm:px-6 pt-[calc(0.875rem+env(safe-area-inset-top,0px))] pb-3 bg-slate-950/90 border-b border-white/10 shrink-0">
+          {/* Top Bar */}
+          <div
+            className={`relative z-30 flex items-center justify-between gap-4 px-4 sm:px-6 pt-[calc(0.875rem+env(safe-area-inset-top,0px))] pb-3 border-b shrink-0 transition-colors ${
+              scanResult
+                ? 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-xs'
+                : 'bg-slate-950/90 border-white/10'
+            }`}
+          >
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-md shrink-0">
+              <div
+                className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                  scanResult
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'bg-blue-600 text-white shadow-md'
+                }`}
+              >
                 <Camera className="w-4 h-4" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-sm sm:text-base font-bold text-white truncate">
+                <h3
+                  className={`text-sm sm:text-base font-bold truncate ${
+                    scanResult ? 'text-slate-900 dark:text-white' : 'text-white'
+                  }`}
+                >
                   {scanResult ? scanResult.title : 'Scan Notes'}
                 </h3>
-                <div className="flex items-center gap-2 text-xs text-slate-400 truncate">
+                <div
+                  className={`flex items-center gap-2 text-xs truncate ${
+                    scanResult ? 'text-slate-500 dark:text-slate-400' : 'text-slate-300'
+                  }`}
+                >
                   {scanResult ? (
                     <>
                       <span>{scanResult.sizeFormatted}</span>
                       <span aria-hidden="true">·</span>
                       {isSavedToWorkspace ? (
-                        <span className="inline-flex items-center gap-1 text-emerald-400 font-medium">
+                        <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
                           <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
                           <span className="truncate">Added to {savedWorkspaceName}</span>
                         </span>
                       ) : (
-                        <span className="text-slate-300">Not added to workspace yet</span>
+                        <span className="text-slate-600 dark:text-slate-300">Not added to workspace yet</span>
                       )}
                     </>
                   ) : detectedBounds && autoCropEnabled ? (
@@ -1222,13 +1242,13 @@ export default function CameraNoteScannerModal({
                     disabled={!scanResult.extractedText}
                     className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                       isCopied
-                        ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-300'
-                        : 'bg-white/10 hover:bg-white/15 border-white/15 text-white'
+                        ? 'bg-emerald-50 dark:bg-emerald-500/20 border-emerald-200 dark:border-emerald-400/40 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 shadow-2xs'
                     }`}
                   >
                     {isCopied ? (
                       <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                         <span>Copied</span>
                       </>
                     ) : (
@@ -1246,13 +1266,13 @@ export default function CameraNoteScannerModal({
                         setSaveWorkspaceError(null);
                         setSavePromptIntent('manual');
                       }}
-                      className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                      className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer whitespace-nowrap shrink-0"
                     >
                       <FolderPlus className="w-3.5 h-3.5" />
                       <span>Add to Workspace</span>
                     </button>
                   ) : (
-                    <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-semibold whitespace-nowrap shrink-0">
+                    <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-semibold whitespace-nowrap shrink-0">
                       <CheckCircle2 className="w-3.5 h-3.5" />
                       <span>Saved</span>
                     </span>
@@ -1266,7 +1286,7 @@ export default function CameraNoteScannerModal({
                   onClick={() => setAutoCropEnabled((prev) => !prev)}
                   className={`h-9 px-3 rounded-xl border flex items-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                     autoCropEnabled
-                      ? 'bg-indigo-600/85 border-indigo-400/50 text-white'
+                      ? 'bg-blue-600 border-blue-400/50 text-white'
                       : 'bg-white/10 border-white/15 text-slate-300 hover:bg-white/15'
                   }`}
                   title={autoCropEnabled ? 'Automatic Paper Cropping: ON' : 'Automatic Paper Cropping: OFF'}
@@ -1293,7 +1313,11 @@ export default function CameraNoteScannerModal({
                 <button
                   type="button"
                   onClick={handleAttemptClose}
-                  className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                  className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+                    scanResult
+                      ? 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                      : 'bg-white/10 hover:bg-white/20 text-white border-white/15'
+                  }`}
                   aria-label="Close scanner"
                 >
                   <X className="w-4 h-4" />
@@ -1302,33 +1326,39 @@ export default function CameraNoteScannerModal({
             </div>
           </div>
 
-          {/* Main Content Area: Google Lens Result View OR Camera Viewfinder */}
-          <div className="relative flex-1 w-full min-h-0 flex items-center justify-center bg-slate-950 overflow-hidden">
+          {/* Main Content Area: White StudyWeb Scan AI Tutor Workspace OR Camera Viewfinder */}
+          <div
+            className={`relative flex-1 w-full min-h-0 flex items-center justify-center overflow-hidden ${
+              scanResult ? 'bg-slate-50 dark:bg-slate-950' : 'bg-black'
+            }`}
+          >
             {scanResult && !isProcessing ? (
-              <div className="w-full h-full max-w-6xl mx-auto px-4 sm:px-6 py-4 flex flex-col lg:grid lg:grid-cols-12 gap-4 sm:gap-6 min-h-0 overflow-y-auto lg:overflow-hidden">
-                {/* Left Column: Scanned Image Preview & Detected Formulas */}
+              <div className="w-full h-full max-w-6xl mx-auto px-4 sm:px-6 py-4 sm:py-5 flex flex-col lg:grid lg:grid-cols-12 gap-4 sm:gap-6 min-h-0 overflow-y-auto lg:overflow-hidden">
+                {/* Left Column: Clean White Scanned Image Card & Detected Formulas */}
                 <div className="lg:col-span-5 flex flex-col gap-3 min-h-0">
-                  <div className="flex-1 min-h-[220px] max-h-[320px] lg:max-h-none rounded-2xl bg-slate-900 border border-white/10 p-3 flex flex-col overflow-hidden">
-                    <div className="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-white/10 shrink-0">
-                      <span className="text-xs font-semibold text-slate-300">Scanned Page</span>
+                  <div className="flex-1 min-h-[220px] max-h-[320px] lg:max-h-none rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 flex flex-col overflow-hidden shadow-sm">
+                    <div className="flex items-center justify-between gap-2 pb-3 mb-3 border-b border-slate-100 dark:border-slate-800 shrink-0">
+                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        Scanned Page
+                      </span>
                       <button
                         type="button"
                         onClick={handleAttemptRescan}
-                        className="text-xs font-medium text-indigo-300 hover:text-indigo-200 inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                        className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                         <span>Scan Another</span>
                       </button>
                     </div>
-                    <div className="relative flex-1 min-h-0 rounded-xl overflow-hidden bg-black/70 flex items-center justify-center">
+                    <div className="relative flex-1 min-h-0 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 flex items-center justify-center p-2">
                       <img
                         src={scanResult.dataUrl}
                         alt={scanResult.title}
-                        className="w-full h-full object-contain"
+                        className="w-full h-full object-contain rounded-lg"
                       />
                     </div>
                     {scanResult.tags.length > 0 && (
-                      <p className="pt-2.5 text-xs text-slate-400 truncate">
+                      <p className="pt-3 text-xs text-slate-500 dark:text-slate-400 truncate">
                         {scanResult.tags.slice(0, 4).join(' · ')}
                       </p>
                     )}
@@ -1336,8 +1366,8 @@ export default function CameraNoteScannerModal({
 
                   {/* Quick-copy detected formulas (if any) */}
                   {scanResult.formulas.length > 0 && (
-                    <div className="rounded-2xl bg-slate-900 border border-white/10 p-3.5 space-y-2 shrink-0 max-h-40 overflow-y-auto">
-                      <p className="text-xs font-semibold text-slate-300">
+                    <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 space-y-2.5 shrink-0 max-h-44 overflow-y-auto shadow-sm">
+                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                         Detected Formulas (tap to copy)
                       </p>
                       <div className="space-y-1.5">
@@ -1351,7 +1381,7 @@ export default function CameraNoteScannerModal({
                                 (window as any).showToast?.('Formula copied to clipboard!', 'success', 2000);
                               }
                             }}
-                            className="w-full text-left px-3 py-2 rounded-lg bg-slate-950/70 hover:bg-slate-800 border border-white/10 text-xs font-mono text-indigo-200 flex items-center justify-between gap-2 cursor-pointer transition-colors"
+                            className="w-full text-left px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950/70 hover:bg-blue-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-xs font-mono text-blue-700 dark:text-blue-300 flex items-center justify-between gap-2 cursor-pointer transition-colors"
                           >
                             <span className="truncate">{formula}</span>
                             <Copy className="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -1362,18 +1392,18 @@ export default function CameraNoteScannerModal({
                   )}
                 </div>
 
-                {/* Right Column: Google Lens Interactive Tabs (Ask & Solve vs Text & Translate) */}
-                <div className="lg:col-span-7 flex flex-col rounded-2xl bg-slate-900 border border-white/10 min-h-[420px] lg:min-h-0 overflow-hidden">
-                  {/* Google Lens Mode Switcher */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-white/10 shrink-0">
-                    <div className="flex items-center gap-1 p-1 bg-slate-950 rounded-xl border border-white/10">
+                {/* Right Column: Bright StudyWeb Interactive Scan AI Tutor & Translator */}
+                <div className="lg:col-span-7 flex flex-col rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 min-h-[430px] lg:min-h-0 overflow-hidden shadow-sm">
+                  {/* Mode Switcher Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
+                    <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200/80 dark:border-slate-700">
                       <button
                         type="button"
                         onClick={() => setLensMode('ask')}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                           lensMode === 'ask'
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'text-slate-300 hover:text-white'
+                            ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+                            : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                         }`}
                       >
                         <Sparkles className="w-3.5 h-3.5" />
@@ -1382,13 +1412,13 @@ export default function CameraNoteScannerModal({
                       <button
                         type="button"
                         onClick={() => setLensMode('text')}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                           lensMode === 'text'
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'text-slate-300 hover:text-white'
+                            ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+                            : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                         }`}
                       >
-                        <FileText className="w-3.5 h-3.5" />
+                        <Languages className="w-3.5 h-3.5" />
                         <span>Text &amp; Translate</span>
                       </button>
                     </div>
@@ -1404,10 +1434,10 @@ export default function CameraNoteScannerModal({
                           )
                         }
                         disabled={!scanResult.extractedText}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                           isSpeaking
-                            ? 'bg-amber-500/20 border-amber-400/40 text-amber-200'
-                            : 'bg-white/5 hover:bg-white/10 border-white/10 text-slate-200'
+                            ? 'bg-amber-50 dark:bg-amber-500/20 border-amber-300 dark:border-amber-400/40 text-amber-700 dark:text-amber-200'
+                            : 'bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
                         }`}
                       >
                         {isSpeaking ? (
@@ -1426,15 +1456,15 @@ export default function CameraNoteScannerModal({
                   </div>
 
                   {lensMode === 'ask' ? (
-                    /* Ask & Solve Mode (Direct Google Lens Q&A + Problem Solver + Generators) */
+                    /* Ask & Solve Mode (Direct Scan AI Tutor Q&A + Problem Solver + Explain + Summarize) */
                     <div className="flex-1 flex flex-col min-h-0">
-                      {/* Quick Google Lens Actions */}
-                      <div className="px-4 py-2.5 border-b border-white/10 bg-slate-950/40 flex flex-wrap items-center gap-2 shrink-0">
+                      {/* Quick Action Bar */}
+                      <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 flex flex-wrap items-center gap-2 shrink-0">
                         <button
                           type="button"
                           onClick={() => runLensAction('solve')}
                           disabled={isLensLoading}
-                          className="px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-400/30 text-indigo-200 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50"
+                          className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50"
                         >
                           <Calculator className="w-3.5 h-3.5" />
                           <span>Solve Step-by-Step</span>
@@ -1443,59 +1473,58 @@ export default function CameraNoteScannerModal({
                           type="button"
                           onClick={() => runLensAction('explain')}
                           disabled={isLensLoading}
-                          className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50"
+                          className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50"
                         >
-                          <BookOpen className="w-3.5 h-3.5" />
+                          <BookOpen className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                           <span>Explain Concepts</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => runLensAction('summarize')}
                           disabled={isLensLoading}
-                          className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50"
+                          className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50"
                         >
-                          <FileText className="w-3.5 h-3.5" />
+                          <FileText className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                           <span>Summarize</span>
                         </button>
                         <button
                           type="button"
-                          onClick={() => runLensAction('quiz')}
-                          disabled={isLensLoading}
-                          className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50"
+                          onClick={() => setLensMode('text')}
+                          className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
                         >
-                          <ListChecks className="w-3.5 h-3.5" />
-                          <span>Practice Questions</span>
+                          <Languages className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                          <span>Translate Text</span>
                         </button>
                       </div>
 
                       {/* Q&A Stream */}
-                      <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
+                      <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-4 bg-white dark:bg-slate-900">
                         {lensMessages.length === 0 ? (
-                          <div className="space-y-3 py-2">
-                            <div className="rounded-xl bg-slate-950/70 border border-white/10 p-4 space-y-2">
-                              <p className="text-xs sm:text-sm font-semibold text-white">
+                          <div className="space-y-3.5 py-1">
+                            <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 p-4 space-y-2">
+                              <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
                                 Ready to help directly from your scan
                               </p>
-                              <p className="text-xs text-slate-300 leading-relaxed">
+                              <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
                                 {scanResult.summary ||
-                                  'Ask any question below or tap Solve Step-by-Step, Explain Concepts, Summarize, or Practice Questions without uploading to a workspace.'}
+                                  'Ask any question below, or tap Solve Step-by-Step, Explain Concepts, Summarize, or Translate Text directly here without leaving Scan Notes.'}
                               </p>
                             </div>
                             {scanResult.extractedText && (
-                              <div className="rounded-xl bg-slate-950/50 border border-white/10 p-3.5">
-                                <div className="flex items-center justify-between gap-2 mb-1.5">
-                                  <span className="text-xs font-semibold text-slate-300">
+                              <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
+                                <div className="flex items-center justify-between gap-2 mb-2">
+                                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                                     Scanned Text Preview
                                   </span>
                                   <button
                                     type="button"
                                     onClick={() => setLensMode('text')}
-                                    className="text-xs font-medium text-indigo-300 hover:text-indigo-200 cursor-pointer"
+                                    className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer"
                                   >
-                                    View &amp; Translate Full Text
+                                    Copy &amp; Translate Full Text
                                   </button>
                                 </div>
-                                <p className="text-xs text-slate-300 leading-relaxed line-clamp-4 whitespace-pre-wrap">
+                                <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed line-clamp-5 whitespace-pre-wrap">
                                   {scanResult.extractedText}
                                 </p>
                               </div>
@@ -1510,18 +1539,18 @@ export default function CameraNoteScannerModal({
                               }`}
                             >
                               {msg.role === 'user' ? (
-                                <div className="max-w-[85%] rounded-2xl bg-indigo-600 text-white px-4 py-2.5 text-xs sm:text-sm font-medium shadow-sm">
+                                <div className="max-w-[85%] rounded-2xl bg-blue-600 text-white px-4 py-2.5 text-xs sm:text-sm font-medium shadow-xs">
                                   {msg.text}
                                 </div>
                               ) : msg.isError ? (
-                                <div className="w-full rounded-xl bg-rose-950/70 border border-rose-500/40 p-3.5 space-y-2">
+                                <div className="w-full rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-500/40 p-4 space-y-2.5">
                                   <div className="flex items-start gap-2.5">
-                                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                                    <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
                                     <div className="min-w-0 flex-1">
-                                      <p className="text-xs font-semibold text-rose-200">
+                                      <p className="text-xs font-semibold text-rose-800 dark:text-rose-200">
                                         Could not generate answer
                                       </p>
-                                      <p className="text-xs text-rose-200/90 mt-0.5 break-words">
+                                      <p className="text-xs text-rose-700 dark:text-rose-200/90 mt-0.5 break-words">
                                         {msg.text}
                                       </p>
                                     </div>
@@ -1531,7 +1560,7 @@ export default function CameraNoteScannerModal({
                                       type="button"
                                       onClick={() => handleRetryLensMessage(msg)}
                                       disabled={isLensLoading}
-                                      className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                                      className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
                                     >
                                       <RotateCcw className="w-3 h-3" />
                                       <span>Retry</span>
@@ -1539,10 +1568,10 @@ export default function CameraNoteScannerModal({
                                   )}
                                 </div>
                               ) : (
-                                <div className="w-full rounded-xl bg-slate-950/80 border border-white/10 p-4 space-y-2.5">
-                                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-white/10">
-                                    <span className="text-xs font-semibold text-indigo-300">
-                                      {msg.actionLabel || 'Lens Answer'}
+                                <div className="w-full rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 p-4 space-y-2.5">
+                                  <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-200/80 dark:border-slate-700">
+                                    <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
+                                      {msg.actionLabel || 'Scan AI Answer'}
                                     </span>
                                     <button
                                       type="button"
@@ -1553,12 +1582,12 @@ export default function CameraNoteScannerModal({
                                           setTimeout(() => setCopiedMessageId(null), 2000);
                                         }
                                       }}
-                                      className="text-xs font-medium text-slate-300 hover:text-white inline-flex items-center gap-1 cursor-pointer"
+                                      className="text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white inline-flex items-center gap-1 cursor-pointer"
                                     >
                                       {copiedMessageId === msg.id ? (
                                         <>
-                                          <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                          <span className="text-emerald-300">Copied</span>
+                                          <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                          <span className="text-emerald-600 dark:text-emerald-300">Copied</span>
                                         </>
                                       ) : (
                                         <>
@@ -1576,8 +1605,8 @@ export default function CameraNoteScannerModal({
                         )}
 
                         {isLensLoading && (
-                          <div className="flex items-center gap-2.5 px-3.5 py-3 rounded-xl bg-slate-950/70 border border-white/10 text-xs text-slate-300">
-                            <Loader2 className="w-4 h-4 text-indigo-400 animate-spin shrink-0" />
+                          <div className="flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-600 dark:text-slate-300">
+                            <Loader2 className="w-4 h-4 text-blue-600 dark:text-blue-400 animate-spin shrink-0" />
                             <span>Analyzing your scan...</span>
                           </div>
                         )}
@@ -1590,20 +1619,20 @@ export default function CameraNoteScannerModal({
                           e.preventDefault();
                           runLensAction('ask');
                         }}
-                        className="p-3 border-t border-white/10 bg-slate-950/60 shrink-0"
+                        className="p-3 sm:p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900 shrink-0"
                       >
-                        <div className="flex items-center gap-2 rounded-xl bg-slate-900 border border-white/15 focus-within:border-indigo-400 px-3 py-2">
+                        <div className="flex items-center gap-2 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/15 px-3.5 py-2 shadow-2xs">
                           <input
                             type="text"
                             value={lensQuestionInput}
                             onChange={(e) => setLensQuestionInput(e.target.value)}
                             placeholder="Ask a question about this scan..."
-                            className="flex-1 bg-transparent text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none min-w-0"
+                            className="flex-1 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none min-w-0"
                           />
                           <button
                             type="submit"
                             disabled={isLensLoading || !lensQuestionInput.trim()}
-                            className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-45 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-45 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
                           >
                             <Send className="w-3.5 h-3.5" />
                             <span>Ask</span>
@@ -1613,16 +1642,16 @@ export default function CameraNoteScannerModal({
                     </div>
                   ) : (
                     /* Text, Copy & Translate Mode */
-                    <div className="flex-1 flex flex-col min-h-0">
+                    <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-900">
                       {/* Translate & Copy Toolbar */}
-                      <div className="px-4 py-2.5 border-b border-white/10 bg-slate-950/40 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                      <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/60 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <Languages className="w-4 h-4 text-indigo-300 shrink-0" />
+                          <Languages className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                           <select
                             value={targetLanguage}
                             onChange={(e) => setTargetLanguage(e.target.value)}
                             aria-label="Target translation language"
-                            className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-white/15 text-xs text-white focus:outline-none focus:border-indigo-400"
+                            className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-800 dark:text-white focus:outline-none focus:border-blue-500"
                           >
                             {TRANSLATE_LANGUAGES.map((lang) => (
                               <option key={lang} value={lang}>
@@ -1634,7 +1663,7 @@ export default function CameraNoteScannerModal({
                             type="button"
                             onClick={handleTranslateScan}
                             disabled={isTranslating || !scanResult.extractedText}
-                            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
+                            className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors whitespace-nowrap"
                           >
                             {isTranslating ? (
                               <>
@@ -1651,15 +1680,15 @@ export default function CameraNoteScannerModal({
                           type="button"
                           onClick={handleCopyOcrText}
                           disabled={!scanResult.extractedText}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap ${
+                          className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap ${
                             isCopied
-                              ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-300'
-                              : 'bg-white/10 hover:bg-white/15 border-white/15 text-white'
+                              ? 'bg-emerald-50 dark:bg-emerald-500/20 border-emerald-200 dark:border-emerald-400/40 text-emerald-700 dark:text-emerald-300'
+                              : 'bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
                           }`}
                         >
                           {isCopied ? (
                             <>
-                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                               <span>Copied!</span>
                             </>
                           ) : (
@@ -1672,30 +1701,30 @@ export default function CameraNoteScannerModal({
                       </div>
 
                       {/* Selectable OCR Text + Translation Area */}
-                      <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
+                      <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-4">
                         <div>
-                          <p className="text-xs font-medium text-slate-400 mb-2">
+                          <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">
                             Highlight any lines to copy a selection, or tap Copy All Text above.
                           </p>
-                          <div className="rounded-xl bg-slate-950/80 border border-white/10 p-4 text-xs sm:text-sm text-slate-100 leading-relaxed whitespace-pre-wrap select-text">
+                          <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 p-4 text-xs sm:text-sm text-slate-800 dark:text-slate-100 leading-relaxed whitespace-pre-wrap select-text">
                             {scanResult.extractedText || 'No readable text was detected on this page.'}
                           </div>
                         </div>
 
                         {translationError && (
-                          <div className="rounded-xl bg-rose-950/70 border border-rose-500/40 p-3.5 flex items-start gap-2.5">
-                            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                          <div className="rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-500/40 p-4 flex items-start gap-2.5">
+                            <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
                             <div className="min-w-0 flex-1">
-                              <p className="text-xs font-semibold text-rose-200">Translation Error</p>
-                              <p className="text-xs text-rose-200/90 mt-0.5 break-words">{translationError}</p>
+                              <p className="text-xs font-semibold text-rose-800 dark:text-rose-200">Translation Error</p>
+                              <p className="text-xs text-rose-700 dark:text-rose-200/90 mt-0.5 break-words">{translationError}</p>
                             </div>
                           </div>
                         )}
 
                         {translatedText && (
-                          <div className="rounded-xl bg-indigo-950/35 border border-indigo-400/30 p-4 space-y-2">
-                            <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-white/10">
-                              <span className="text-xs font-semibold text-indigo-300">
+                          <div className="rounded-2xl bg-blue-50/70 dark:bg-blue-950/35 border border-blue-200 dark:border-blue-500/30 p-4 space-y-2.5">
+                            <div className="flex items-center justify-between gap-2 pb-2 border-b border-blue-200/70 dark:border-white/10">
+                              <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">
                                 Translation ({targetLanguage})
                               </span>
                               <button
@@ -1707,12 +1736,12 @@ export default function CameraNoteScannerModal({
                                     setTimeout(() => setIsTranslationCopied(false), 2000);
                                   }
                                 }}
-                                className="text-xs font-medium text-slate-200 hover:text-white inline-flex items-center gap-1 cursor-pointer"
+                                className="text-xs font-semibold text-blue-700 dark:text-blue-200 hover:text-blue-900 dark:hover:text-white inline-flex items-center gap-1 cursor-pointer"
                               >
                                 {isTranslationCopied ? (
                                   <>
-                                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                    <span className="text-emerald-300">Copied</span>
+                                    <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                    <span className="text-emerald-700 dark:text-emerald-300">Copied</span>
                                   </>
                                 ) : (
                                   <>
@@ -1722,7 +1751,7 @@ export default function CameraNoteScannerModal({
                                 )}
                               </button>
                             </div>
-                            <div className="text-xs sm:text-sm text-slate-100 leading-relaxed whitespace-pre-wrap select-text">
+                            <div className="text-xs sm:text-sm text-slate-800 dark:text-slate-100 leading-relaxed whitespace-pre-wrap select-text">
                               {translatedText}
                             </div>
                           </div>
@@ -1740,34 +1769,34 @@ export default function CameraNoteScannerModal({
                   className="w-full h-full object-contain bg-black"
                 />
                 {isProcessing && (
-                  <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-20">
+                  <div className="absolute inset-0 bg-white/90 dark:bg-slate-950/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-20">
                     <motion.div
                       animate={{ top: ['12%', '86%', '12%'] }}
                       transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
-                      className="absolute left-6 right-6 h-0.5 bg-gradient-to-r from-transparent via-indigo-400 to-transparent shadow-[0_0_16px_#6366f1]"
+                      className="absolute left-6 right-6 h-0.5 bg-gradient-to-r from-transparent via-blue-500 to-transparent shadow-[0_0_14px_#2563eb]"
                     />
-                    <div className="w-16 h-16 rounded-2xl bg-indigo-600/25 border border-indigo-500/40 flex items-center justify-center text-indigo-400 mb-4 shadow-xl">
+                    <div className="w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-600/20 border border-blue-200 dark:border-blue-500/40 flex items-center justify-center text-blue-600 dark:text-blue-400 mb-4 shadow-sm">
                       <Loader2 className="w-8 h-8 animate-spin" />
                     </div>
-                    <p className="text-sm sm:text-base font-bold text-white mb-1.5">
+                    <p className="text-sm sm:text-base font-bold text-slate-900 dark:text-white mb-1.5">
                       {scanStepText}
                     </p>
-                    <p className="text-xs text-slate-300 font-medium mb-4">
-                      Extracting text and preparing Lens tools (nothing is saved unless you choose)
+                    <p className="text-xs text-slate-600 dark:text-slate-300 font-medium mb-4">
+                      Extracting text and preparing Scan AI tools (nothing is saved unless you choose)
                     </p>
-                    <div className="w-64 max-w-[80vw] h-2 bg-slate-800 rounded-full overflow-hidden">
+                    <div className="w-64 max-w-[80vw] h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
                       <motion.div
-                        className="h-full bg-indigo-500 rounded-full"
+                        className="h-full bg-blue-600 rounded-full"
                         animate={{ width: `${scanProgress}%` }}
                         transition={{ duration: 0.3 }}
                       />
                     </div>
                     {ocrPreviewSnippet && (
-                      <div className="mt-5 px-4 py-3 rounded-2xl bg-slate-900/90 border border-indigo-500/35 max-w-md text-left shadow-xl">
-                        <p className="text-xs font-semibold text-indigo-300 mb-1">
+                      <div className="mt-5 px-4 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 max-w-md text-left shadow-md">
+                        <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 mb-1">
                           Detected Text
                         </p>
-                        <p className="text-xs text-slate-200 line-clamp-3 font-medium leading-relaxed">
+                        <p className="text-xs text-slate-700 dark:text-slate-200 line-clamp-3 font-medium leading-relaxed">
                           {ocrPreviewSnippet}
                         </p>
                       </div>
@@ -1776,17 +1805,17 @@ export default function CameraNoteScannerModal({
                 )}
 
                 {!isProcessing && scanError && (
-                  <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 z-20">
-                    <div className="w-full max-w-md rounded-2xl bg-rose-950/90 border border-rose-500/50 p-5 sm:p-6 text-left shadow-2xl space-y-4">
+                  <div className="absolute inset-0 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 z-20">
+                    <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-500/50 p-5 sm:p-6 text-left shadow-2xl space-y-4">
                       <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-400/40 text-rose-300 flex items-center justify-center shrink-0">
+                        <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-500/20 border border-rose-200 dark:border-rose-400/40 text-rose-600 dark:text-rose-300 flex items-center justify-center shrink-0">
                           <AlertTriangle className="w-5 h-5" />
                         </div>
                         <div className="min-w-0">
-                          <h4 className="text-sm sm:text-base font-bold text-white">
+                          <h4 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
                             Scan Error
                           </h4>
-                          <p className="text-xs sm:text-sm text-rose-200 mt-1 leading-relaxed break-words">
+                          <p className="text-xs sm:text-sm text-rose-700 dark:text-rose-200 mt-1 leading-relaxed break-words">
                             {scanError}
                           </p>
                         </div>
@@ -1795,7 +1824,7 @@ export default function CameraNoteScannerModal({
                         <button
                           type="button"
                           onClick={resetScannerSessionState}
-                          className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+                          className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
                         >
                           <Camera className="w-3.5 h-3.5" />
                           <span>Scan Again</span>
@@ -1803,7 +1832,7 @@ export default function CameraNoteScannerModal({
                         <button
                           type="button"
                           onClick={() => processScannedImage(capturedDataUrl, undefined, null)}
-                          className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-lg cursor-pointer transition-colors"
+                          className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer transition-colors"
                         >
                           <RotateCcw className="w-3.5 h-3.5" />
                           <span>Retry Scan</span>
@@ -1849,7 +1878,7 @@ export default function CameraNoteScannerModal({
                   <div className="text-center space-y-3 z-10 p-6 max-w-sm">
                     {cameraError ? (
                       <>
-                        <div className="w-14 h-14 rounded-2xl bg-indigo-500/20 border border-indigo-500/35 text-indigo-400 flex items-center justify-center mx-auto shadow-lg">
+                        <div className="w-14 h-14 rounded-2xl bg-blue-500/20 border border-blue-400/35 text-blue-400 flex items-center justify-center mx-auto shadow-lg">
                           <Camera className="w-7 h-7" />
                         </div>
                         <p className="text-sm sm:text-base font-bold text-white">
@@ -1861,7 +1890,7 @@ export default function CameraNoteScannerModal({
                       </>
                     ) : (
                       <>
-                        <Loader2 className="w-8 h-8 text-indigo-400 animate-spin mx-auto" />
+                        <Loader2 className="w-8 h-8 text-blue-400 animate-spin mx-auto" />
                         <p className="text-sm font-bold text-white">Opening Camera...</p>
                         <p className="text-xs text-slate-300 font-medium">
                           Position your handwritten or printed notes inside the frame
@@ -1875,17 +1904,17 @@ export default function CameraNoteScannerModal({
 
             {/* Explicit Workspace Confirmation Prompt (always asks before saving anything to a workspace) */}
             {savePromptIntent && scanResult && (
-              <div className="absolute inset-0 z-40 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-                <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-white/15 p-5 sm:p-6 shadow-2xl space-y-4">
+              <div className="absolute inset-0 z-40 bg-slate-900/50 dark:bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-2xl space-y-4">
                   <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-600/25 border border-indigo-400/30 text-indigo-300 flex items-center justify-center shrink-0">
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-600/20 border border-blue-200 dark:border-blue-400/30 text-blue-600 dark:text-blue-300 flex items-center justify-center shrink-0">
                       <FolderPlus className="w-5 h-5" />
                     </div>
                     <div className="min-w-0">
-                      <h4 className="text-base font-bold text-white">
+                      <h4 className="text-base font-bold text-slate-900 dark:text-white">
                         Add scan to workspace?
                       </h4>
-                      <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                      <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
                         {savePromptIntent === 'manual'
                           ? 'Choose which workspace to save this scanned image and extracted text into.'
                           : 'This scan has not been added to a workspace yet. Would you like to save it before leaving?'}
@@ -1896,7 +1925,7 @@ export default function CameraNoteScannerModal({
                   <div className="space-y-1.5">
                     <label
                       htmlFor="lens-target-workspace"
-                      className="block text-xs font-semibold text-slate-300"
+                      className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
                     >
                       Destination Workspace
                     </label>
@@ -1904,7 +1933,7 @@ export default function CameraNoteScannerModal({
                       id="lens-target-workspace"
                       value={selectedTargetWsId}
                       onChange={(e) => setSelectedTargetWsId(e.target.value)}
-                      className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-white/15 text-xs sm:text-sm text-white focus:outline-none focus:border-indigo-400"
+                      className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:border-blue-500"
                     >
                       {workspaces.map((ws) => (
                         <option key={ws.id} value={ws.id}>
@@ -1916,9 +1945,9 @@ export default function CameraNoteScannerModal({
                   </div>
 
                   {saveWorkspaceError && (
-                    <div className="rounded-xl bg-rose-950/80 border border-rose-500/40 p-3 flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                      <p className="text-xs text-rose-200">{saveWorkspaceError}</p>
+                    <div className="rounded-xl bg-rose-50 dark:bg-rose-950/80 border border-rose-200 dark:border-rose-500/40 p-3 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                      <p className="text-xs text-rose-700 dark:text-rose-200">{saveWorkspaceError}</p>
                     </div>
                   )}
 
@@ -1927,7 +1956,7 @@ export default function CameraNoteScannerModal({
                       type="button"
                       onClick={() => setSavePromptIntent(null)}
                       disabled={isSavingToWorkspace}
-                      className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 text-xs font-semibold cursor-pointer transition-colors"
+                      className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold cursor-pointer transition-colors"
                     >
                       Cancel
                     </button>
@@ -1936,7 +1965,7 @@ export default function CameraNoteScannerModal({
                         type="button"
                         onClick={handleDiscardUnsavedAndProceed}
                         disabled={isSavingToWorkspace}
-                        className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/10 text-slate-200 text-xs font-semibold cursor-pointer transition-colors"
+                        className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold cursor-pointer transition-colors"
                       >
                         Don&apos;t Save
                       </button>
@@ -1949,7 +1978,7 @@ export default function CameraNoteScannerModal({
                         })
                       }
                       disabled={isSavingToWorkspace}
-                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+                      className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs"
                     >
                       {isSavingToWorkspace ? (
                         <>
@@ -2003,14 +2032,14 @@ export default function CameraNoteScannerModal({
                   className={`w-20 h-20 rounded-full p-1.5 border-4 flex items-center justify-center hover:scale-105 active:scale-95 transition-all cursor-pointer ${
                     detectedBounds && autoCropEnabled
                       ? 'border-emerald-400 shadow-[0_0_32px_rgba(52,211,153,0.55)]'
-                      : 'border-white shadow-[0_0_28px_rgba(99,102,241,0.45)]'
+                      : 'border-white shadow-[0_0_28px_rgba(37,99,235,0.45)]'
                   }`}
                 >
                   <div
                     className={`w-full h-full rounded-full flex items-center justify-center text-white transition-colors ${
                       detectedBounds && autoCropEnabled
                         ? 'bg-emerald-600 hover:bg-emerald-500'
-                        : 'bg-indigo-600 hover:bg-indigo-500'
+                        : 'bg-blue-600 hover:bg-blue-500'
                     }`}
                   >
                     <Camera className="w-8 h-8" />
