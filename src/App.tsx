@@ -1131,7 +1131,7 @@ export default function App() {
             workspaces={workspaces}
             userId={currentUserId}
             onCreateWorkspaceByName={handleCreateWorkspaceByName}
-            onScanComplete={(targetWs, scannedFile, draftPayload) => {
+            onScanComplete={(targetWs, scannedFile, draftPayload, options) => {
               const updatedWs: Workspace = {
                 ...targetWs,
                 files: [
@@ -1142,8 +1142,6 @@ export default function App() {
               };
               handleUpdateWorkspace(updatedWs);
               setActiveWorkspace(updatedWs);
-              setHasVisitedAITutor(true);
-              setShowQuickScan(false);
 
               const pendingPayload = {
                 workspaceId: updatedWs.id,
@@ -1151,19 +1149,25 @@ export default function App() {
                 draft: draftPayload
               };
               (window as any).__studywebPendingScannedNote = pendingPayload;
-              setActiveTab('ai-tutor');
-
               setTimeout(() => {
                 window.dispatchEvent(
                   new CustomEvent('studyweb-scanned-note-ready', { detail: pendingPayload })
                 );
               }, 80);
 
+              if (options?.openInAiTutor) {
+                setHasVisitedAITutor(true);
+                setShowQuickScan(false);
+                setActiveTab('ai-tutor');
+              } else if (options?.closeAfterSave) {
+                setShowQuickScan(false);
+              }
+
               (window as any).showToast?.(
-                `"${scannedFile.name}" has been scanned, uploaded to "${updatedWs.name}", and attached in AI Tutor!`,
+                `"${scannedFile.name}" has been added to "${updatedWs.name}"!`,
                 'success',
-                4200,
-                'Note Scanned & Ready'
+                4000,
+                'Added to Workspace'
               );
             }}
           />

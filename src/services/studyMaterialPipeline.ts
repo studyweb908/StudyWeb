@@ -733,8 +733,8 @@ Tell the student exactly what is in this video, what it is about, summarize its 
 2. Describe the exact subject matter shown in the image (for example, if it shows an AI tool, software interface, infographic, architecture diagram, chart, or handwritten notes, explain its exact name, purpose, features, and workflow).
 3. Base the "title", "summary", "detailedNotes", "keyTakeaways", "conceptsAndDefinitions", "practiceQuestions", and "transcription" 100% on what is actually visible inside this image. Do NOT invent unrelated subjects.`
       : `Analyze this uploaded document/file "${enrichedName}" (${type}, MIME: ${normalizedMime}). 
-Perform complete verbatim OCR and deep conceptual extraction on all text, headings, sections, diagrams, formulas, tables, and questions.${enrichedSourceText ? `\n\nExtracted Document Text:\n${enrichedSourceText.slice(0, 28000)}` : ''}
-Extract complete study notes, flashcards, practice questions, and definitions as specified in the schema. Base your entire analysis 100% on the actual content of this uploaded file.`;
+Perform complete verbatim OCR and deep conceptual extraction on ALL visible text, questions, problems, headings, sections, diagrams, formulas, tables, and choices inside this file.${enrichedSourceText ? `\n\nExtracted Document Text:\n${enrichedSourceText.slice(0, 28000)}` : ''}
+Extract complete study notes, verbatim questions/text in "transcription", flashcards, practice questions, and definitions as specified in the schema. Base your entire analysis 100% on the actual content of this uploaded file—never invent or substitute unrelated subjects.`;
 
     contents = [
       { text: mediaPrompt },
@@ -789,9 +789,9 @@ Instructions:
 
   // Active verified Gemini models
   const modelCandidates = [
-    'gemini-3.8-flash',
     'gemini-3-flash-preview',
     'gemini-3.1-flash-lite-preview',
+    'gemini-3.1-pro-preview',
     'gemini-flash-latest'
   ];
 
@@ -806,7 +806,7 @@ Instructions:
             : contents;
 
         const supportsMinimalThinking = model === 'gemini-3-flash-preview' || model === 'gemini-3.1-flash-lite-preview';
-        const supportsLowThinking = model === 'gemini-3.8-flash';
+        const supportsLowThinking = model === 'gemini-3.1-pro-preview';
 
         const response = await ai.models.generateContent({
           model,
@@ -875,8 +875,9 @@ Instructions:
     }
   }
 
-  console.error('[Study Material Pipeline Error] All Gemini models failed during structured analysis:', lastModelError?.message || 'Unknown error');
-  return generateReliableStudyFallback(enrichedName, type, enrichedSourceText, sourceUrl);
+  const finalErrMsg = lastModelError?.message || 'All AI models failed to analyze the uploaded study material.';
+  console.error('[Study Material Pipeline Error] All Gemini models failed during structured analysis:', finalErrMsg);
+  throw new Error(finalErrMsg);
 }
 
 export function generateReliableStudyFallback(

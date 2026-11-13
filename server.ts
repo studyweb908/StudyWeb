@@ -2487,29 +2487,26 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         );
       }
 
-      // If the user has uploaded ANY real file of their own, remove the 4 hardcoded initial demo stub files
-      // so default sample stubs (Newton's Laws, Rotational Dynamics, Calculus, SN1/SN2) never override or contaminate the user's uploaded material!
+      // If the user has uploaded ANY real file of their own in the active workspace, remove demo stub files
+      // and never bleed files from other workspaces into the active workspace.
       const hasUserUploadedFilesInActive = effectiveFiles.some((f: any) => !isDefaultDemoStubFile(f));
       if (hasUserUploadedFilesInActive) {
         effectiveFiles = effectiveFiles.filter((f: any) => !isDefaultDemoStubFile(f));
-      } else {
-        // Check if the user uploaded files in any workspace when workspaceId wasn't matched
-        const allUploadedUserFiles = Array.from(allWorkspacesMap.values())
-          .flatMap(w => w.files || [])
-          .filter((f: any) => !isDefaultDemoStubFile(f));
-        if (allUploadedUserFiles.length > 0 && (!isRealWorkspaceId || effectiveFiles.every((f: any) => isDefaultDemoStubFile(f)))) {
-          effectiveFiles = [...allUploadedUserFiles];
-        }
+      } else if (isRealWorkspaceId) {
+        effectiveFiles = effectiveFiles.filter((f: any) => Boolean(f.isDirectAttachment) || !isDefaultDemoStubFile(f));
       }
 
-      // Sort effectiveFiles so direct attachments and user-uploaded files with rich content come first
+      // Sort effectiveFiles so direct attachments and newest user-uploaded/scanned files come first
       effectiveFiles.sort((a: any, b: any) => {
         const aDirect = a.isDirectAttachment ? 1 : 0;
         const bDirect = b.isDirectAttachment ? 1 : 0;
         if (aDirect !== bDirect) return bDirect - aDirect;
         const aUser = !isDefaultDemoStubFile(a) ? 1 : 0;
         const bUser = !isDefaultDemoStubFile(b) ? 1 : 0;
-        return bUser - aUser;
+        if (aUser !== bUser) return bUser - aUser;
+        const aTime = a.uploadDate ? Date.parse(String(a.uploadDate)) || 0 : 0;
+        const bTime = b.uploadDate ? Date.parse(String(b.uploadDate)) || 0 : 0;
+        return bTime - aTime;
       });
 
       const hasUserUploadedFiles = effectiveFiles.some((f: any) => !isDefaultDemoStubFile(f));
@@ -3012,18 +3009,18 @@ Include a clear, structured comparison (using a markdown table or side-by-side b
      [FOLLOW_UP: Second follow-up question?]
      [FOLLOW_UP: Third follow-up question?]`;
 
-      const coreSystemInstruction = `You are StudyWeb's AI Tutor, providing students with clear, accurate, and comprehensive academic explanations grounded strictly in their uploaded study materials.
+      const coreSystemInstruction = `You are StudyWeb's AI Tutor, providing students with clear, accurate, and comprehensive academic explanations grounded strictly in their uploaded or scanned study materials.
 CRITICAL INSTRUCTION DIRECTIVES:
-1. STRICT RAG GROUNDING IN UPLOADED FILES (HIGHEST PRIORITY):
-   - Carefully read the "=== RETRIEVED WORKSPACE DOCUMENT SEGMENTS ===" and "=== FULL UPLOADED WORKSPACE MATERIALS & NOTES ===" provided below, as well as any attached inlineData (PDF/image/video).
-   - When the student asks about their uploaded document, image, video, link, or any concept/question/topic present in their uploaded workspace files, base your answer 100% on the exact facts, text, figures, definitions, and details inside their uploaded material(s).
-   - NEVER hallucinate unrelated subjects, and NEVER replace the contents of the student's uploaded file with generic or unrelated textbook topics.
-2. DIRECT, PRECISE & COMPLETE: Read the student's question attentively and deliver the exact answer, definition, derivation, analysis, or explanation directly from their uploaded material.
+1. STRICT RAG GROUNDING IN UPLOADED & SCANNED FILES (HIGHEST PRIORITY):
+   - Carefully read ALL sections of "=== RETRIEVED WORKSPACE DOCUMENT SEGMENTS ===" and "=== FULL UPLOADED WORKSPACE MATERIALS & NOTES ===" provided below, as well as any attached inlineData (PDF / scanned note image / document / video).
+   - When the student uploads or scans material (e.g., Chemistry questions, Physics problems, handwritten notes, PDFs, or images) and asks questions about it, answer 100% strictly from that uploaded/scanned material. Solve the exact questions, equations, and concepts from their uploaded material step by step.
+   - NEVER switch to a different or unrelated topic, NEVER invent facts outside the uploaded subject, and NEVER replace the student's uploaded file with generic textbook topics.
+2. DIRECT, PRECISE & COMPLETE: Read the student's question attentively and deliver the exact answer, solution, definition, derivation, analysis, or explanation directly from their uploaded/scanned material.
 3. SMART WORKSPACE RELEVANCE:
-   - Always give first priority to the student's uploaded workspace files in "${workspaceName || 'Active Workspace'}".
-   - Only if the student explicitly asks about a topic that has zero connection to their uploaded workspace files, clearly state what your uploaded files cover and then answer their question without mixing up the two.
-4. MULTIMODAL ANALYSIS (VIDEOS, WEBSITES, DOCUMENTS, IMAGES, TEXT):
-   - When analyzing an uploaded or linked video, website, PDF, document, or image, provide a thorough, structured breakdown of its actual contents, key concepts, formulas, arguments, and takeaways.
+   - Always give first priority to the student's uploaded and scanned files in "${workspaceName || 'Active Workspace'}".
+   - Only if the student explicitly asks about a topic that has zero connection to their uploaded workspace files, clearly state what their uploaded files cover and then answer their question without mixing up the two.
+4. MULTIMODAL ANALYSIS (VIDEOS, WEBSITES, DOCUMENTS, SCANNED NOTES, IMAGES, TEXT):
+   - When analyzing an uploaded or scanned image, PDF, document, video, or website, provide a thorough, accurate breakdown or exact solution of its contents, questions, formulas, and takeaways.
 5. STRICT AVOIDANCE:
    - NEVER generate any image, SVG, or picture. If the user asks you to generate, create, draw, or make an image or picture, reply: "I cannot generate image. I can help you with your study tasks."
    - NEVER mention "Document 1246", "Enjoy the videos", "music you love", or "Mix".
@@ -3066,7 +3063,7 @@ ${citationGuideline}`;
           ...effectiveFiles.filter((f: any) => !f.isDirectAttachment && !isDefaultDemoStubFile(f) && matchedSourceSet.has(f.name)),
           ...effectiveFiles.filter((f: any) => !f.isDirectAttachment && !isDefaultDemoStubFile(f) && !matchedSourceSet.has(f.name)),
           ...effectiveFiles.filter((f: any) => !f.isDirectAttachment && isDefaultDemoStubFile(f))
-        ].slice(0, 3);
+        ].slice(0, 4);
 
         for (const file of candidateAttachmentFiles) {
           let rawBase64 = "";
@@ -3583,13 +3580,8 @@ ${citationGuideline}`;
       const apiKey = getGeminiApiKey();
 
       if (!apiKey) {
-        res.json({
-          title: defaultTitle,
-          extractedText: `Scanned study note "${defaultTitle}".`,
-          summary: `Scanned study note "${defaultTitle}" uploaded for AI Tutor inspection.`,
-          highlights: [`Primary resource: ${defaultTitle}`],
-          formulas: [],
-          tags: ["Scanned Note", "OCR"]
+        res.status(503).json({
+          error: "Gemini AI API key is not configured on the server. Unable to extract OCR text from scanned note."
         });
         return;
       }
@@ -3604,12 +3596,12 @@ ${citationGuideline}`;
       });
 
       const ocrPrompt = `You are a high-precision academic Optical Character Recognition (OCR) and study note parser.
-Carefully inspect this scanned study note image ("${defaultTitle}") and extract ALL visible handwritten and printed text word-for-word.
+Carefully inspect this scanned study note image ("${defaultTitle}") and extract ALL visible handwritten and printed text, questions, problems, diagrams, and equations word-for-word.
 
 Instructions:
-1. "extractedText": Transcribe the complete, verbatim text from the image accurately. Preserve headings, bullet points, numbered lists, definitions, diagram labels, tables, and mathematical equations in clean Markdown format so the AI Tutor can answer any question directly from this text.
+1. "extractedText": Transcribe the complete, verbatim text from the image accurately. Preserve headings, questions, choices, bullet points, numbered lists, definitions, diagram labels, tables, and mathematical/chemical equations in clean Markdown format so the AI Tutor can answer any question directly from this text. If the image is blank or contains no readable text/content, return an empty string "".
 2. "title": A concise, clear academic title (3 to 7 words) reflecting the actual topic or heading written on the scanned note.
-3. "summary": A clear, comprehensive summary explaining the core concepts and subject matter covered in the scanned note.
+3. "summary": A clear, comprehensive summary explaining the exact concepts and subject matter covered in the scanned note.
 4. "highlights": 4 to 6 key facts, definitions, or takeaways extracted directly from the scanned note.
 5. "formulas": Any mathematical, physics, chemistry, or scientific equations/formulas visible in the note (empty array if none).
 6. "tags": 3 to 5 specific subject/topic tags.`;
@@ -3637,15 +3629,16 @@ Instructions:
       };
 
       const candidateModels = [
-        "gemini-3.8-flash",
         "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite-preview"
+        "gemini-3.1-flash-lite-preview",
+        "gemini-3.1-pro-preview"
       ];
 
       let response: any = null;
+      let lastOcrModelError = "";
       for (const modelName of candidateModels) {
         try {
-          const isGemini38 = modelName === "gemini-3.8-flash";
+          const isPro = modelName === "gemini-3.1-pro-preview";
           response = await ai.models.generateContent({
             model: modelName,
             contents: [
@@ -3661,13 +3654,14 @@ Instructions:
               responseMimeType: "application/json",
               responseSchema: ocrSchema,
               thinkingConfig: {
-                thinkingLevel: isGemini38 ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL
+                thinkingLevel: isPro ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL
               }
             }
           });
           if (response && response.text) break;
         } catch (modelErr: any) {
-          console.warn(`[OCR Endpoint] Model ${modelName} fallback:`, modelErr?.message || modelErr);
+          lastOcrModelError = modelErr?.message || String(modelErr);
+          console.warn(`[OCR Endpoint] Model ${modelName} fallback:`, lastOcrModelError);
         }
       }
 
@@ -3677,11 +3671,21 @@ Instructions:
           rawText = rawText.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/, "").trim();
         }
         const parsed = JSON.parse(rawText);
+        const rawExtracted = String(parsed?.extractedText || "").trim();
+        const rawSummary = String(parsed?.summary || "").trim();
+
+        if (!rawExtracted && !rawSummary) {
+          res.status(422).json({
+            error: "No readable text or study content could be detected in the scanned image. Please ensure the page is well-lit and in focus."
+          });
+          return;
+        }
+
         const cleanTitle = cleanNotebookLMTitle(parsed.title || defaultTitle, "", "image");
         const formattedDocument = [
           `# ${cleanTitle}`,
-          parsed.summary ? `\n## Summary\n${parsed.summary}` : "",
-          parsed.extractedText ? `\n## Verbatim Scanned Notes (OCR)\n${parsed.extractedText}` : "",
+          rawSummary ? `\n## Summary\n${rawSummary}` : "",
+          rawExtracted ? `\n## Verbatim Scanned Notes (OCR)\n${rawExtracted}` : "",
           Array.isArray(parsed.highlights) && parsed.highlights.length > 0
             ? `\n## Key Highlights\n${parsed.highlights.map((h: string) => `- ${h}`).join("\n")}`
             : "",
@@ -3695,8 +3699,8 @@ Instructions:
         res.json({
           title: cleanTitle,
           extractedText: formattedDocument,
-          rawOcrText: parsed.extractedText || "",
-          summary: parsed.summary || `Scanned notes on ${cleanTitle}.`,
+          rawOcrText: rawExtracted,
+          summary: rawSummary || `Scanned notes on ${cleanTitle}.`,
           highlights: Array.isArray(parsed.highlights) ? parsed.highlights : [],
           formulas: Array.isArray(parsed.formulas) ? parsed.formulas : [],
           tags: Array.isArray(parsed.tags) && parsed.tags.length > 0 ? parsed.tags : ["Scanned Note", "OCR"]
@@ -3704,17 +3708,171 @@ Instructions:
         return;
       }
 
-      res.json({
-        title: defaultTitle,
-        extractedText: `Scanned study note "${defaultTitle}".`,
-        summary: `Scanned study note "${defaultTitle}" ready for AI Tutor analysis.`,
-        highlights: [`Primary resource: ${defaultTitle}`],
-        formulas: [],
-        tags: ["Scanned Note", "OCR"]
+      res.status(422).json({
+        error: lastOcrModelError || "Could not extract text from the scanned image. Please try scanning again with clearer lighting."
       });
     } catch (error: any) {
       console.error("[OCR Endpoint Error] /api/ocr/scan-note:", error?.message || error);
-      res.status(500).json({ error: "Failed to run OCR on scanned note", details: error?.message });
+      res.status(500).json({ error: error?.message || "Failed to run OCR on scanned note", details: error?.message });
+    }
+  });
+
+  // API Route: Google Lens-style Direct Multimodal Q&A, Solver, Generator & Translator for Scanned Notes (no workspace required)
+  app.post("/api/ocr/lens-ask", async (req, res) => {
+    try {
+      const {
+        fileBase64,
+        fileMimeType,
+        extractedText,
+        question,
+        mode = "ask",
+        targetLanguage = "English",
+        history = []
+      } = req.body || {};
+
+      const trimmedText = String(extractedText || "").trim();
+      if (!fileBase64 && !trimmedText) {
+        res.status(400).json({
+          error: "A scanned image or extracted note text is required to answer or generate content."
+        });
+        return;
+      }
+
+      const apiKey = getGeminiApiKey();
+      if (!apiKey) {
+        res.status(503).json({
+          error: "Gemini AI API key is not configured on the server. Unable to analyze this scan right now."
+        });
+        return;
+      }
+
+      let cleanBase64 = fileBase64 ? String(fileBase64) : "";
+      if (cleanBase64.includes(";base64,")) {
+        cleanBase64 = cleanBase64.split(";base64,")[1];
+      }
+      cleanBase64 = cleanBase64.replace(/[\r\n\s]/g, "");
+
+      let normalizedMime = String(fileMimeType || "image/jpeg").toLowerCase().trim();
+      if (normalizedMime === "image/jpg" || normalizedMime === "image/pjpeg" || normalizedMime === "image/jfif") {
+        normalizedMime = "image/jpeg";
+      }
+
+      const normalizedMode = String(mode || "ask").toLowerCase().trim();
+      const userQuestion = String(question || "").trim();
+
+      let modeInstruction = "";
+      if (normalizedMode === "solve") {
+        modeInstruction = `Task: Solve Step-by-Step (Homework & Problem Solver).
+Examine all questions, problems, equations, formulas, diagrams, or multiple-choice items visible in the scanned image and extracted OCR text.
+- Solve each problem clearly step-by-step showing every calculation, chemical reaction/balanced equation, theorem, or reasoning step.
+- Highlight the final answer clearly for each question.
+- If there are multiple questions on the page, number and solve each one in order.`;
+      } else if (normalizedMode === "explain") {
+        modeInstruction = `Task: Explain Concepts Clearly.
+Explain the exact topics, definitions, diagrams, formulas, or examples visible in this scanned note in clear, intuitive student-friendly language, referencing the actual content written on the page.`;
+      } else if (normalizedMode === "summarize") {
+        modeInstruction = `Task: Summarize Scanned Note.
+Create a crisp, structured revision summary containing only the core ideas, definitions, key takeaways, and formulas visible in this scan.`;
+      } else if (normalizedMode === "quiz") {
+        modeInstruction = `Task: Generate Practice Questions.
+Create 4–5 high-quality practice questions (with an Answer Key & brief step-by-step explanations at the bottom) strictly based on the concepts, problems, and facts visible in this scanned note so the student can test themselves right away.`;
+      } else if (normalizedMode === "translate") {
+        modeInstruction = `Task: Translate Scanned Text into ${targetLanguage || "English"}.
+Accurately translate ALL readable text visible in the scanned image and extracted text into ${targetLanguage || "English"}.
+- Preserve headings, numbered items, bullet lists, and mathematical/chemical symbols accurately.
+- Return only the clean translated text cleanly formatted in Markdown.`;
+      } else {
+        if (!userQuestion) {
+          res.status(400).json({ error: "Please enter a question about your scanned note." });
+          return;
+        }
+        modeInstruction = `Task: Answer the Student's Specific Question About This Scan.
+Student Question: "${userQuestion}"
+Answer thoroughly, accurately, and step-by-step based strictly on the scanned image and its extracted text. If a detail asked about is not visible or unreadable in the scan, state that clearly instead of guessing or switching to an unrelated topic.`;
+      }
+
+      const conversationContext = Array.isArray(history) && history.length > 0
+        ? `\nPrevious Q&A on this scanned note:\n${history
+            .slice(-6)
+            .map((m: any) => `${m.role === "user" ? "Student" : "Lens AI"}: ${String(m.text || "").slice(0, 1200)}`)
+            .join("\n")}\n`
+        : "";
+
+      const fullPrompt = `You are StudyWeb Visual Lens, an interactive study assistant built directly into the camera scanner (similar to Google Lens Homework, Text, and Ask modes).
+
+STRICT GROUNDING RULES:
+1. Base your response 100% on the attached scanned image and the extracted OCR text below.
+2. NEVER invent unrelated subjects or pull content from outside the scan unless applying standard formulas/steps needed to solve or explain the exact problem shown in the scan.
+3. Format your response cleanly with Markdown headings, bullet points, and step-by-step lines so it is easy to read.
+
+${trimmedText ? `=== EXTRACTED OCR TEXT FROM THIS SCAN ===\n${trimmedText.slice(0, 14000)}\n` : ""}
+${conversationContext}
+${modeInstruction}`;
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build"
+          }
+        }
+      });
+
+      const contentParts: any[] = [{ text: fullPrompt }];
+      if (cleanBase64) {
+        contentParts.push({
+          inlineData: {
+            data: cleanBase64,
+            mimeType: normalizedMime
+          }
+        });
+      }
+
+      const candidateModels = [
+        "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite-preview",
+        "gemini-3.1-pro-preview"
+      ];
+
+      let response: any = null;
+      let lastModelError = "";
+      for (const modelName of candidateModels) {
+        try {
+          const isPro = modelName === "gemini-3.1-pro-preview";
+          response = await ai.models.generateContent({
+            model: modelName,
+            contents: contentParts,
+            config: {
+              thinkingConfig: {
+                thinkingLevel: isPro ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL
+              }
+            }
+          });
+          if (response && response.text && response.text.trim()) {
+            break;
+          }
+        } catch (modelErr: any) {
+          lastModelError = modelErr?.message || String(modelErr);
+          console.warn(`[Lens Ask Endpoint] Model ${modelName} fallback:`, lastModelError);
+        }
+      }
+
+      if (response && response.text && response.text.trim()) {
+        res.json({
+          answer: response.text.trim(),
+          mode: normalizedMode
+        });
+        return;
+      }
+
+      res.status(422).json({
+        error: lastModelError || "Unable to analyze this scanned image right now. Please try again."
+      });
+    } catch (error: any) {
+      console.error("[Lens Ask Endpoint Error] /api/ocr/lens-ask:", error?.message || error);
+      res.status(500).json({
+        error: error?.message || "Failed to process your question about this scan."
+      });
     }
   });
 
@@ -4220,11 +4378,11 @@ Each question MUST:
 
 Strictly return a JSON object containing a "questions" array matching the requested schema.`;
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
-        console.warn("GEMINI_API_KEY not configured. Using high-quality local generation fallback.");
-        const fallbackQuiz = generateFallbackQuiz(notes || [], files || [], questionCount, diffLevel, qType);
-        res.json({ questions: fallbackQuiz });
+      const apiKey = getGeminiApiKey();
+      if (!apiKey) {
+        res.status(503).json({
+          error: "Gemini AI API key is not configured on the server. Unable to generate a quiz from your uploaded materials."
+        });
         return;
       }
 
@@ -4240,14 +4398,45 @@ Strictly return a JSON object containing a "questions" array matching the reques
       const ragQuery = `Generate a ${diffLevel} difficulty ${qType} quiz containing ${questionCount} questions about the core concepts, topics, formulas, and definitions.`;
       const contextText = await performAdvancedRAG(ai, ragQuery, files, notes, 15, workspaceId, req.headers.authorization);
 
-      const prompt = `Generate a practice quiz with ${questionCount} questions of difficulty "${diffLevel}" and type "${qType}" from the following study materials and contextual references:\n\n${contextText}`;
+      const directFilesContext = (Array.isArray(files) ? files : [])
+        .slice(0, 6)
+        .map((f: any, idx: number) => {
+          const textBody = String(f.transcription || f.contentText || f.content_text || f.summary || '').trim();
+          const hl = Array.isArray(f.highlights) ? f.highlights.join('; ') : '';
+          return `File #${idx + 1}: "${f.name || 'Uploaded File'}"\n${textBody.slice(0, 8000)}${hl ? `\nHighlights: ${hl}` : ''}`;
+        })
+        .join('\n\n');
+
+      const directNotesContext = (Array.isArray(notes) ? notes : [])
+        .slice(0, 6)
+        .map((n: any, idx: number) => `Note #${idx + 1}: "${n.title || 'Study Note'}"\n${String(n.content || '').replace(/<[^>]+>/g, ' ').slice(0, 4000)}`)
+        .join('\n\n');
+
+      const prompt = `Generate a practice quiz with ${questionCount} questions of difficulty "${diffLevel}" and type "${qType}" strictly based ONLY on the student's uploaded study materials and notes below (never invent unrelated topics):\n\n${directFilesContext}\n\n${directNotesContext}\n\n${contextText}`;
+
+      const quizParts: any[] = [{ text: prompt }];
+      for (const f of (Array.isArray(files) ? files : []).slice(0, 3)) {
+        let rawB64 = String(f.fileBase64 || '');
+        let mime = String(f.fileMimeType || '');
+        if (!rawB64 && typeof f.url === 'string' && f.url.startsWith('data:') && f.url.includes(';base64,')) {
+          const m = f.url.match(/^data:([^;]+);base64,(.+)$/);
+          if (m) {
+            mime = mime || m[1];
+            rawB64 = m[2];
+          }
+        }
+        if (rawB64.includes(';base64,')) rawB64 = rawB64.split(';base64,')[1];
+        if (rawB64 && rawB64.length > 20 && rawB64.length < 10_000_000 && (mime.startsWith('image/') || mime === 'application/pdf')) {
+          quizParts.push({ inlineData: { data: rawB64, mimeType: mime } });
+        }
+      }
 
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: prompt,
+        contents: quizParts,
         config: {
           systemInstruction,
-          temperature: 0.7,
+          temperature: 0.4,
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -4278,26 +4467,23 @@ Strictly return a JSON object containing a "questions" array matching the reques
 
       if (response && response.text) {
         let text = response.text.trim();
-        // Sometimes Gemini wraps JSON in markdown block
-        if (text.startsWith("```json")) {
-           text = text.replace(/^```json\n/, "").replace(/\n```$/, "");
+        if (text.startsWith("```")) {
+           text = text.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/, "").trim();
         }
         const data = JSON.parse(text);
         if (data && data.questions) {
-          // Strictly enforce count
           let quizQuestions = data.questions;
           if (quizQuestions.length > questionCount) {
              quizQuestions = quizQuestions.slice(0, questionCount);
           }
           
           const quizWithIds = quizQuestions.map((q: any, i: number) => {
-            // Strictly enforce type and difficulty
             let safeOptions = q.options;
             
             if (qType === "TF") {
                safeOptions = ["True", "False"];
                if (q.correctIndex !== 0 && q.correctIndex !== 1) {
-                  q.correctIndex = 0; // fallback safe
+                  q.correctIndex = 0;
                }
             }
             
@@ -4317,127 +4503,13 @@ Strictly return a JSON object containing a "questions" array matching the reques
         throw new Error("No response text received from Gemini API.");
       }
     } catch (error: any) {
-      console.error("Error in /api/generate-quiz, falling back to local quiz generator:", error);
-      try {
-        const fallbackQuiz = generateFallbackQuiz(
-          req.body.notes || [], 
-          req.body.files || [], 
-          req.body.count || 5, 
-          req.body.difficulty || "Medium",
-          req.body.questionType || "MCQ"
-        );
-        res.json({ questions: fallbackQuiz });
-      } catch (innerError: any) {
-        res.status(500).json({
-          error: "Failed to generate quiz.",
-          details: error.message
-        });
-      }
-    }
-  });
-
-  function generateFallbackQuiz(notes: any[], files: any[], count: number, difficulty: string, qType: string = 'MCQ') {
-    let combinedText = "";
-    if (notes && notes.length > 0) {
-      combinedText += notes.map((n: any) => `${n.title} ${n.content}`).join(" ");
-    }
-    if (files && files.length > 0) {
-      combinedText += files.map((f: any) => `${f.name} ${f.summary || ""} ${(f.highlights || []).join(" ")}`).join(" ");
-    }
-    if (!combinedText) {
-      combinedText = "Mendel Genetics active recall spaced repetition Feynman Technique Cellular Respiration photosynthesis";
-    }
-
-    const keywords = Array.from(new Set(combinedText.match(/\b[A-Za-z]{5,15}\b/g) || []))
-      .filter(w => !["about", "these", "their", "there", "would", "could", "should", "which", "other"].includes(w.toLowerCase()))
-      .slice(0, 10);
-
-    const basePool = [
-      {
-        question: `Regarding ${keywords[0] || 'active recall'} and study notes, which of the following practices is most effective for long-term retention?`,
-        options: [
-          'Passive re-reading of highlighting notes',
-          'Testing yourself using active recall & spaced repetition',
-          'Cramming all information 3 hours before the examination',
-          'Summarizing without self-testing'
-        ],
-        correctIndex: 1,
-        explanation: 'Active recall forces the brain to retrieve information, which strengthens neural pathways and memory consolidation.',
-      },
-      {
-        question: `How does linking concepts in a mind map or visual study graph (like ${keywords[1] || 'synthesis'}) help cognitive synthesis?`,
-        options: [
-          'It increases raw memorization speed by 200%',
-          'It contextualizes isolated facts into a relational network',
-          'It bypasses the need for active review entirely',
-          'It is only useful for visual learners'
-        ],
-        correctIndex: 1,
-        explanation: 'Connecting terms like a web allows the brain to establish associative memories, easing recall during exams.',
-      },
-      {
-        question: `When dealing with complex academic themes such as ${keywords[2] || 'theories'}, what is the "Feynman Technique"?`,
-        options: [
-          'Reading a textbook chapter backwards to test recall',
-          'Explaining a concept in simple terms as if teaching a child',
-          'Using highlighters with 4 distinct colors',
-          'Listening to binary beats while sleeping'
-        ],
-        correctIndex: 1,
-        explanation: 'The Feynman Technique highlights knowledge gaps by forcing you to simplify and explain concepts cleanly.',
-      },
-      {
-        question: `Which of the following is a primary benefit of creating structured review quizzes?`,
-        options: [
-          'Guaranteed 100% exam score on any subject',
-          'Identifying specific blind spots in your conceptual understanding',
-          'Saves time by replacing actual studying completely',
-          'Increases your brain capacity'
-        ],
-        correctIndex: 1,
-        explanation: 'Quizzes act as low-stakes self-testing, immediately revealing which subtopics require further review.',
-      },
-      {
-        question: `In standard study pathways, how does the "Spaced Repetition" schedule fight the "Forgetting Curve"?`,
-        options: [
-          'By reviewing facts right after you have completely forgotten them',
-          'By reviewing information at expanding intervals just before it fades',
-          'By studying for 10 hours consecutively once a week',
-          'By never reviewing a topic more than once'
-        ],
-        correctIndex: 1,
-        explanation: 'Spaced repetition resets the forgetting curve at strategic intervals, progressively moving data into long-term memory.',
-      }
-    ];
-
-    const result = [];
-    for (let i = 0; i < count; i++) {
-      const baseQ = basePool[i % basePool.length];
-      
-      let finalOptions = baseQ.options;
-      let finalCorrectIndex = baseQ.correctIndex;
-      
-      if (qType === 'TF') {
-         finalOptions = ['True', 'False'];
-         finalCorrectIndex = Math.random() > 0.5 ? 0 : 1;
-      } else if (qType === 'FillBlank') {
-         finalOptions = [baseQ.options[baseQ.correctIndex]];
-         finalCorrectIndex = 0;
-      }
-      
-      result.push({
-        id: `fallback-quiz-${Date.now()}-${i}`,
-        question: baseQ.question,
-        options: finalOptions,
-        correctIndex: finalCorrectIndex,
-        explanation: baseQ.explanation,
-        difficulty: difficulty,
-        type: qType
+      console.error("Error in /api/generate-quiz:", error);
+      res.status(500).json({
+        error: error?.message || "Failed to generate quiz from your uploaded study materials. Please try again.",
+        details: error?.message
       });
     }
-
-    return result;
-  }
+  });
 
   // API Route: AI-driven explanations for incorrect quiz answers using Gemini
   app.post("/api/explain-incorrect", async (req, res) => {

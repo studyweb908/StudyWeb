@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Image as ImageIcon, Globe, Sparkles, ArrowRight, Upload, Download, Link, Video, HardDrive, Clipboard, X, Loader2, Clock, Check, ChevronDown, Search, Trash2, FileText, Music, Lightbulb, BookOpen, HelpCircle, Info, Eye, ExternalLink, Calendar, Tag, SlidersHorizontal, Plus, Play } from 'lucide-react';
+import { Image as ImageIcon, Globe, Sparkles, ArrowRight, Upload, Download, Link, Video, HardDrive, Clipboard, X, Loader2, Clock, Check, ChevronDown, Search, Trash2, FileText, Music, Lightbulb, BookOpen, HelpCircle, Info, Eye, ExternalLink, Calendar, Tag, SlidersHorizontal, Plus, Play, AlertCircle } from 'lucide-react';
 import { Workspace, WorkspaceFile, WorkspaceNote } from './WorkspaceTypes';
 import { supabase } from '../../lib/supabase';
 import { fileUploadService, FileUploadService, FileUploadError } from '../../services/FileUploadService';
@@ -52,8 +52,8 @@ export default function WorkspaceLibrary({
     return { token, userId };
   };
 
-  // Real uploading states
   const [isUploading, setIsUploading] = useState(false);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
   const [isDraggingLocal, setIsDraggingLocal] = useState(false);
   const [previewFile, setPreviewFile] = useState<WorkspaceFile | null>(null);
   const [uploadPercent, setUploadPercent] = useState(0);
@@ -362,6 +362,7 @@ export default function WorkspaceLibrary({
     const title = driveCopyTitle.trim() || `Pasted Doc: ${driveCopyText.substring(0, 15)}...`;
     
     setShowDriveCopyInput(false);
+    setLibraryError(null);
     
     setIsUploading(true);
     setUploadFileName(title);
@@ -431,6 +432,9 @@ export default function WorkspaceLibrary({
       if (processRes.ok) {
         const resData = await processRes.json();
         materialResult = resData.material;
+      } else {
+        const errPayload = await processRes.json().catch(() => ({}));
+        throw new Error(errPayload?.error || `Failed to analyze pasted study text (HTTP ${processRes.status}).`);
       }
 
       const fileData = {
@@ -460,7 +464,7 @@ export default function WorkspaceLibrary({
         window.dispatchEvent(
           new CustomEvent('studyweb-toast', {
             detail: {
-              message: `🎉 "${fileData.name}" was parsed, analyzed, and indexed into your workspace!`,
+              message: `"${fileData.name}" was parsed, analyzed, and indexed into your workspace!`,
               type: 'success'
             }
           })
@@ -473,43 +477,20 @@ export default function WorkspaceLibrary({
         setDriveCopyTitle('');
       }, 220);
 
-    } catch (err) {
+    } catch (err: any) {
       clearInterval(progress);
       libraryProgressRef.current = null;
-      
-      // Clean fallback for pasted text
-      const cleanSnippet = (driveCopyText || '').trim().slice(0, 180);
-      const fallbackData = {
-        id: 'file-' + Date.now(),
-        name: title,
-        type: 'doc' as const,
-        size: 'Pasted Document',
-        uploadDate: new Date().toISOString(),
-        status: 'indexed' as const,
-        summary: cleanSnippet ? `Document notes on "${title}": ${cleanSnippet}...` : `Study notes for "${title}".`,
-        highlights: [
-          `Pasted study content added for "${title}".`,
-          `Text indexed into workspace for tutor questioning.`
-        ],
-        tags: ['Document', 'Text Analysis', 'Notes']
-      };
-      
-      setTimeout(() => {
-        onAddFile(fallbackData);
-        setPreviewFile(fallbackData);
-        setIsUploading(false);
-        setDriveCopyText('');
-        setDriveCopyTitle('');
-        
-        window.dispatchEvent(
-          new CustomEvent('studyweb-toast', {
-            detail: {
-              message: `🎉 Boom! "${title}" was parsed, analyzed, and synthesized into your workspace! 🧠🔥`,
-              type: 'success'
-            }
-          })
-        );
-      }, 800);
+      setIsUploading(false);
+      const errMsg = err?.message || `Failed to analyze "${title}". Please try again.`;
+      setLibraryError(errMsg);
+      window.dispatchEvent(
+        new CustomEvent('studyweb-toast', {
+          detail: {
+            message: errMsg,
+            type: 'error'
+          }
+        })
+      );
     }
   };
 
@@ -917,6 +898,7 @@ export default function WorkspaceLibrary({
       const validation = fileUploadService.validate(file);
       if (!validation.valid) {
         console.error('[Upload Validation Error] [UPLOAD_VALIDATION_ERR]', validation.error);
+        setLibraryError(validation.error || 'Invalid file.');
         if (typeof (window as any).showToast === 'function') {
           (window as any).showToast(`[UPLOAD_VALIDATION_ERR] ${validation.error}`, 'error', 5000, 'Upload Error');
         }
@@ -924,6 +906,7 @@ export default function WorkspaceLibrary({
       }
     }
 
+    setLibraryError(null);
     setIsUploading(true);
     setUploadPercent(0);
     setUploadSeconds(0);
@@ -1065,19 +1048,27 @@ export default function WorkspaceLibrary({
 
         if (processRes.ok) {
           const resData = await processRes.json();
-          materialResult = resData.material;
+          if (resData?.material && resData.material.status !== 'failed') {
+            materialResult = resData.material;
+          } else {
+            throw new Error(resData?.error || `Failed to analyze "${name}".`);
+          }
         } else {
           const errPayload = await processRes.json().catch(() => ({}));
           const errCode = errPayload?.errorCode || `HTTP_${processRes.status}`;
           const errMsg = errPayload?.error || `Failed to analyze "${name}" (status ${processRes.status})`;
           console.error(`[Study Material Pipeline Error] [${errCode}] ${errMsg}`, errPayload);
-          (window as any).showToast?.(`[${errCode}] ${errMsg}`, 'error', 5500, 'AI Analysis Error');
+          throw new Error(errMsg);
         }
       } catch (pipelineErr: any) {
         const errCode = pipelineErr?.name === 'AbortError' ? 'AI_PIPELINE_TIMEOUT' : (pipelineErr?.code || 'AI_PIPELINE_ERR');
-        const errMsg = pipelineErr?.message || 'Could not complete server AI analysis.';
+        const errMsg = pipelineErr?.name === 'AbortError'
+          ? `Analysis timed out while processing "${name}". Please try again.`
+          : (pipelineErr?.message || 'Could not complete server AI analysis.');
         console.error(`[Study Material Pipeline Error] [${errCode}] ${errMsg}`, pipelineErr);
-        (window as any).showToast?.(`[${errCode}] ${errMsg}`, 'error', 5500, 'AI Analysis Error');
+        if (!(url && TranscriptProcessor.isVideoUrl(url)) && !rawTextContent) {
+          throw new Error(errMsg);
+        }
       }
 
       // If uploading a video URL and materialResult did not return a full transcript, fetch captions via TranscriptProcessor
@@ -1178,117 +1169,15 @@ export default function WorkspaceLibrary({
     } catch (err: any) {
       const parsedError = FileUploadError.fromError(err, `Upload of ${name || url}`);
       console.error(`[Upload Error] [${parsedError.code}] ${parsedError.message}`, parsedError);
-      (window as any).showToast?.(`[${parsedError.code}] ${parsedError.message}`, 'error', 5500, 'Upload Error');
-      fileUploadService.log('warn', `Upload analysis encountered error: [${parsedError.code}] ${parsedError.message}`, parsedError);
-      
-      let objectUrl = dataUrl || url;
-      if (!objectUrl && file) {
-        try {
-          objectUrl = URL.createObjectURL(file);
-        } catch(e) {}
-      }
-
-      const generatedTags = [];
-      const lowerName = (name || url || '').toLowerCase();
-      if (type === 'pdf' || type === 'doc') generatedTags.push('Document', 'Text Analysis');
-      if (type === 'video') generatedTags.push('Video', 'Media');
-      if (type === 'image') generatedTags.push('Visual', 'Image');
-      if (type === 'audio') generatedTags.push('Audio', 'Transcript');
-      if (lowerName.includes('math') || lowerName.includes('calc')) generatedTags.push('Mathematics');
-      if (lowerName.includes('science') || lowerName.includes('physics')) generatedTags.push('Science');
-      if (lowerName.includes('history')) generatedTags.push('History');
-      if (generatedTags.length === 0) generatedTags.push('General');
-
-      const quickTitleFallback = await quickTitlePromise;
-      const fallbackNotebookName = cleanNotebookLMTitle(
-        !isRawUrlOrPlaceholderTitle(quickTitleFallback) ? quickTitleFallback : name,
-        url,
-        type
-      );
-
-      const fileData = {
-        id: 'file-' + Date.now(),
-        name: fallbackNotebookName,
-        type,
-        size,
-        uploadDate: new Date().toISOString(),
-        status: 'indexed' as const,
-        url: dataUrl || objectUrl,
-        fileBase64: fileBase64 || undefined,
-        fileMimeType: fileMimeType || undefined,
-        summary: '',
-        highlights: [],
-        tags: generatedTags
-      };
-      
-      if (file) {
-        try {
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            const dataUrl = e.target?.result as string;
-            fileData.url = dataUrl;
-            
-            // Re-update the workspace to save the data URL
-            setTimeout(() => {
-              // We dispatch an event here to trigger an update because closure might have stale workspace
-              window.dispatchEvent(
-                new CustomEvent('studyweb-file-dataurl-ready', {
-                  detail: { id: fileData.id, url: dataUrl }
-                })
-              );
-            }, 1000);
-          };
-          reader.readAsDataURL(file);
-        } catch(e) {}
-      }
-      
-      // Stop the regular interval and do a smooth simulated upload for Supabase
       clearInterval(progressInterval);
-      
-      let currentProgress = 0;
-      setUploadPercent(0);
-      
-      // Start a smooth completion sequence
-      const finishInterval = setInterval(async () => {
-        currentProgress += Math.max(2, (100 - currentProgress) / 8);
-        if (currentProgress >= 98) {
-          currentProgress = 100;
-          setUploadPercent(100);
-          setCurrentStepIdx(steps.length - 1);
-          setUploadStep(steps[steps.length - 1]);
-          clearInterval(finishInterval);
-          
-          try {
-            await WorkspaceSyncService.saveWorkspaceFile(workspace.id, fileData);
-          } catch {
-            // Non-fatal fallback
-          }
-         
-          onAddFile(fileData);
-          setPreviewFile(fileData);
-          clearInterval(timerInterval);
-          progressIntervalRef.current = null;
-          timerIntervalRef.current = null;
-          setIsUploading(false);
-         
-          window.dispatchEvent(
-            new CustomEvent('studyweb-toast', {
-              detail: {
-                title: 'Material Analyzed & Indexed',
-                badge: 'Library Synchronized',
-                message: `"${fileData.name}" was uploaded and added to your study workspace!`,
-                type: 'success'
-              }
-            })
-          );
-        } else {
-          setUploadPercent(Math.floor(currentProgress));
-          const stepCount = steps.length;
-          const calculatedStep = Math.min(stepCount - 2, Math.floor((currentProgress / 100) * stepCount));
-          setCurrentStepIdx(calculatedStep);
-          setUploadStep(steps[calculatedStep]);
-        }
-      }, 50);
+      clearInterval(timerInterval);
+      progressIntervalRef.current = null;
+      timerIntervalRef.current = null;
+      setIsUploading(false);
+      const displayErr = err?.message || parsedError.message || `Could not upload or analyze "${name}".`;
+      setLibraryError(displayErr);
+      (window as any).showToast?.(displayErr, 'error', 5500, 'Upload Error');
+      fileUploadService.log('warn', `Upload analysis encountered error: [${parsedError.code}] ${displayErr}`, parsedError);
     }
   };
 
@@ -1380,6 +1269,25 @@ export default function WorkspaceLibrary({
 
         {/* Studio Body Content */}
         <div className="p-5 sm:p-7 space-y-6">
+          {libraryError && (
+            <div className="flex items-start justify-between gap-3 p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs sm:text-sm">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="font-bold">Upload &amp; Analysis Error</p>
+                  <p className="mt-0.5 text-rose-700 dark:text-rose-300 leading-relaxed break-words">{libraryError}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLibraryError(null)}
+                className="p-1 rounded-lg text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-900/50 cursor-pointer shrink-0"
+                aria-label="Dismiss upload error"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
           {/* UPLOAD LOCAL FILES (DRAG & DROP ZONE) */}
           {!showUrlInput && !showDriveCopyInput && (
             <div

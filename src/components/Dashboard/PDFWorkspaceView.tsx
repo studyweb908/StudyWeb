@@ -35,58 +35,15 @@ import { PDFDocument } from './types';
 import AutoSavingToast from '../AutoSavingToast';
 import AITutorAvatar from './AITutorAvatar';
 
-const DOCUMENT_PAGES: Record<string, { page: number; paragraphs: string[] }[]> = {
-  'ap-bio-genetics': [
-    {
-      page: 1,
-      paragraphs: [
-        "Gregor Mendel's law of segregation states that the two alleles for each gene separate during gamete formation.",
-        "Mendelian inheritance patterns are the foundation of classical genetics. By cross-pollinating pea plants with distinct traits, Mendel discovered that traits are inherited as discrete units (which we now call genes).",
-        "The Law of Independent Assortment states that genes for different traits can segregate independently during the formation of gametes. This is illustrated in a dihybrid cross.",
-        "Dihybrid crosses yield a phenotypic ratio of 9:3:3:1, representing the principle of independent assortment under simple dominant-recessive inheritance."
-      ]
-    },
-    {
-      page: 2,
-      paragraphs: [
-        "Incomplete dominance results in a blended phenotype, as seen in pink snapdragons produced from red and white parents.",
-        "Codominance is a different pattern where both alleles are simultaneously expressed in the heterozygote. A classic example is the ABO blood group system in humans, where the A and B alleles are codominant.",
-        "Sex-linked traits are located on the sex chromosomes (usually the X chromosome). Hemophilia and red-green colorblindness are well-known examples of X-linked recessive disorders."
-      ]
-    }
-  ],
-  'ap-chem-thermo': [
-    {
-      page: 1,
-      paragraphs: [
-        "Gibbs Free Energy equation: ΔG = ΔH - TΔS determines the thermodynamic spontaneity of any chemical reaction.",
-        "A chemical reaction is spontaneous when ΔG is negative, which is heavily favored by exothermic conditions (-ΔH).",
-        "Enthalpy (ΔH) represents the total heat content of a system, while Entropy (ΔS) represents the degree of disorder or randomness."
-      ]
-    },
-    {
-      page: 2,
-      paragraphs: [
-        "The third law of thermodynamics states that the entropy of a perfect crystal at absolute zero is exactly equal to zero.",
-        "Spontaneous endothermic reactions are driven entirely by a large positive change in entropy (ΔS), which overcomes the positive ΔH at higher temperatures.",
-        "Standard Gibbs Free Energy change can also be calculated from equilibrium constants using the relation ΔG° = -RT ln(K)."
-      ]
-    }
-  ]
-};
-
-const getDocPages = (docId: string, docName: string, highlights: string[] = [], contentText?: string) => {
-  const customPages = DOCUMENT_PAGES[docId];
-  if (customPages) return customPages;
-
+const getDocPages = (_docId: string, docName: string, highlights: string[] = [], contentText?: string) => {
   if (contentText && contentText.trim().length > 0) {
     const rawParagraphs = contentText
       .split(/\n+/)
       .map(p => p.trim())
       .filter(p => p.length > 0);
     if (rawParagraphs.length > 0) {
-      const page1Paragraphs = rawParagraphs.slice(0, 4);
-      const page2Paragraphs = rawParagraphs.slice(4, 8);
+      const page1Paragraphs = rawParagraphs.slice(0, 6);
+      const page2Paragraphs = rawParagraphs.slice(6, 12);
       return [
         { page: 1, paragraphs: page1Paragraphs },
         ...(page2Paragraphs.length > 0 ? [{ page: 2, paragraphs: page2Paragraphs }] : [])
@@ -94,24 +51,15 @@ const getDocPages = (docId: string, docName: string, highlights: string[] = [], 
     }
   }
 
-  // Otherwise, let's generate on the fly
-  const cleanName = docName.replace(/\.pdf$/i, '');
+  if (highlights && highlights.length > 0) {
+    return [{ page: 1, paragraphs: highlights }];
+  }
+
   return [
     {
       page: 1,
       paragraphs: [
-        `Fundamental analysis of ${cleanName}. This introductory chapter details the core framework, initial formulations, and quantitative paradigms.`,
-        highlights[0] || `Experimental researchers observe that ${cleanName} components stabilize under controlled ambient conditions.`,
-        "This dynamic baseline acts as a control model for advanced synthesis and long-term testing protocols.",
-        "Ensure all reference datasets are calibrated against the secondary benchmarks described in Section 4.2."
-      ]
-    },
-    {
-      page: 2,
-      paragraphs: [
-        highlights[1] || `Case study formulations demonstrating practical adaptations of ${cleanName} in contemporary academic environments.`,
-        "Key takeaways emphasize the correlation of independent systems acting in absolute equilibrium.",
-        "Review exercises at the end of this chapter are recommended to consolidate exam targets."
+        `No extracted text preview is stored for "${docName}" yet. Ask the AI Tutor to inspect or explain its contents directly.`
       ]
     }
   ];
@@ -299,7 +247,7 @@ export default function PDFWorkspaceView({ workspace, onUpdateWorkspace }: PDFWo
       setSelectedDocIds([]);
     }
   }, [workspace]);
-  const [aiChatLogs, setAiChatLogs] = useState<Array<{ sender: 'user' | 'ai'; text: string }>>([
+  const [aiChatLogs, setAiChatLogs] = useState<Array<{ sender: 'user' | 'ai'; text: string; isError?: boolean }>>([
     { 
       sender: 'ai', 
       text: "Hello! I am your AI Study Tutor. Ask me anything about your uploaded materials, and I will explain concepts, highlight key formulas, or generate flashcards."
@@ -314,7 +262,7 @@ export default function PDFWorkspaceView({ workspace, onUpdateWorkspace }: PDFWo
   const [mobileTab, setMobileTab] = useState<'sources' | 'reader' | 'chat'>('reader');
 
   // Active viewing states
-  const [viewingDocId, setViewingDocId] = useState<string>('ap-bio-genetics');
+  const [viewingDocId, setViewingDocId] = useState<string>('');
   const [centerTab, setCenterTab] = useState<'view' | 'citations'>('view');
   const [activePage, setActivePage] = useState<number>(1);
   const [annotationMode, setAnnotationMode] = useState<'select' | 'highlight' | 'sticky'>('select');
@@ -339,28 +287,7 @@ export default function PDFWorkspaceView({ workspace, onUpdateWorkspace }: PDFWo
   };
   
   // Sticky notes map
-  const [stickyNotes, setStickyNotes] = useState<Record<string, StickyNote[]>>({
-    'ap-bio-genetics': [
-      {
-        id: 'note-1',
-        text: 'Mendel is often called the Father of Modern Genetics. Remember his 3 main laws!',
-        color: 'yellow',
-        page: 1,
-        paragraphIndex: 1,
-        createdAt: '10:15 AM'
-      }
-    ],
-    'ap-chem-thermo': [
-      {
-        id: 'note-2',
-        text: 'Be extremely careful with units! ΔH is usually in kJ, while ΔS is in J/K.',
-        color: 'blue',
-        page: 1,
-        paragraphIndex: 0,
-        createdAt: '11:02 AM'
-      }
-    ]
-  });
+  const [stickyNotes, setStickyNotes] = useState<Record<string, StickyNote[]>>({});
 
   // Auto-save simulation on changes
   React.useEffect(() => {
@@ -719,19 +646,18 @@ ${selectedHighlights}`;
       });
 
       if (!response.ok) {
-        throw new Error("Failed to contact Gemini AI Tutor engine");
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData?.error || `Failed to contact Gemini AI Tutor engine (HTTP ${response.status}).`);
       }
 
       const data = await response.json();
       setAiChatLogs(prev => [...prev, { sender: 'ai', text: data.text || data.reply || "No response received." }]);
-    } catch (err) {
-      console.warn("AI Tutor action fallback:", err);
-      const docSummaries = selectedDocs
-        .map((d: any) => `**${d.name}**: ${(d.summary || d.transcription || (Array.isArray(d.highlights) ? d.highlights.join(' ') : '') || 'Document loaded in workspace.').slice(0, 600)}`)
-        .join('\n\n');
+    } catch (err: any) {
+      console.error("AI Tutor action error:", err);
       setAiChatLogs(prev => [...prev, {
         sender: 'ai',
-        text: `### ${action === 'summary' ? 'Executive Summary' : action === 'formulas' ? 'Extracted Key Concepts & Formulas' : 'Study Flashcards'}: ${selectedNames}\n\n${docSummaries}`
+        isError: true,
+        text: err?.message || "Unable to reach the AI Tutor right now. Please try again."
       }]);
     } finally {
       setLoadingAction(null);
@@ -786,7 +712,8 @@ ${selectedHighlights}`;
       });
 
       if (!response.ok) {
-        throw new Error("Failed to contact Gemini AI Tutor engine");
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData?.error || `Failed to contact Gemini AI Tutor engine (HTTP ${response.status}).`);
       }
 
       const data = await response.json();
@@ -794,17 +721,12 @@ ${selectedHighlights}`;
         sender: 'ai',
         text: data.text || data.reply || "No response received."
       }]);
-    } catch (err) {
-      console.warn("AI Tutor chat fallback:", err);
-      const activeDocs = documents.filter(d => selectedDocIds.includes(d.id));
-      const contextPreview = activeDocs
-        .map((d: any) => `**${d.name}**: ${(d.summary || d.transcription || (Array.isArray(d.highlights) ? d.highlights.join(' ') : '') || '').slice(0, 500)}`)
-        .join('\n\n');
+    } catch (err: any) {
+      console.error("AI Tutor chat error:", err);
       setAiChatLogs(prev => [...prev, {
         sender: 'ai',
-        text: contextPreview
-          ? `Based on your uploaded material:\n\n${contextPreview}`
-          : `Unable to reach the AI Tutor right now. Please try your question again.`
+        isError: true,
+        text: err?.message || "Unable to reach the AI Tutor right now. Please try your question again."
       }]);
     } finally {
       setLoadingAction(null);
@@ -1628,22 +1550,30 @@ ${selectedHighlights}`;
               <div className={`px-4 py-3 rounded-2xl text-xs leading-relaxed shadow-sm relative group max-w-[calc(100%-40px)] border ${
                 log.sender === 'user' 
                   ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 border-transparent rounded-tr-none' 
+                  : log.isError
+                  ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200 border-rose-200 dark:border-rose-800 rounded-tl-none'
                   : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border-slate-200/60 dark:border-slate-800 rounded-tl-none'
               }`}>
-                {/* Formatting output block */}
-                <div 
-                  className="space-y-2 font-medium"
-                  dangerouslySetInnerHTML={{ 
-                    __html: log.text 
-                      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                      .replace(/- (.*?)\n/g, '<li class="ml-4 list-disc">$1</li>')
-                      .replace(/\n/g, '<br />')
-                      .replace(/### (.*?)(<br \/>|$)/g, '<h5 class="font-extrabold text-indigo-600 dark:text-indigo-400 mt-3 text-[13px] flex items-center gap-1">$1</h5>')
-                  }} 
-                />
+                {log.isError ? (
+                  <div className="flex items-start gap-2 font-medium">
+                    <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                    <span className="break-words">{log.text}</span>
+                  </div>
+                ) : (
+                  <div 
+                    className="space-y-2 font-medium"
+                    dangerouslySetInnerHTML={{ 
+                      __html: log.text 
+                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                        .replace(/- (.*?)\n/g, '<li class="ml-4 list-disc">$1</li>')
+                        .replace(/\n/g, '<br />')
+                        .replace(/### (.*?)(<br \/>|$)/g, '<h5 class="font-extrabold text-indigo-600 dark:text-indigo-400 mt-3 text-[13px] flex items-center gap-1">$1</h5>')
+                    }} 
+                  />
+                )}
 
                 {/* AI response actions */}
-                {log.sender === 'ai' && (
+                {log.sender === 'ai' && !log.isError && (
                   <div className="flex flex-wrap items-center gap-1.5 pt-2.5 border-t border-slate-100 dark:border-slate-700/60 mt-3 text-[10px] text-slate-400">
                     <button
                       onClick={() => handleCopyMessage(idx, log.text)}

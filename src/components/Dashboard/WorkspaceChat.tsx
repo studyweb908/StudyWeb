@@ -170,6 +170,7 @@ export default function WorkspaceChat({
 
   // Attached files for the current pending draft message
   const [attachedDrafts, setAttachedDrafts] = useState<AttachedDraftFile[]>([]);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [linkInputUrl, setLinkInputUrl] = useState('');
   const [isAnalyzingLink, setIsAnalyzingLink] = useState(false);
@@ -454,11 +455,10 @@ export default function WorkspaceChat({
     return () => clearInterval(interval);
   }, [isListening]);
 
-  // Aggregate all user workspaces (props + local cache fallback) so the AI Tutor sees every workspace and uploaded item
+  // Aggregate user workspaces strictly for the active user (never merge unrelated guest caches)
   const allUserWorkspaces = useMemo(() => {
     const wsMap = new Map<string, Workspace>();
     const stored = loadStoredWorkspaces(resolvedUserId) || [];
-    const storedGuest = resolvedUserId ? (loadStoredWorkspaces(null) || []) : [];
 
     const mergeIntoMap = (ws: Workspace) => {
       if (!ws || !ws.id) return;
@@ -505,7 +505,6 @@ export default function WorkspaceChat({
       }
     };
 
-    storedGuest.forEach(mergeIntoMap);
     stored.forEach(mergeIntoMap);
     (workspaces || []).forEach(mergeIntoMap);
     if (workspace) mergeIntoMap(workspace);
@@ -1162,22 +1161,60 @@ export default function WorkspaceChat({
         }
         clearTimeout(tId);
 
+        let uploadErrMsg: string | null = null;
         if (procRes.ok) {
           const procData = await procRes.json();
-          analyzedMaterial = procData.material;
+          if (procData?.material && procData.material.status !== 'failed') {
+            analyzedMaterial = procData.material;
+          } else {
+            uploadErrMsg = procData?.error || `Failed to analyze ${file.name}.`;
+          }
         } else {
           const errJson = await procRes.json().catch(() => ({}));
           const errCode = errJson?.errorCode || `HTTP_${procRes.status}`;
-          const errMsg = errJson?.error || `Failed to analyze ${file.name}`;
-          console.error(`[Chat Upload Pipeline Error] [${errCode}] ${errMsg}`, errJson);
-          (window as any).showToast?.(`[${errCode}] ${errMsg}`, 'error', 5500, 'AI Upload Error');
+          uploadErrMsg = errJson?.error || `Failed to analyze ${file.name} (${errCode}).`;
+          console.error(`[Chat Upload Pipeline Error] [${errCode}] ${uploadErrMsg}`, errJson);
+        }
+
+        if (uploadErrMsg && !content) {
+          setUploadError(`Upload failed for "${file.name}": ${uploadErrMsg}`);
+          setMessages(prev => [
+            ...prev,
+            {
+              id: `upload-err-${Date.now()}-${i}`,
+              sender: 'ai',
+              text: `Could not analyze "${file.name}": ${uploadErrMsg}`,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              isError: true,
+              errorCode: 'UPLOAD_FAILED'
+            }
+          ]);
+          continue;
         }
       } catch (procErr: any) {
         const errCode = procErr?.name === 'AbortError' ? 'AI_UPLOAD_TIMEOUT' : 'AI_UPLOAD_ERR';
+        const errMsg = procErr?.name === 'AbortError'
+          ? `Analysis timed out for "${file.name}". Please try again.`
+          : (procErr?.message || `AI analysis error for "${file.name}".`);
         console.error(`[Chat Upload Pipeline Error] [${errCode}]`, procErr);
-        (window as any).showToast?.(`[${errCode}] ${procErr?.message || 'AI analysis error'}`, 'error', 5500, 'AI Upload Error');
+        if (!content) {
+          setUploadError(errMsg);
+          setMessages(prev => [
+            ...prev,
+            {
+              id: `upload-err-${Date.now()}-${i}`,
+              sender: 'ai',
+              text: errMsg,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              isError: true,
+              errorCode: errCode
+            }
+          ]);
+          continue;
+        }
       }
 
+      setUploadError(null);
       const extractedSummary = analyzedMaterial?.summary || (content ? content.slice(0, 1000) : '');
       const extractedTranscript = analyzedMaterial?.transcription || analyzedMaterial?.contentText || content;
       const extractedHighlights = Array.isArray(analyzedMaterial?.highlights) && analyzedMaterial.highlights.length > 0
@@ -1336,17 +1373,22 @@ export default function WorkspaceChat({
         })
       });
 
-      if (res.ok) {
-        const data = await res.json().catch(() => null);
-        const mat = data?.material || data?.file || data;
-        if (mat) {
-          if (mat.id) processedMaterialId = mat.id;
-          analyzedTitle = (mat.name || mat.title || '').trim();
-          fullText = (mat.transcription || mat.contentText || mat.content_text || mat.summary || '').trim();
-          summaryText = (mat.summary || '').trim();
-          if (Array.isArray(mat.highlights)) highlightsList = mat.highlights;
-        }
+      if (!res.ok) {
+        const errPayload = await res.json().catch(() => ({}));
+        throw new Error(errPayload?.error || `Failed to analyze link (HTTP ${res.status}).`);
       }
+
+      const data = await res.json().catch(() => null);
+      const mat = data?.material || data?.file || data;
+      if (!mat || mat.status === 'failed') {
+        throw new Error(data?.error || 'Could not extract readable study content from that link.');
+      }
+
+      if (mat.id) processedMaterialId = mat.id;
+      analyzedTitle = (mat.name || mat.title || '').trim();
+      fullText = (mat.transcription || mat.contentText || mat.content_text || mat.summary || '').trim();
+      summaryText = (mat.summary || '').trim();
+      if (Array.isArray(mat.highlights)) highlightsList = mat.highlights;
 
       if (!analyzedTitle || analyzedTitle.startsWith('http')) {
         analyzedTitle = isYt ? 'YouTube Video Study Guide' : 'Web Study Resource';
@@ -1363,6 +1405,7 @@ export default function WorkspaceChat({
         highlights: highlightsList
       };
 
+      setUploadError(null);
       setAttachedDrafts(prev => [...prev, newDraft]);
       setLinkInputUrl('');
       setShowLinkInput(false);
@@ -1418,9 +1461,22 @@ export default function WorkspaceChat({
         3200,
         'Video / Link Ready'
       );
-    } catch (err) {
+    } catch (err: any) {
       clearInterval(progInterval);
       setChatUploadOverlay(prev => ({ ...prev, isOpen: false }));
+      const errMsg = err?.message || 'Failed to analyze link. Please check the URL and try again.';
+      setUploadError(errMsg);
+      setMessages(prev => [
+        ...prev,
+        {
+          id: `link-err-${Date.now()}`,
+          sender: 'ai',
+          text: errMsg,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isError: true,
+          errorCode: 'LINK_ANALYSIS_FAILED'
+        }
+      ]);
       console.warn('Failed to analyze link:', err);
     } finally {
       setIsAnalyzingLink(false);
@@ -1704,9 +1760,14 @@ export default function WorkspaceChat({
         }
       }
       const isActiveWorkspaceFile = !f.workspaceId || String(f.workspaceId) === String(workspace.id);
-      const needsBinaryInspection = isNewAttachment || (isActiveWorkspaceFile && (f.type === 'image' || candidateMime?.startsWith('image/') || !f.transcription));
+      const isPdfOrImage =
+        f.type === 'image' ||
+        f.type === 'pdf' ||
+        candidateMime?.startsWith('image/') ||
+        candidateMime === 'application/pdf';
+      const needsBinaryInspection = isNewAttachment || (isActiveWorkspaceFile && (isPdfOrImage || !f.transcription));
       let safeBase64: string | undefined = undefined;
-      if (needsBinaryInspection && includedBinaryCount < 3 && typeof candidateB64 === 'string' && candidateB64.length < 6000000) {
+      if (needsBinaryInspection && includedBinaryCount < 4 && typeof candidateB64 === 'string' && candidateB64.length < 6000000) {
         safeBase64 = candidateB64;
         includedBinaryCount++;
       }
@@ -2685,6 +2746,22 @@ export default function WorkspaceChat({
       {/* ============================================================== */}
       <footer className="p-2 sm:p-4 border-t border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md shrink-0">
         <div data-tour="ai-tutor-input-dock" className="max-w-3xl mx-auto space-y-2.5">
+          {uploadError && (
+            <div className="flex items-start justify-between gap-2.5 p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs">
+              <div className="flex items-start gap-2 min-w-0">
+                <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                <span className="font-medium leading-relaxed break-words">{uploadError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUploadError(null)}
+                className="p-1 rounded-lg text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-900/50 cursor-pointer shrink-0"
+                aria-label="Dismiss error"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
           {/* Quick Prompt Suggestions when chat is fresh */}
           {messages.length <= 1 && (
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
