@@ -27,6 +27,13 @@ import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import { toValidUuid } from '../../utils/uuid';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import { OCRService, LensAskRequest } from '../../services/OCRService';
+import {
+  fetchNaturalTtsAudio,
+  getStoredVoiceProfileGender,
+  prepareTextForNaturalSpeech,
+  resolveGeminiVoiceForProfile,
+  selectBestBrowserNaturalVoice
+} from '../../utils/naturalTts';
 
 export interface ScannedNoteDraftPayload {
   id: string;
@@ -402,6 +409,10 @@ export default function CameraNoteScannerModal({
   const [isTranslating, setIsTranslating] = useState(false);
   const [isTranslationCopied, setIsTranslationCopied] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isTtsLoading, setIsTtsLoading] = useState(false);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsAbortRef = useRef<AbortController | null>(null);
+  const ttsSeqRef = useRef(0);
 
   // Explicit Workspace Save Prompt State (never saves without user confirmation)
   const [isSavedToWorkspace, setIsSavedToWorkspace] = useState(false);
@@ -412,12 +423,27 @@ export default function CameraNoteScannerModal({
   const [saveWorkspaceError, setSaveWorkspaceError] = useState<string | null>(null);
 
   const stopSpeech = useCallback(() => {
+    ttsSeqRef.current += 1;
+    if (ttsAbortRef.current) {
+      try {
+        ttsAbortRef.current.abort();
+      } catch {}
+      ttsAbortRef.current = null;
+    }
+    if (ttsAudioRef.current) {
+      try {
+        ttsAudioRef.current.pause();
+        ttsAudioRef.current.currentTime = 0;
+      } catch {}
+      ttsAudioRef.current = null;
+    }
     try {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
       }
     } catch {}
     setIsSpeaking(false);
+    setIsTtsLoading(false);
   }, []);
 
   const stopCameraStream = useCallback(() => {
@@ -665,24 +691,105 @@ export default function CameraNoteScannerModal({
     }
   };
 
-  const handleToggleSpeak = (textToSpeak: string) => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      (window as any).showToast?.('Read aloud is not supported in this browser.', 'error', 3000);
-      return;
-    }
-    if (isSpeaking) {
+  const handleToggleSpeak = async (textToSpeak: string, spokenLanguage?: string) => {
+    if (isSpeaking || isTtsLoading) {
       stopSpeech();
       return;
     }
-    const cleanText = textToSpeak.replace(/[#*`]/g, '').trim();
+
+    const cleanText = prepareTextForNaturalSpeech(textToSpeak);
     if (!cleanText) return;
+
     stopSpeech();
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    utterance.rate = 1.0;
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-    setIsSpeaking(true);
-    window.speechSynthesis.speak(utterance);
+    const seq = ++ttsSeqRef.current;
+    const abortCtrl = new AbortController();
+    ttsAbortRef.current = abortCtrl;
+    const gender = getStoredVoiceProfileGender();
+    const voiceName = resolveGeminiVoiceForProfile(gender);
+
+    setIsTtsLoading(true);
+
+    const playBrowserFallback = () => {
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+        setIsTtsLoading(false);
+        setIsSpeaking(false);
+        (window as any).showToast?.('Read aloud is not supported in this browser.', 'error', 3000);
+        return;
+      }
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(cleanText.slice(0, 1500));
+        if (!spokenLanguage || spokenLanguage === 'English') {
+          const bestVoice = selectBestBrowserNaturalVoice(gender);
+          if (bestVoice) utterance.voice = bestVoice;
+        }
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        utterance.onstart = () => {
+          setIsTtsLoading(false);
+          setIsSpeaking(true);
+        };
+        utterance.onend = () => {
+          setIsTtsLoading(false);
+          setIsSpeaking(false);
+        };
+        utterance.onerror = () => {
+          setIsTtsLoading(false);
+          setIsSpeaking(false);
+        };
+        window.speechSynthesis.speak(utterance);
+      } catch {
+        setIsTtsLoading(false);
+        setIsSpeaking(false);
+      }
+    };
+
+    try {
+      const ttsResult = await fetchNaturalTtsAudio({
+        text: cleanText,
+        voiceName,
+        persona: 'scan_notes',
+        language: spokenLanguage,
+        timeoutMs: 25000,
+        signal: abortCtrl.signal
+      });
+
+      if (ttsSeqRef.current !== seq || abortCtrl.signal.aborted) {
+        return;
+      }
+
+      if (ttsResult?.audioBase64) {
+        const audio = new Audio(`data:${ttsResult.mimeType};base64,${ttsResult.audioBase64}`);
+        ttsAudioRef.current = audio;
+
+        audio.onplay = () => {
+          setIsTtsLoading(false);
+          setIsSpeaking(true);
+        };
+        audio.onended = () => {
+          ttsAudioRef.current = null;
+          setIsTtsLoading(false);
+          setIsSpeaking(false);
+        };
+        audio.onerror = () => {
+          ttsAudioRef.current = null;
+          if (ttsSeqRef.current === seq) {
+            playBrowserFallback();
+          }
+        };
+
+        await audio.play();
+        return;
+      }
+
+      if (ttsSeqRef.current === seq && !abortCtrl.signal.aborted) {
+        playBrowserFallback();
+      }
+    } catch {
+      if (ttsSeqRef.current === seq && !abortCtrl.signal.aborted) {
+        playBrowserFallback();
+      }
+    }
   };
 
   const extractMimeFromDataUrl = (dataUrl: string, fallback = 'image/jpeg'): string => {
@@ -1426,21 +1533,32 @@ export default function CameraNoteScannerModal({
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() =>
-                          handleToggleSpeak(
+                        onClick={() => {
+                          const latestAiAnswer = [...lensMessages]
+                            .reverse()
+                            .find((m) => m.role === 'assistant' && !m.isError)?.text;
+                          const textToRead =
                             lensMode === 'text' && translatedText
                               ? translatedText
-                              : scanResult.extractedText
-                          )
-                        }
+                              : lensMode === 'ask' && latestAiAnswer
+                              ? latestAiAnswer
+                              : scanResult.extractedText;
+                          const lang = lensMode === 'text' && translatedText ? targetLanguage : undefined;
+                          handleToggleSpeak(textToRead, lang);
+                        }}
                         disabled={!scanResult.extractedText}
                         className={`px-3 py-1.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                          isSpeaking
+                          isSpeaking || isTtsLoading
                             ? 'bg-amber-50 dark:bg-amber-500/20 border-amber-300 dark:border-amber-400/40 text-amber-700 dark:text-amber-200'
                             : 'bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
                         }`}
                       >
-                        {isSpeaking ? (
+                        {isTtsLoading ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Preparing Voice...</span>
+                          </>
+                        ) : isSpeaking ? (
                           <>
                             <Square className="w-3 h-3 fill-current" />
                             <span>Stop</span>

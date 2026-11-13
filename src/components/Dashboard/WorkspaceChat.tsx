@@ -38,6 +38,11 @@ import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import { toValidUuid } from '../../utils/uuid';
 import AITutorAvatar from './AITutorAvatar';
 import { ShareContentModal, triggerNativeDeviceShare } from './ShareContentModal';
+import {
+  fetchNaturalTtsAudio,
+  prepareTextForNaturalSpeech,
+  selectBestBrowserNaturalVoice
+} from '../../utils/naturalTts';
 
 export type TutorPersona = string;
 
@@ -48,7 +53,7 @@ export interface VoiceProfile {
   name: string;
   genderLabel: string;
   gender: 'male' | 'female';
-  geminiVoice: 'Fenrir' | 'Kore';
+  geminiVoice: 'Charon' | 'Zephyr' | 'Fenrir' | 'Kore' | 'Puck';
   description: string;
   icon: string;
   samplePhrase: string;
@@ -60,20 +65,20 @@ export const VOICE_PROFILES: Record<VoiceProfileId, VoiceProfile> = {
     name: 'Male Voice',
     genderLabel: 'Male Voice',
     gender: 'male',
-    geminiVoice: 'Fenrir',
-    description: 'Deep, confident, and authoritative academic mentor',
+    geminiVoice: 'Charon',
+    description: 'Calm, natural, conversational male human mentor',
     icon: '👨‍🏫',
-    samplePhrase: "Greetings. Let's break down this concept step-by-step to master it."
+    samplePhrase: "Hey there. Let's walk through this idea together, nice and easy."
   },
   female: {
     id: 'female',
     name: 'Female Voice',
     genderLabel: 'Female Voice',
     gender: 'female',
-    geminiVoice: 'Kore',
-    description: 'Warm, clear, and articulate academic guide',
+    geminiVoice: 'Zephyr',
+    description: 'Warm, relaxed, natural female study guide',
     icon: '👩‍🏫',
-    samplePhrase: "Hello! I'm your academic tutor. What questions or concepts shall we explore today?"
+    samplePhrase: "Hi! I'm right here with you. What topic would you like to unpack today?"
   }
 };
 
@@ -224,6 +229,8 @@ export default function WorkspaceChat({
   const [targetLoadingId, setTargetLoadingId] = useState<string | null>(null);
   const [isTtsLoading, setIsTtsLoading] = useState(false);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsAbortRef = useRef<AbortController | null>(null);
+  const ttsRequestSeqRef = useRef(0);
 
   // Full-screen circular upload overlay state for Chat uploads
   const [chatUploadOverlay, setChatUploadOverlay] = useState<{
@@ -253,8 +260,15 @@ export default function WorkspaceChat({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [showVoiceSettings]);
 
-  // Stop any active speech (both HTML5 audio and browser speech synthesis)
+  // Stop any active speech (in-flight fetch, HTML5 audio, and browser speech synthesis)
   const stopSpeech = useCallback(() => {
+    ttsRequestSeqRef.current += 1;
+    if (ttsAbortRef.current) {
+      try {
+        ttsAbortRef.current.abort();
+      } catch {}
+      ttsAbortRef.current = null;
+    }
     if (currentAudioRef.current) {
       try {
         currentAudioRef.current.pause();
@@ -280,24 +294,8 @@ export default function WorkspaceChat({
     };
   }, [stopSpeech]);
 
-  // Natural speech text cleaner: strips markdown headers, bullet symbols, citation tags, and code blocks
-  const cleanSpeechText = (raw: string): string => {
-    if (!raw) return '';
-    return raw
-      .replace(/```[\s\S]*?```/g, '') // remove code blocks
-      .replace(/`([^`]+)`/g, '$1')
-      .replace(/\[Source:[^\]]+\]/gi, '') // remove citation source tags
-      .replace(/\[\d+:\d+\]/g, '')
-      .replace(/#{1,6}\s+/g, '') // remove markdown headings
-      .replace(/\*\*(.*?)\*\*/g, '$1') // remove bold
-      .replace(/\*(.*?)\*/g, '$1') // remove italics
-      .replace(/__([^_]+)__/g, '$1')
-      .replace(/_([^_]+)_/g, '$1')
-      .replace(/[-*•]\s+/g, '') // remove bullet points
-      .replace(/\n{2,}/g, '. ')
-      .replace(/\n/g, ' ')
-      .trim();
-  };
+  // Natural speech text cleaner: removes markdown/citations and converts math notation to spoken phrasing
+  const cleanSpeechText = (raw: string): string => prepareTextForNaturalSpeech(raw);
 
   const speakWithBrowserSynthesis = useCallback((textToSpeak: string, msgId: string, voiceIdOverride?: VoiceProfileId, customRate?: number) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
@@ -310,28 +308,13 @@ export default function WorkspaceChat({
     try {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(textToSpeak.slice(0, 1500));
-      
+
       const targetProfile = VOICE_PROFILES[voiceIdOverride || selectedVoiceProfile] || VOICE_PROFILES.male;
-      const targetGender = targetProfile.gender;
-
-      const voices = window.speechSynthesis.getVoices() || [];
-      let matchedVoice: SpeechSynthesisVoice | undefined;
-
-      if (targetGender === 'female') {
-        matchedVoice = voices.find(v => 
-          v.lang.startsWith('en') && (v.name.includes('Samantha') || v.name.includes('Karen') || v.name.includes('Zira') || v.name.includes('Victoria') || (v.name.includes('Google') && v.name.includes('Female')) || v.name.includes('Female'))
-        );
-      } else {
-        matchedVoice = voices.find(v => 
-          v.lang.startsWith('en') && (v.name.includes('Daniel') || v.name.includes('Alex') || v.name.includes('David') || v.name.includes('George') || (v.name.includes('Google') && v.name.includes('Male')) || v.name.includes('Male'))
-        );
-      }
-
-      const naturalVoice = matchedVoice || voices.find(v => v.lang.startsWith('en')) || voices[0];
-      if (naturalVoice) utterance.voice = naturalVoice;
+      const bestVoice = selectBestBrowserNaturalVoice(targetProfile.gender);
+      if (bestVoice) utterance.voice = bestVoice;
 
       utterance.rate = customRate || speechRate || 1.0;
-      utterance.pitch = targetGender === 'female' ? 1.04 : 0.95;
+      utterance.pitch = 1.0;
 
       utterance.onstart = () => {
         setSpeakingMessageId(msgId);
@@ -361,8 +344,8 @@ export default function WorkspaceChat({
   }, [selectedVoiceProfile, speechRate]);
 
   const handleSpeakMessage = useCallback(async (msgId: string, text: string, persona?: TutorPersona, voiceProfileOverride?: VoiceProfileId) => {
-    // If currently speaking this message, clicking again toggles pause/stop
-    if (speakingMessageId === msgId) {
+    // If currently speaking or loading this message, clicking again toggles stop
+    if (speakingMessageId === msgId || targetLoadingId === msgId) {
       stopSpeech();
       return;
     }
@@ -371,61 +354,65 @@ export default function WorkspaceChat({
     const cleanText = cleanSpeechText(text);
     if (!cleanText) return;
 
+    const reqSeq = ++ttsRequestSeqRef.current;
+    const abortController = new AbortController();
+    ttsAbortRef.current = abortController;
+
     setTargetLoadingId(msgId);
     setIsTtsLoading(true);
 
     const activeProfile = VOICE_PROFILES[voiceProfileOverride || selectedVoiceProfile] || VOICE_PROFILES.male;
 
     try {
-      // 1. Try high-fidelity Gemini 3.8 Flash Lite TTS endpoint
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 6500);
-
-      const res = await fetch('/api/ai-tutor-tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: cleanText,
-          voiceName: activeProfile.geminiVoice
-        }),
-        signal: controller.signal
+      const ttsResult = await fetchNaturalTtsAudio({
+        text: cleanText,
+        voiceName: activeProfile.geminiVoice,
+        persona: persona || 'socratic',
+        timeoutMs: 25000,
+        signal: abortController.signal
       });
-      clearTimeout(timer);
 
-      if (res.ok) {
-        const data = await res.json().catch(() => null);
-        if (data && data.success && data.audioBase64) {
-          const audio = new Audio(`data:${data.mimeType || 'audio/wav'};base64,${data.audioBase64}`);
-          audio.playbackRate = speechRate || 1.0;
-          currentAudioRef.current = audio;
-
-          audio.onplay = () => {
-            setSpeakingMessageId(msgId);
-            setIsTtsLoading(false);
-            setTargetLoadingId(null);
-          };
-
-          audio.onended = () => {
-            setSpeakingMessageId(prev => prev === msgId ? null : prev);
-            currentAudioRef.current = null;
-            setIsPlayingPreview(null);
-          };
-
-          audio.onerror = () => {
-            currentAudioRef.current = null;
-            speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
-          };
-
-          await audio.play();
-          return;
-        }
+      if (ttsRequestSeqRef.current !== reqSeq || abortController.signal.aborted) {
+        return;
       }
 
-      speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
+      if (ttsResult?.audioBase64) {
+        const audio = new Audio(`data:${ttsResult.mimeType};base64,${ttsResult.audioBase64}`);
+        audio.playbackRate = speechRate || 1.0;
+        currentAudioRef.current = audio;
+
+        audio.onplay = () => {
+          setSpeakingMessageId(msgId);
+          setIsTtsLoading(false);
+          setTargetLoadingId(null);
+        };
+
+        audio.onended = () => {
+          setSpeakingMessageId(prev => prev === msgId ? null : prev);
+          currentAudioRef.current = null;
+          setIsPlayingPreview(null);
+        };
+
+        audio.onerror = () => {
+          currentAudioRef.current = null;
+          if (ttsRequestSeqRef.current === reqSeq) {
+            speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
+          }
+        };
+
+        await audio.play();
+        return;
+      }
+
+      if (ttsRequestSeqRef.current === reqSeq && !abortController.signal.aborted) {
+        speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
+      }
     } catch {
-      speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
+      if (ttsRequestSeqRef.current === reqSeq && !abortController.signal.aborted) {
+        speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
+      }
     }
-  }, [speakingMessageId, stopSpeech, selectedVoiceProfile, speechRate, speakWithBrowserSynthesis]);
+  }, [speakingMessageId, targetLoadingId, stopSpeech, selectedVoiceProfile, speechRate, speakWithBrowserSynthesis]);
 
   // Preview a voice profile sample phrase
   const handlePreviewVoice = (vProfile: VoiceProfile) => {

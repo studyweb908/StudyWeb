@@ -3407,20 +3407,21 @@ ${citationGuideline}`;
       return res.status(200).json({ success: true, cleared: true });
     }
   });
-  app.post("/api/ai-tutor-tts", async (req, res) => {
+  app.post(["/api/ai-tutor-tts", "/api/ai-tutor-tts/"], async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     try {
       const rawText = String(req.body?.text || "").trim();
       const persona = String(req.body?.persona || "socratic").trim();
-      const requestedVoice = String(req.body?.voiceName || (persona === "socratic" ? "Zephyr" : "Kore")).trim();
+      const language = req.body?.language ? String(req.body.language).trim() : "";
+      const requestedVoice = String(req.body?.voiceName || "Charon").trim();
 
       if (!rawText) {
         return res.status(400).json({ error: "Text is required for TTS synthesis." });
       }
 
-      // Strip markdown, asterisks, brackets, citation tags, and code blocks for spoken audio
-      const cleanText = rawText
-        .replace(/```[\s\S]*?```/g, "")
+      // Strip markdown, citations, code blocks, and smooth math notation into natural spoken phrasing
+      let cleanText = rawText
+        .replace(/```[\s\S]*?```/g, " ")
         .replace(/`([^`]+)`/g, "$1")
         .replace(/\[Source:[^\]]+\]/gi, "")
         .replace(/\[\d+:\d+\]/g, "")
@@ -3429,11 +3430,29 @@ ${citationGuideline}`;
         .replace(/\*(.*?)\*/g, "$1")
         .replace(/__([^_]+)__/g, "$1")
         .replace(/_([^_]+)_/g, "$1")
-        .replace(/[-*•]\s+/g, "")
+        .replace(/^[-*•]\s+/gm, "")
+        .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "$1 over $2")
+        .replace(/\\sqrt\{([^}]+)\}/g, "square root of $1")
+        .replace(/\$([^$]+)\$/g, "$1")
+        .replace(/(\w)\^2\b/g, "$1 squared")
+        .replace(/(\w)\^3\b/g, "$1 cubed")
+        .replace(/\s*×\s*/g, " times ")
+        .replace(/\s*÷\s*/g, " divided by ")
+        .replace(/(\d)\s*=\s*(\d|[A-Za-z])/g, "$1 equals $2")
         .replace(/\n{2,}/g, ". ")
-        .replace(/\n/g, " ")
-        .trim()
-        .slice(0, 1800); // Keep focused for rapid audio delivery
+        .replace(/\n+/g, ", ")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+
+      if (cleanText.length > 1800) {
+        const truncated = cleanText.slice(0, 1800);
+        const lastBreak = Math.max(
+          truncated.lastIndexOf(". "),
+          truncated.lastIndexOf("? "),
+          truncated.lastIndexOf("! ")
+        );
+        cleanText = lastBreak > 900 ? truncated.slice(0, lastBreak + 1).trim() : truncated.trim();
+      }
 
       if (!cleanText) {
         return res.status(400).json({ error: "Cleaned text is empty." });
@@ -3450,64 +3469,86 @@ ${citationGuideline}`;
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: { headers: { "User-Agent": "aistudio-build" } }
       });
 
-      const styleInstruction = persona === "socratic"
-        ? "Thoughtful, encouraging Socratic tutor asking guiding questions and scaffolding concepts"
-        : persona === "exam_prep"
-        ? "High-energy, focused exam coach emphasizing testable points and active recall"
-        : "Warm, articulate, friendly academic tutor explaining concepts clearly";
+      const langNote = language ? ` Speak fluently and naturally in ${language}.` : "";
+      const styleInstruction =
+        persona === "exam_prep"
+          ? `Natural, real human study coach speaking one-on-one in person—clear conversational tone, organic breathing and natural pauses at punctuation, relaxed warmth, zero robotic or announcer cadence.${langNote}`
+          : persona === "scan_notes" || persona === "explain"
+          ? `Warm, grounded, real human tutor sitting beside a student reading and explaining notes aloud—natural conversational rhythm, subtle human inflection and brief pauses at commas and periods, never monotonous or synthetic.${langNote}`
+          : `Warm, natural, thoughtful human tutor talking face-to-face in relaxed conversation—authentic human cadence, gentle emphasis on key ideas, natural breathing pauses, completely unscripted and never robotic.${langNote}`;
 
       const validVoice = ["Kore", "Puck", "Fenrir", "Charon", "Zephyr"].includes(requestedVoice)
         ? requestedVoice
-        : (persona === "socratic" ? "Zephyr" : "Kore");
+        : "Charon";
 
-      const ttsModel = "gemini-3.8-flash-lite-tts";
-      if (isModelOnCooldown(ttsModel)) {
+      const ttsCandidates = ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"].filter(
+        (m) => !isModelOnCooldown(m)
+      );
+
+      if (ttsCandidates.length === 0) {
         return res.status(200).json({
           success: false,
           fallbackToBrowser: true,
-          message: "TTS model on cooldown, using client speech synthesis."
+          message: "TTS models on cooldown, using client speech synthesis."
         });
       }
 
-      const response = await ai.models.generateContent({
-        model: ttsModel,
-        contents: [
-          {
-            role: "user",
-            parts: [
+      let lastErr: any = null;
+      for (const ttsModel of ttsCandidates) {
+        try {
+          const response = await ai.models.generateContent({
+            model: ttsModel,
+            contents: [
               {
-                text: cleanText,
-                speechMetadata: {
-                  style: styleInstruction
+                role: "user",
+                parts: [
+                  {
+                    text: cleanText,
+                    speechMetadata: {
+                      style: styleInstruction
+                    }
+                  }
+                ]
+              }
+            ] as any,
+            config: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: validVoice
+                  }
                 }
               }
-            ]
-          }
-        ] as any,
-        config: {
-          responseModalities: ["AUDIO"],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: validVoice
-              }
             }
-          }
-        }
-      });
+          });
 
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (base64Audio) {
-        return res.json({
-          success: true,
-          audioBase64: base64Audio,
-          mimeType: "audio/wav",
-          voiceUsed: validVoice,
-          cleanedText: cleanText
-        });
+          const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+          if (base64Audio) {
+            return res.json({
+              success: true,
+              audioBase64: base64Audio,
+              mimeType: "audio/wav",
+              voiceUsed: validVoice,
+              modelUsed: ttsModel,
+              cleanedText: cleanText
+            });
+          }
+        } catch (modelErr: any) {
+          lastErr = modelErr;
+          if (isQuotaOrRateLimitError(modelErr)) {
+            recordModelQuotaCooldown(ttsModel, modelErr);
+          }
+          console.log(`[AI Tutor TTS] ${ttsModel} fallback notice (${summarizeModelError(modelErr)})`);
+        }
+      }
+
+      if (lastErr) {
+        console.log(`[AI Tutor TTS] Switching to client speech synthesis (${summarizeModelError(lastErr)})`);
       }
 
       return res.json({
@@ -3517,7 +3558,7 @@ ${citationGuideline}`;
       });
     } catch (ttsErr: any) {
       if (isQuotaOrRateLimitError(ttsErr)) {
-        recordModelQuotaCooldown("gemini-3.8-flash-lite-tts", ttsErr);
+        recordModelQuotaCooldown("gemini-3.8-flash-tts", ttsErr);
       }
       console.log(`[AI Tutor TTS] Switching to client speech synthesis (${summarizeModelError(ttsErr)})`);
       return res.status(200).json({
