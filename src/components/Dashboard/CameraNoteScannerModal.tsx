@@ -686,11 +686,17 @@ export default function CameraNoteScannerModal({
     window.speechSynthesis.speak(utterance);
   };
 
+  const extractMimeFromDataUrl = (dataUrl: string, fallback = 'image/jpeg'): string => {
+    const match = /^data:([^;]+);base64,/i.exec(String(dataUrl || ''));
+    const rawMime = (match?.[1] || fallback).toLowerCase().trim();
+    return rawMime === 'image/jpg' ? 'image/jpeg' : rawMime;
+  };
+
   // Automatically crop to detected paper boundaries and normalize image to JPEG DataURL + Base64
   const normalizeAndCompressImage = (
     rawDataUrl: string,
     preDetectedBounds?: NormalizedDocBounds | null
-  ): Promise<{ dataUrl: string; base64: string; sizeFormatted: string; wasCropped: boolean }> => {
+  ): Promise<{ dataUrl: string; base64: string; mimeType: string; sizeFormatted: string; wasCropped: boolean }> => {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
@@ -740,7 +746,13 @@ export default function CameraNoteScannerModal({
         if (!ctx) {
           const fallbackB64 = rawDataUrl.split(';base64,')[1] || '';
           const kb = Math.max(1, Math.round((fallbackB64.length * 0.75) / 1024));
-          resolve({ dataUrl: rawDataUrl, base64: fallbackB64, sizeFormatted: `${kb} KB`, wasCropped: false });
+          resolve({
+            dataUrl: rawDataUrl,
+            base64: fallbackB64,
+            mimeType: extractMimeFromDataUrl(rawDataUrl),
+            sizeFormatted: `${kb} KB`,
+            wasCropped: false
+          });
           return;
         }
 
@@ -757,6 +769,7 @@ export default function CameraNoteScannerModal({
         resolve({
           dataUrl: outUrl,
           base64: b64,
+          mimeType: 'image/jpeg',
           sizeFormatted: `${kb} KB`,
           wasCropped: Boolean(autoCropEnabled && cropBounds)
         });
@@ -764,7 +777,13 @@ export default function CameraNoteScannerModal({
       img.onerror = () => {
         const fallbackB64 = rawDataUrl.split(';base64,')[1] || '';
         const kb = Math.max(1, Math.round((fallbackB64.length * 0.75) / 1024));
-        resolve({ dataUrl: rawDataUrl, base64: fallbackB64, sizeFormatted: `${kb} KB`, wasCropped: false });
+        resolve({
+          dataUrl: rawDataUrl,
+          base64: fallbackB64,
+          mimeType: extractMimeFromDataUrl(rawDataUrl),
+          sizeFormatted: `${kb} KB`,
+          wasCropped: false
+        });
       };
       img.src = rawDataUrl;
     });
@@ -798,7 +817,7 @@ export default function CameraNoteScannerModal({
     );
 
     try {
-      const { dataUrl, base64, sizeFormatted, wasCropped } = await normalizeAndCompressImage(
+      const { dataUrl, base64, mimeType, sizeFormatted, wasCropped } = await normalizeAndCompressImage(
         rawDataUrl,
         lockedBounds
       );
@@ -818,7 +837,7 @@ export default function CameraNoteScannerModal({
       const ocrResult = await OCRService.extractTextFromNoteImage(
         {
           fileBase64: base64,
-          fileMimeType: 'image/jpeg',
+          fileMimeType: mimeType,
           defaultName: defaultScanName,
           sizeFormatted
         },
@@ -857,7 +876,7 @@ export default function CameraNoteScannerModal({
         tags: ocrResult.tags || ['Scanned Note', 'OCR Extracted'],
         dataUrl,
         base64,
-        mimeType: 'image/jpeg',
+        mimeType,
         sizeFormatted
       });
     } catch (error: any) {

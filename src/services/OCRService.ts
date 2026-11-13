@@ -50,6 +50,17 @@ export class OCRService {
       sizeFormatted = '120 KB'
     } = request;
 
+    let resolvedMime = String(fileMimeType || 'image/jpeg').toLowerCase().trim();
+    if (fileBase64.includes(';base64,')) {
+      const mimeMatch = /^data:([^;]+);base64,/i.exec(fileBase64);
+      if (mimeMatch?.[1]) {
+        resolvedMime = mimeMatch[1].toLowerCase().trim();
+      }
+    }
+    if (resolvedMime === 'image/jpg' || resolvedMime === 'image/pjpeg' || resolvedMime === 'image/jfif') {
+      resolvedMime = 'image/jpeg';
+    }
+
     const cleanBase64 = fileBase64.includes(';base64,')
       ? fileBase64.split(';base64,')[1]
       : fileBase64;
@@ -70,7 +81,7 @@ export class OCRService {
         signal: abortCtrl.signal,
         body: JSON.stringify({
           fileBase64: cleanBase64,
-          fileMimeType,
+          fileMimeType: resolvedMime,
           name: defaultName,
           workspaceId: workspaceId ? toValidUuid(workspaceId) : undefined,
           userId: userId || undefined,
@@ -116,8 +127,15 @@ export class OCRService {
         }
         lastOcrError = data?.error || 'No readable text was detected in this image.';
       } else {
-        const errData = await response.json().catch(() => ({}));
-        lastOcrError = errData?.error || errData?.details || `OCR failed (HTTP ${response.status}).`;
+        const rawErrBody = await response.text().catch(() => '');
+        let errData: any = {};
+        try {
+          errData = rawErrBody ? JSON.parse(rawErrBody) : {};
+        } catch {}
+        lastOcrError =
+          errData?.error ||
+          errData?.details ||
+          `OCR failed (HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}).`;
       }
     } catch (ocrErr: any) {
       lastOcrError = ocrErr?.name === 'AbortError'
@@ -151,9 +169,18 @@ export class OCRService {
 
       clearTimeout(timeoutId);
 
-      const data = await response.json().catch(() => ({}));
+      const rawBody = await response.text().catch(() => '');
+      let data: any = {};
+      try {
+        data = rawBody ? JSON.parse(rawBody) : {};
+      } catch {}
+
       if (!response.ok) {
-        throw new Error(data?.error || data?.details || `Lens request failed (HTTP ${response.status}).`);
+        throw new Error(
+          data?.error ||
+            data?.details ||
+            `Lens request failed (HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}).`
+        );
       }
 
       const answer = String(data?.answer || '').trim();

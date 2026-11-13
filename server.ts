@@ -3557,7 +3557,7 @@ ${citationGuideline}`;
   }
 
   // API Route: Dedicated Optical Character Recognition (OCR) for Camera-Scanned Study Notes
-  app.post("/api/ocr/scan-note", async (req, res) => {
+  app.post(["/api/ocr/scan-note", "/api/ocr/scan-note/"], async (req, res) => {
     try {
       const { fileBase64, fileMimeType, name } = req.body || {};
       if (!fileBase64) {
@@ -3718,7 +3718,7 @@ Instructions:
   });
 
   // API Route: Google Lens-style Direct Multimodal Q&A, Solver, Generator & Translator for Scanned Notes (no workspace required)
-  app.post("/api/ocr/lens-ask", async (req, res) => {
+  app.post(["/api/ocr/lens-ask", "/api/ocr/lens-ask/"], async (req, res) => {
     try {
       const {
         fileBase64,
