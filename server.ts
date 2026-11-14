@@ -3676,17 +3676,18 @@ Instructions:
       };
 
       const candidateModels = [
-        "gemini-4-hydrogen",
         "gemini-3.1-flash-lite",
-        "gemini-3-flash-preview"
+        "gemini-3-flash-preview",
+        "gemini-4-hydrogen"
       ];
 
       let response: any = null;
       let lastOcrModelError = "";
       for (const modelName of candidateModels) {
+        let modelTimeoutId: ReturnType<typeof setTimeout> | null = null;
         try {
           const useLowThinking = modelName === "gemini-4-hydrogen";
-          response = await ai.models.generateContent({
+          const genPromise = ai.models.generateContent({
             model: modelName,
             contents: [
               { text: ocrPrompt },
@@ -3705,8 +3706,14 @@ Instructions:
               }
             }
           });
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            modelTimeoutId = setTimeout(() => reject(new Error(`OCR model ${modelName} timed out after 20s`)), 20000);
+          });
+          response = await Promise.race([genPromise, timeoutPromise]);
+          if (modelTimeoutId) clearTimeout(modelTimeoutId);
           if (response && response.text) break;
         } catch (modelErr: any) {
+          if (modelTimeoutId) clearTimeout(modelTimeoutId);
           lastOcrModelError = modelErr?.message || String(modelErr);
           console.warn(`[OCR Endpoint] Model ${modelName} fallback:`, lastOcrModelError);
         }
@@ -3877,17 +3884,18 @@ ${modeInstruction}`;
       }
 
       const candidateModels = [
-        "gemini-4-hydrogen",
         "gemini-3.1-flash-lite",
-        "gemini-3-flash-preview"
+        "gemini-3-flash-preview",
+        "gemini-4-hydrogen"
       ];
 
       let response: any = null;
       let lastModelError = "";
       for (const modelName of candidateModels) {
+        let modelTimeoutId: ReturnType<typeof setTimeout> | null = null;
         try {
           const useLowThinking = modelName === "gemini-4-hydrogen";
-          response = await ai.models.generateContent({
+          const genPromise = ai.models.generateContent({
             model: modelName,
             contents: contentParts,
             config: {
@@ -3896,10 +3904,16 @@ ${modeInstruction}`;
               }
             }
           });
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            modelTimeoutId = setTimeout(() => reject(new Error(`Lens model ${modelName} timed out after 20s`)), 20000);
+          });
+          response = await Promise.race([genPromise, timeoutPromise]);
+          if (modelTimeoutId) clearTimeout(modelTimeoutId);
           if (response && response.text && response.text.trim()) {
             break;
           }
         } catch (modelErr: any) {
+          if (modelTimeoutId) clearTimeout(modelTimeoutId);
           lastModelError = modelErr?.message || String(modelErr);
           console.warn(`[Lens Ask Endpoint] Model ${modelName} fallback:`, lastModelError);
         }

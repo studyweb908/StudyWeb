@@ -70,7 +70,7 @@ export class OCRService {
 
     try {
       const abortCtrl = new AbortController();
-      const timeoutId = setTimeout(() => abortCtrl.abort(), 45000);
+      const timeoutId = setTimeout(() => abortCtrl.abort(), 65000);
 
       const response = await fetch('/api/ocr/scan-note', {
         method: 'POST',
@@ -155,7 +155,7 @@ export class OCRService {
    */
   public static async askLensQuestion(request: LensAskRequest): Promise<string> {
     const abortCtrl = new AbortController();
-    const timeoutId = setTimeout(() => abortCtrl.abort(), 45000);
+    const timeoutId = setTimeout(() => abortCtrl.abort(), 65000);
 
     try {
       const response = await fetch('/api/ocr/lens-ask', {
