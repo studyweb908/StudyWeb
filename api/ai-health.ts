@@ -39,13 +39,14 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     const ai = new GoogleGenAI({
       apiKey,
+      apiVersion: 'v1beta',
       httpOptions: {
-        headers: { 'User-Agent': 'studyweb-health-check' }
+        headers: { 'User-Agent': 'aistudio-build' }
       }
     });
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-4-hydrogen',
       contents: 'Reply with the word OK.'
     });
 
@@ -54,7 +55,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     return res.status(200).json({
       status: 'ok',
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-4-hydrogen',
       reply: text,
       verified: text.length > 0,
       durationMs

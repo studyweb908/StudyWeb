@@ -158,7 +158,7 @@ export function recordModelQuotaCooldown(model: string, err?: any): void {
 
 export function getAvailableCandidateModels(preferredModels: string[]): string[] {
   const available = preferredModels.filter((m) => !isModelOnCooldown(m));
-  return available.length > 0 ? available : ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-flash-latest"];
+  return available.length > 0 ? available : ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"];
 }
 
 export function summarizeModelError(err: any): string {
@@ -1802,13 +1802,14 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
-          headers: { "User-Agent": "studyweb-health-check" }
+          headers: { "User-Agent": "aistudio-build" }
         }
       });
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-4-hydrogen",
         contents: "Reply with the word OK."
       });
 
@@ -1817,7 +1818,7 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
 
       return res.json({
         status: "ok",
-        model: "gemini-3-flash-preview",
+        model: "gemini-4-hydrogen",
         reply: text,
         verified: text.length > 0,
         durationMs
@@ -1886,6 +1887,7 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
 
       const ai = new GoogleGenAI({ 
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build",
@@ -1895,7 +1897,7 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
 
       // Timeout safety: if Gemini takes more than 4 seconds, deliver clean answer
       const geminiPromise = ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-4-hydrogen",
         contents: q,
         config: {
           systemInstruction: `You are StudyWeb's voice assistant. Answer the user's question directly, accurately, and conversationally for text-to-speech voice playback.
@@ -1943,6 +1945,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build",
@@ -1954,7 +1957,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       const cleanMime = mimeType.split(";")[0] || "audio/webm";
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-4-hydrogen",
         contents: [
           {
             inlineData: {
@@ -2643,6 +2646,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
                 if (apiKey && (!f.transcription || f.transcription.length < 800)) {
                   const aiClient = new GoogleGenAI({
                     apiKey,
+                    apiVersion: 'v1beta',
                     httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
                   });
                   const grounded = await enrichUrlWithGeminiWebGrounding(aiClient, candidateUrl, f.name, f.transcription);
@@ -3040,12 +3044,11 @@ ${citationGuideline}`;
         groundedSourceContext
       ].filter(Boolean).join('\n\n');
 
-      // Verified active Gemini 3 Flash & Pro models for fast, reliable responses
+      // Verified active Gemini models for fast, reliable responses
       const baseCandidateModels: string[] = [
-        "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite-preview",
-        "gemini-flash-latest",
-        "gemini-3.1-pro-preview"
+        "gemini-4-hydrogen",
+        "gemini-3.1-flash-lite",
+        "gemini-3-flash-preview"
       ];
       const candidateModels: string[] = getAvailableCandidateModels(baseCandidateModels);
 
@@ -3179,6 +3182,7 @@ ${citationGuideline}`;
 
             const ai = new GoogleGenAI({
               apiKey,
+              apiVersion: "v1beta",
               httpOptions: {
                 headers: {
                   "User-Agent": "aistudio-build",
@@ -3194,6 +3198,7 @@ ${citationGuideline}`;
               const hasMediaOrVideoPart = activeParts.some((p: any) => Boolean(p?.fileData || p?.inlineData));
               const timeoutMs = hasMediaOrVideoPart ? 22000 : 12000;
 
+              const isHydrogen = currentModel === "gemini-4-hydrogen";
               const supportsMinimalThinking = currentModel.startsWith("gemini-3");
 
               const genPromise = ai.models.generateContent({
@@ -3203,11 +3208,11 @@ ${citationGuideline}`;
                   systemInstruction: pass <= 1
                     ? systemInstruction
                     : [coreSystemInstruction, outOfWorkspaceInstruction, fileOverviewContext, groundedSourceContext].filter(Boolean).join('\n\n'),
-                  temperature: 0.6,
-                  ...(supportsMinimalThinking
-                    ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
-                    : currentModel.includes("pro")
+                  ...(isHydrogen ? {} : { temperature: 0.6 }),
+                  ...(isHydrogen
                     ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+                    : supportsMinimalThinking
+                    ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
                     : {})
                 }
               });
@@ -3629,6 +3634,7 @@ ${citationGuideline}`;
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build"
@@ -3670,16 +3676,16 @@ Instructions:
       };
 
       const candidateModels = [
-        "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite-preview",
-        "gemini-3.1-pro-preview"
+        "gemini-4-hydrogen",
+        "gemini-3.1-flash-lite",
+        "gemini-3-flash-preview"
       ];
 
       let response: any = null;
       let lastOcrModelError = "";
       for (const modelName of candidateModels) {
         try {
-          const isPro = modelName === "gemini-3.1-pro-preview";
+          const useLowThinking = modelName === "gemini-4-hydrogen";
           response = await ai.models.generateContent({
             model: modelName,
             contents: [
@@ -3695,7 +3701,7 @@ Instructions:
               responseMimeType: "application/json",
               responseSchema: ocrSchema,
               thinkingConfig: {
-                thinkingLevel: isPro ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL
+                thinkingLevel: useLowThinking ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL
               }
             }
           });
@@ -3750,11 +3756,11 @@ Instructions:
       }
 
       res.status(422).json({
-        error: lastOcrModelError || "Could not extract text from the scanned image. Please try scanning again with clearer lighting."
+        error: "Could not extract text from the scanned image right now. Please ensure the page is well-lit and try scanning again."
       });
     } catch (error: any) {
       console.error("[OCR Endpoint Error] /api/ocr/scan-note:", error?.message || error);
-      res.status(500).json({ error: error?.message || "Failed to run OCR on scanned note", details: error?.message });
+      res.status(500).json({ error: "Unable to process the scanned note right now. Please try scanning again." });
     }
   });
 
@@ -3852,6 +3858,7 @@ ${modeInstruction}`;
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build"
@@ -3870,22 +3877,22 @@ ${modeInstruction}`;
       }
 
       const candidateModels = [
-        "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite-preview",
-        "gemini-3.1-pro-preview"
+        "gemini-4-hydrogen",
+        "gemini-3.1-flash-lite",
+        "gemini-3-flash-preview"
       ];
 
       let response: any = null;
       let lastModelError = "";
       for (const modelName of candidateModels) {
         try {
-          const isPro = modelName === "gemini-3.1-pro-preview";
+          const useLowThinking = modelName === "gemini-4-hydrogen";
           response = await ai.models.generateContent({
             model: modelName,
             contents: contentParts,
             config: {
               thinkingConfig: {
-                thinkingLevel: isPro ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL
+                thinkingLevel: useLowThinking ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL
               }
             }
           });
@@ -3907,12 +3914,12 @@ ${modeInstruction}`;
       }
 
       res.status(422).json({
-        error: lastModelError || "Unable to analyze this scanned image right now. Please try again."
+        error: "Unable to analyze this scanned image right now. Please try again."
       });
     } catch (error: any) {
       console.error("[Lens Ask Endpoint Error] /api/ocr/lens-ask:", error?.message || error);
       res.status(500).json({
-        error: error?.message || "Failed to process your question about this scan."
+        error: "Failed to process your question about this scan. Please try again."
       });
     }
   });
@@ -4004,7 +4011,7 @@ ${modeInstruction}`;
       const apiKey = getGeminiApiKey();
       if (apiKey) {
         try {
-          const ai = new GoogleGenAI({ apiKey });
+          const ai = new GoogleGenAI({ apiKey, apiVersion: 'v1beta', httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
           const analysisPrompt = `Analyze the following academic study material resource titled "${resolvedTitle}" of type "${resourceType}":
 URL: ${sourceUrl || 'N/A'}
 Content snippet: ${extractedContent.substring(0, 4000)}
@@ -4018,11 +4025,11 @@ Return a JSON object with:
   "transcription": "Detailed key topics or voice notes segment..."
 }`;
           const genMaterialPromise = ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-4-hydrogen',
             contents: analysisPrompt,
             config: {
               responseMimeType: 'application/json',
-              thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }
+              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
             }
           });
           const materialTimeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2800));
@@ -4163,6 +4170,7 @@ You must return a JSON object with the following schema:
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build",
@@ -4265,13 +4273,19 @@ Return a valid JSON object matching the requested schema.`
       }
 
       let response: any = null;
-      const candidateModels = ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"];
+      const candidateModels = ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"];
       for (const m of candidateModels) {
         try {
+          const isHydrogen = m === "gemini-4-hydrogen";
+          const modelConfig = {
+            ...config,
+            ...(isHydrogen ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : { temperature: 0.2, thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } })
+          };
+          if (isHydrogen) delete modelConfig.temperature;
           response = await ai.models.generateContent({
             model: m,
             contents: contents,
-            config: config
+            config: modelConfig
           });
           if (response && response.text) break;
         } catch (modelErr: any) {
@@ -4429,6 +4443,7 @@ Strictly return a JSON object containing a "questions" array matching the reques
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build",
@@ -4574,6 +4589,7 @@ Strictly return a JSON object containing a "questions" array matching the reques
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build",
@@ -5168,6 +5184,7 @@ For each incorrect answer in the array, you must:
 
         const ai = new GoogleGenAI({
           apiKey,
+          apiVersion: "v1beta",
           httpOptions: {
             headers: {
               "User-Agent": "aistudio-build",
@@ -5220,18 +5237,17 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
   ]
 }`;
 
-        const candidateModels = isDeepMode
-          ? ["gemini-3-flash-preview", "gemini-2.5-flash"]
-          : ["gemini-3-flash-preview", "gemini-2.5-flash"];
+        const candidateModels = ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"];
 
         let lastErr: any = null;
         for (const model of candidateModels) {
           try {
+            const isHydrogen = model === "gemini-4-hydrogen";
             const response = await ai.models.generateContent({
               model,
               contents: prompt,
               config: {
-                temperature: 0.25,
+                ...(isHydrogen ? {} : { temperature: 0.25 }),
                 tools: [{ googleSearch: {} }],
               }
             });
@@ -5458,6 +5474,7 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build",
@@ -5698,6 +5715,7 @@ Your output MUST be a JSON object matching the following TypeScript schema:
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build",
@@ -5862,6 +5880,7 @@ You MUST return a JSON object with a "flashcards" array containing your generate
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build",

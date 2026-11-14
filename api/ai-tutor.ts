@@ -124,17 +124,15 @@ You are a rapid-fire active recall trainer and flashcard coach:
 ${selectedPersona}
 Explain concepts clearly using simple analogies, key points, and examples. Answer thoroughly and help the student master the subject. NEVER output placeholder text or fake answers.`;
 
-    // Supported fast Gemini candidate models
-    const candidateModels = ['gemini-3-flash-preview', 'gemini-2.5-flash'];
-    if (deepResearch || modelMode === 'pro') {
-      candidateModels.push('gemini-3.1-pro-preview');
-    }
+    // Supported active Gemini candidate models
+    const candidateModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview'];
 
     const ai = new GoogleGenAI({
       apiKey,
+      apiVersion: 'v1beta',
       httpOptions: {
         headers: {
-          'User-Agent': 'studyweb-ai-tutor'
+          'User-Agent': 'aistudio-build'
         }
       }
     });
@@ -204,12 +202,13 @@ Explain concepts clearly using simple analogies, key points, and examples. Answe
     for (const model of candidateModels) {
       try {
         console.log(`[AI Tutor ${correlationId}] Invoking candidate model: ${model}`);
+        const isHydrogen = model === 'gemini-4-hydrogen';
         const response = await ai.models.generateContent({
           model,
           contents: contentsPayload,
           config: {
             systemInstruction,
-            temperature: 0.7
+            ...(isHydrogen ? {} : { temperature: 0.7 })
           }
         });
 

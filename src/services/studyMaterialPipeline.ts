@@ -65,6 +65,7 @@ export function getGeminiClient(): GoogleGenAI | null {
   if (!apiKey) return null;
   return new GoogleGenAI({
     apiKey,
+    apiVersion: 'v1beta',
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build'
@@ -446,7 +447,7 @@ export async function enrichUrlWithGeminiWebGrounding(
   initialTitle?: string,
   initialScrapedText?: string
 ): Promise<{ groundedTitle?: string; groundedContent: string }> {
-  const groundedModels = ['gemini-3.8-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
+  const groundedModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview'];
   const prompt = `Carefully inspect and analyze this exact URL from across the internet using URL Context and Google Search:
 URL: ${sourceUrl}
 ${initialTitle ? `Known Title / Label: ${initialTitle}` : ''}
@@ -789,10 +790,9 @@ Instructions:
 
   // Active verified Gemini models
   const modelCandidates = [
-    'gemini-3-flash-preview',
-    'gemini-3.1-flash-lite-preview',
-    'gemini-3.1-pro-preview',
-    'gemini-flash-latest'
+    'gemini-4-hydrogen',
+    'gemini-3.1-flash-lite',
+    'gemini-3-flash-preview'
   ];
 
   let lastModelError: any = null;
@@ -805,8 +805,8 @@ Instructions:
             ? contents[1].text
             : contents;
 
-        const supportsMinimalThinking = model === 'gemini-3-flash-preview' || model === 'gemini-3.1-flash-lite-preview';
-        const supportsLowThinking = model === 'gemini-3.1-pro-preview';
+        const supportsMinimalThinking = model === 'gemini-3.1-flash-lite' || model === 'gemini-3-flash-preview';
+        const supportsLowThinking = model === 'gemini-4-hydrogen';
 
         const response = await ai.models.generateContent({
           model,

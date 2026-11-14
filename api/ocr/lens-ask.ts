@@ -168,9 +168,10 @@ ${modeInstruction}`;
 
     const ai = new GoogleGenAI({
       apiKey,
+      apiVersion: 'v1beta',
       httpOptions: {
         headers: {
-          'User-Agent': 'studyweb-lens-ask'
+          'User-Agent': 'aistudio-build'
         }
       }
     });
@@ -186,9 +187,9 @@ ${modeInstruction}`;
     }
 
     const candidateModels = [
-      'gemini-3-flash-preview',
-      'gemini-3.1-flash-lite-preview',
-      'gemini-3.1-pro-preview'
+      'gemini-4-hydrogen',
+      'gemini-3.1-flash-lite',
+      'gemini-3-flash-preview'
     ];
 
     let response: any = null;
@@ -196,13 +197,13 @@ ${modeInstruction}`;
 
     for (const modelName of candidateModels) {
       try {
-        const isPro = modelName === 'gemini-3.1-pro-preview';
+        const useLowThinking = modelName === 'gemini-4-hydrogen';
         response = await ai.models.generateContent({
           model: modelName,
           contents: contentParts,
           config: {
             thinkingConfig: {
-              thinkingLevel: isPro ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL
+              thinkingLevel: useLowThinking ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL
             }
           }
         });
@@ -223,12 +224,12 @@ ${modeInstruction}`;
     }
 
     return res.status(422).json({
-      error: lastModelError || 'Unable to analyze this scanned image right now. Please try again.'
+      error: 'Unable to analyze this scanned image right now. Please try again.'
     });
   } catch (error: any) {
     console.error('[Serverless Lens Ask Error] /api/ocr/lens-ask:', error?.message || error);
     return res.status(500).json({
-      error: error?.message || 'Failed to process your question about this scan.'
+      error: 'Failed to process your question about this scan. Please try again.'
     });
   }
 }

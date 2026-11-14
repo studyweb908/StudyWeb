@@ -120,9 +120,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     const ai = new GoogleGenAI({
       apiKey,
+      apiVersion: 'v1beta',
       httpOptions: {
         headers: {
-          'User-Agent': 'studyweb-ocr-scanner'
+          'User-Agent': 'aistudio-build'
         }
       }
     });
@@ -161,9 +162,9 @@ Instructions:
     };
 
     const candidateModels = [
-      'gemini-3-flash-preview',
-      'gemini-3.1-flash-lite-preview',
-      'gemini-3.1-pro-preview'
+      'gemini-4-hydrogen',
+      'gemini-3.1-flash-lite',
+      'gemini-3-flash-preview'
     ];
 
     let response: any = null;
@@ -171,7 +172,7 @@ Instructions:
 
     for (const modelName of candidateModels) {
       try {
-        const isPro = modelName === 'gemini-3.1-pro-preview';
+        const useLowThinking = modelName === 'gemini-4-hydrogen';
         response = await ai.models.generateContent({
           model: modelName,
           contents: [
@@ -187,7 +188,7 @@ Instructions:
             responseMimeType: 'application/json',
             responseSchema: ocrSchema,
             thinkingConfig: {
-              thinkingLevel: isPro ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL
+              thinkingLevel: useLowThinking ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL
             }
           }
         });
@@ -244,14 +245,12 @@ Instructions:
     }
 
     return res.status(422).json({
-      error:
-        lastOcrModelError ||
-        'Could not extract text from the scanned image. Please try scanning again with clearer lighting.'
+      error: 'Could not extract text from the scanned image right now. Please ensure the page is well-lit and try scanning again.'
     });
   } catch (error: any) {
     console.error('[Serverless OCR Error] /api/ocr/scan-note:', error?.message || error);
     return res.status(500).json({
-      error: error?.message || 'Failed to run OCR on scanned note'
+      error: 'Unable to process the scanned note right now. Please try scanning again.'
     });
   }
 }
