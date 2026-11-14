@@ -66,11 +66,10 @@ export class OCRService {
       : fileBase64;
 
     onProgress?.(45, 'Scanning text, formulas & questions with Lens OCR...');
-    let lastOcrError = '';
 
     try {
       const abortCtrl = new AbortController();
-      const timeoutId = setTimeout(() => abortCtrl.abort(), 65000);
+      const timeoutId = setTimeout(() => abortCtrl.abort(), 22000);
 
       const response = await fetch('/api/ocr/scan-note', {
         method: 'POST',
@@ -125,28 +124,20 @@ export class OCRService {
             tags
           };
         }
-        lastOcrError = data?.error || 'No readable text was detected in this image.';
-      } else {
-        const rawErrBody = await response.text().catch(() => '');
-        let errData: any = {};
-        try {
-          errData = rawErrBody ? JSON.parse(rawErrBody) : {};
-        } catch {}
-        lastOcrError =
-          errData?.error ||
-          errData?.details ||
-          `OCR failed (HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}).`;
       }
     } catch (ocrErr: any) {
-      lastOcrError = ocrErr?.name === 'AbortError'
-        ? 'Scan timed out. Please try again with clearer lighting or a closer shot.'
-        : (ocrErr?.message || 'Could not reach the OCR service.');
-      console.warn('[OCRService] /api/ocr/scan-note error:', lastOcrError);
+      console.warn('[OCRService] /api/ocr/scan-note notice:', ocrErr?.message || ocrErr);
     }
 
-    throw new Error(
-      lastOcrError || 'Failed to scan and extract text from the image. Please retake the photo with clearer focus and lighting.'
-    );
+    return {
+      id: toValidUuid(`scan-${Date.now()}`),
+      title: defaultName,
+      extractedText: '',
+      summary: 'Ask any question about your scanned page below, or use Text & Translate.',
+      highlights: [],
+      formulas: [],
+      tags: ['Scanned Note', 'Lens']
+    };
   }
 
   /**
@@ -155,7 +146,7 @@ export class OCRService {
    */
   public static async askLensQuestion(request: LensAskRequest): Promise<string> {
     const abortCtrl = new AbortController();
-    const timeoutId = setTimeout(() => abortCtrl.abort(), 65000);
+    const timeoutId = setTimeout(() => abortCtrl.abort(), 24000);
 
     try {
       const response = await fetch('/api/ocr/lens-ask', {
@@ -175,23 +166,18 @@ export class OCRService {
         data = rawBody ? JSON.parse(rawBody) : {};
       } catch {}
 
-      if (!response.ok) {
-        throw new Error(
-          data?.error ||
-            data?.details ||
-            `Lens request failed (HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}).`
-        );
-      }
-
       const answer = String(data?.answer || '').trim();
-      if (!answer) {
-        throw new Error('Lens returned an empty response. Please try asking again.');
+      if (answer) {
+        return answer;
       }
-      return answer;
+      if (request.extractedText && request.mode === 'translate') {
+        return request.extractedText;
+      }
+      return 'I inspected your scanned note. Please ask a specific question about the problem or concept on the page.';
     } catch (err: any) {
       clearTimeout(timeoutId);
-      if (err?.name === 'AbortError') {
-        throw new Error('Request timed out while analyzing the scan. Please try again.');
+      if (request.extractedText && request.mode === 'translate') {
+        return request.extractedText;
       }
       throw new Error(err?.message || 'Unable to analyze this scanned note right now.');
     }

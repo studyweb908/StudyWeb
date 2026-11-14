@@ -19,7 +19,9 @@ import {
   ListChecks,
   PenLine,
   GitCompareArrows,
-  ToggleLeft
+  ToggleLeft,
+  TrendingUp,
+  AlertTriangle
 } from 'lucide-react';
 import { Workspace, WorkspaceFile, WorkspaceNote, QuizQuestionItem } from './WorkspaceTypes';
 import InteractiveQuizRunner from './InteractiveQuizRunner';
@@ -27,10 +29,15 @@ import { recordUserActivity } from '../../utils/userActivity';
 import {
   SavedQuizSession,
   PendingQuizIntent,
+  QuizDraftState,
+  QuizRunnerProgress,
+  QuizTopicResult,
   loadQuizHistory,
   saveQuizSession,
   updateQuizSessionScore,
-  deleteQuizSession
+  deleteQuizSession,
+  loadQuizDraftState,
+  saveQuizDraftState
 } from '../../utils/quizHistoryStorage';
 
 interface QuizCenterViewProps {
@@ -117,42 +124,77 @@ export default function QuizCenterView({
   pendingQuizIntent,
   onClearPendingQuizIntent
 }: QuizCenterViewProps) {
-  const [sourceMode, setSourceMode] = useState<'uploaded' | 'internet'>('uploaded');
+  const initialDraftRef = useRef<QuizDraftState | null>(loadQuizDraftState());
+  const initialHistoryRef = useRef<SavedQuizSession[]>(loadQuizHistory());
+
+  const [sourceMode, setSourceMode] = useState<'uploaded' | 'internet'>(
+    () => initialDraftRef.current?.sourceMode || 'uploaded'
+  );
 
   // Uploaded materials selection
-  const [workspaceFilterId, setWorkspaceFilterId] = useState<string>(() =>
-    activeWorkspace?.id || 'all'
+  const [workspaceFilterId, setWorkspaceFilterId] = useState<string>(
+    () => initialDraftRef.current?.workspaceFilterId || activeWorkspace?.id || 'all'
   );
-  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
-  const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
+  const [selectedFileIds, setSelectedFileIds] = useState<string[]>(
+    () => initialDraftRef.current?.selectedFileIds || []
+  );
+  const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>(
+    () => initialDraftRef.current?.selectedNoteIds || []
+  );
 
   // Internet resources search & selection
-  const [webQuery, setWebQuery] = useState('');
-  const [webResourceType, setWebResourceType] = useState<'all' | 'text' | 'wikipedia' | 'pdf' | 'video'>('all');
+  const [webQuery, setWebQuery] = useState(() => initialDraftRef.current?.webQuery || '');
+  const [webResourceType, setWebResourceType] = useState<'all' | 'text' | 'wikipedia' | 'pdf' | 'video'>(
+    () => initialDraftRef.current?.webResourceType || 'all'
+  );
   const [isSearchingWeb, setIsSearchingWeb] = useState(false);
-  const [webSearchBrief, setWebSearchBrief] = useState<string>('');
-  const [webSources, setWebSources] = useState<InternetSourceItem[]>([]);
-  const [selectedWebSourceIds, setSelectedWebSourceIds] = useState<string[]>([]);
+  const [webSearchBrief, setWebSearchBrief] = useState<string>(
+    () => initialDraftRef.current?.webSearchBrief || ''
+  );
+  const [webSources, setWebSources] = useState<InternetSourceItem[]>(
+    () => (Array.isArray(initialDraftRef.current?.webSources) ? initialDraftRef.current!.webSources : [])
+  );
+  const [selectedWebSourceIds, setSelectedWebSourceIds] = useState<string[]>(
+    () => (Array.isArray(initialDraftRef.current?.selectedWebSourceIds) ? initialDraftRef.current!.selectedWebSourceIds : [])
+  );
 
   // Analysis state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState<MaterialAnalysisResult | null>(null);
-  const [selectedFocusTopics, setSelectedFocusTopics] = useState<string[]>([]);
+  const [analysisResult, setAnalysisResult] = useState<MaterialAnalysisResult | null>(
+    () => initialDraftRef.current?.analysisResult || null
+  );
+  const [selectedFocusTopics, setSelectedFocusTopics] = useState<string[]>(
+    () => (Array.isArray(initialDraftRef.current?.selectedFocusTopics) ? initialDraftRef.current!.selectedFocusTopics : [])
+  );
 
   // Quiz configuration
-  const [quizType, setQuizType] = useState<QuizTypeOption>('MCQ');
-  const [questionCount, setQuestionCount] = useState<number>(5);
-  const [difficulty, setDifficulty] = useState<DifficultyOption>('Medium');
+  const [quizType, setQuizType] = useState<QuizTypeOption>(
+    () => initialDraftRef.current?.quizType || 'MCQ'
+  );
+  const [questionCount, setQuestionCount] = useState<number>(
+    () => initialDraftRef.current?.questionCount || 5
+  );
+  const [difficulty, setDifficulty] = useState<DifficultyOption>(
+    () => initialDraftRef.current?.difficulty || 'Medium'
+  );
+
+  // History persistence
+  const [quizHistory, setQuizHistory] = useState<SavedQuizSession[]>(() => initialHistoryRef.current);
 
   // Generation & active quiz session
   const [isGenerating, setIsGenerating] = useState(false);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
-  const [activeSession, setActiveSession] = useState<SavedQuizSession | null>(null);
-
-  // History persistence
-  const [quizHistory, setQuizHistory] = useState<SavedQuizSession[]>(() => loadQuizHistory());
+  const [activeSession, setActiveSession] = useState<SavedQuizSession | null>(() => {
+    const activeId = initialDraftRef.current?.activeSessionId;
+    if (!activeId) return null;
+    return initialHistoryRef.current.find((s) => s.id === activeId) || null;
+  });
+  const [runnerProgress, setRunnerProgress] = useState<QuizRunnerProgress | null>(
+    () => initialDraftRef.current?.runnerProgress || null
+  );
 
   const handledIntentRef = useRef<string | null>(null);
+  const hasInitializedSelectionRef = useRef<boolean>(Boolean(initialDraftRef.current));
 
   // Build deduplicated list of uploaded files & notes for current filter
   const { visibleFiles, visibleNotes } = useMemo(() => {
@@ -178,22 +220,61 @@ export default function QuizCenterView({
     return { visibleFiles: files, visibleNotes: notes };
   }, [workspaces, workspaceFilterId]);
 
-  // Auto-select available materials initially when visible list changes and nothing is selected
+  // Auto-select available materials only when no prior saved draft selection exists
   useEffect(() => {
     if (visibleFiles.length > 0 || visibleNotes.length > 0) {
-      setSelectedFileIds((prev) => {
-        const valid = prev.filter((id) => visibleFiles.some((f) => f.id === id));
-        return valid.length > 0 ? valid : visibleFiles.map((f) => f.id);
-      });
-      setSelectedNoteIds((prev) => {
-        const valid = prev.filter((id) => visibleNotes.some((n) => n.id === id));
-        return valid.length > 0 ? valid : visibleNotes.map((n) => n.id);
-      });
+      if (!hasInitializedSelectionRef.current) {
+        hasInitializedSelectionRef.current = true;
+        setSelectedFileIds(visibleFiles.map((f) => f.id));
+        setSelectedNoteIds(visibleNotes.map((n) => n.id));
+      } else {
+        setSelectedFileIds((prev) => prev.filter((id) => visibleFiles.some((f) => f.id === id)));
+        setSelectedNoteIds((prev) => prev.filter((id) => visibleNotes.some((n) => n.id === id)));
+      }
     } else {
       setSelectedFileIds([]);
       setSelectedNoteIds([]);
     }
   }, [visibleFiles, visibleNotes]);
+
+  // Continuously persist Quizzes builder + active runner state across tab switches & reloads
+  useEffect(() => {
+    saveQuizDraftState({
+      sourceMode,
+      workspaceFilterId,
+      selectedFileIds,
+      selectedNoteIds,
+      webQuery,
+      webResourceType,
+      webSearchBrief,
+      webSources,
+      selectedWebSourceIds,
+      analysisResult,
+      selectedFocusTopics,
+      quizType,
+      questionCount,
+      difficulty,
+      activeSessionId: activeSession?.id || null,
+      runnerProgress: activeSession ? runnerProgress : null
+    });
+  }, [
+    sourceMode,
+    workspaceFilterId,
+    selectedFileIds,
+    selectedNoteIds,
+    webQuery,
+    webResourceType,
+    webSearchBrief,
+    webSources,
+    selectedWebSourceIds,
+    analysisResult,
+    selectedFocusTopics,
+    quizType,
+    questionCount,
+    difficulty,
+    activeSession,
+    runnerProgress
+  ]);
 
   // Clear stale analysis when selection or source mode changes meaningfully
   const clearAnalysis = () => {
@@ -523,6 +604,7 @@ export default function QuizCenterView({
         iconType: 'quiz'
       });
 
+      setRunnerProgress(null);
       setActiveSession(newSession);
     } catch (err) {
       console.warn('[QuizCenterView] Quiz generation warning:', err);
@@ -550,6 +632,8 @@ export default function QuizCenterView({
           : 'Medium';
       const targetCount = Math.min(25, Math.max(1, Number(pendingQuizIntent.count) || 5));
 
+      setActiveSession(null);
+      setRunnerProgress(null);
       setQuizType(targetType);
       setDifficulty(targetDiff);
       setQuestionCount(targetCount);
@@ -621,18 +705,90 @@ export default function QuizCenterView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingQuizIntent]);
 
+  // Compute cumulative Quizzes Section progress & weak topics across all completed quizzes
+  const overallProgressStats = useMemo(() => {
+    const attempted = quizHistory.filter((q) => typeof q.lastScore === 'number' && q.questionCount > 0);
+    if (attempted.length === 0) {
+      return null;
+    }
+
+    let totalCorrect = 0;
+    let totalQuestions = 0;
+    const topicAgg = new Map<string, { correct: number; total: number }>();
+
+    attempted.forEach((session) => {
+      const sCorrect = session.lastScore || 0;
+      const sTotal = session.questionCount || session.questions.length || 0;
+      totalCorrect += sCorrect;
+      totalQuestions += sTotal;
+
+      if (Array.isArray(session.topicBreakdown) && session.topicBreakdown.length > 0) {
+        session.topicBreakdown.forEach((tb) => {
+          const key = tb.topic.trim() || session.title;
+          const prev = topicAgg.get(key) || { correct: 0, total: 0 };
+          topicAgg.set(key, {
+            correct: prev.correct + tb.correct,
+            total: prev.total + tb.total
+          });
+        });
+      } else if (sTotal > 0) {
+        const key = session.title.replace(/\s+Quiz$/i, '').trim() || session.title;
+        const prev = topicAgg.get(key) || { correct: 0, total: 0 };
+        topicAgg.set(key, {
+          correct: prev.correct + sCorrect,
+          total: prev.total + sTotal
+        });
+      }
+    });
+
+    const overallPct = totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 100) : 0;
+    const performanceTier =
+      overallPct >= 90
+        ? { label: 'Mastery', colorClass: 'text-emerald-600 dark:text-emerald-400' }
+        : overallPct >= 70
+        ? { label: 'Proficient', colorClass: 'text-indigo-600 dark:text-indigo-400' }
+        : overallPct >= 50
+        ? { label: 'Developing', colorClass: 'text-amber-600 dark:text-amber-400' }
+        : { label: 'Needs Practice', colorClass: 'text-rose-600 dark:text-rose-400' };
+
+    const allTopicStats: QuizTopicResult[] = Array.from(topicAgg.entries())
+      .map(([topic, val]) => ({ topic, correct: val.correct, total: val.total }))
+      .sort((a, b) => a.correct / Math.max(1, a.total) - b.correct / Math.max(1, b.total));
+
+    const lackingAreas = allTopicStats.filter(
+      (t) => t.total > 0 && Math.round((t.correct / t.total) * 100) < 70
+    );
+
+    return {
+      attemptedCount: attempted.length,
+      totalSavedCount: quizHistory.length,
+      totalCorrect,
+      totalQuestions,
+      overallPct,
+      performanceTier,
+      allTopicStats,
+      lackingAreas
+    };
+  }, [quizHistory]);
+
   // If playing or reviewing a generated/retaken quiz
   if (activeSession) {
     return (
       <div className="max-w-4xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
         <InteractiveQuizRunner
+          sessionId={activeSession.id}
           title={activeSession.title}
           subtitle={`${getQuizTypeLabel(activeSession.quizType)} · ${activeSession.difficulty} · ${activeSession.questions.length} Questions`}
           questions={activeSession.questions}
+          initialProgress={runnerProgress}
+          onProgressChange={setRunnerProgress}
           exitLabel="Back to Quizzes"
-          onExit={() => setActiveSession(null)}
-          onComplete={(score, total) => {
-            const updated = updateQuizSessionScore(activeSession.id, score, total);
+          onExit={() => {
+            setActiveSession(null);
+            setRunnerProgress(null);
+          }}
+          onComplete={(score, total, topicBreakdown) => {
+            const updated = updateQuizSessionScore(activeSession.id, score, total, topicBreakdown);
             setQuizHistory(updated);
             recordUserActivity({
               title: 'Completed Quiz',
@@ -1234,6 +1390,130 @@ export default function QuizCenterView({
         </div>
       </div>
 
+      {/* OVERALL QUIZZES PROGRESS & PERFORMANCE BAR */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 sm:p-5 space-y-4 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-[#5145F5] dark:text-indigo-400" />
+            <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+              Your Quiz Progress &amp; Performance
+            </h2>
+          </div>
+          {overallProgressStats ? (
+            <span className={`text-xs font-bold tabular-nums ${overallProgressStats.performanceTier.colorClass}`}>
+              {overallProgressStats.overallPct}% Accuracy · {overallProgressStats.performanceTier.label}
+            </span>
+          ) : (
+            <span className="text-xs font-medium text-slate-400">Complete a quiz to track performance</span>
+          )}
+        </div>
+
+        {overallProgressStats ? (
+          <div className="space-y-4">
+            {/* Full-Width Progress Bar */}
+            <div className="space-y-1.5">
+              <div className="w-full h-3.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+                {overallProgressStats.totalCorrect > 0 && (
+                  <div
+                    className="h-full bg-emerald-500 transition-all duration-500"
+                    style={{
+                      width: `${(overallProgressStats.totalCorrect / Math.max(1, overallProgressStats.totalQuestions)) * 100}%`
+                    }}
+                  />
+                )}
+                {overallProgressStats.totalQuestions - overallProgressStats.totalCorrect > 0 && (
+                  <div
+                    className="h-full bg-rose-400 dark:bg-rose-500/80 transition-all duration-500"
+                    style={{
+                      width: `${
+                        ((overallProgressStats.totalQuestions - overallProgressStats.totalCorrect) /
+                          Math.max(1, overallProgressStats.totalQuestions)) *
+                        100
+                      }%`
+                    }}
+                  />
+                )}
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+                <span>
+                  {overallProgressStats.attemptedCount} of {overallProgressStats.totalSavedCount} saved quizzes completed
+                </span>
+                <span>
+                  {overallProgressStats.totalCorrect} Correct ·{' '}
+                  {overallProgressStats.totalQuestions - overallProgressStats.totalCorrect} Missed ({overallProgressStats.totalQuestions} total questions)
+                </span>
+              </div>
+            </div>
+
+            {/* Where User Is Lacking + Per-Topic Bars */}
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="font-bold text-slate-800 dark:text-slate-100">
+                  Topic Breakdown
+                </span>
+                {overallProgressStats.lackingAreas.length > 0 ? (
+                  <span className="font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      Needs improvement in:{' '}
+                      {overallProgressStats.lackingAreas
+                        .slice(0, 4)
+                        .map((a) => `${a.topic} (${Math.round((a.correct / Math.max(1, a.total)) * 100)}%)`)
+                        .join(', ')}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>All covered topics are at 70%+ mastery</span>
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {overallProgressStats.allTopicStats.slice(0, 6).map((stat) => {
+                  const pct = stat.total > 0 ? Math.round((stat.correct / stat.total) * 100) : 0;
+                  const lacking = pct < 70;
+                  return (
+                    <div key={stat.topic} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs tabular-nums">
+                        <span className="font-medium text-slate-700 dark:text-slate-200 truncate pr-2">
+                          {stat.topic}
+                        </span>
+                        <span
+                          className={`font-semibold shrink-0 ${
+                            lacking ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
+                          }`}
+                        >
+                          {pct}% ({stat.correct}/{stat.total})
+                        </span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${
+                            lacking ? 'bg-rose-500' : 'bg-emerald-500'
+                          }`}
+                          style={{ width: `${Math.max(4, pct)}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="w-full h-3 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+              <div className="h-full w-0 bg-[#5145F5]" />
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Generate and finish a quiz above to see your overall accuracy bar, strengths, and exact topics where you need more practice.
+            </p>
+          </div>
+        )}
+      </div>
+
       {/* RECENT QUIZZES HISTORY */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 sm:p-5 space-y-4 shadow-xs">
         <div className="flex items-center justify-between gap-2">
@@ -1275,7 +1555,10 @@ export default function QuizCenterView({
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     type="button"
-                    onClick={() => setActiveSession(item)}
+                    onClick={() => {
+                      setRunnerProgress(null);
+                      setActiveSession(item);
+                    }}
                     className="px-3 py-1.5 rounded-lg bg-[#5145F5] hover:bg-indigo-700 text-white text-xs font-bold inline-flex items-center gap-1 transition-colors cursor-pointer min-h-[36px]"
                   >
                     <Play className="w-3 h-3 fill-current" />
@@ -1283,7 +1566,14 @@ export default function QuizCenterView({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setQuizHistory(deleteQuizSession(item.id))}
+                    onClick={() => {
+                      const updated = deleteQuizSession(item.id);
+                      setQuizHistory(updated);
+                      if (activeSession?.id === item.id) {
+                        setActiveSession(null);
+                        setRunnerProgress(null);
+                      }
+                    }}
                     aria-label="Delete saved quiz"
                     className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center"
                   >

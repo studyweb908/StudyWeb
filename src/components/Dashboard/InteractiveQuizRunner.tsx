@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   CheckCircle,
@@ -10,16 +10,22 @@ import {
   Check,
   HelpCircle,
   Loader2,
-  ArrowLeft
+  ArrowLeft,
+  AlertTriangle,
+  TrendingUp
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QuizQuestionItem, QuizMatchPair } from './WorkspaceTypes';
+import { QuizRunnerProgress, QuizTopicResult } from '../../utils/quizHistoryStorage';
 
 interface InteractiveQuizRunnerProps {
+  sessionId?: string;
   title: string;
   subtitle?: string;
   questions: QuizQuestionItem[];
-  onComplete?: (score: number, total: number) => void;
+  initialProgress?: QuizRunnerProgress | null;
+  onProgressChange?: (progress: QuizRunnerProgress | null) => void;
+  onComplete?: (score: number, total: number, topicBreakdown?: QuizTopicResult[]) => void;
   onExit?: () => void;
   exitLabel?: string;
 }
@@ -54,28 +60,73 @@ function deterministicShuffle<T>(items: T[], seedStr: string): T[] {
   return arr;
 }
 
+function getPerformanceTier(pct: number): { label: string; colorClass: string } {
+  if (pct >= 90) return { label: 'Mastery', colorClass: 'text-emerald-600 dark:text-emerald-400' };
+  if (pct >= 70) return { label: 'Proficient', colorClass: 'text-indigo-600 dark:text-indigo-400' };
+  if (pct >= 50) return { label: 'Developing', colorClass: 'text-amber-600 dark:text-amber-400' };
+  return { label: 'Needs Practice', colorClass: 'text-rose-600 dark:text-rose-400' };
+}
+
 export default function InteractiveQuizRunner({
+  sessionId,
   title,
   subtitle,
   questions,
+  initialProgress,
+  onProgressChange,
   onComplete,
   onExit,
   exitLabel = 'Back to Quizzes'
 }: InteractiveQuizRunnerProps) {
-  const [currentIdx, setCurrentIdx] = useState(0);
+  const canRestore = Boolean(initialProgress && sessionId && initialProgress.sessionId === sessionId);
+
+  const [currentIdx, setCurrentIdx] = useState(() =>
+    canRestore ? Math.min(questions.length - 1, Math.max(0, initialProgress!.currentIdx)) : 0
+  );
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [blankInput, setBlankInput] = useState('');
   const [activeLeftId, setActiveLeftId] = useState<string | null>(null);
   const [matchSelections, setMatchSelections] = useState<Record<string, string>>({});
   const [isAnswered, setIsAnswered] = useState(false);
   const [isCurrentCorrect, setIsCurrentCorrect] = useState(false);
-  const [score, setScore] = useState(0);
-  const [quizFinished, setQuizFinished] = useState(false);
-  const [missedQuestions, setMissedQuestions] = useState<MissedQuestionPayload[]>([]);
+  const [score, setScore] = useState(() => (canRestore ? initialProgress!.score : 0));
+  const [quizFinished, setQuizFinished] = useState(() => (canRestore ? initialProgress!.quizFinished : false));
+  const [missedQuestions, setMissedQuestions] = useState<MissedQuestionPayload[]>(() =>
+    canRestore && Array.isArray(initialProgress!.missedQuestions) ? initialProgress!.missedQuestions : []
+  );
+  const [topicResults, setTopicResults] = useState<Record<string, { correct: number; total: number }>>(() =>
+    canRestore && initialProgress!.topicResults ? initialProgress!.topicResults : {}
+  );
   const [aiReviewList, setAiReviewList] = useState<Array<{ question: string; explanation: string }>>([]);
   const [isLoadingReview, setIsLoadingReview] = useState(false);
 
   const activeQuestion = questions[currentIdx] || null;
+
+  useEffect(() => {
+    if (!sessionId || !onProgressChange) return;
+    onProgressChange({
+      sessionId,
+      currentIdx,
+      score,
+      quizFinished,
+      topicResults,
+      missedQuestions
+    });
+  }, [sessionId, currentIdx, score, quizFinished, topicResults, missedQuestions, onProgressChange]);
+
+  const recordTopicOutcome = (question: QuizQuestionItem, isCorrect: boolean) => {
+    const topicKey = (question.topic || question.type || 'General Concepts').trim();
+    setTopicResults((prev) => {
+      const existing = prev[topicKey] || { correct: 0, total: 0 };
+      return {
+        ...prev,
+        [topicKey]: {
+          correct: existing.correct + (isCorrect ? 1 : 0),
+          total: existing.total + 1
+        }
+      };
+    });
+  };
 
   const shuffledRightPairs = useMemo<QuizMatchPair[]>(() => {
     if (!activeQuestion?.pairs || activeQuestion.pairs.length === 0) return [];
@@ -102,6 +153,7 @@ export default function InteractiveQuizRunner({
     setScore(0);
     setQuizFinished(false);
     setMissedQuestions([]);
+    setTopicResults({});
     setAiReviewList([]);
     resetQuestionInputs();
   };
@@ -112,6 +164,7 @@ export default function InteractiveQuizRunner({
     setIsAnswered(true);
     const correct = idx === activeQuestion.correctIndex;
     setIsCurrentCorrect(correct);
+    recordTopicOutcome(activeQuestion, correct);
     if (correct) {
       setScore((prev) => prev + 1);
     } else {
@@ -148,6 +201,7 @@ export default function InteractiveQuizRunner({
 
     setIsAnswered(true);
     setIsCurrentCorrect(correct);
+    recordTopicOutcome(activeQuestion, correct);
     if (correct) {
       setScore((prev) => prev + 1);
     } else {
@@ -196,6 +250,7 @@ export default function InteractiveQuizRunner({
     const allMatched = pairs.every((p) => matchSelections[p.id] === p.id);
     setIsAnswered(true);
     setIsCurrentCorrect(allMatched);
+    recordTopicOutcome(activeQuestion, allMatched);
     if (allMatched) {
       setScore((prev) => prev + 1);
     } else {
@@ -219,6 +274,18 @@ export default function InteractiveQuizRunner({
     }
   };
 
+  const topicBreakdown = useMemo<QuizTopicResult[]>(() => {
+    const entries = Object.entries(topicResults) as Array<[string, { correct: number; total: number }]>;
+    if (entries.length > 0) {
+      return entries.map(([topic, stats]) => ({
+        topic,
+        correct: stats.correct,
+        total: stats.total
+      }));
+    }
+    return [];
+  }, [topicResults]);
+
   const handleNext = () => {
     if (currentIdx < questions.length - 1) {
       setCurrentIdx((prev) => prev + 1);
@@ -234,7 +301,7 @@ export default function InteractiveQuizRunner({
         });
       }
       if (onComplete) {
-        onComplete(score, questions.length);
+        onComplete(score, questions.length, topicBreakdown);
       }
     }
   };
@@ -322,21 +389,109 @@ export default function InteractiveQuizRunner({
         </div>
       )}
 
-      {quizFinished ? (
+      {quizFinished ? (() => {
+        const finalPct = questions.length > 0 ? Math.round((score / questions.length) * 100) : 0;
+        const missedCount = Math.max(0, questions.length - score);
+        const tier = getPerformanceTier(finalPct);
+        const lackingTopics = topicBreakdown.filter((t) => t.total > 0 && Math.round((t.correct / t.total) * 100) < 70);
+        const strongTopics = topicBreakdown.filter((t) => t.total > 0 && Math.round((t.correct / t.total) * 100) >= 70);
+
+        return (
         <div className="max-w-2xl mx-auto py-6 sm:py-8 space-y-6">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 text-center space-y-4">
-            <div className="w-16 h-16 bg-amber-50 dark:bg-amber-950/50 rounded-full flex items-center justify-center mx-auto text-amber-500">
-              <Trophy className="w-8 h-8" />
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 space-y-5">
+            <div className="text-center space-y-3">
+              <div className="w-16 h-16 bg-amber-50 dark:bg-amber-950/50 rounded-full flex items-center justify-center mx-auto text-amber-500">
+                <Trophy className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-900 dark:text-white">Quiz Completed</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-300 tabular-nums">
+                You scored <span className="font-extrabold text-slate-900 dark:text-white">{score}</span> out of{' '}
+                <span className="font-extrabold text-slate-900 dark:text-white">{questions.length}</span>{' '}
+                (<span className={`font-bold ${tier.colorClass}`}>{finalPct}% · {tier.label}</span>)
+              </p>
             </div>
-            <h3 className="text-xl font-extrabold text-slate-900 dark:text-white">Quiz Completed</h3>
-            <p className="text-sm text-slate-600 dark:text-slate-300 tabular-nums">
-              You scored <span className="font-extrabold text-slate-900 dark:text-white">{score}</span> out of{' '}
-              <span className="font-extrabold text-slate-900 dark:text-white">{questions.length}</span> (
-              <span className="font-bold text-indigo-600 dark:text-indigo-400">
-                {Math.round((score / questions.length) * 100)}%
-              </span>
-              ).
-            </p>
+
+            {/* Full-Width Performance Progress Bar */}
+            <div className="space-y-2.5 pt-2 text-left">
+              <div className="flex items-center justify-between text-xs font-semibold tabular-nums">
+                <span className="text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                  <TrendingUp className="w-3.5 h-3.5 text-[#5145F5] dark:text-indigo-400" />
+                  <span>Overall Quiz Performance</span>
+                </span>
+                <span className={tier.colorClass}>
+                  {score} Correct · {missedCount} Missed ({finalPct}%)
+                </span>
+              </div>
+              <div className="w-full h-3.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+                {score > 0 && (
+                  <div
+                    className="h-full bg-emerald-500 transition-all duration-500"
+                    style={{ width: `${(score / questions.length) * 100}%` }}
+                  />
+                )}
+                {missedCount > 0 && (
+                  <div
+                    className="h-full bg-rose-400 dark:bg-rose-500/80 transition-all duration-500"
+                    style={{ width: `${(missedCount / questions.length) * 100}%` }}
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Topic Progress & Where You Are Lacking */}
+            {topicBreakdown.length > 0 && (
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3 text-left">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-bold text-slate-800 dark:text-slate-100">
+                    Topic Progress &amp; Focus Areas
+                  </span>
+                  {lackingTopics.length > 0 ? (
+                    <span className="text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Lacking in: {lackingTopics.map((t) => t.topic).join(', ')}</span>
+                    </span>
+                  ) : (
+                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                      <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Strong performance across all topics ({strongTopics.length})</span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-2.5">
+                  {topicBreakdown.map((item) => {
+                    const topicPct = item.total > 0 ? Math.round((item.correct / item.total) * 100) : 0;
+                    const isLacking = topicPct < 70;
+                    return (
+                      <div key={item.topic} className="space-y-1">
+                        <div className="flex items-center justify-between text-xs tabular-nums">
+                          <span className="font-medium text-slate-700 dark:text-slate-200 truncate pr-2">
+                            {item.topic}
+                          </span>
+                          <span
+                            className={`font-semibold shrink-0 ${
+                              isLacking
+                                ? 'text-rose-600 dark:text-rose-400'
+                                : 'text-emerald-600 dark:text-emerald-400'
+                            }`}
+                          >
+                            {item.correct}/{item.total} ({topicPct}%{isLacking ? ' · Needs review' : ''})
+                          </span>
+                        </div>
+                        <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-500 ${
+                              isLacking ? 'bg-rose-500' : 'bg-emerald-500'
+                            }`}
+                            style={{ width: `${Math.max(4, topicPct)}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
               <button
@@ -386,7 +541,8 @@ export default function InteractiveQuizRunner({
             </div>
           )}
         </div>
-      ) : activeQuestion ? (
+        );
+      })() : activeQuestion ? (
         <div className="max-w-3xl mx-auto space-y-5">
           <div className="bg-white dark:bg-slate-900 p-5 sm:p-7 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-5">
             {/* Unboxed Question Metadata */}

@@ -176,11 +176,14 @@ export default function App() {
 
   const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState<boolean>(true);
   const [hasVisitedAITutor, setHasVisitedAITutor] = useState<boolean>(() => activeTab === 'ai-tutor');
+  const [hasVisitedQuizzes, setHasVisitedQuizzes] = useState<boolean>(() => activeTab === 'quiz-center');
   const [pendingQuizIntent, setPendingQuizIntent] = useState<PendingQuizIntent | null>(null);
 
   useEffect(() => {
     if (activeTab === 'ai-tutor') {
       setHasVisitedAITutor(true);
+    } else if (activeTab === 'quiz-center') {
+      setHasVisitedQuizzes(true);
     }
   }, [activeTab]);
 
@@ -838,15 +841,17 @@ export default function App() {
             isLoading={isLoadingWorkspaces}
           />
         )}
-        {activeTab === 'quiz-center' && (
-          <QuizCenterView
-            workspaces={workspaces}
-            activeWorkspace={activeWorkspace}
-            onSelectWorkspace={handleSelectWorkspace}
-            onUpdateWorkspace={handleUpdateWorkspace}
-            pendingQuizIntent={pendingQuizIntent}
-            onClearPendingQuizIntent={() => setPendingQuizIntent(null)}
-          />
+        {(activeTab === 'quiz-center' || hasVisitedQuizzes) && (
+          <div className={activeTab === 'quiz-center' ? 'w-full min-w-0' : 'hidden'}>
+            <QuizCenterView
+              workspaces={workspaces}
+              activeWorkspace={activeWorkspace}
+              onSelectWorkspace={handleSelectWorkspace}
+              onUpdateWorkspace={handleUpdateWorkspace}
+              pendingQuizIntent={pendingQuizIntent}
+              onClearPendingQuizIntent={() => setPendingQuizIntent(null)}
+            />
+          </div>
         )}
         {activeTab === 'profile' && <ProfileSettingsHub />}
 

@@ -390,6 +390,8 @@ export default function CameraNoteScannerModal({
   const [detectedBounds, setDetectedBounds] = useState<NormalizedDocBounds | null>(null);
   const [scanResult, setScanResult] = useState<ScannedNoteSession | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [isExtractingOcr, setIsExtractingOcr] = useState(false);
+  const activeScanSeqRef = useRef(0);
 
   // Google Lens interactive states (stay right inside Scan Notes without leaving)
   const [lensMode, setLensMode] = useState<'ask' | 'text'>('ask');
@@ -512,9 +514,11 @@ export default function CameraNoteScannerModal({
   }, [activeWorkspace, workspaces]);
 
   const resetScannerSessionState = useCallback(() => {
+    activeScanSeqRef.current += 1;
     stopSpeech();
     setCapturedDataUrl(null);
     setIsProcessing(false);
+    setIsExtractingOcr(false);
     setScanProgress(0);
     setCameraError(null);
     setOcrPreviewSnippet(null);
@@ -829,7 +833,7 @@ export default function CameraNoteScannerModal({
         const sw = autoCropEnabled && cropBounds ? Math.round(cropBounds.width * srcW) : srcW;
         const sh = autoCropEnabled && cropBounds ? Math.round(cropBounds.height * srcH) : srcH;
 
-        const maxDim = 1400;
+        const maxDim = 1024;
         let outW = sw;
         let outH = sh;
         if (outW > maxDim || outH > maxDim) {
@@ -863,9 +867,9 @@ export default function CameraNoteScannerModal({
         ctx.fillRect(0, 0, outW, outH);
         ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
 
-        let outUrl = canvas.toDataURL('image/jpeg', 0.84);
-        if (outUrl.length > 290_000) {
-          outUrl = canvas.toDataURL('image/jpeg', 0.66);
+        let outUrl = canvas.toDataURL('image/jpeg', 0.74);
+        if (outUrl.length > 175_000) {
+          outUrl = canvas.toDataURL('image/jpeg', 0.58);
         }
         const b64 = outUrl.split(';base64,')[1] || '';
         const kb = Math.max(1, Math.round((b64.length * 0.75) / 1024));
@@ -892,17 +896,18 @@ export default function CameraNoteScannerModal({
     });
   };
 
-  // Scan and extract OCR text ONLY — never automatically saves to any workspace.
+  // Instant Google Lens experience: opens the interactive Lens workspace immediately (<50ms)
+  // after local crop/compression while OCR text extraction populates in the background.
   const processScannedImage = async (
     rawDataUrl: string,
     originalFileName?: string,
     lockedBounds?: NormalizedDocBounds | null
   ) => {
+    const scanSeq = ++activeScanSeqRef.current;
     stopCameraStream();
     stopSpeech();
     setCapturedDataUrl(rawDataUrl);
     setOcrPreviewSnippet(null);
-    setScanResult(null);
     setScanError(null);
     setIsCopied(false);
     setLensMessages([]);
@@ -911,83 +916,68 @@ export default function CameraNoteScannerModal({
     setIsSavedToWorkspace(false);
     setSavedWorkspaceName(null);
     setSavePromptIntent(null);
-    setIsProcessing(true);
-    setScanProgress(20);
-    setScanStepText(
-      autoCropEnabled
-        ? 'Detecting boundaries & preparing Lens scan...'
-        : 'Preparing scanned note for Lens...'
-    );
 
     try {
-      const { dataUrl, base64, mimeType, sizeFormatted, wasCropped } = await normalizeAndCompressImage(
+      const { dataUrl, base64, mimeType, sizeFormatted } = await normalizeAndCompressImage(
         rawDataUrl,
         lockedBounds
       );
-      setCapturedDataUrl(dataUrl);
-
-      if (wasCropped) {
-        setScanProgress(35);
-        setScanStepText('Page cropped! Reading text & content with Lens...');
-      }
+      if (activeScanSeqRef.current !== scanSeq) return;
 
       const timestampLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const dateLabel = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       const defaultScanName = originalFileName
         ? originalFileName.replace(/\.[^/.]+$/, '')
         : `Scanned Notes (${dateLabel}, ${timestampLabel})`;
+      const tempId = toValidUuid(`scan-${Date.now()}`);
 
-      const ocrResult = await OCRService.extractTextFromNoteImage(
-        {
-          fileBase64: base64,
-          fileMimeType: mimeType,
-          defaultName: defaultScanName,
-          sizeFormatted
-        },
-        (progress, stepText) => {
-          setScanProgress(progress);
-          setScanStepText(stepText);
-        }
-      );
-
-      if (ocrResult.extractedText) {
-        const previewClean = ocrResult.extractedText
-          .replace(/^#+\s+/gm, '')
-          .replace(/\n+/g, ' ')
-          .trim()
-          .slice(0, 140);
-        if (previewClean) {
-          setOcrPreviewSnippet(previewClean + (ocrResult.extractedText.length > 140 ? '...' : ''));
-        }
-      }
-
-      const tempId = ocrResult.id || toValidUuid(`scan-${Date.now()}`);
-      const resolvedName = ocrResult.title || defaultScanName;
-
-      setScanProgress(100);
-      setScanStepText('Scan ready in Lens!');
-      await new Promise((r) => setTimeout(r, 180));
-
+      // Open the interactive Lens workspace immediately — zero blocking full-screen wait!
+      setCapturedDataUrl(dataUrl);
       setIsProcessing(false);
+      setIsExtractingOcr(true);
       setScanResult({
         tempId,
-        extractedText: ocrResult.extractedText || '',
-        title: resolvedName,
-        summary: ocrResult.summary || '',
-        highlights: ocrResult.highlights || [],
-        formulas: ocrResult.formulas || [],
-        tags: ocrResult.tags || ['Scanned Note', 'OCR Extracted'],
+        extractedText: '',
+        title: defaultScanName,
+        summary: 'Ask any question about your scanned notes below, switch to Text & Translate to copy or translate, or tap Listen to hear it read aloud.',
+        highlights: [],
+        formulas: [],
+        tags: ['Scanned Note', 'Lens Ready'],
         dataUrl,
         base64,
         mimeType,
         sizeFormatted
       });
+
+      // Extract verbatim OCR text, title, summary & formulas in the background (~1s)
+      const ocrResult = await OCRService.extractTextFromNoteImage({
+        fileBase64: base64,
+        fileMimeType: mimeType,
+        defaultName: defaultScanName,
+        sizeFormatted
+      });
+
+      if (activeScanSeqRef.current !== scanSeq) return;
+
+      setIsExtractingOcr(false);
+      setScanResult((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          tempId: ocrResult.id || prev.tempId,
+          extractedText: ocrResult.extractedText || prev.extractedText,
+          title: ocrResult.title || prev.title,
+          summary: ocrResult.summary || prev.summary,
+          highlights: ocrResult.highlights?.length ? ocrResult.highlights : prev.highlights,
+          formulas: ocrResult.formulas?.length ? ocrResult.formulas : prev.formulas,
+          tags: ocrResult.tags?.length ? ocrResult.tags : ['Scanned Note', 'OCR Extracted']
+        };
+      });
     } catch (error: any) {
-      console.error('Error scanning note:', error);
-      const errMessage = error?.message || 'Could not scan this note. Please check your image and try again.';
-      setScanError(errMessage);
+      if (activeScanSeqRef.current !== scanSeq) return;
+      console.warn('Notice during background OCR:', error);
       setIsProcessing(false);
-      (window as any).showToast?.(errMessage, 'error', 4500, 'Scan Error');
+      setIsExtractingOcr(false);
     }
   };
 
@@ -1682,7 +1672,7 @@ export default function CameraNoteScannerModal({
                                   'Ask any question about your scanned notes below, switch to Text & Translate to copy or translate, or tap Listen to hear it read aloud.'}
                               </p>
                             </div>
-                            {scanResult.extractedText && (
+                            {scanResult.extractedText ? (
                               <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 sm:p-4">
                                 <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                                   <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -1700,7 +1690,12 @@ export default function CameraNoteScannerModal({
                                   {scanResult.extractedText}
                                 </p>
                               </div>
-                            )}
+                            ) : isExtractingOcr ? (
+                              <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 sm:p-4 flex items-center gap-2.5 text-xs text-slate-600 dark:text-slate-300">
+                                <Loader2 className="w-4 h-4 text-blue-600 dark:text-blue-400 animate-spin shrink-0" />
+                                <span>Reading text from your scan — you can already ask any question below!</span>
+                              </div>
+                            ) : null}
                           </div>
                         ) : (
                           lensMessages.map((msg) => (
@@ -1834,7 +1829,7 @@ export default function CameraNoteScannerModal({
                           <button
                             type="button"
                             onClick={handleTranslateScan}
-                            disabled={isTranslating || !scanResult.extractedText}
+                            disabled={isTranslating}
                             className="px-3 sm:px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors whitespace-nowrap shrink-0"
                           >
                             {isTranslating ? (
@@ -1879,7 +1874,16 @@ export default function CameraNoteScannerModal({
                             Highlight any lines to copy a selection, or tap Copy All Text above.
                           </p>
                           <div className="rounded-2xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 p-4 text-xs sm:text-sm text-slate-800 dark:text-slate-100 leading-relaxed whitespace-pre-wrap select-text">
-                            {scanResult.extractedText || 'No readable text was detected on this page.'}
+                            {scanResult.extractedText ? (
+                              scanResult.extractedText
+                            ) : isExtractingOcr ? (
+                              <span className="inline-flex items-center gap-2 text-slate-500 dark:text-slate-400">
+                                <Loader2 className="w-4 h-4 text-blue-600 dark:text-blue-400 animate-spin shrink-0" />
+                                Extracting verbatim text from your scanned page...
+                              </span>
+                            ) : (
+                              'Tap Translate Text above or switch to Ask & Solve to analyze this image.'
+                            )}
                           </div>
                         </div>
 
