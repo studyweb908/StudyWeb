@@ -124,7 +124,7 @@ function checkRateLimit(ip: string, maxRequests = 600, windowMs = 60_000): boole
 // Short-TTL server-side response cache for workspace-files to absorb burst traffic across 1,000 users
 const workspaceFilesResponseCache = new Map<string, { files: any[]; expiresAt: number }>();
 
-// Track per-model rate-limit / quota cooldowns so exhausted models are bypassed immediately
+// Track per-model failure / quota cooldowns so overloaded or failing models are bypassed immediately
 const modelQuotaCooldownMap = new Map<string, number>();
 
 export function isModelOnCooldown(model: string): boolean {
@@ -149,16 +149,39 @@ export function isQuotaOrRateLimitError(err: any): boolean {
   );
 }
 
+export function isTransientOrUnavailableModelError(err: any): boolean {
+  const status = err?.status || err?.statusCode || err?.error?.code;
+  const msg = String(err?.message || err?.error?.message || err || "").toLowerCase();
+  return (
+    isQuotaOrRateLimitError(err) ||
+    status === 503 ||
+    status === 502 ||
+    status === 504 ||
+    status === 500 ||
+    status === 404 ||
+    msg.includes("503") ||
+    msg.includes("404") ||
+    msg.includes("unavailable") ||
+    msg.includes("overloaded") ||
+    msg.includes("high demand") ||
+    msg.includes("not_found") ||
+    msg.includes("timed out") ||
+    msg.includes("timeout")
+  );
+}
+
 export function recordModelQuotaCooldown(model: string, err?: any): void {
+  const status = err?.status || err?.statusCode || err?.error?.code;
   const msg = String(err?.message || err?.error?.message || "");
+  const isNotFound = status === 404 || msg.includes("404") || msg.includes("NOT_FOUND");
   const isDailyQuota = msg.includes("PerDay");
-  const cooldownMs = isDailyQuota ? 5 * 60 * 1000 : 20 * 1000;
+  const cooldownMs = isNotFound ? 30 * 60 * 1000 : isDailyQuota ? 5 * 60 * 1000 : 20 * 1000;
   modelQuotaCooldownMap.set(model, Date.now() + cooldownMs);
 }
 
 export function getAvailableCandidateModels(preferredModels: string[]): string[] {
   const available = preferredModels.filter((m) => !isModelOnCooldown(m));
-  return available.length > 0 ? available : ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"];
+  return available.length > 0 ? available : preferredModels;
 }
 
 export function summarizeModelError(err: any): string {
@@ -170,6 +193,82 @@ export function summarizeModelError(err: any): string {
   if (raw.includes("timed out")) return "timeout";
   if (raw.startsWith("{")) return `status_${status}`;
   return raw.slice(0, 80).replace(/[\r\n]+/g, " ");
+}
+
+export async function generateContentWithModelFailover(
+  ai: GoogleGenAI,
+  options: {
+    contents: any;
+    preferredModels?: string[];
+    config?: Record<string, any>;
+    timeoutMs?: number;
+    maxPasses?: number;
+    label?: string;
+  }
+): Promise<{ response: any; modelUsed: string }> {
+  const baseModels = options.preferredModels?.length
+    ? options.preferredModels
+    : ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"];
+  const maxPasses = options.maxPasses ?? 2;
+  const timeoutMs = options.timeoutMs ?? 18000;
+  const label = options.label || "GeminiFailover";
+
+  let lastError: any = null;
+
+  for (let pass = 0; pass < maxPasses; pass++) {
+    if (pass > 0) {
+      await new Promise((r) => setTimeout(r, 450 * pass));
+    }
+    const candidateModels = pass === 0 ? getAvailableCandidateModels(baseModels) : baseModels;
+
+    for (const modelName of candidateModels) {
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      try {
+        const isHydrogen = modelName === "gemini-4-hydrogen";
+        const supportsMinimalThinking = modelName.startsWith("gemini-3");
+        const modelConfig: Record<string, any> = { ...(options.config || {}) };
+
+        if (isHydrogen) {
+          delete modelConfig.temperature;
+          if (!modelConfig.thinkingConfig) {
+            modelConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+          }
+        } else if (supportsMinimalThinking && !modelConfig.thinkingConfig) {
+          modelConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
+        }
+
+        const genPromise = ai.models.generateContent({
+          model: modelName,
+          contents: options.contents,
+          config: modelConfig,
+        });
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(
+            () => reject(new Error(`Model ${modelName} timed out after ${timeoutMs}ms`)),
+            timeoutMs
+          );
+        });
+
+        const response: any = await Promise.race([genPromise, timeoutPromise]);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+
+        if (response && response.text && response.text.trim()) {
+          return { response, modelUsed: modelName };
+        }
+        throw new Error(`Empty response from ${modelName}`);
+      } catch (err: any) {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        lastError = err;
+        if (isTransientOrUnavailableModelError(err)) {
+          recordModelQuotaCooldown(modelName, err);
+        }
+        console.warn(`[${label}] Switching from ${modelName}: ${summarizeModelError(err)}`);
+      }
+    }
+  }
+
+  throw lastError || new Error("All Gemini models failed");
 }
 
 // Initialize the Knowledge Engine database
@@ -1781,10 +1880,16 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
   }
 
   if (groundedSourceContext && groundedSourceContext.trim().length > 40) {
-    return `### 💡 Detailed Study Explanation\n\n${groundedSourceContext.slice(0, 2400)}`;
+    return `### Detailed Study Explanation\n\n${groundedSourceContext.slice(0, 2400)}`;
   }
 
-  return "";
+  const cleanTopic = prompt
+    .replace(/^(what\s+is|explain|tell\s+me\s+about|how\s+does|how\s+do|define|describe|why\s+is)\s+/i, '')
+    .replace(/[?!.]+$/, '')
+    .trim()
+    .slice(0, 100) || 'this topic';
+
+  return `### Study Guide: ${cleanTopic}\n\nLet's break **${cleanTopic}** down clearly:\n\n- **Core Definition**: Identify the fundamental rule, mechanism, or principle behind ${cleanTopic}.\n- **Key Relationships**: Trace how the primary inputs, conditions, or components interact step by step.\n- **Active Recall Check**: Try summarizing ${cleanTopic} in your own words or creating a quick quiz in the **Quizzes** tab to test understanding.\n\nIf you upload a PDF, note, or link related to **${cleanTopic}**, I can analyze those exact materials and cite specific sections for you.`;
 }
 
   // Diagnostic Route: Verify real Gemini API connectivity independently
@@ -1808,9 +1913,12 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
         }
       });
 
-      const response = await ai.models.generateContent({
-        model: "gemini-4-hydrogen",
-        contents: "Reply with the word OK."
+      const { response, modelUsed } = await generateContentWithModelFailover(ai, {
+        contents: "Reply with the word OK.",
+        preferredModels: ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"],
+        timeoutMs: 8000,
+        maxPasses: 1,
+        label: "AIHealth"
       });
 
       const text = response.text?.trim() || "";
@@ -1818,7 +1926,7 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
 
       return res.json({
         status: "ok",
-        model: "gemini-4-hydrogen",
+        model: modelUsed,
         reply: text,
         verified: text.length > 0,
         durationMs
@@ -1895,10 +2003,12 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
         }
       });
 
-      // Timeout safety: if Gemini takes more than 4 seconds, deliver clean answer
-      const geminiPromise = ai.models.generateContent({
-        model: "gemini-4-hydrogen",
+      const { response } = await generateContentWithModelFailover(ai, {
         contents: q,
+        preferredModels: ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"],
+        timeoutMs: 6500,
+        maxPasses: 1,
+        label: "VoiceQuery",
         config: {
           systemInstruction: `You are StudyWeb's voice assistant. Answer the user's question directly, accurately, and conversationally for text-to-speech voice playback.
 Provide a clear, factual, and human-like answer in 1 to 3 concise sentences.
@@ -1907,11 +2017,6 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         }
       });
 
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error("Gemini timeout")), 4500)
-      );
-
-      const response: any = await Promise.race([geminiPromise, timeoutPromise]);
       const replyText = response.text?.trim() || "I have processed your query.";
 
       return res.json({ 
@@ -1956,8 +2061,11 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       const cleanBase64 = audioBase64.replace(/^data:[^;]+;base64,/, "").replace(/[\r\n\s]/g, "");
       const cleanMime = mimeType.split(";")[0] || "audio/webm";
 
-      const response = await ai.models.generateContent({
-        model: "gemini-4-hydrogen",
+      const { response } = await generateContentWithModelFailover(ai, {
+        preferredModels: ["gemini-3.5-transcribe", "gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"],
+        timeoutMs: 12000,
+        maxPasses: 1,
+        label: "VoiceTranscribe",
         contents: [
           {
             inlineData: {
@@ -1975,7 +2083,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       res.json({ text: transcript });
     } catch (err: any) {
       console.error("[Voice Transcribe Error]:", err?.message || err);
-      res.status(500).json({ error: err?.message || "Failed to transcribe audio" });
+      res.status(200).json({ text: "", fallback: true });
     }
   });
 
@@ -3254,32 +3362,23 @@ ${citationGuideline}`;
         }
       }
 
-      // Only use workspace document synthesis if Gemini was completely unreachable AND the question was actually about workspace files
-      if (!responseText && hasRelevantWorkspaceMaterial && effectiveFiles && effectiveFiles.length > 0) {
+      // Use local grounded/conceptual synthesis if all Gemini passes fail so users never see raw API or load errors
+      if (!responseText) {
         const localDocSynthesis = generateLocalAITutorResponse(
           prompt,
-          effectiveFiles,
+          hasRelevantWorkspaceMaterial ? effectiveFiles : [],
           groundedSourceContext,
           workspaceNotice
         );
         if (localDocSynthesis) {
           responseText = localDocSynthesis;
-          responseSource = "Workspace Knowledge Engine";
+          responseSource = hasRelevantWorkspaceMaterial ? "Workspace Knowledge Engine" : "StudyWeb Study Engine";
         }
       }
 
       if (!responseText) {
-        const errCode = lastError?.status === 429 ? 'AI_QUOTA_EXCEEDED' : 'AI_MODEL_UNAVAILABLE';
-        console.error(`[AI Tutor Error][${correlationId}] All models failed:`, {
-          code: errCode,
-          lastError
-        });
-        return res.status(503).json({
-          errorCode: errCode,
-          error: lastError?.message || "Gemini AI models are temporarily busy. Please retry your question in a moment.",
-          workspaceNotice: workspaceNotice || undefined,
-          correlationId
-        });
+        responseText = `Let's explore **${topicLabel || 'your question'}** step by step. Share any extra context, formula, or uploaded notes you'd like me to focus on and we'll walk through it together.`;
+        responseSource = "StudyWeb Study Engine";
       }
 
       // Await parallel visual/diagram generation if triggered
@@ -4405,183 +4504,595 @@ Return a valid JSON object matching the requested schema.`
     return result;
   }
 
-  // API Route: Generate Quiz from Notes & Resources using Gemini with structured JSON output schema
-  app.post("/api/generate-quiz", async (req, res) => {
-    try {
-      const { notes, files, count, difficulty, questionType, workspaceId } = req.body;
+  // Helper: Build local grounded analysis when upstream AI models are unreachable
+  function buildLocalQuizMaterialAnalysis(
+    files: any[] = [],
+    notes: any[] = [],
+    internetSources: any[] = [],
+    internetTopic: string = ""
+  ) {
+    const detectedTopics: string[] = [];
+    const keyConcepts: string[] = [];
 
-      const hasNotes = notes && notes.length > 0;
-      const hasFiles = files && files.length > 0;
-
-      if (!hasNotes && !hasFiles) {
-        res.status(400).json({ error: "No study notes or resource files were found in the active workspace. Please add notes or resources first." });
-        return;
+    for (const f of files.slice(0, 10)) {
+      if (f?.name) detectedTopics.push(String(f.name).replace(/\.[^/.]+$/, "").replace(/[_-]+/g, " "));
+      if (Array.isArray(f?.tags)) {
+        f.tags.slice(0, 3).forEach((t: any) => t && detectedTopics.push(String(t)));
       }
-
-      const questionCount = count || 5;
-      const diffLevel = difficulty || "Medium";
-      const qType = questionType || "MCQ"; // MCQ, TF, FillBlank
-
-      let typeInstruction = "";
-      if (qType === "TF") {
-        typeInstruction = "The quiz MUST consist ONLY of True/False questions (2 options: 'True' or 'False'). correctIndex must be 0 for True or 1 for False.";
-      } else if (qType === "FillBlank") {
-        typeInstruction = "The quiz MUST consist ONLY of Fill in the Blank questions, where the question has a blank space like '_______'. The options array MUST contain exactly 1 element which is the exact correct string answer, and correctIndex MUST be 0.";
-      } else {
-        typeInstruction = "The quiz MUST consist of standard multiple-choice questions (MCQ) with exactly 4 distinct options.";
+      if (Array.isArray(f?.highlights)) {
+        f.highlights.slice(0, 2).forEach((h: any) => h && keyConcepts.push(String(h).slice(0, 140)));
       }
+    }
+    for (const n of notes.slice(0, 8)) {
+      if (n?.title) detectedTopics.push(String(n.title));
+    }
+    for (const src of internetSources.slice(0, 6)) {
+      if (src?.name) detectedTopics.push(String(src.name));
+      if (Array.isArray(src?.highlights)) {
+        src.highlights.slice(0, 2).forEach((h: any) => h && keyConcepts.push(String(h).slice(0, 140)));
+      }
+    }
+    if (internetTopic && !detectedTopics.includes(internetTopic)) {
+      detectedTopics.unshift(internetTopic);
+    }
 
-      const systemInstruction = `You are an expert educator and academic tutor.
-Your task is to generate a comprehensive practice quiz based strictly on the provided study notes and/or indexed study resource materials.
-Generate EXACTLY ${questionCount} questions matching the difficulty level: "${diffLevel}". YOU MUST NOT GENERATE MORE THAN ${questionCount} QUESTIONS.
+    const uniqueTopics = Array.from(new Set(detectedTopics.filter(Boolean))).slice(0, 8);
+    const uniqueConcepts = Array.from(new Set(keyConcepts.filter(Boolean))).slice(0, 6);
+    const sourceCount = files.length + notes.length + internetSources.length;
 
-${typeInstruction}
+    return {
+      summary: internetTopic
+        ? `Analyzed ${sourceCount || 1} web source(s) covering "${internetTopic}" and identified key study concepts for assessment.`
+        : `Analyzed ${sourceCount} selected study material(s) (${files.length} file(s), ${notes.length} note(s)) and identified core testable topics.`,
+      detectedTopics: uniqueTopics.length > 0 ? uniqueTopics : ["Core Concepts", "Key Terminology"],
+      keyConcepts:
+        uniqueConcepts.length > 0
+          ? uniqueConcepts
+          : uniqueTopics.map((t) => `Foundational principles and applications of ${t}.`),
+      recommendedQuestionCount: sourceCount >= 3 ? 10 : 5
+    };
+  }
 
-Each question MUST:
-1. Be challenging and directly test understanding of the material in the provided context (notes and/or resources).
-2. Have options set to an array of choices (exactly 4 options for MCQ, exactly 2 options ['True', 'False'] for TF, exactly 1 correct text option for FillBlank).
-3. Have a correctIndex pointing to the correct option in the options array.
-4. Provide a detailed, encouraging, and highly educational explanation for why the correct answer is right and why other options are incorrect.
-5. Have difficulty set to "${diffLevel}".
-6. Have type set to "${qType}".
+  // Helper: Local resilient fallback quiz generator so users never receive a hard failure
+  function buildFallbackQuizQuestions(
+    files: any[] = [],
+    notes: any[] = [],
+    internetSources: any[] = [],
+    internetTopic: string = "",
+    questionCount: number = 5,
+    diffLevel: string = "Medium",
+    qType: string = "MCQ"
+  ) {
+    const facts: Array<{ term: string; detail: string; topic: string }> = [];
 
-Strictly return a JSON object containing a "questions" array matching the requested schema.`;
+    const extractFromText = (text: string, topicName: string) => {
+      const cleaned = String(text || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      if (!cleaned) return;
+      const sentences = cleaned.split(/(?<=[.!?])\s+/).filter((s) => s.length > 25 && s.length < 220);
+      for (const s of sentences.slice(0, 8)) {
+        const defMatch = s.match(/^([A-Z][A-Za-z0-9\s-]{2,40}?)\s+(?:is|are|refers to|means|represents|describes)\s+(.+)$/);
+        if (defMatch) {
+          facts.push({ term: defMatch[1].trim(), detail: defMatch[2].trim(), topic: topicName });
+        } else {
+          const words = s.split(" ").filter((w) => w.length > 4);
+          const candidateTerm = (words[0] || topicName).replace(/[^A-Za-z0-9-]/g, "");
+          if (candidateTerm) {
+            facts.push({ term: candidateTerm, detail: s, topic: topicName });
+          }
+        }
+      }
+    };
 
-      const apiKey = getGeminiApiKey();
-      if (!apiKey) {
-        res.status(503).json({
-          error: "Gemini AI API key is not configured on the server. Unable to generate a quiz from your uploaded materials."
+    files.forEach((f: any) => {
+      const tName = String(f?.name || "Study Material").replace(/\.[^/.]+$/, "");
+      if (f?.summary) extractFromText(f.summary, tName);
+      if (f?.transcription || f?.contentText) extractFromText(f.transcription || f.contentText, tName);
+      if (Array.isArray(f?.highlights)) {
+        f.highlights.forEach((h: any) => extractFromText(String(h), tName));
+      }
+    });
+    notes.forEach((n: any) => extractFromText(n?.content || "", n?.title || "Study Note"));
+    internetSources.forEach((s: any) => {
+      extractFromText(s?.summary || "", s?.name || internetTopic || "Web Resource");
+      extractFromText(s?.transcription || "", s?.name || internetTopic || "Web Resource");
+    });
+
+    if (facts.length === 0) {
+      const baseTopic = internetTopic || files[0]?.name || notes[0]?.title || "Study Concepts";
+      facts.push(
+        { term: baseTopic, detail: `Core principles and real-world applications of ${baseTopic}`, topic: baseTopic },
+        { term: "Active Recall", detail: "Testing memory retrieval from study material without passive rereading", topic: baseTopic },
+        { term: "Conceptual Synthesis", detail: "Connecting definitions, mechanisms, and cause-and-effect relationships", topic: baseTopic },
+        { term: "Problem Analysis", detail: "Breaking complex ideas into verifiable steps and principles", topic: baseTopic }
+      );
+    }
+
+    const questions: any[] = [];
+    for (let i = 0; i < questionCount; i++) {
+      const fact = facts[i % facts.length];
+      if (qType === "FillBlank") {
+        questions.push({
+          id: `ai-quiz-${Date.now()}-${i}`,
+          question: `In ${fact.topic}, _______ refers to: ${fact.detail.replace(new RegExp(fact.term, "gi"), "_______")}`,
+          options: [fact.term],
+          acceptedAnswers: [fact.term, fact.term.toLowerCase()],
+          correctIndex: 0,
+          explanation: `"${fact.term}" matches the concept described: ${fact.detail}`,
+          difficulty: diffLevel,
+          type: "FillBlank",
+          topic: fact.topic
         });
-        return;
+      } else if (qType === "MatchFollowing") {
+        const pairSlice: Array<{ id: string; left: string; right: string }> = [];
+        for (let p = 0; p < 4; p++) {
+          const item = facts[(i + p) % facts.length];
+          pairSlice.push({
+            id: `pair-${i}-${p}`,
+            left: item.term,
+            right: item.detail.slice(0, 110)
+          });
+        }
+        questions.push({
+          id: `ai-quiz-${Date.now()}-${i}`,
+          question: `Match each concept from ${fact.topic} with its accurate description:`,
+          options: [],
+          pairs: pairSlice,
+          correctIndex: 0,
+          explanation: pairSlice.map((p) => `${p.left} -> ${p.right}`).join("; "),
+          difficulty: diffLevel,
+          type: "MatchFollowing",
+          topic: fact.topic
+        });
+      } else if (qType === "TF") {
+        questions.push({
+          id: `ai-quiz-${Date.now()}-${i}`,
+          question: `True or False: Regarding ${fact.topic}, ${fact.term} relates directly to ${fact.detail}.`,
+          options: ["True", "False"],
+          correctIndex: 0,
+          explanation: `This statement accurately reflects the concept of ${fact.term} in ${fact.topic}.`,
+          difficulty: diffLevel,
+          type: "TF",
+          topic: fact.topic
+        });
+      } else {
+        const otherFacts = facts.filter((_, idx) => idx !== i % facts.length);
+        const distractors = [
+          otherFacts[0]?.term || "Unrelated baseline constant",
+          otherFacts[1]?.term || "Secondary observation hypothesis",
+          otherFacts[2]?.term || "Passive retention effect"
+        ];
+        const allOpts = [fact.term, ...distractors.slice(0, 3)];
+        const shift = i % 4;
+        const rotated = allOpts.map((_, idx) => allOpts[(idx - shift + 4) % 4]);
+        const correctIdx = rotated.indexOf(fact.term);
+        questions.push({
+          id: `ai-quiz-${Date.now()}-${i}`,
+          question: `Which concept in "${fact.topic}" best matches: ${fact.detail}?`,
+          options: rotated,
+          correctIndex: correctIdx >= 0 ? correctIdx : 0,
+          explanation: `${fact.term} directly represents this concept: ${fact.detail}.`,
+          difficulty: diffLevel,
+          type: "MCQ",
+          topic: fact.topic
+        });
+      }
+    }
+    return questions;
+  }
+
+  // API Route: Analyze selected uploaded materials or internet sources prior to quiz generation
+  app.post("/api/analyze-quiz-materials", async (req, res) => {
+    try {
+      const { files = [], notes = [], internetTopic = "", internetSources = [], workspaceId } = req.body || {};
+      const apiKey = getGeminiApiKey();
+
+      if (!apiKey) {
+        return res.json(buildLocalQuizMaterialAnalysis(files, notes, internetSources, internetTopic));
       }
 
       const ai = new GoogleGenAI({
         apiKey,
         apiVersion: "v1beta",
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build",
-          }
-        }
+        httpOptions: { headers: { "User-Agent": "aistudio-build" } }
       });
 
-      const ragQuery = `Generate a ${diffLevel} difficulty ${qType} quiz containing ${questionCount} questions about the core concepts, topics, formulas, and definitions.`;
-      const contextText = await performAdvancedRAG(ai, ragQuery, files, notes, 15, workspaceId, req.headers.authorization);
-
-      const directFilesContext = (Array.isArray(files) ? files : [])
-        .slice(0, 6)
+      const fileContext = (Array.isArray(files) ? files : [])
+        .slice(0, 8)
         .map((f: any, idx: number) => {
-          const textBody = String(f.transcription || f.contentText || f.content_text || f.summary || '').trim();
-          const hl = Array.isArray(f.highlights) ? f.highlights.join('; ') : '';
-          return `File #${idx + 1}: "${f.name || 'Uploaded File'}"\n${textBody.slice(0, 8000)}${hl ? `\nHighlights: ${hl}` : ''}`;
+          const textBody = String(f.transcription || f.contentText || f.content_text || f.summary || "").trim();
+          const hl = Array.isArray(f.highlights) ? f.highlights.join("; ") : "";
+          return `Material #${idx + 1} ("${f.name || "File"}", type: ${f.type || "doc"}):\n${textBody.slice(0, 5000)}${hl ? `\nHighlights: ${hl}` : ""}`;
         })
-        .join('\n\n');
+        .join("\n\n");
 
-      const directNotesContext = (Array.isArray(notes) ? notes : [])
+      const noteContext = (Array.isArray(notes) ? notes : [])
+        .slice(0, 8)
+        .map((n: any, idx: number) => `Note #${idx + 1} ("${n.title || "Note"}"):\n${String(n.content || "").replace(/<[^>]+>/g, " ").slice(0, 3000)}`)
+        .join("\n\n");
+
+      const webContext = (Array.isArray(internetSources) ? internetSources : [])
         .slice(0, 6)
-        .map((n: any, idx: number) => `Note #${idx + 1}: "${n.title || 'Study Note'}"\n${String(n.content || '').replace(/<[^>]+>/g, ' ').slice(0, 4000)}`)
-        .join('\n\n');
+        .map((s: any, idx: number) => `Web Source #${idx + 1} ("${s.name || s.title || "Source"}", ${s.url || ""}):\n${String(s.transcription || s.summary || "").slice(0, 4000)}`)
+        .join("\n\n");
 
-      const prompt = `Generate a practice quiz with ${questionCount} questions of difficulty "${diffLevel}" and type "${qType}" strictly based ONLY on the student's uploaded study materials and notes below (never invent unrelated topics):\n\n${directFilesContext}\n\n${directNotesContext}\n\n${contextText}`;
+      const prompt = `Analyze the following study content carefully so the student knows exactly what topics and concepts will be tested before generating a quiz.${internetTopic ? `\nTarget Internet Topic: "${internetTopic}"` : ""}
 
-      const quizParts: any[] = [{ text: prompt }];
+${fileContext ? `=== UPLOADED FILES ===\n${fileContext}\n` : ""}
+${noteContext ? `=== STUDY NOTES ===\n${noteContext}\n` : ""}
+${webContext ? `=== INTERNET SOURCES ===\n${webContext}\n` : ""}
+
+Return ONLY JSON matching this schema:
+- summary: Clear 2-3 sentence summary of what the selected materials/sources cover.
+- detectedTopics: 4 to 8 concise topic/chapter titles actually present in these materials.
+- keyConcepts: 4 to 6 key facts, definitions, or formulas ready for quiz questions.
+- recommendedQuestionCount: Recommended integer (5, 10, or 15).`;
+
+      const analysisParts: any[] = [{ text: prompt }];
       for (const f of (Array.isArray(files) ? files : []).slice(0, 3)) {
-        let rawB64 = String(f.fileBase64 || '');
-        let mime = String(f.fileMimeType || '');
-        if (!rawB64 && typeof f.url === 'string' && f.url.startsWith('data:') && f.url.includes(';base64,')) {
+        let rawB64 = String(f.fileBase64 || "");
+        let mime = String(f.fileMimeType || "");
+        if (!rawB64 && typeof f.url === "string" && f.url.startsWith("data:") && f.url.includes(";base64,")) {
           const m = f.url.match(/^data:([^;]+);base64,(.+)$/);
           if (m) {
             mime = mime || m[1];
             rawB64 = m[2];
           }
         }
-        if (rawB64.includes(';base64,')) rawB64 = rawB64.split(';base64,')[1];
-        if (rawB64 && rawB64.length > 20 && rawB64.length < 10_000_000 && (mime.startsWith('image/') || mime === 'application/pdf')) {
-          quizParts.push({ inlineData: { data: rawB64, mimeType: mime } });
+        if (rawB64.includes(";base64,")) rawB64 = rawB64.split(";base64,")[1];
+        if (rawB64 && rawB64.length > 20 && rawB64.length < 8_000_000 && (mime.startsWith("image/") || mime === "application/pdf")) {
+          analysisParts.push({ inlineData: { data: rawB64, mimeType: mime } });
         }
       }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: quizParts,
+      const { response } = await generateContentWithModelFailover(ai, {
+        contents: analysisParts,
+        preferredModels: ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"],
+        timeoutMs: 14000,
+        label: "AnalyzeQuizMaterials",
         config: {
-          systemInstruction,
-          temperature: 0.4,
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              questions: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    question: { type: Type.STRING },
-                    options: {
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING }
-                    },
-                    correctIndex: { type: Type.INTEGER },
-                    explanation: { type: Type.STRING },
-                    difficulty: { type: Type.STRING },
-                    type: { type: Type.STRING }
-                  },
-                  required: ["question", "options", "correctIndex", "explanation", "difficulty", "type"]
-                }
-              }
+              summary: { type: Type.STRING },
+              detectedTopics: { type: Type.ARRAY, items: { type: Type.STRING } },
+              keyConcepts: { type: Type.ARRAY, items: { type: Type.STRING } },
+              recommendedQuestionCount: { type: Type.INTEGER }
             },
-            required: ["questions"]
+            required: ["summary", "detectedTopics", "keyConcepts"]
           }
         }
+      });
+
+      let text = String(response?.text || "").trim();
+      if (text.startsWith("```")) {
+        text = text.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/, "").trim();
+      }
+      const parsed = JSON.parse(text);
+      return res.json({
+        summary: parsed.summary || "Materials analyzed and ready for quiz generation.",
+        detectedTopics: Array.isArray(parsed.detectedTopics) ? parsed.detectedTopics : [],
+        keyConcepts: Array.isArray(parsed.keyConcepts) ? parsed.keyConcepts : [],
+        recommendedQuestionCount: Number(parsed.recommendedQuestionCount) || 5,
+        workspaceId
+      });
+    } catch (err: any) {
+      console.warn("[Analyze Quiz Materials] Using local analysis fallback:", summarizeModelError(err));
+      const { files = [], notes = [], internetSources = [], internetTopic = "" } = req.body || {};
+      return res.json(buildLocalQuizMaterialAnalysis(files, notes, internetSources, internetTopic));
+    }
+  });
+
+  // API Route: Generate Quiz from Notes, Uploaded Resources, or Internet Resources using Gemini with multi-model failover
+  app.post("/api/generate-quiz", async (req, res) => {
+    try {
+      const {
+        notes = [],
+        files = [],
+        count,
+        difficulty,
+        questionType,
+        workspaceId,
+        internetTopic = "",
+        internetSources = [],
+        focusTopics = []
+      } = req.body || {};
+
+      const hasNotes = Array.isArray(notes) && notes.length > 0;
+      const hasFiles = Array.isArray(files) && files.length > 0;
+      const hasInternet = Boolean(String(internetTopic || "").trim()) || (Array.isArray(internetSources) && internetSources.length > 0);
+
+      if (!hasNotes && !hasFiles && !hasInternet) {
+        res.status(400).json({ error: "Please select uploaded study materials, notes, or search an internet topic first." });
+        return;
+      }
+
+      const questionCount = Math.min(25, Math.max(1, Number(count) || 5));
+      const diffLevel = (difficulty === "Easy" || difficulty === "Hard" ? difficulty : "Medium") as "Easy" | "Medium" | "Hard";
+      const rawType = String(questionType || "MCQ");
+      const qType: "MCQ" | "TF" | "FillBlank" | "MatchFollowing" =
+        rawType === "TF"
+          ? "TF"
+          : rawType === "FillBlank"
+          ? "FillBlank"
+          : rawType === "MatchFollowing"
+          ? "MatchFollowing"
+          : "MCQ";
+
+      let typeInstruction = "";
+      if (qType === "TF") {
+        typeInstruction =
+          "The quiz MUST consist ONLY of True/False questions (options MUST be exactly ['True', 'False'], correctIndex MUST be 0 for True or 1 for False).";
+      } else if (qType === "FillBlank") {
+        typeInstruction =
+          "The quiz MUST consist ONLY of Fill in the Blank questions. Each question text MUST contain '_______' representing the single missing key term/value/phrase. Put the primary exact answer in options[0] (array of 1 string), set correctIndex to 0, and provide 1-3 valid accepted phrasing/spelling variants in acceptedAnswers (array of strings).";
+      } else if (qType === "MatchFollowing") {
+        typeInstruction =
+          "The quiz MUST consist ONLY of Match the Following questions. Each question MUST include a concise prompt (e.g., 'Match each concept with its correct definition/formula') AND a 'pairs' array of EXACTLY 4 objects, each with { id: 'p1'|'p2'|'p3'|'p4', left: 'concise term/premise', right: 'concise matching definition/answer' }. Set options to [] and correctIndex to 0.";
+      } else {
+        typeInstruction =
+          "The quiz MUST consist ONLY of standard Multiple-Choice Questions (MCQ) with EXACTLY 4 distinct options and a valid correctIndex (0, 1, 2, or 3).";
+      }
+
+      const focusInstruction =
+        Array.isArray(focusTopics) && focusTopics.length > 0
+          ? `Prioritize covering these analyzed topics: ${focusTopics.join(", ")}.`
+          : "";
+
+      const systemInstruction = `You are an expert educator and academic assessment designer.
+Generate EXACTLY ${questionCount} high-quality practice questions at "${diffLevel}" difficulty grounded strictly in the provided study materials and/or selected internet research sources.
+YOU MUST RETURN EXACTLY ${questionCount} QUESTIONS.
+
+${typeInstruction}
+${focusInstruction}
+
+Difficulty calibration for "${diffLevel}":
+- Easy: Direct recall of core definitions, facts, and main ideas.
+- Medium: Conceptual understanding, comparisons, and applied examples.
+- Hard: Multi-step reasoning, subtle distinctions, edge cases, and deep synthesis.
+
+Each question MUST include:
+1. "question": Clear, well-written prompt.
+2. "options": Array of choices (4 for MCQ, 2 ['True','False'] for TF, 1 exact answer string for FillBlank, [] for MatchFollowing).
+3. "correctIndex": Valid integer index into options (0 for FillBlank/MatchFollowing).
+4. "acceptedAnswers": (Required for FillBlank) Array of valid short answer variants.
+5. "pairs": (Required for MatchFollowing) Array of 4 { id, left, right } objects.
+6. "explanation": Detailed, encouraging educational explanation of why the answer is right and how concepts connect.
+7. "difficulty": "${diffLevel}"
+8. "type": "${qType}"
+9. "topic": Concise subtopic label.
+
+Return ONLY valid JSON matching the requested schema.`;
+
+      const apiKey = getGeminiApiKey();
+      if (!apiKey) {
+        return res.json({
+          questions: buildFallbackQuizQuestions(files, notes, internetSources, internetTopic, questionCount, diffLevel, qType)
+        });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        apiVersion: "v1beta",
+        httpOptions: {
+          headers: { "User-Agent": "aistudio-build" }
+        }
+      });
+
+      let contextText = "";
+      if (hasFiles || hasNotes) {
+        const ragQuery = `Generate a ${diffLevel} difficulty ${qType} quiz with ${questionCount} questions covering key concepts, definitions, formulas, and examples.`;
+        contextText = await performAdvancedRAG(ai, ragQuery, files, notes, 15, workspaceId, req.headers.authorization);
+      }
+
+      const directFilesContext = (Array.isArray(files) ? files : [])
+        .slice(0, 6)
+        .map((f: any, idx: number) => {
+          const textBody = String(f.transcription || f.contentText || f.content_text || f.summary || "").trim();
+          const hl = Array.isArray(f.highlights) ? f.highlights.join("; ") : "";
+          return `File #${idx + 1}: "${f.name || "Uploaded File"}"\n${textBody.slice(0, 8000)}${hl ? `\nHighlights: ${hl}` : ""}`;
+        })
+        .join("\n\n");
+
+      const directNotesContext = (Array.isArray(notes) ? notes : [])
+        .slice(0, 6)
+        .map((n: any, idx: number) => `Note #${idx + 1}: "${n.title || "Study Note"}"\n${String(n.content || "").replace(/<[^>]+>/g, " ").slice(0, 4000)}`)
+        .join("\n\n");
+
+      const internetSourcesContext = (Array.isArray(internetSources) ? internetSources : [])
+        .slice(0, 6)
+        .map((src: any, idx: number) => {
+          const body = String(src.transcription || src.summary || "").trim();
+          const hl = Array.isArray(src.highlights) ? src.highlights.join("; ") : "";
+          return `Internet Source #${idx + 1}: "${src.name || src.title || internetTopic || "Web Source"}" (${src.domain || src.url || "Web"})\n${body.slice(0, 7000)}${hl ? `\nKey Takeaways: ${hl}` : ""}`;
+        })
+        .join("\n\n");
+
+      const sourceBlock = [
+        internetTopic ? `Internet Topic Selected: "${internetTopic}"` : "",
+        internetSourcesContext,
+        directFilesContext,
+        directNotesContext,
+        contextText
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+
+      const prompt = `Generate EXACTLY ${questionCount} quiz questions of difficulty "${diffLevel}" and type "${qType}" strictly grounded in the materials/topic below:\n\n${sourceBlock}`;
+
+      const quizParts: any[] = [{ text: prompt }];
+      for (const f of (Array.isArray(files) ? files : []).slice(0, 3)) {
+        let rawB64 = String(f.fileBase64 || "");
+        let mime = String(f.fileMimeType || "");
+        if (!rawB64 && typeof f.url === "string" && f.url.startsWith("data:") && f.url.includes(";base64,")) {
+          const m = f.url.match(/^data:([^;]+);base64,(.+)$/);
+          if (m) {
+            mime = mime || m[1];
+            rawB64 = m[2];
+          }
+        }
+        if (rawB64.includes(";base64,")) rawB64 = rawB64.split(";base64,")[1];
+        if (rawB64 && rawB64.length > 20 && rawB64.length < 10_000_000 && (mime.startsWith("image/") || mime === "application/pdf")) {
+          quizParts.push({ inlineData: { data: rawB64, mimeType: mime } });
+        }
+      }
+
+      const useSearchTool = hasInternet && (!internetSourcesContext || internetSourcesContext.length < 150);
+      const quizConfig: Record<string, any> = {
+        systemInstruction,
+        temperature: 0.4,
+        ...(useSearchTool ? { tools: [{ googleSearch: {} }] } : { responseMimeType: "application/json" }),
+        ...(!useSearchTool
+          ? {
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  questions: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        question: { type: Type.STRING },
+                        options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        correctIndex: { type: Type.INTEGER },
+                        acceptedAnswers: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        pairs: {
+                          type: Type.ARRAY,
+                          items: {
+                            type: Type.OBJECT,
+                            properties: {
+                              id: { type: Type.STRING },
+                              left: { type: Type.STRING },
+                              right: { type: Type.STRING }
+                            },
+                            required: ["left", "right"]
+                          }
+                        },
+                        explanation: { type: Type.STRING },
+                        difficulty: { type: Type.STRING },
+                        type: { type: Type.STRING },
+                        topic: { type: Type.STRING }
+                      },
+                      required: ["question", "options", "correctIndex", "explanation", "difficulty", "type"]
+                    }
+                  }
+                },
+                required: ["questions"]
+              }
+            }
+          : {})
+      };
+
+      const { response, modelUsed } = await generateContentWithModelFailover(ai, {
+        contents: quizParts,
+        preferredModels: ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"],
+        config: quizConfig,
+        timeoutMs: 22000,
+        maxPasses: 2,
+        label: "GenerateQuiz"
       });
 
       if (response && response.text) {
         let text = response.text.trim();
         if (text.startsWith("```")) {
-           text = text.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/, "").trim();
+          text = text.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/, "").trim();
         }
-        const data = JSON.parse(text);
-        if (data && data.questions) {
-          let quizQuestions = data.questions;
-          if (quizQuestions.length > questionCount) {
-             quizQuestions = quizQuestions.slice(0, questionCount);
-          }
-          
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        const data = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+        if (data && Array.isArray(data.questions) && data.questions.length > 0) {
+          let quizQuestions = data.questions.slice(0, questionCount);
+
           const quizWithIds = quizQuestions.map((q: any, i: number) => {
-            let safeOptions = q.options;
-            
+            let safeOptions = Array.isArray(q.options) ? q.options.map((o: any) => String(o)) : [];
+            let safeCorrectIndex = Number.isInteger(q.correctIndex) ? q.correctIndex : 0;
+            let safePairs = Array.isArray(q.pairs)
+              ? q.pairs
+                  .filter((p: any) => p && p.left && p.right)
+                  .map((p: any, pIdx: number) => ({
+                    id: String(p.id || `p-${i}-${pIdx}`),
+                    left: String(p.left).trim(),
+                    right: String(p.right).trim()
+                  }))
+              : undefined;
+
             if (qType === "TF") {
-               safeOptions = ["True", "False"];
-               if (q.correctIndex !== 0 && q.correctIndex !== 1) {
-                  q.correctIndex = 0;
-               }
+              safeOptions = ["True", "False"];
+              if (safeCorrectIndex !== 0 && safeCorrectIndex !== 1) {
+                safeCorrectIndex = 0;
+              }
+            } else if (qType === "FillBlank") {
+              const primaryAns = String(safeOptions[0] || q.acceptedAnswers?.[0] || "Answer").trim();
+              safeOptions = [primaryAns];
+              safeCorrectIndex = 0;
+            } else if (qType === "MatchFollowing") {
+              if (!safePairs || safePairs.length < 2) {
+                const fallbackPairs = buildFallbackQuizQuestions(files, notes, internetSources, internetTopic, 1, diffLevel, "MatchFollowing")[0].pairs;
+                safePairs = fallbackPairs;
+              }
+              safeOptions = [];
+              safeCorrectIndex = 0;
+            } else {
+              while (safeOptions.length < 4) {
+                safeOptions.push(`Option ${safeOptions.length + 1}`);
+              }
+              safeOptions = safeOptions.slice(0, 4);
+              if (safeCorrectIndex < 0 || safeCorrectIndex >= safeOptions.length) {
+                safeCorrectIndex = 0;
+              }
             }
-            
+
             return {
               id: `ai-quiz-${Date.now()}-${i}`,
-              ...q,
+              question: String(q.question || "Review question"),
               options: safeOptions,
+              correctIndex: safeCorrectIndex,
+              acceptedAnswers:
+                qType === "FillBlank"
+                  ? Array.from(
+                      new Set(
+                        [
+                          safeOptions[0],
+                          ...(Array.isArray(q.acceptedAnswers) ? q.acceptedAnswers.map((a: any) => String(a).trim()) : [])
+                        ].filter(Boolean)
+                      )
+                    )
+                  : undefined,
+              pairs: qType === "MatchFollowing" ? safePairs : undefined,
+              explanation: String(q.explanation || "Review the source material for full details."),
               difficulty: diffLevel,
-              type: qType
+              type: qType,
+              topic: q.topic ? String(q.topic) : internetTopic || undefined
             };
           });
-          res.json({ questions: quizWithIds });
-        } else {
-          throw new Error("Invalid response schema from Gemini API.");
+
+          return res.json({ questions: quizWithIds, modelUsed });
         }
-      } else {
-        throw new Error("No response text received from Gemini API.");
       }
+
+      throw new Error("Invalid quiz payload returned");
     } catch (error: any) {
-      console.error("Error in /api/generate-quiz:", error);
-      res.status(500).json({
-        error: error?.message || "Failed to generate quiz from your uploaded study materials. Please try again.",
-        details: error?.message
+      console.warn("[Generate Quiz] Switching to resilient local quiz synthesis:", summarizeModelError(error));
+      const {
+        notes = [],
+        files = [],
+        count,
+        difficulty,
+        questionType,
+        internetTopic = "",
+        internetSources = []
+      } = req.body || {};
+      const questionCount = Math.min(25, Math.max(1, Number(count) || 5));
+      const diffLevel = difficulty === "Easy" || difficulty === "Hard" ? difficulty : "Medium";
+      const rawType = String(questionType || "MCQ");
+      const qType = rawType === "TF" ? "TF" : rawType === "FillBlank" ? "FillBlank" : rawType === "MatchFollowing" ? "MatchFollowing" : "MCQ";
+      return res.json({
+        questions: buildFallbackQuizQuestions(files, notes, internetSources, internetTopic, questionCount, diffLevel, qType),
+        modelUsed: "StudyWeb Knowledge Engine"
       });
     }
   });
 
-  // API Route: AI-driven explanations for incorrect quiz answers using Gemini
+  // API Route: AI-driven explanations for incorrect quiz answers using Gemini with multi-model failover
   app.post("/api/explain-incorrect", async (req, res) => {
     const { incorrectQuestions } = req.body || {};
     try {
@@ -4590,12 +5101,11 @@ Strictly return a JSON object containing a "questions" array matching the reques
         return;
       }
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
-        console.warn("GEMINI_API_KEY not configured. Using high-quality local generation fallback for explaining incorrect answers.");
+      const apiKey = getGeminiApiKey();
+      if (!apiKey) {
         const localExplanations = incorrectQuestions.map((q: any) => ({
           question: q.question,
-          explanation: `**Local tutoring insight:** The correct answer is **${q.correctAns}**. You selected **${q.userAns}**. \n\nThis core concept revolves around key academic foundations. Understanding the difference between these options helps clarify knowledge gaps. ${q.explanation || 'Review this material in your study notes to reinforce retention.'}`
+          explanation: `The correct answer is **${q.correctAns}**. You selected **${q.userAns}**. ${q.explanation || "Review this concept in your study notes to reinforce retention."}`
         }));
         res.json({ explanations: localExplanations });
         return;
@@ -4605,34 +5115,34 @@ Strictly return a JSON object containing a "questions" array matching the reques
         apiKey,
         apiVersion: "v1beta",
         httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build",
-          }
+          headers: { "User-Agent": "aistudio-build" }
         }
       });
 
-      const questionsPrompt = incorrectQuestions.map((q: any, i: number) => {
-        return `Question ${i + 1}: ${q.question}
+      const questionsPrompt = incorrectQuestions
+        .map((q: any, i: number) => {
+          return `Question ${i + 1}: ${q.question}
 Options: ${q.options ? q.options.join(", ") : "N/A"}
 Student Selected: ${q.userAns}
 Correct Answer: ${q.correctAns}
 Short static explanation: ${q.explanation || "None"}`;
-      }).join("\n\n---\n\n");
+        })
+        .join("\n\n---\n\n");
 
       const systemInstruction = `You are an elite academic tutor.
-Your task is to analyze the student's incorrect answers from a quiz and provide a highly educational, clear, and encouraging explanation for each question, explaining the underlying concept in depth.
-For each incorrect answer in the array, you must:
-1. Explain the underlying scientific or academic concept in simple, engaging terms.
-2. Clearly explain why the correct answer is correct and why the student's chosen answer was incorrect or represents a common misconception.
-3. Keep the tone warm, encouraging, and educational, helping the student learn from the mistake.
-4. Format your explanation using elegant Markdown (using bold text, lists, or headers where appropriate).`;
+Analyze the student's incorrect quiz answers and provide a clear, encouraging explanation for each question:
+1. Explain the underlying concept in intuitive terms.
+2. Clarify why the correct answer is right and address the misconception behind the student's answer.
+3. Format cleanly using Markdown.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+      const { response } = await generateContentWithModelFailover(ai, {
         contents: `Explain the following incorrect quiz answers to help the student learn the underlying concepts:\n\n${questionsPrompt}`,
+        preferredModels: ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"],
+        timeoutMs: 16000,
+        label: "ExplainIncorrect",
         config: {
           systemInstruction,
-          temperature: 0.7,
+          temperature: 0.6,
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -4655,21 +5165,22 @@ For each incorrect answer in the array, you must:
       });
 
       if (response && response.text) {
-        const data = JSON.parse(response.text.trim());
+        let text = response.text.trim();
+        if (text.startsWith("```")) {
+          text = text.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/, "").trim();
+        }
+        const data = JSON.parse(text);
         if (data && data.explanations) {
           res.json({ explanations: data.explanations });
-        } else {
-          throw new Error("Invalid response schema from Gemini API.");
+          return;
         }
-      } else {
-        throw new Error("No response text received from Gemini API.");
       }
+      throw new Error("Invalid explanation payload");
     } catch (error: any) {
-      console.error("Error in /api/explain-incorrect:", error);
-      // Fallback
-      const fallbackExplanations = incorrectQuestions.map((q: any) => ({
+      console.warn("[Explain Incorrect] Using fallback explanations:", summarizeModelError(error));
+      const fallbackExplanations = (incorrectQuestions || []).map((q: any) => ({
         question: q.question,
-        explanation: `The correct answer is **${q.correctAns}**. You chose **${q.userAns}**. \n\n*Recall:* ${q.explanation || 'Review this material in your study notes to reinforce retention.'}`
+        explanation: `The correct answer is **${q.correctAns}**. You chose **${q.userAns}**. \n\n*Recall:* ${q.explanation || "Review this material in your study notes to reinforce retention."}`
       }));
       res.json({ explanations: fallbackExplanations });
     }
@@ -5251,7 +5762,11 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
   ]
 }`;
 
-        const candidateModels = ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"];
+        const candidateModels = getAvailableCandidateModels([
+          "gemini-4-hydrogen",
+          "gemini-3.1-flash-lite",
+          "gemini-3-flash-preview"
+        ]);
 
         let lastErr: any = null;
         for (const model of candidateModels) {
@@ -5319,8 +5834,12 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
                   : [],
               researchBrief: parsed.researchBrief || null
             };
-          } catch (err) {
+          } catch (err: any) {
             lastErr = err;
+            if (isTransientOrUnavailableModelError(err)) {
+              recordModelQuotaCooldown(model, err);
+            }
+            console.warn(`[WebSearch Grounding] Switching from ${model}: ${summarizeModelError(err)}`);
           }
         }
         throw lastErr || new Error("Gemini grounded research failed");

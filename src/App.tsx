@@ -94,8 +94,10 @@ import { StreakCelebrationModal } from './components/Dashboard/StreakCelebration
 import WorkspaceSelector from './components/Dashboard/WorkspaceSelector';
 import WorkspaceContainer from './components/Dashboard/WorkspaceContainer';
 import WorkspaceChat from './components/Dashboard/WorkspaceChat';
+import QuizCenterView from './components/Dashboard/QuizCenterView';
 import CameraNoteScannerModal from './components/Dashboard/CameraNoteScannerModal';
 import ToastContainer from './components/ToastContainer';
+import { PendingQuizIntent } from './utils/quizHistoryStorage';
 
 const StudyPlannerView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.StudyPlannerView })));
 const SubjectsView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.SubjectsView })));
@@ -174,12 +176,25 @@ export default function App() {
 
   const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState<boolean>(true);
   const [hasVisitedAITutor, setHasVisitedAITutor] = useState<boolean>(() => activeTab === 'ai-tutor');
+  const [pendingQuizIntent, setPendingQuizIntent] = useState<PendingQuizIntent | null>(null);
 
   useEffect(() => {
     if (activeTab === 'ai-tutor') {
       setHasVisitedAITutor(true);
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    const handleOpenQuizzesIntent = (e: Event) => {
+      const customEvent = e as CustomEvent<PendingQuizIntent>;
+      if (customEvent.detail) {
+        setPendingQuizIntent(customEvent.detail);
+      }
+      setActiveTab('quiz-center');
+    };
+    window.addEventListener('studyweb-open-quizzes-intent', handleOpenQuizzesIntent);
+    return () => window.removeEventListener('studyweb-open-quizzes-intent', handleOpenQuizzesIntent);
+  }, [setActiveTab]);
 
   // Workspace context handles persistance, but we still need to manage workspaces array locally.
   const handleUpdateWorkspace = (updated: Workspace) => {
@@ -721,7 +736,7 @@ export default function App() {
   // Helper to render active workspace tabs
   const renderDashboardContent = () => {
     const isAITutorTab = activeTab === 'ai-tutor';
-    const isOtherWorkspaceTab = ['workspaces', 'notes', 'flashcards', 'quiz-center'].includes(activeTab);
+    const isOtherWorkspaceTab = ['workspaces', 'notes', 'flashcards'].includes(activeTab);
     const allUserFiles = workspaces.flatMap(w => w.files || []);
     const allUserNotes = workspaces.flatMap(w => w.notes || []);
     const fallbackGeneralWorkspace: Workspace = {
@@ -759,10 +774,10 @@ export default function App() {
         : null);
 
     return (
-      <div className={`w-full ${isAITutorTab ? 'h-full flex-1 flex flex-col min-h-0' : 'h-full'} relative`}>
+      <div className={`w-full min-w-0 ${isAITutorTab ? 'h-full flex-1 flex flex-col min-h-0' : ''} relative`}>
         {/* Dedicated Persistent AI Tutor Viewport: mounted on demand and kept alive in background */}
         {(isAITutorTab || hasVisitedAITutor) && (
-          <div className={`w-full ${isAITutorTab ? 'h-full flex-1 flex flex-col min-h-0' : 'hidden'}`}>
+          <div className={`w-full min-w-0 ${isAITutorTab ? 'h-full flex-1 flex flex-col min-h-0' : 'hidden'}`}>
             <WorkspaceContainer 
               workspace={tutorWorkspace} 
               workspaces={workspaces}
@@ -777,7 +792,7 @@ export default function App() {
 
         {/* Other Workspace Tabs (Overview, Notes, Flashcards, Quiz Center, Workspace Selector) */}
         {isOtherWorkspaceTab && (
-          <div className="block">
+          <div className="w-full min-w-0">
             {targetWorkspace ? (
               <WorkspaceContainer 
                 workspace={targetWorkspace} 
@@ -792,8 +807,7 @@ export default function App() {
                 initialTab={
                   activeTab === 'workspaces' ? (tourWorkspaceSubTab || 'overview') : 
                   activeTab === 'notes' ? 'notes' : 
-                  activeTab === 'flashcards' ? 'flashcards' : 
-                  activeTab === 'quiz-center' ? 'quiz' : 'overview'
+                  activeTab === 'flashcards' ? 'flashcards' : 'overview'
                 }
               />
             ) : (
@@ -822,6 +836,16 @@ export default function App() {
             workspaces={workspaces} 
             activeWorkspace={activeWorkspace} 
             isLoading={isLoadingWorkspaces}
+          />
+        )}
+        {activeTab === 'quiz-center' && (
+          <QuizCenterView
+            workspaces={workspaces}
+            activeWorkspace={activeWorkspace}
+            onSelectWorkspace={handleSelectWorkspace}
+            onUpdateWorkspace={handleUpdateWorkspace}
+            pendingQuizIntent={pendingQuizIntent}
+            onClearPendingQuizIntent={() => setPendingQuizIntent(null)}
           />
         )}
         {activeTab === 'profile' && <ProfileSettingsHub />}
@@ -881,8 +905,8 @@ export default function App() {
           />
 
           {/* Active Workspace Viewport */}
-          <main id="workspace-main-content" className={`flex-1 min-w-0 w-full h-[calc(100dvh-3.5rem)] ${activeTab === 'ai-tutor' ? 'overflow-hidden p-0 md:p-6 pb-[calc(4rem+env(safe-area-inset-bottom,0px))] md:pb-6 flex flex-col' : 'overflow-y-auto overflow-x-hidden p-3 sm:p-5 md:p-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-6'}`}>
-            <div className={`${activeTab === 'ai-tutor' ? 'h-full flex-1 flex flex-col min-h-0' : ''} w-full ${isFocusMode ? 'max-w-none' : 'max-w-7xl mx-auto'}`}>
+          <main id="workspace-main-content" className={`flex-1 min-w-0 min-h-0 w-full ${activeTab === 'ai-tutor' ? 'overflow-hidden p-0 md:p-6 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-6 flex flex-col' : 'overflow-y-auto overflow-x-hidden px-3 pt-3 sm:p-5 md:p-6 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] md:pb-6'}`}>
+            <div className={`${activeTab === 'ai-tutor' ? 'h-full flex-1 flex flex-col min-h-0' : ''} w-full min-w-0 ${isFocusMode ? 'max-w-none' : 'max-w-7xl mx-auto'}`}>
               {renderDashboardContent()}
             </div>
           </main>

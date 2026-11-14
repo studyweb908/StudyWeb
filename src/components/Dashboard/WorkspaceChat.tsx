@@ -43,6 +43,105 @@ import {
   prepareTextForNaturalSpeech,
   selectBestBrowserNaturalVoice
 } from '../../utils/naturalTts';
+import { PendingQuizIntent } from '../../utils/quizHistoryStorage';
+
+function parseQuizNavigationIntent(
+  promptText: string,
+  recentMessages: Array<{ sender: 'user' | 'ai'; text: string; originalQuery?: string; isError?: boolean }>,
+  activeWorkspaceId: string
+): PendingQuizIntent | null {
+  const lower = promptText.toLowerCase();
+  const asksToOpenQuizzes =
+    /\b(quizzes?\s+(section|tab|page|center|hub|area)|go\s+(to|into)\s+(the\s+)?quizzes?|open\s+(the\s+)?quizzes?|take\s+me\s+to\s+(the\s+)?quizzes?)\b/i.test(lower) ||
+    (/\b(create|generate|make|build)\b/i.test(lower) &&
+      /\bquiz(zes)?\b/i.test(lower) &&
+      (/\b(internet|online|web|search|fill\s+in\s+the\s+blanks?|match\s+the\s+following)\b/i.test(lower) ||
+        /\bin\s+(the\s+)?quiz(zes)?\b/i.test(lower)));
+
+  if (!asksToOpenQuizzes) return null;
+
+  let quizType: PendingQuizIntent['quizType'] = 'MCQ';
+  if (/\b(match\s+the\s+following|matching)\b/i.test(lower)) {
+    quizType = 'MatchFollowing';
+  } else if (/\b(fill\s+in\s+the\s+blanks?|fill\s+blanks?|blanks)\b/i.test(lower)) {
+    quizType = 'FillBlank';
+  } else if (/\b(true\s*(?:or|\/)\s*false|t\/f)\b/i.test(lower)) {
+    quizType = 'TF';
+  }
+
+  let difficulty: PendingQuizIntent['difficulty'] = 'Medium';
+  if (/\b(hard|difficult|challenging|advanced)\b/i.test(lower)) {
+    difficulty = 'Hard';
+  } else if (/\b(easy|simple|basic|beginner)\b/i.test(lower)) {
+    difficulty = 'Easy';
+  }
+
+  const countMatch = lower.match(/\b(\d{1,2})\s*(?:questions?|qs|mcqs?|quizzes?|items?)\b/i) ||
+    lower.match(/\b(?:of|with)\s*(\d{1,2})\b/i);
+  const count = countMatch ? Math.min(25, Math.max(1, parseInt(countMatch[1], 10))) : 5;
+
+  const mentionsUploaded = /\b(uploaded|my\s+files?|my\s+notes?|workspace|documents?|pdfs?)\b/i.test(lower);
+  const mentionsInternet = /\b(internet|online|web|search)\b/i.test(lower);
+
+  // Extract explicit topic from prompt
+  let topic = '';
+  const searchMatch = promptText.match(/(?:search(?:\s+for)?|look\s+up|find)\s+["']?([^"']+?)["']?(?:\s+(?:and|then|from|on|in|to)\b|$)/i);
+  const topicPrepMatch = promptText.match(/(?:about|on|regarding|from\s+(?:the\s+)?(?:internet\s+(?:about|on)\s+)?|topic(?:\s+of)?)\s+["']?([a-z0-9][^,.!?;]{2,70})["']?(?:$|[,.!?;])/i);
+
+  if (searchMatch && searchMatch[1]) {
+    topic = searchMatch[1]
+      .replace(/\b(the\s+internet|online|web|resources?|for|me|a|quiz|quizzes|section)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  if ((!topic || topic.length < 2) && topicPrepMatch && topicPrepMatch[1]) {
+    const candidate = topicPrepMatch[1]
+      .replace(/\b(the\s+quizzes?\s+section|quizzes?\s+section|the\s+internet|online|web|my\s+uploaded\s+materials?|uploaded\s+files?|that\s+very\s+topic|this\s+topic|that\s+topic|it|this|that)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (candidate.length >= 2) topic = candidate;
+  }
+
+  // Resolve contextual topic from recent chat turns if user said "that topic" / "what we just searched"
+  const isGenericPronoun = !topic || /^(this|that|it|same|above|previous|topic)$/i.test(topic);
+  if (isGenericPronoun && !mentionsUploaded) {
+    const reversed = [...recentMessages].reverse();
+    for (const m of reversed) {
+      if (m.isError) continue;
+      if (m.sender === 'user' && m.text && m.text.length > 3) {
+        const cleaned = m.text
+          .replace(/^(what\s+is|explain|tell\s+me\s+about|search(?:\s+for)?|research)\s+/i, '')
+          .replace(/[?!.]+$/, '')
+          .trim();
+        if (cleaned && !/quizzes?\s+section/i.test(cleaned)) {
+          topic = cleaned.slice(0, 80);
+          break;
+        }
+      }
+      if (m.originalQuery) {
+        topic = m.originalQuery.slice(0, 80);
+        break;
+      }
+    }
+  }
+
+  const sourceType: 'uploaded' | 'internet' =
+    mentionsUploaded && !mentionsInternet && !topic
+      ? 'uploaded'
+      : mentionsInternet || Boolean(topic)
+      ? 'internet'
+      : 'uploaded';
+
+  return {
+    sourceType,
+    topic: topic || undefined,
+    workspaceId: activeWorkspaceId,
+    quizType,
+    count,
+    difficulty,
+    autoStart: true
+  };
+}
 
 export type TutorPersona = string;
 
@@ -1672,6 +1771,34 @@ export default function WorkspaceChat({
     setMessages(prev => [...prev, userMsg]);
     setInputValue('');
     setAttachedDrafts([]); // Clear attachment queue
+
+    // Check if user requested opening the Quizzes section to auto-create a quiz
+    const quizIntent = parseQuizNavigationIntent(userMsgText, messages, workspace.id);
+    if (quizIntent && !sendOptions?.allowOutsideResearch && currentDrafts.length === 0) {
+      const typeDisplay =
+        quizIntent.quizType === 'FillBlank'
+          ? 'Fill in the Blanks'
+          : quizIntent.quizType === 'MatchFollowing'
+          ? 'Match the Following'
+          : quizIntent.quizType === 'TF'
+          ? 'True / False'
+          : 'Multiple Choice';
+      const targetDesc = quizIntent.topic
+        ? `from internet resources on **${quizIntent.topic}**`
+        : `from your uploaded materials in **${workspace.name}**`;
+      const confirmMsg: Message = {
+        id: `msg-ai-quiz-nav-${Date.now()}`,
+        sender: 'ai',
+        text: `Opening the **Quizzes** section now to automatically create a **${quizIntent.count}-question ${quizIntent.difficulty} ${typeDisplay}** quiz ${targetDesc}!`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setMessages(prev => [...prev, confirmMsg]);
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('studyweb-open-quizzes-intent', { detail: quizIntent }));
+      }, 350);
+      return;
+    }
+
     setIsThinking(true);
 
     // Record real-time user activity for asking AI Tutor
@@ -2007,7 +2134,7 @@ export default function WorkspaceChat({
       <header className="px-2.5 sm:px-6 py-2 sm:py-3 border-b border-slate-200/80 dark:border-slate-800/80 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md flex items-center justify-between gap-1.5 sm:gap-2 shrink-0 z-20">
         
         {/* Left: Workspace Logo & AI Tutor Branding */}
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
           {renderWorkspaceLogo('w-7 h-7 sm:w-8.5 sm:h-8.5', 'text-base sm:text-lg')}
 
           <div className="min-w-0">
@@ -2330,11 +2457,12 @@ export default function WorkspaceChat({
           {/* Clear Chat Button */}
           <button
             onClick={handleResetChat}
-            className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 dark:bg-slate-850 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200/80 dark:border-slate-750/80 hover:border-rose-200 dark:hover:border-rose-900/50 active:scale-95 shadow-2xs"
+            className="px-2 sm:px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 dark:bg-slate-850 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200/80 dark:border-slate-750/80 hover:border-rose-200 dark:hover:border-rose-900/50 active:scale-95 shadow-2xs whitespace-nowrap shrink-0"
             title="Clear current conversation history while keeping workspace open"
           >
-            <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-            <span className="inline">Clear Chat</span>
+            <Trash2 className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+            <span className="hidden sm:inline">Clear Chat</span>
+            <span className="sm:hidden">Clear</span>
           </button>
         </div>
       </header>
@@ -2802,7 +2930,7 @@ export default function WorkspaceChat({
 
           {/* Inline YouTube / Web Link Analyzer Bar */}
           {showLinkInput && (
-            <div className="flex items-center gap-2 p-2 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/70">
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 p-2 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/70">
               <Link2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400 ml-1 shrink-0" />
               <input
                 type="url"

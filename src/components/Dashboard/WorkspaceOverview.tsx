@@ -190,11 +190,11 @@ export default function WorkspaceOverview({
   const isCustomLogo = workspace.emoji && (workspace.emoji.startsWith('data:') || workspace.emoji.startsWith('http'));
 
   return (
-    <div className="max-w-6xl mx-auto w-full space-y-6 text-left">
+    <div className="max-w-6xl mx-auto w-full min-w-0 space-y-4 sm:space-y-6 text-left">
       {/* ================= WORKSPACE HERO HEADER WITH BANNER BESIDE IT ================= */}
       <div
         data-tour="space-overview-header"
-        className="relative rounded-[24px] overflow-hidden bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-6 md:p-8 shadow-xs hover:shadow-md transition-all"
+        className="relative rounded-[20px] sm:rounded-[24px] overflow-hidden bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 sm:p-6 md:p-8 shadow-xs hover:shadow-md transition-all"
       >
         {/* Subtle Ambient Background Highlight */}
         <div className="absolute inset-0 bg-gradient-to-r from-slate-50/50 via-white to-transparent dark:from-slate-800/40 dark:via-slate-900 dark:to-transparent pointer-events-none" />
@@ -203,10 +203,10 @@ export default function WorkspaceOverview({
         <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-500/5 dark:bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
 
         {/* Selected Element: Unified White Horizontal Layout Container */}
-        <div className="relative z-10 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-6">
+        <div className="relative z-10 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-5 sm:gap-6">
           {/* Left Column: Workspace Identity & Actions */}
-          <div className="flex-1 space-y-4">
-            <div className="flex items-center gap-4">
+          <div className="flex-1 min-w-0 space-y-4">
+            <div className="flex items-center gap-3.5 sm:gap-4 min-w-0">
               {/* Interactive Workspace Logo */}
               <button
                 type="button"
@@ -227,8 +227,8 @@ export default function WorkspaceOverview({
                 </div>
               </button>
 
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
+              <div className="space-y-1 min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200/70 dark:border-indigo-800">
                     {workspace.subject || 'General'}
                   </span>
@@ -239,7 +239,7 @@ export default function WorkspaceOverview({
                       setEditInitialTab('general');
                       setShowEditModal(true);
                     }}
-                    className="text-xs font-bold text-slate-600 hover:text-indigo-600 dark:text-slate-300 dark:hover:text-indigo-400 flex items-center gap-1 transition-colors cursor-pointer"
+                    className="text-xs font-bold text-slate-600 hover:text-indigo-600 dark:text-slate-300 dark:hover:text-indigo-400 flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
                   >
                     <Edit3 className="w-3.5 h-3.5" />
                     <span>Customize</span>
@@ -251,7 +251,7 @@ export default function WorkspaceOverview({
                     setEditInitialTab('general');
                     setShowEditModal(true);
                   }}
-                  className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight leading-tight cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                  className="text-xl sm:text-2xl md:text-3xl font-black text-slate-900 dark:text-white tracking-tight leading-tight cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors break-words"
                   title="Click to edit name"
                 >
                   {workspace.name}
@@ -266,15 +266,15 @@ export default function WorkspaceOverview({
             )}
 
             {/* Cohesive Aligned Workspace Action Bar */}
-            <div className="pt-2">
+            <div className="pt-1 sm:pt-2">
               <div
                 data-tour="workspace-action-bar"
-                className="inline-flex flex-wrap sm:flex-nowrap items-center gap-2 p-1.5 rounded-2xl bg-slate-50/90 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/70"
+                className="grid grid-cols-2 sm:inline-flex sm:flex-wrap items-center gap-2 w-full sm:w-auto p-1.5 rounded-2xl bg-slate-50/90 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/70"
               >
                 <button
                   type="button"
                   onClick={onBack}
-                  className="h-10 px-4 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700 text-xs font-bold transition-all inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0 shadow-2xs cursor-pointer"
+                  className="w-full sm:w-auto h-10 px-3 sm:px-4 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700 text-xs font-bold transition-all inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 shadow-2xs cursor-pointer"
                 >
                   <Layers className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 shrink-0" />
                   <span>All Workspaces</span>
@@ -284,7 +284,7 @@ export default function WorkspaceOverview({
                   type="button"
                   data-tour="workspace-upload-btn"
                   onClick={() => setActiveWorkspaceTab('library')}
-                  className="h-10 px-4 rounded-xl bg-white dark:bg-slate-900 hover:bg-indigo-50/60 dark:hover:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/70 text-xs font-bold transition-all inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0 shadow-2xs cursor-pointer"
+                  className="w-full sm:w-auto h-10 px-3 sm:px-4 rounded-xl bg-white dark:bg-slate-900 hover:bg-indigo-50/60 dark:hover:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800/70 text-xs font-bold transition-all inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 shadow-2xs cursor-pointer"
                 >
                   <Upload className="w-3.5 h-3.5 shrink-0" />
                   <span>Upload Material</span>
@@ -293,7 +293,7 @@ export default function WorkspaceOverview({
                 <button
                   type="button"
                   onClick={() => setActiveWorkspaceTab('chat')}
-                  className="h-10 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0 shadow-xs shadow-indigo-600/20 cursor-pointer"
+                  className="w-full sm:w-auto h-10 px-3 sm:px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 shadow-xs shadow-indigo-600/20 cursor-pointer"
                 >
                   <Sparkles className="w-3.5 h-3.5 shrink-0" />
                   <span>AI Tutor</span>
@@ -303,7 +303,7 @@ export default function WorkspaceOverview({
                   type="button"
                   data-tour="workspace-export-btn"
                   onClick={handleExportAllUserData}
-                  className="h-10 px-4 rounded-xl bg-white dark:bg-slate-900 hover:bg-emerald-50/70 dark:hover:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/70 text-xs font-bold transition-all inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0 shadow-2xs cursor-pointer"
+                  className="w-full sm:w-auto h-10 px-3 sm:px-4 rounded-xl bg-white dark:bg-slate-900 hover:bg-emerald-50/70 dark:hover:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/70 text-xs font-bold transition-all inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 shadow-2xs cursor-pointer"
                   title="Export all of your uploaded materials in this workspace as a ZIP file"
                 >
                   <Download className="w-3.5 h-3.5 shrink-0" />
@@ -321,7 +321,7 @@ export default function WorkspaceOverview({
                       setShowDeleteConfirm(true);
                     }
                   }}
-                  className="h-10 px-3.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200/80 dark:border-rose-900/50 text-xs font-bold transition-all inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 shadow-2xs cursor-pointer"
+                  className="col-span-2 sm:col-span-1 w-full sm:w-auto h-10 px-3.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200/80 dark:border-rose-900/50 text-xs font-bold transition-all inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 shadow-2xs cursor-pointer"
                   title="Delete Workspace"
                 >
                   <Trash2 className="w-3.5 h-3.5 shrink-0" />
@@ -367,19 +367,19 @@ export default function WorkspaceOverview({
       </div>
 
       {/* ================= STATS (FULL CENTERED ROW) ================= */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {/* Stat 1: Resources */}
         <button
           type="button"
           onClick={() => setActiveWorkspaceTab('library')}
-          className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 rounded-2xl flex items-center gap-3.5 text-left hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors cursor-pointer"
+          className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-3.5 sm:p-5 rounded-2xl flex items-center gap-2.5 sm:gap-3.5 text-left hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors cursor-pointer min-w-0"
         >
-          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
-            <FileText className="w-5 h-5" />
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+            <FileText className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Resources</p>
-            <p className="text-lg font-black text-slate-900 dark:text-white leading-tight">{fileCount}</p>
+            <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Resources</p>
+            <p className="text-base sm:text-lg font-black text-slate-900 dark:text-white leading-tight tabular-nums">{fileCount}</p>
           </div>
         </button>
 
@@ -387,14 +387,14 @@ export default function WorkspaceOverview({
         <button
           type="button"
           onClick={() => setActiveWorkspaceTab('notes')}
-          className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 rounded-2xl flex items-center gap-3.5 text-left hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors cursor-pointer"
+          className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-3.5 sm:p-5 rounded-2xl flex items-center gap-2.5 sm:gap-3.5 text-left hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors cursor-pointer min-w-0"
         >
-          <div className="w-10 h-10 rounded-xl bg-violet-50 dark:bg-violet-950/40 border border-violet-100 dark:border-violet-900/30 flex items-center justify-center text-violet-600 dark:text-violet-400 shrink-0">
-            <BookOpen className="w-5 h-5" />
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-violet-50 dark:bg-violet-950/40 border border-violet-100 dark:border-violet-900/30 flex items-center justify-center text-violet-600 dark:text-violet-400 shrink-0">
+            <BookOpen className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Study Notes</p>
-            <p className="text-lg font-black text-slate-900 dark:text-white leading-tight">{noteCount}</p>
+            <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Study Notes</p>
+            <p className="text-base sm:text-lg font-black text-slate-900 dark:text-white leading-tight tabular-nums">{noteCount}</p>
           </div>
         </button>
 
@@ -402,14 +402,14 @@ export default function WorkspaceOverview({
         <button
           type="button"
           onClick={() => setActiveWorkspaceTab('flashcards')}
-          className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 rounded-2xl flex items-center gap-3.5 text-left hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors cursor-pointer"
+          className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-3.5 sm:p-5 rounded-2xl flex items-center gap-2.5 sm:gap-3.5 text-left hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors cursor-pointer min-w-0"
         >
-          <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
-            <Layers className="w-5 h-5" />
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+            <Layers className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Flashcards</p>
-            <p className="text-lg font-black text-slate-900 dark:text-white leading-tight">{cardCount}</p>
+            <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Flashcards</p>
+            <p className="text-base sm:text-lg font-black text-slate-900 dark:text-white leading-tight tabular-nums">{cardCount}</p>
           </div>
         </button>
 
@@ -417,26 +417,26 @@ export default function WorkspaceOverview({
         <button
           type="button"
           onClick={() => setActiveWorkspaceTab('quiz')}
-          className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-5 rounded-2xl flex items-center gap-3.5 text-left hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors cursor-pointer"
+          className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-3.5 sm:p-5 rounded-2xl flex items-center gap-2.5 sm:gap-3.5 text-left hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors cursor-pointer min-w-0"
         >
-          <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-100 dark:border-amber-900/30 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
-            <Award className="w-5 h-5" />
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-100 dark:border-amber-900/30 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
+            <Award className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Quizzes</p>
-            <p className="text-lg font-black text-slate-900 dark:text-white leading-tight">{quizCount}</p>
+            <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">Quizzes</p>
+            <p className="text-base sm:text-lg font-black text-slate-900 dark:text-white leading-tight tabular-nums">{quizCount}</p>
           </div>
         </button>
       </div>
 
 
       {/* ================= RECENT RESOURCES ================= */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-6 rounded-[24px]">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-black text-slate-900 dark:text-white tracking-tight text-lg">Recent Study Materials</h3>
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-4 sm:p-6 rounded-[20px] sm:rounded-[24px]">
+        <div className="flex items-center justify-between gap-2 mb-4">
+          <h3 className="font-black text-slate-900 dark:text-white tracking-tight text-base sm:text-lg truncate">Recent Study Materials</h3>
           <button 
             onClick={() => setActiveWorkspaceTab('library')}
-            className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-1 cursor-pointer transition-colors"
+            className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap shrink-0"
           >
             <span>View All</span>
             <ChevronRight className="w-3.5 h-3.5" />
@@ -459,8 +459,8 @@ export default function WorkspaceOverview({
         ) : (
           <div className="space-y-2">
             {[...files].sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime()).slice(0, 3).map((file, idx) => (
-              <div key={file.id || idx} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border border-transparent hover:border-slate-100 dark:hover:border-slate-700/50 group cursor-pointer" onClick={() => setPreviewFile(file)}>
-                <div className="flex items-center gap-3">
+              <div key={file.id || idx} className="flex items-center justify-between gap-2 p-2.5 sm:p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors border border-transparent hover:border-slate-100 dark:hover:border-slate-700/50 group cursor-pointer" onClick={() => setPreviewFile(file)}>
+                <div className="flex items-center gap-3 min-w-0 flex-1">
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
                     (file.type || '').toLowerCase().includes('pdf') ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-500' :
                     ((file.type || '').toLowerCase().includes('video') || (file.type || '').toLowerCase().includes('mp4')) ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-500' :
@@ -478,16 +478,16 @@ export default function WorkspaceOverview({
                      ((file.type || '').toLowerCase().includes('epub') || (file.type || '').toLowerCase().includes('book')) ? <BookOpen className="w-4 h-4" /> :
                      <FileText className="w-4 h-4" />}
                   </div>
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 line-clamp-1">{getNotebookLMDisplayTitle(file)}</h4>
-                    <div className="flex items-center gap-2 mt-0.5">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
                       <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{file.type}</span>
                       <span className="w-1 h-1 rounded-full bg-slate-200 dark:bg-slate-700" />
                       <span className="text-[10px] text-slate-400">{file.uploadDate}</span>
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1 sm:gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
                   {isUserUploadedFile(file) && (
                     <button
                       onClick={(e) => {
