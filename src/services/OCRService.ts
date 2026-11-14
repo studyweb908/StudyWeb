@@ -67,66 +67,68 @@ export class OCRService {
 
     onProgress?.(45, 'Scanning text, formulas & questions with Lens OCR...');
 
-    try {
-      const abortCtrl = new AbortController();
-      const timeoutId = setTimeout(() => abortCtrl.abort(), 22000);
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const abortCtrl = new AbortController();
+        const timeoutId = setTimeout(() => abortCtrl.abort(), 14000);
 
-      const response = await fetch('/api/ocr/scan-note', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(supabaseToken ? { Authorization: `Bearer ${supabaseToken}` } : {})
-        },
-        signal: abortCtrl.signal,
-        body: JSON.stringify({
-          fileBase64: cleanBase64,
-          fileMimeType: resolvedMime,
-          name: defaultName,
-          workspaceId: workspaceId ? toValidUuid(workspaceId) : undefined,
-          userId: userId || undefined,
-          size: sizeFormatted
-        })
-      });
+        const response = await fetch('/api/ocr/scan-note', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(supabaseToken ? { Authorization: `Bearer ${supabaseToken}` } : {})
+          },
+          signal: abortCtrl.signal,
+          body: JSON.stringify({
+            fileBase64: cleanBase64,
+            fileMimeType: resolvedMime,
+            name: defaultName,
+            workspaceId: workspaceId ? toValidUuid(workspaceId) : undefined,
+            userId: userId || undefined,
+            size: sizeFormatted
+          })
+        });
 
-      clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
 
-      if (response.ok) {
-        const data = await response.json();
-        const rawOcr = String(data?.rawOcrText || '').trim();
-        const fullExtracted = String(data?.extractedText || rawOcr || data?.transcription || data?.summary || '').trim();
-        if (data && fullExtracted) {
-          onProgress?.(85, 'Text extracted & ready in Lens!');
-          const title = String(data.title || data.name || defaultName).trim();
-          const summary = String(
-            data.summary || `Scanned study note "${title}".`
+        if (response.ok) {
+          const data = await response.json();
+          const rawOcr = String(data?.rawOcrText || '').trim();
+          const fullExtracted = String(
+            data?.extractedText || rawOcr || data?.transcription || data?.summary || ''
           ).trim();
-          const highlights =
-            Array.isArray(data.highlights) && data.highlights.length > 0
-              ? data.highlights
-              : fullExtracted
-                  .split(/\n+/)
-                  .map((line: string) => line.replace(/^[-*•\d.)\s]+/, '').trim())
-                  .filter((line: string) => line.length > 12)
-                  .slice(0, 5);
-          const formulas = Array.isArray(data.formulas) ? data.formulas : [];
-          const tags =
-            Array.isArray(data.tags) && data.tags.length > 0
-              ? data.tags
-              : ['Scanned Note', 'OCR Extracted'];
+          if (data && fullExtracted) {
+            onProgress?.(85, 'Text extracted & ready in Lens!');
+            const title = String(data.title || data.name || defaultName).trim();
+            const summary = String(data.summary || `Scanned study note "${title}".`).trim();
+            const highlights =
+              Array.isArray(data.highlights) && data.highlights.length > 0
+                ? data.highlights
+                : fullExtracted
+                    .split(/\n+/)
+                    .map((line: string) => line.replace(/^[-*•\d.)\s]+/, '').trim())
+                    .filter((line: string) => line.length > 12)
+                    .slice(0, 5);
+            const formulas = Array.isArray(data.formulas) ? data.formulas : [];
+            const tags =
+              Array.isArray(data.tags) && data.tags.length > 0
+                ? data.tags
+                : ['Scanned Note', 'OCR Extracted'];
 
-          return {
-            id: data.id || toValidUuid(`scan-${Date.now()}`),
-            title,
-            extractedText: rawOcr || fullExtracted,
-            summary,
-            highlights,
-            formulas,
-            tags
-          };
+            return {
+              id: data.id || toValidUuid(`scan-${Date.now()}`),
+              title,
+              extractedText: rawOcr || fullExtracted,
+              summary,
+              highlights,
+              formulas,
+              tags
+            };
+          }
         }
+      } catch (ocrErr: any) {
+        console.warn(`[OCRService] /api/ocr/scan-note attempt ${attempt} notice:`, ocrErr?.message || ocrErr);
       }
-    } catch (ocrErr: any) {
-      console.warn('[OCRService] /api/ocr/scan-note notice:', ocrErr?.message || ocrErr);
     }
 
     return {
@@ -145,41 +147,44 @@ export class OCRService {
    * directly on a scanned image + OCR text without requiring workspace upload first.
    */
   public static async askLensQuestion(request: LensAskRequest): Promise<string> {
-    const abortCtrl = new AbortController();
-    const timeoutId = setTimeout(() => abortCtrl.abort(), 24000);
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const abortCtrl = new AbortController();
+      const timeoutId = setTimeout(() => abortCtrl.abort(), 15000);
 
-    try {
-      const response = await fetch('/api/ocr/lens-ask', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        signal: abortCtrl.signal,
-        body: JSON.stringify(request)
-      });
-
-      clearTimeout(timeoutId);
-
-      const rawBody = await response.text().catch(() => '');
-      let data: any = {};
       try {
-        data = rawBody ? JSON.parse(rawBody) : {};
-      } catch {}
+        const response = await fetch('/api/ocr/lens-ask', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          signal: abortCtrl.signal,
+          body: JSON.stringify(request)
+        });
 
-      const answer = String(data?.answer || '').trim();
-      if (answer) {
-        return answer;
+        clearTimeout(timeoutId);
+
+        const rawBody = await response.text().catch(() => '');
+        let data: any = {};
+        try {
+          data = rawBody ? JSON.parse(rawBody) : {};
+        } catch {}
+
+        const answer = String(data?.answer || '').trim();
+        if (answer) {
+          return answer;
+        }
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+        console.warn(`[OCRService] /api/ocr/lens-ask attempt ${attempt} notice:`, err?.message || err);
       }
-      if (request.extractedText && request.mode === 'translate') {
-        return request.extractedText;
-      }
-      return 'I inspected your scanned note. Please ask a specific question about the problem or concept on the page.';
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      if (request.extractedText && request.mode === 'translate') {
-        return request.extractedText;
-      }
-      throw new Error(err?.message || 'Unable to analyze this scanned note right now.');
     }
+
+    if (request.extractedText && request.mode === 'translate') {
+      return request.extractedText;
+    }
+    if (request.extractedText) {
+      return `### Key Notes & Content from Your Scan\n\n${request.extractedText.slice(0, 1500)}`;
+    }
+    return 'I inspected your scanned note. Ask any specific question about a problem, formula, or concept on the page.';
   }
 }

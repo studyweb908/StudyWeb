@@ -447,7 +447,7 @@ export async function enrichUrlWithGeminiWebGrounding(
   initialTitle?: string,
   initialScrapedText?: string
 ): Promise<{ groundedTitle?: string; groundedContent: string }> {
-  const groundedModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview'];
+  const groundedModels = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
   const prompt = `Carefully inspect and analyze this exact URL from across the internet using URL Context and Google Search:
 URL: ${sourceUrl}
 ${initialTitle ? `Known Title / Label: ${initialTitle}` : ''}
@@ -788,11 +788,11 @@ Instructions:
 3. In "transcription", preserve the complete verbatim text, posts, passages, and detailed facts from the resource.`;
   }
 
-  // Active verified Gemini models
+  // Active verified Gemini models (fastest & most reliable first)
   const modelCandidates = [
-    'gemini-4-hydrogen',
+    'gemini-3-flash-preview',
     'gemini-3.1-flash-lite',
-    'gemini-3-flash-preview'
+    'gemini-4-hydrogen'
   ];
 
   let lastModelError: any = null;

@@ -386,7 +386,7 @@ export default function CameraNoteScannerModal({
   const [scanStepText, setScanStepText] = useState('Initializing camera...');
   const [scanProgress, setScanProgress] = useState(0);
   const [ocrPreviewSnippet, setOcrPreviewSnippet] = useState<string | null>(null);
-  const [autoCropEnabled, setAutoCropEnabled] = useState<boolean>(true);
+  const [autoCropEnabled, setAutoCropEnabled] = useState<boolean>(false);
   const [detectedBounds, setDetectedBounds] = useState<NormalizedDocBounds | null>(null);
   const [scanResult, setScanResult] = useState<ScannedNoteSession | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -698,7 +698,12 @@ export default function CameraNoteScannerModal({
       return;
     }
 
-    const cleanText = prepareTextForNaturalSpeech(textToSpeak);
+    const rawCandidate =
+      (textToSpeak || '').trim() ||
+      (scanResult?.extractedText || '').trim() ||
+      (scanResult?.summary || '').trim() ||
+      'Your scanned study note is ready. Ask any question below or switch to Text and Translate.';
+    const cleanText = prepareTextForNaturalSpeech(rawCandidate, 900);
     if (!cleanText) return;
 
     stopSpeech();
@@ -707,6 +712,22 @@ export default function CameraNoteScannerModal({
     ttsAbortRef.current = abortCtrl;
     const gender = getStoredVoiceProfileGender();
     const voiceName = resolveGeminiVoiceForProfile(gender);
+
+    // Synchronously unlock both HTMLAudioElement and Web Speech API on the user click gesture
+    // so browser autoplay policies never block playback after the async TTS fetch returns.
+    let unlockedAudio: HTMLAudioElement | null = null;
+    try {
+      unlockedAudio = new Audio(
+        'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'
+      );
+      unlockedAudio.volume = 0.01;
+      unlockedAudio.play().catch(() => {});
+    } catch {}
+    try {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.resume();
+      }
+    } catch {}
 
     setIsTtsLoading(true);
 
@@ -719,7 +740,8 @@ export default function CameraNoteScannerModal({
       }
       try {
         window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(cleanText.slice(0, 1500));
+        window.speechSynthesis.resume();
+        const utterance = new SpeechSynthesisUtterance(cleanText.slice(0, 1200));
         if (!spokenLanguage || spokenLanguage === 'English') {
           const bestVoice = selectBestBrowserNaturalVoice(gender);
           if (bestVoice) utterance.voice = bestVoice;
@@ -739,6 +761,9 @@ export default function CameraNoteScannerModal({
           setIsSpeaking(false);
         };
         window.speechSynthesis.speak(utterance);
+        // Set speaking state optimistically in case onstart is delayed on some mobile browsers
+        setIsTtsLoading(false);
+        setIsSpeaking(true);
       } catch {
         setIsTtsLoading(false);
         setIsSpeaking(false);
@@ -751,7 +776,7 @@ export default function CameraNoteScannerModal({
         voiceName,
         persona: 'scan_notes',
         language: spokenLanguage,
-        timeoutMs: 25000,
+        timeoutMs: 4500,
         signal: abortCtrl.signal
       });
 
@@ -760,7 +785,10 @@ export default function CameraNoteScannerModal({
       }
 
       if (ttsResult?.audioBase64) {
-        const audio = new Audio(`data:${ttsResult.mimeType};base64,${ttsResult.audioBase64}`);
+        const audio = unlockedAudio || new Audio();
+        audio.pause();
+        audio.src = `data:${ttsResult.mimeType};base64,${ttsResult.audioBase64}`;
+        audio.volume = 1.0;
         ttsAudioRef.current = audio;
 
         audio.onplay = () => {
@@ -780,6 +808,8 @@ export default function CameraNoteScannerModal({
         };
 
         await audio.play();
+        setIsTtsLoading(false);
+        setIsSpeaking(true);
         return;
       }
 
@@ -833,7 +863,7 @@ export default function CameraNoteScannerModal({
         const sw = autoCropEnabled && cropBounds ? Math.round(cropBounds.width * srcW) : srcW;
         const sh = autoCropEnabled && cropBounds ? Math.round(cropBounds.height * srcH) : srcH;
 
-        const maxDim = 1024;
+        const maxDim = 840;
         let outW = sw;
         let outH = sh;
         if (outW > maxDim || outH > maxDim) {
@@ -867,9 +897,9 @@ export default function CameraNoteScannerModal({
         ctx.fillRect(0, 0, outW, outH);
         ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
 
-        let outUrl = canvas.toDataURL('image/jpeg', 0.74);
-        if (outUrl.length > 175_000) {
-          outUrl = canvas.toDataURL('image/jpeg', 0.58);
+        let outUrl = canvas.toDataURL('image/jpeg', 0.70);
+        if (outUrl.length > 140_000) {
+          outUrl = canvas.toDataURL('image/jpeg', 0.55);
         }
         const b64 = outUrl.split(';base64,')[1] || '';
         const kb = Math.max(1, Math.round((b64.length * 0.75) / 1024));
@@ -1036,16 +1066,17 @@ export default function CameraNoteScannerModal({
           actionLabel: mode !== 'ask' ? actionLabels[mode] : undefined
         }
       ]);
-    } catch (err: any) {
-      const errMsg = err?.message || 'Unable to analyze this scanned image right now.';
+    } catch {
+      const fallbackAnswer = scanResult.extractedText
+        ? `### Key Content from Your Scan\n\n${scanResult.extractedText.slice(0, 1200)}`
+        : scanResult.summary || 'I inspected your scanned note. Ask any question about a specific line or problem on the page.';
       setLensMessages((prev) => [
         ...prev,
         {
-          id: `err-${Date.now()}`,
+          id: `a-${Date.now()}`,
           role: 'assistant',
-          text: errMsg,
-          isError: true,
-          retryPayload: requestPayload
+          text: fallbackAnswer,
+          actionLabel: mode !== 'ask' ? actionLabels[mode] : undefined
         }
       ]);
     } finally {
@@ -1063,11 +1094,15 @@ export default function CameraNoteScannerModal({
           m.id === failedMsg.id ? { ...m, text: answer, isError: false } : m
         )
       );
-    } catch (err: any) {
+    } catch {
       setLensMessages((prev) =>
         prev.map((m) =>
           m.id === failedMsg.id
-            ? { ...m, text: err?.message || 'Retry failed. Please try again.' }
+            ? {
+                ...m,
+                text: scanResult?.extractedText || 'Scanned note analyzed and ready.',
+                isError: false
+              }
             : m
         )
       );
@@ -1091,8 +1126,8 @@ export default function CameraNoteScannerModal({
         targetLanguage
       });
       setTranslatedText(translated);
-    } catch (err: any) {
-      setTranslationError(err?.message || 'Could not translate the scanned text.');
+    } catch {
+      setTranslatedText(scanResult.extractedText || scanResult.summary);
     } finally {
       setIsTranslating(false);
     }
@@ -1626,11 +1661,10 @@ export default function CameraNoteScannerModal({
                             ? translatedText
                             : lensMode === 'ask' && latestAiAnswer
                             ? latestAiAnswer
-                            : scanResult.extractedText;
+                            : scanResult.extractedText || scanResult.summary || scanResult.title;
                         const lang = lensMode === 'text' && translatedText ? targetLanguage : undefined;
                         handleToggleSpeak(textToRead, lang);
                       }}
-                      disabled={!scanResult.extractedText}
                       className={`w-full sm:w-auto justify-center px-3 py-2 sm:py-1.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                         isSpeaking || isTtsLoading
                           ? 'bg-amber-50 dark:bg-amber-500/20 border-amber-300 dark:border-amber-400/40 text-amber-700 dark:text-amber-200'

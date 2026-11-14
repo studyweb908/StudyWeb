@@ -195,6 +195,45 @@ export default function QuizCenterView({
 
   const handledIntentRef = useRef<string | null>(null);
   const hasInitializedSelectionRef = useRef<boolean>(Boolean(initialDraftRef.current));
+  const SEEN_WEB_SOURCES_STORAGE_KEY = 'studyweb_quiz_seen_web_sources_v1';
+
+  const loadTopicSearchMemory = (topicKey: string): { urls: string[]; titles: string[]; attempts: number } => {
+    try {
+      const raw = localStorage.getItem(SEEN_WEB_SOURCES_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      const entry = parsed?.[topicKey];
+      if (entry && typeof entry === 'object') {
+        return {
+          urls: Array.isArray(entry.urls) ? entry.urls : [],
+          titles: Array.isArray(entry.titles) ? entry.titles : [],
+          attempts: typeof entry.attempts === 'number' ? entry.attempts : 0
+        };
+      }
+    } catch {}
+    return { urls: [], titles: [], attempts: 0 };
+  };
+
+  const saveTopicSearchMemory = (
+    topicKey: string,
+    newUrls: string[],
+    newTitles: string[],
+    nextAttempts: number
+  ) => {
+    try {
+      const raw = localStorage.getItem(SEEN_WEB_SOURCES_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      const prev = parsed?.[topicKey] || { urls: [], titles: [], attempts: 0 };
+      const mergedUrls = Array.from(new Set([...(Array.isArray(prev.urls) ? prev.urls : []), ...newUrls])).slice(-36);
+      const mergedTitles = Array.from(new Set([...(Array.isArray(prev.titles) ? prev.titles : []), ...newTitles])).slice(-36);
+      parsed[topicKey] = {
+        urls: mergedUrls,
+        titles: mergedTitles,
+        attempts: nextAttempts,
+        updatedAt: Date.now()
+      };
+      localStorage.setItem(SEEN_WEB_SOURCES_STORAGE_KEY, JSON.stringify(parsed));
+    } catch {}
+  };
 
   // Build deduplicated list of uploaded files & notes for current filter
   const { visibleFiles, visibleNotes } = useMemo(() => {
@@ -316,6 +355,16 @@ export default function QuizCenterView({
     );
   };
 
+  const handleSelectAllWebSources = () => {
+    clearAnalysis();
+    setSelectedWebSourceIds(webSources.map((s) => s.id));
+  };
+
+  const handleClearAllWebSources = () => {
+    clearAnalysis();
+    setSelectedWebSourceIds([]);
+  };
+
   const toggleFocusTopic = (topic: string) => {
     setSelectedFocusTopics((prev) =>
       prev.includes(topic) ? prev.filter((t) => t !== topic) : [...prev, topic]
@@ -368,8 +417,12 @@ export default function QuizCenterView({
       setStatusNotice('Select at least one uploaded file or note to analyze.');
       return null;
     }
-    if (mode === 'internet' && internetList.length === 0 && !topicStr) {
-      setStatusNotice('Search a topic or select internet resources first.');
+    if (mode === 'internet' && internetList.length === 0) {
+      setStatusNotice(
+        webSources.length > 0
+          ? 'Please select at least 1 web source from the list to analyze.'
+          : 'Search for a topic and select at least 1 web source to analyze.'
+      );
       return null;
     }
 
@@ -422,6 +475,14 @@ export default function QuizCenterView({
     setStatusNotice(null);
     clearAnalysis();
 
+    const topicKey = `${q.toLowerCase()}::${typeOverride || webResourceType}`;
+    const memory = loadTopicSearchMemory(topicKey);
+    const currentUrls = webSources.map((s) => s.url || '').filter(Boolean);
+    const currentTitles = webSources.map((s) => s.name || '').filter(Boolean);
+    const excludeUrls = Array.from(new Set([...memory.urls, ...currentUrls]));
+    const excludeTitles = Array.from(new Set([...memory.titles, ...currentTitles]));
+    const attemptIndex = memory.attempts;
+
     try {
       const res = await fetch('/api/web-search-sources', {
         method: 'POST',
@@ -429,12 +490,24 @@ export default function QuizCenterView({
         body: JSON.stringify({
           query: q,
           resourceType: typeOverride || webResourceType,
-          subject: activeWorkspace?.subject || ''
+          subject: activeWorkspace?.subject || '',
+          excludeUrls,
+          excludeTitles,
+          attemptIndex
         })
       });
       const data = await res.json().catch(() => null);
       const found: InternetSourceItem[] = Array.isArray(data?.sources) ? data.sources : [];
       const briefText: string = String(data?.researchBrief?.overview || '');
+
+      if (found.length > 0) {
+        saveTopicSearchMemory(
+          topicKey,
+          found.map((s) => s.url || '').filter(Boolean),
+          found.map((s) => s.name || '').filter(Boolean),
+          attemptIndex + 1
+        );
+      }
 
       setWebSources(found);
       setWebSearchBrief(briefText);
@@ -442,7 +515,7 @@ export default function QuizCenterView({
       setSelectedWebSourceIds(autoIds);
 
       if (found.length === 0) {
-        setStatusNotice(`No direct sources matched "${q}". You can still generate a quiz directly on "${q}".`);
+        setStatusNotice(`No direct web sources matched "${q}". Try searching another keyword.`);
       }
       return { sources: found, brief: briefText };
     } catch (err) {
@@ -483,8 +556,12 @@ export default function QuizCenterView({
       setStatusNotice('Select at least one uploaded file or note before generating a quiz.');
       return;
     }
-    if (mode === 'internet' && internetList.length === 0 && !topicStr) {
-      setStatusNotice('Search for a topic or select at least one internet resource.');
+    if (mode === 'internet' && internetList.length === 0) {
+      setStatusNotice(
+        webSources.length > 0
+          ? 'Please select at least 1 web source before generating a quiz.'
+          : 'Search for a topic and select at least 1 web source before generating a quiz.'
+      );
       return;
     }
 
@@ -1091,15 +1168,31 @@ export default function QuizCenterView({
 
               {webSources.length > 0 && (
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-600 dark:text-slate-300 tabular-nums">
-                      {selectedWebSourceIds.length} of {webSources.length} web sources selected
-                    </span>
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-3">
+                      <span className="font-bold text-slate-600 dark:text-slate-300 tabular-nums">
+                        {selectedWebSourceIds.length} of {webSources.length} web sources selected
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleSelectAllWebSources}
+                        className="font-bold text-[#5145F5] dark:text-indigo-400 hover:underline cursor-pointer"
+                      >
+                        Select All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleClearAllWebSources}
+                        className="font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    </div>
                     <button
                       type="button"
-                      disabled={isAnalyzing || (selectedWebSourceIds.length === 0 && !webQuery.trim())}
+                      disabled={isAnalyzing || selectedWebSourceIds.length === 0}
                       onClick={() => runMaterialAnalysis()}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-[#5145F5] dark:text-indigo-300 font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-[#5145F5] dark:text-indigo-300 font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {isAnalyzing ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -1109,6 +1202,11 @@ export default function QuizCenterView({
                       <span>{isAnalyzing ? 'Analyzing...' : 'Analyze Selected Sources'}</span>
                     </button>
                   </div>
+                  {selectedWebSourceIds.length === 0 && (
+                    <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                      Select at least 1 web source below to analyze and generate a quiz.
+                    </p>
+                  )}
 
                   <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
                     {webSources.map((src) => {
@@ -1365,7 +1463,7 @@ export default function QuizCenterView({
               isGenerating ||
               (sourceMode === 'uploaded'
                 ? selectedUploadedCount === 0
-                : selectedWebSourceIds.length === 0 && !webQuery.trim())
+                : selectedWebSourceIds.length === 0)
             }
             onClick={() => handleGenerateQuiz()}
             className="w-full py-3.5 px-4 rounded-xl bg-[#5145F5] hover:bg-indigo-700 text-white font-bold text-sm inline-flex items-center justify-center gap-2 shadow-sm transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed min-h-[48px]"
