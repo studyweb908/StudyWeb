@@ -2019,6 +2019,19 @@ export default function WorkspaceLibrary({
               }
               await WorkspaceSyncService.updateWorkspaceFileTags(workspace.id, fileId, newTags);
             }}
+            onUpdateSummary={(fileId, newSummary) => {
+              const updatedFiles = (workspace.files || []).map((f) =>
+                f.id === fileId ? { ...f, summary: newSummary } : f
+              );
+              const targetFile = updatedFiles.find((f) => f.id === fileId);
+              if (onUpdateWorkspace) {
+                onUpdateWorkspace({ ...workspace, files: updatedFiles });
+              }
+              setPreviewFile((prev) => (prev && prev.id === fileId ? { ...prev, summary: newSummary } : prev));
+              if (targetFile) {
+                WorkspaceSyncService.saveWorkspaceFile(workspace.id, targetFile).catch(() => {});
+              }
+            }}
           />
         )}
         

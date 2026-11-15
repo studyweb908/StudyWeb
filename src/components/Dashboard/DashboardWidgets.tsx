@@ -677,6 +677,14 @@ export function RecentStudyMaterials({
         <QuickPreviewModal 
           file={previewFile} 
           onClose={() => setPreviewFile(null)} 
+          onUpdateSummary={(fileId, newSummary) => {
+            setDbFiles((prev) =>
+              prev.map((f) => (f.id === fileId ? { ...f, summary: newSummary } : f))
+            );
+            setPreviewFile((prev: any) =>
+              prev && prev.id === fileId ? { ...prev, summary: newSummary } : prev
+            );
+          }}
         />
       )}
       

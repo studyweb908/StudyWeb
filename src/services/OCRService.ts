@@ -23,11 +23,51 @@ export interface OCRScanResult {
 export interface LensAskRequest {
   fileBase64?: string;
   fileMimeType?: string;
+  imageUrl?: string;
   extractedText?: string;
   question?: string;
-  mode?: 'ask' | 'solve' | 'explain' | 'summarize' | 'quiz' | 'translate';
+  mode?: 'ask' | 'solve' | 'explain' | 'summarize' | 'short_summary' | 'quiz' | 'translate';
   targetLanguage?: string;
   history?: Array<{ role: 'user' | 'assistant'; text: string }>;
+}
+
+const SHORT_SUMMARY_CACHE_KEY = 'studyweb_scan_short_summaries_v1';
+
+export function isPlaceholderScanSummary(summary?: string | null): boolean {
+  const s = String(summary || '').trim();
+  if (!s || s.length < 18) return true;
+  return /ask any question about your scanned|scanned image loaded in lens|scanned study note ready|switch to text & translate|tap listen to hear|uploading and analyzing/i.test(
+    s
+  );
+}
+
+export function getCachedShortSummary(fileId?: string): string | null {
+  if (!fileId) return null;
+  try {
+    const raw = localStorage.getItem(SHORT_SUMMARY_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const val = parsed?.[fileId];
+    return typeof val === 'string' && !isPlaceholderScanSummary(val) ? val : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setCachedShortSummary(fileId: string | undefined, summary: string): void {
+  if (!fileId || !summary || isPlaceholderScanSummary(summary)) return;
+  try {
+    const raw = localStorage.getItem(SHORT_SUMMARY_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const next = typeof parsed === 'object' && parsed !== null ? parsed : {};
+    next[fileId] = summary;
+    // Keep cache bounded to most recent 60 entries
+    const keys = Object.keys(next);
+    if (keys.length > 60) {
+      delete next[keys[0]];
+    }
+    localStorage.setItem(SHORT_SUMMARY_CACHE_KEY, JSON.stringify(next));
+  } catch {}
 }
 
 export class OCRService {
@@ -100,7 +140,7 @@ export class OCRService {
           if (data && fullExtracted) {
             onProgress?.(85, 'Text extracted & ready in Lens!');
             const title = String(data.title || data.name || defaultName).trim();
-            const summary = String(data.summary || `Scanned study note "${title}".`).trim();
+            const summary = String(data.summary || '').trim();
             const highlights =
               Array.isArray(data.highlights) && data.highlights.length > 0
                 ? data.highlights
@@ -135,11 +175,63 @@ export class OCRService {
       id: toValidUuid(`scan-${Date.now()}`),
       title: defaultName,
       extractedText: '',
-      summary: 'Ask any question about your scanned page below, or use Text & Translate.',
+      summary: '',
       highlights: [],
       formulas: [],
       tags: ['Scanned Note', 'Lens']
     };
+  }
+
+  /**
+   * Automatically creates a concise 2-3 sentence short summary for any clicked/opened scanned note.
+   */
+  public static async generateShortSummaryForScannedNote(params: {
+    id?: string;
+    name?: string;
+    fileBase64?: string;
+    fileMimeType?: string;
+    imageUrl?: string;
+    extractedText?: string;
+  }): Promise<string> {
+    const cached = getCachedShortSummary(params.id);
+    if (cached) return cached;
+
+    let resolvedBase64 = params.fileBase64 || '';
+    let resolvedMime = params.fileMimeType || 'image/jpeg';
+    if (!resolvedBase64 && params.imageUrl && params.imageUrl.startsWith('data:')) {
+      const mimeMatch = /^data:([^;]+);base64,/i.exec(params.imageUrl);
+      if (mimeMatch?.[1]) resolvedMime = mimeMatch[1];
+      resolvedBase64 = params.imageUrl.split(';base64,')[1] || '';
+    }
+
+    const answer = await this.askLensQuestion({
+      fileBase64: resolvedBase64 || undefined,
+      fileMimeType: resolvedMime,
+      imageUrl: params.imageUrl && params.imageUrl.startsWith('http') ? params.imageUrl : undefined,
+      extractedText: params.extractedText || params.name || '',
+      mode: 'short_summary'
+    });
+
+    const cleaned = answer
+      .replace(/^#{1,6}\s+[^\n]*\n+/g, '')
+      .replace(/^\*{0,2}(?:short\s+)?summary\*{0,2}\s*:\s*/i, '')
+      .trim();
+
+    if (cleaned && !isPlaceholderScanSummary(cleaned)) {
+      setCachedShortSummary(params.id, cleaned);
+      return cleaned;
+    }
+
+    if (params.extractedText) {
+      const fallback = params.extractedText
+        .replace(/^#+\s+/gm, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 220);
+      return fallback.length >= 220 ? `${fallback}...` : fallback;
+    }
+
+    return `Study notes from "${params.name || 'Scanned Note'}" ready for review and Q&A.`;
   }
 
   /**

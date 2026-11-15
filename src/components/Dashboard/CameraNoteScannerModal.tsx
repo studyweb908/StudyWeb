@@ -23,7 +23,12 @@ import { supabase } from '../../lib/supabase';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import { toValidUuid } from '../../utils/uuid';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
-import { OCRService, LensAskRequest } from '../../services/OCRService';
+import {
+  OCRService,
+  LensAskRequest,
+  isPlaceholderScanSummary,
+  setCachedShortSummary
+} from '../../services/OCRService';
 import {
   fetchNaturalTtsAudio,
   getStoredVoiceProfileGender,
@@ -969,7 +974,7 @@ export default function CameraNoteScannerModal({
         tempId,
         extractedText: '',
         title: defaultScanName,
-        summary: 'Ask any question about your scanned notes below, switch to Text & Translate to copy or translate, or tap Listen to hear it read aloud.',
+        summary: '',
         highlights: [],
         formulas: [],
         tags: ['Scanned Note', 'Lens Ready'],
@@ -979,7 +984,7 @@ export default function CameraNoteScannerModal({
         sizeFormatted
       });
 
-      // Extract verbatim OCR text, title, summary & formulas in the background (~1s)
+      // Extract verbatim OCR text, title, short summary & formulas in the background (~1s)
       const ocrResult = await OCRService.extractTextFromNoteImage({
         fileBase64: base64,
         fileMimeType: mimeType,
@@ -989,6 +994,20 @@ export default function CameraNoteScannerModal({
 
       if (activeScanSeqRef.current !== scanSeq) return;
 
+      let resolvedSummary = (ocrResult.summary || '').trim();
+      if (isPlaceholderScanSummary(resolvedSummary)) {
+        resolvedSummary = await OCRService.generateShortSummaryForScannedNote({
+          id: ocrResult.id || tempId,
+          name: ocrResult.title || defaultScanName,
+          fileBase64: base64,
+          fileMimeType: mimeType,
+          extractedText: ocrResult.extractedText
+        });
+        if (activeScanSeqRef.current !== scanSeq) return;
+      } else {
+        setCachedShortSummary(ocrResult.id || tempId, resolvedSummary);
+      }
+
       setIsExtractingOcr(false);
       setScanResult((prev) => {
         if (!prev) return prev;
@@ -997,7 +1016,7 @@ export default function CameraNoteScannerModal({
           tempId: ocrResult.id || prev.tempId,
           extractedText: ocrResult.extractedText || prev.extractedText,
           title: ocrResult.title || prev.title,
-          summary: ocrResult.summary || prev.summary,
+          summary: resolvedSummary || prev.summary,
           highlights: ocrResult.highlights?.length ? ocrResult.highlights : prev.highlights,
           formulas: ocrResult.formulas?.length ? ocrResult.formulas : prev.formulas,
           tags: ocrResult.tags?.length ? ocrResult.tags : ['Scanned Note', 'OCR Extracted']
@@ -1698,12 +1717,23 @@ export default function CameraNoteScannerModal({
                         {lensMessages.length === 0 ? (
                           <div className="space-y-3.5 py-1">
                             <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 p-3.5 sm:p-4 space-y-2">
-                              <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
-                                Ready to help directly from your scan
-                              </p>
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white inline-flex items-center gap-1.5">
+                                  <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                                  <span>Short Summary</span>
+                                </p>
+                                {isExtractingOcr && !scanResult.summary && (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 dark:text-blue-400">
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    <span>Creating summary...</span>
+                                  </span>
+                                )}
+                              </div>
                               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
                                 {scanResult.summary ||
-                                  'Ask any question about your scanned notes below, switch to Text & Translate to copy or translate, or tap Listen to hear it read aloud.'}
+                                  (isExtractingOcr
+                                    ? 'Reading your scanned note and creating a short summary...'
+                                    : 'Ask any question about your scanned notes below, switch to Text & Translate to copy or translate, or tap Listen to hear it read aloud.')}
                               </p>
                             </div>
                             {scanResult.extractedText ? (

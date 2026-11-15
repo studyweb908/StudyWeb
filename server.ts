@@ -3843,7 +3843,7 @@ ${citationGuideline}`;
       const fastOcrPrompt = `Transcribe ALL visible handwritten and printed text, questions, multiple-choice options, and equations from this image word-for-word in clean Markdown.
 Output format:
 # <Concise 3 to 6 word topic title>
-Summary: <1 sentence summary of what this note or problem is about>
+Summary: <Crisp 2 to 3 sentence short summary explaining what this note is about, its main concepts or problem, and key takeaway>
 
 <Full verbatim transcription of the page>`;
 
@@ -3964,6 +3964,7 @@ Summary: <1 sentence summary of what this note or problem is about>
       const {
         fileBase64,
         fileMimeType,
+        imageUrl,
         extractedText,
         question,
         mode = "ask",
@@ -3972,7 +3973,7 @@ Summary: <1 sentence summary of what this note or problem is about>
       } = req.body || {};
 
       const trimmedText = String(extractedText || "").trim();
-      if (!fileBase64 && !trimmedText) {
+      if (!fileBase64 && !trimmedText && !imageUrl) {
         res.status(400).json({
           error: "A scanned image or extracted note text is required to answer or generate content."
         });
@@ -4001,6 +4002,23 @@ Summary: <1 sentence summary of what this note or problem is about>
         normalizedMime = "image/jpeg";
       }
 
+      // If no inline base64 was supplied but a remote image URL was passed, fetch it once on the server
+      if (!cleanBase64 && imageUrl && String(imageUrl).startsWith("http")) {
+        try {
+          const imgRes = await fetch(String(imageUrl), { signal: AbortSignal.timeout(5000) });
+          if (imgRes.ok) {
+            const buf = Buffer.from(await imgRes.arrayBuffer());
+            if (buf.length > 0 && buf.length < 6 * 1024 * 1024) {
+              cleanBase64 = buf.toString("base64");
+              const contentType = imgRes.headers.get("content-type");
+              if (contentType && contentType.startsWith("image/")) {
+                normalizedMime = contentType.split(";")[0].trim();
+              }
+            }
+          }
+        } catch {}
+      }
+
       const normalizedMode = String(mode || "ask").toLowerCase().trim();
       const userQuestion = String(question || "").trim();
 
@@ -4013,6 +4031,9 @@ Examine all questions, problems, equations, formulas, diagrams, or multiple-choi
       } else if (normalizedMode === "explain") {
         modeInstruction = `Task: Explain Concepts Clearly.
 Explain the exact topics, definitions, diagrams, formulas, or examples in this scanned note in clear, intuitive student-friendly language.`;
+      } else if (normalizedMode === "short_summary") {
+        modeInstruction = `Task: Create a Short Automatic Summary of This Scanned Note.
+Write a crisp, student-friendly 2 to 3 sentence short summary (under 80 words) covering what this scanned note is about, its main topic or problem, and the key takeaway. Start directly with the summary sentences (no headings or bullet lists).`;
       } else if (normalizedMode === "summarize") {
         modeInstruction = `Task: Summarize Scanned Note.
 Create a crisp, structured revision summary containing the core ideas, definitions, key takeaways, and formulas in this scan.`;
