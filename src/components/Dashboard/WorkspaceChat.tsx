@@ -44,7 +44,6 @@ import {
   selectBestBrowserNaturalVoice
 } from '../../utils/naturalTts';
 import { PendingQuizIntent } from '../../utils/quizHistoryStorage';
-import { GeminiConnectionTestCard } from './GeminiConnectionTestCard';
 
 function parseQuizNavigationIntent(
   promptText: string,
@@ -1183,8 +1182,8 @@ export default function WorkspaceChat({
           }
         }
       } catch (err: any) {
-        console.error('[Chat File Read Error] [CHAT_FILE_READ_ERR]', err);
-        (window as any).showToast?.(`[CHAT_FILE_READ_ERR] ${err?.message || 'Could not read file'}`, 'error', 5000, 'File Read Error');
+        console.error('[Chat File Read Error]', err);
+        (window as any).showToast?.('Something went wrong. There is a server error. Please try again.', 'error', 5000, 'Server Error');
       }
 
       // 2. Read text content for common textual formats
@@ -1255,6 +1254,7 @@ export default function WorkspaceChat({
             analyzedMaterial = procData.material;
           } else {
             uploadErrMsg = procData?.error || `Failed to analyze ${file.name}.`;
+            console.error('[Chat Upload Pipeline Error]', uploadErrMsg, procData);
           }
         } else {
           const errJson = await procRes.json().catch(() => ({}));
@@ -1264,37 +1264,33 @@ export default function WorkspaceChat({
         }
 
         if (uploadErrMsg && !content) {
-          setUploadError(`Upload failed for "${file.name}": ${uploadErrMsg}`);
+          const genericServerErr = 'Something went wrong. There is a server error. Please try again.';
+          setUploadError(genericServerErr);
           setMessages(prev => [
             ...prev,
             {
               id: `upload-err-${Date.now()}-${i}`,
               sender: 'ai',
-              text: `Could not analyze "${file.name}": ${uploadErrMsg}`,
+              text: genericServerErr,
               time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              isError: true,
-              errorCode: 'UPLOAD_FAILED'
+              isError: true
             }
           ]);
           continue;
         }
       } catch (procErr: any) {
-        const errCode = procErr?.name === 'AbortError' ? 'AI_UPLOAD_TIMEOUT' : 'AI_UPLOAD_ERR';
-        const errMsg = procErr?.name === 'AbortError'
-          ? `Analysis timed out for "${file.name}". Please try again.`
-          : (procErr?.message || `AI analysis error for "${file.name}".`);
-        console.error(`[Chat Upload Pipeline Error] [${errCode}]`, procErr);
+        console.error('[Chat Upload Pipeline Error]', procErr);
         if (!content) {
-          setUploadError(errMsg);
+          const genericServerErr = 'Something went wrong. There is a server error. Please try again.';
+          setUploadError(genericServerErr);
           setMessages(prev => [
             ...prev,
             {
               id: `upload-err-${Date.now()}-${i}`,
               sender: 'ai',
-              text: errMsg,
+              text: genericServerErr,
               time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              isError: true,
-              errorCode: errCode
+              isError: true
             }
           ]);
           continue;
@@ -1383,15 +1379,15 @@ export default function WorkspaceChat({
       setChatUploadOverlay(prev => ({
         ...prev,
         progress: 100,
-        stepText: 'Analyzed & saved to Supabase!'
+        stepText: 'Analyzed & saved to your workspace!'
       }));
 
       setTimeout(() => {
         setChatUploadOverlay(prev => ({ ...prev, isOpen: false }));
-      }, 240);
+      }, 2200);
 
       (window as any).showToast?.(
-        `"${analyzedWorkspaceFiles.map(f => f.name).join(', ')}" was analyzed with AI and saved to Supabase.`,
+        `"${analyzedWorkspaceFiles.map(f => f.name).join(', ')}" was analyzed and saved to your workspace.`,
         'success',
         3200,
         'Material Analyzed & Saved'
@@ -1540,7 +1536,7 @@ export default function WorkspaceChat({
       }));
       setTimeout(() => {
         setChatUploadOverlay(prev => ({ ...prev, isOpen: false }));
-      }, 260);
+      }, 2200);
 
       (window as any).showToast?.(
         `"${analyzedTitle}" is indexed & ready in your workspace.`,
@@ -1551,20 +1547,19 @@ export default function WorkspaceChat({
     } catch (err: any) {
       clearInterval(progInterval);
       setChatUploadOverlay(prev => ({ ...prev, isOpen: false }));
-      const errMsg = err?.message || 'Failed to analyze link. Please check the URL and try again.';
-      setUploadError(errMsg);
+      console.error('[Link Analysis Error]', err);
+      const genericServerErr = 'Something went wrong. There is a server error. Please try again.';
+      setUploadError(genericServerErr);
       setMessages(prev => [
         ...prev,
         {
           id: `link-err-${Date.now()}`,
           sender: 'ai',
-          text: errMsg,
+          text: genericServerErr,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isError: true,
-          errorCode: 'LINK_ANALYSIS_FAILED'
+          isError: true
         }
       ]);
-      console.warn('Failed to analyze link:', err);
     } finally {
       setIsAnalyzingLink(false);
     }
@@ -1994,7 +1989,7 @@ export default function WorkspaceChat({
             id: `msg-ai-${Date.now() + 1}`,
             sender: 'ai',
             text: answer,
-            source: 'Gemini AI Tutor (Voice)',
+            source: 'StudyWeb AI Tutor',
             originalQuery: question,
             followUpQuestions: [
               `Ask me a follow-up interview question on "${cleanSubj}"`,
@@ -2591,14 +2586,12 @@ export default function WorkspaceChat({
                     <div className="p-3.5 sm:p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 space-y-3">
                       <div className="flex items-center gap-2 font-bold text-xs sm:text-sm">
                         <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
-                        <span>
-                          {msg.errorCode && msg.errorCode !== 'unknown'
-                            ? `Failed to generate response (${msg.errorCode})`
-                            : 'Failed to generate response'}
+                        <span className="font-bold text-rose-700 dark:text-rose-300 text-xs">
+                          Server Error
                         </span>
                       </div>
                       <p className="text-xs text-rose-700 dark:text-rose-300 font-normal leading-relaxed break-words">
-                        {msg.text || "There was a problem contacting the Gemini API. Please try again."}
+                        Something went wrong. There is a server error. Please try again.
                       </p>
                       <div className="flex flex-wrap items-center gap-2">
                         {msg.failedPrompt && (
@@ -2613,7 +2606,6 @@ export default function WorkspaceChat({
                           </button>
                         )}
                       </div>
-                      <GeminiConnectionTestCard compact />
                     </div>
                   ) : (
                     renderMessageContent(visibleMsgText, isMsgStreaming)

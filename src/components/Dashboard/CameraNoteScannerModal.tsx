@@ -39,7 +39,6 @@ import {
   resolveGeminiVoiceForProfile,
   selectBestBrowserNaturalVoice
 } from '../../utils/naturalTts';
-import { GeminiConnectionTestCard } from './GeminiConnectionTestCard';
 
 export interface ScannedNoteDraftPayload {
   id: string;
@@ -945,20 +944,6 @@ export default function CameraNoteScannerModal({
     });
   };
 
-  const handleOpenSettingsTestConnection = () => {
-    stopCameraStream();
-    stopSpeech();
-    onClose();
-    setTimeout(() => {
-      window.dispatchEvent(
-        new CustomEvent('studyweb-open-settings-test-connection', {
-          detail: { autoRunTest: true }
-        })
-      );
-    }, 60);
-  };
-
-  // Explicitly verifies the Gemini API key status via /api/ai-health before attempting to summarize OCR text
   const verifyApiKeyAndSummarizeOcr = async (params: {
     id: string;
     name: string;
@@ -972,10 +957,11 @@ export default function CameraNoteScannerModal({
     setGeminiKeyVerified(keyStatus.ok);
 
     if (!keyStatus.ok) {
-      const errMsg = !keyStatus.configured
-        ? 'Gemini API key is not configured or active. Please check Settings > Secrets or use Test Connection in Settings.'
-        : keyStatus.error || 'Gemini API key verification failed before summarizing OCR text.';
-      return { summary: '', error: errMsg };
+      console.error('[Scan Notes Summary Error]', keyStatus.error);
+      return {
+        summary: '',
+        error: 'Something went wrong. There is a server error. Please try again.'
+      };
     }
 
     const generated = await OCRService.generateShortSummaryForScannedNote({
@@ -987,9 +973,10 @@ export default function CameraNoteScannerModal({
     });
 
     if (!generated || isPlaceholderScanSummary(generated)) {
+      console.error('[Scan Notes Summary Error] Empty or placeholder summary returned');
       return {
         summary: '',
-        error: 'Could not generate a short summary from the OCR text. Please retry or test your connection in Settings.'
+        error: 'Something went wrong. There is a server error. Please try again.'
       };
     }
 
@@ -1004,17 +991,14 @@ export default function CameraNoteScannerModal({
     setScanError(null);
 
     try {
-      // Step 1: Explicitly verify Gemini API key status before attempting to summarize the OCR text
       setIsVerifyingApiKey(true);
       const keyStatus = await OCRService.verifyGeminiConnectionStatus();
       setIsVerifyingApiKey(false);
       setGeminiKeyVerified(keyStatus.ok);
 
       if (!keyStatus.ok) {
-        const errMsg = !keyStatus.configured
-          ? 'Gemini API key verification failed: GEMINI_API_KEY is not configured. Use the Test Connection button in Settings to diagnose.'
-          : keyStatus.error || 'Gemini API key verification failed. Use the Test Connection button in Settings.';
-        setSummaryError(errMsg);
+        console.error('[Scan Notes Retry Summary Error]', keyStatus.error);
+        setSummaryError('Something went wrong. There is a server error. Please try again.');
         setSummaryFailureCount((prev) => prev + 1);
         return;
       }
@@ -1024,7 +1008,6 @@ export default function CameraNoteScannerModal({
       let currentTempId = scanResult.tempId;
       let directSummary = '';
 
-      // If initial OCR extraction also failed or returned empty text, re-extract OCR text first
       if (!currentExtractedText.trim()) {
         const ocrResult = await OCRService.extractTextFromNoteImage({
           fileBase64: scanResult.base64,
@@ -1034,7 +1017,8 @@ export default function CameraNoteScannerModal({
         });
 
         if (ocrResult.error) {
-          setSummaryError(ocrResult.error);
+          console.error('[Scan Notes OCR Error]', ocrResult.error);
+          setSummaryError('Something went wrong. There is a server error. Please try again.');
           setSummaryFailureCount((prev) => prev + 1);
           return;
         }
@@ -1059,7 +1043,6 @@ export default function CameraNoteScannerModal({
         );
       }
 
-      // Step 2: Summarize the OCR text now that the Gemini API key is verified
       let resolvedSummary = !isPlaceholderScanSummary(directSummary) ? directSummary : '';
       if (!resolvedSummary) {
         resolvedSummary = await OCRService.generateShortSummaryForScannedNote({
@@ -1072,7 +1055,8 @@ export default function CameraNoteScannerModal({
       }
 
       if (!resolvedSummary || isPlaceholderScanSummary(resolvedSummary)) {
-        setSummaryError('Summary generation failed again. Please use the Test Connection button in Settings to verify your Gemini API connection.');
+        console.error('[Scan Notes Summary Error] Retry failed to produce summary');
+        setSummaryError('Something went wrong. There is a server error. Please try again.');
         setSummaryFailureCount((prev) => prev + 1);
         return;
       }
@@ -1081,9 +1065,8 @@ export default function CameraNoteScannerModal({
       setSummaryError(null);
       setScanResult((prev) => (prev ? { ...prev, summary: resolvedSummary } : prev));
     } catch (err: any) {
-      setSummaryError(
-        String(err?.message || 'Unable to summarize OCR text. Please test your connection in Settings.')
-      );
+      console.error('[Scan Notes Summary Error]', err);
+      setSummaryError('Something went wrong. There is a server error. Please try again.');
       setSummaryFailureCount((prev) => prev + 1);
     } finally {
       setIsVerifyingApiKey(false);
@@ -1166,16 +1149,10 @@ export default function CameraNoteScannerModal({
       if (activeScanSeqRef.current !== scanSeq) return;
 
       if (ocrResult.error) {
-        // Explicitly verify Gemini API key status so the user knows whether the failure is due to the API key
-        const keyCheck = await OCRService.verifyGeminiConnectionStatus();
-        if (activeScanSeqRef.current !== scanSeq) return;
-        setGeminiKeyVerified(keyCheck.ok);
-        setScanError(ocrResult.error);
-        setSummaryError(
-          !keyCheck.ok
-            ? keyCheck.error || ocrResult.error
-            : ocrResult.error
-        );
+        console.error('[Scan Notes OCR Error]', ocrResult.error);
+        const genericErr = 'Something went wrong. There is a server error. Please try again.';
+        setScanError(genericErr);
+        setSummaryError(genericErr);
         setSummaryFailureCount((prev) => Math.max(1, prev + 1));
         setIsExtractingOcr(false);
         return;
@@ -1193,7 +1170,7 @@ export default function CameraNoteScannerModal({
         if (activeScanSeqRef.current !== scanSeq) return;
         resolvedSummary = summaryAttempt.summary;
         if (summaryAttempt.error) {
-          setSummaryError(summaryAttempt.error);
+          setSummaryError('Something went wrong. There is a server error. Please try again.');
           setSummaryFailureCount((prev) => Math.max(1, prev + 1));
         }
       } else {
@@ -1430,7 +1407,8 @@ export default function CameraNoteScannerModal({
         resetScannerSessionState();
       }
     } catch (err: any) {
-      setSaveWorkspaceError(err?.message || 'Failed to add scanned note to workspace. Please try again.');
+      console.error('[Scan Notes Workspace Save Error]', err);
+      setSaveWorkspaceError('Something went wrong. There is a server error. Please try again.');
     } finally {
       setIsSavingToWorkspace(false);
     }
@@ -1491,8 +1469,9 @@ export default function CameraNoteScannerModal({
     for (const f of files) {
       const validation = validateScanInputFile(f);
       if (!validation.valid) {
-        setScanError(validation.error || 'Unsupported or invalid scan file.');
-        (window as any).showToast?.(validation.error || 'Unsupported file format.', 'error', 4000);
+        console.error('[Scan Notes File Validation Error]', validation.error);
+        setScanError('Something went wrong. There is a server error. Please try again.');
+        (window as any).showToast?.('Something went wrong. There is a server error. Please try again.', 'error', 4000, 'Server Error');
         return;
       }
     }
@@ -1543,11 +1522,11 @@ export default function CameraNoteScannerModal({
               : 'bg-black select-none'
           }`}
         >
-          {/* Hidden Native Camera & File Inputs */}
+          {/* Hidden Native Camera & File Inputs (Images Only) */}
           <input
             ref={nativeCameraInputRef}
             type="file"
-            accept="image/*,application/pdf"
+            accept="image/*"
             capture="environment"
             onChange={handleFileInputChange}
             className="hidden"
@@ -1555,7 +1534,7 @@ export default function CameraNoteScannerModal({
           <input
             ref={galleryInputRef}
             type="file"
-            accept="image/*,application/pdf"
+            accept="image/*"
             multiple
             onChange={handleFileInputChange}
             className="hidden"
@@ -1958,10 +1937,10 @@ export default function CameraNoteScannerModal({
                                   <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
                                   <div className="min-w-0">
                                     <p className="text-xs sm:text-sm font-bold text-rose-800 dark:text-rose-200">
-                                      Could Not Analyze Image
+                                      Server Error
                                     </p>
                                     <p className="text-xs text-rose-700 dark:text-rose-300 mt-0.5 leading-relaxed">
-                                      {scanError}
+                                      Something went wrong. There is a server error. Please try again.
                                     </p>
                                   </div>
                                 </div>
@@ -1981,28 +1960,12 @@ export default function CameraNoteScannerModal({
                                     <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
                                     <span>Short Summary</span>
                                   </p>
-                                  {geminiKeyVerified === true && (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200/70 dark:border-emerald-500/30 text-[10px] font-semibold">
-                                      <CheckCircle2 className="w-2.5 h-2.5 shrink-0" />
-                                      <span>API Key Verified</span>
-                                    </span>
-                                  )}
-                                  {geminiKeyVerified === false && (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200/70 dark:border-amber-500/30 text-[10px] font-semibold">
-                                      <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
-                                      <span>API Key Unverified</span>
-                                    </span>
-                                  )}
                                 </div>
                                 {(isExtractingOcr || isVerifyingApiKey || isRetryingSummary) && !scanResult.summary ? (
                                   <span className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 dark:text-blue-400">
                                     <Loader2 className="w-3 h-3 animate-spin" />
                                     <span>
-                                      {isVerifyingApiKey
-                                        ? 'Verifying Gemini API key...'
-                                        : isRetryingSummary
-                                        ? 'Retrying summary...'
-                                        : 'Creating summary...'}
+                                      {isRetryingSummary ? 'Retrying summary...' : 'Creating summary...'}
                                     </span>
                                   </span>
                                 ) : (summaryError || (!isExtractingOcr && isPlaceholderScanSummary(scanResult.summary))) ? (
@@ -2019,45 +1982,12 @@ export default function CameraNoteScannerModal({
                               </div>
                               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
                                 {scanResult.summary ||
-                                  (isVerifyingApiKey
-                                    ? 'Verifying Gemini API key status before summarizing OCR text...'
-                                    : isExtractingOcr || isRetryingSummary
+                                  (isExtractingOcr || isVerifyingApiKey || isRetryingSummary
                                     ? 'Reading your scanned note and creating a short summary...'
-                                    : summaryError
-                                    ? summaryError
-                                    : scanError
-                                    ? 'Summary unavailable until image analysis succeeds.'
+                                    : summaryError || scanError
+                                    ? 'Something went wrong. There is a server error. Please try again.'
                                     : 'Ask any question about your scanned notes below, switch to Text & Translate to copy or translate, or tap Listen to hear it read aloud.')}
                               </p>
-                              {(summaryError || summaryFailureCount > 0) && !scanResult.summary && !isExtractingOcr && !isRetryingSummary && (
-                                <div className="pt-2 space-y-2.5 border-t border-slate-200/70 dark:border-slate-700/70">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={handleRetrySummary}
-                                      disabled={isRetryingSummary || isVerifyingApiKey}
-                                      className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
-                                    >
-                                      <RotateCcw className="w-3 h-3" />
-                                      <span>Verify Key &amp; Retry Summary</span>
-                                    </button>
-                                    {summaryFailureCount >= 1 && (
-                                      <button
-                                        type="button"
-                                        onClick={handleOpenSettingsTestConnection}
-                                        className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/40 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
-                                      >
-                                        <Sparkles className="w-3 h-3" />
-                                        <span>Open Connection Test in Settings</span>
-                                      </button>
-                                    )}
-                                  </div>
-                                  <GeminiConnectionTestCard
-                                    compact
-                                    onStatusChange={(st) => setGeminiKeyVerified(st.ok)}
-                                  />
-                                </div>
-                              )}
                             </div>
                             {scanResult.extractedText ? (
                               <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 sm:p-4">
@@ -2102,10 +2032,10 @@ export default function CameraNoteScannerModal({
                                     <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
                                     <div className="min-w-0 flex-1">
                                       <p className="text-xs font-semibold text-rose-800 dark:text-rose-200">
-                                        Could not generate answer
+                                        Server Error
                                       </p>
                                       <p className="text-xs text-rose-700 dark:text-rose-200/90 mt-0.5 break-words">
-                                        {msg.text}
+                                        Something went wrong. There is a server error. Please try again.
                                       </p>
                                     </div>
                                   </div>
@@ -2305,8 +2235,8 @@ export default function CameraNoteScannerModal({
                           <div className="rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-500/40 p-4 flex items-start gap-2.5">
                             <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
                             <div className="min-w-0 flex-1">
-                              <p className="text-xs font-semibold text-rose-800 dark:text-rose-200">Translation Error</p>
-                              <p className="text-xs text-rose-700 dark:text-rose-200/90 mt-0.5 break-words">{translationError}</p>
+                              <p className="text-xs font-semibold text-rose-800 dark:text-rose-200">Server Error</p>
+                              <p className="text-xs text-rose-700 dark:text-rose-200/90 mt-0.5 break-words">Something went wrong. There is a server error. Please try again.</p>
                             </div>
                           </div>
                         )}
@@ -2403,10 +2333,10 @@ export default function CameraNoteScannerModal({
                         </div>
                         <div className="min-w-0">
                           <h4 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
-                            Scan Error
+                            Server Error
                           </h4>
                           <p className="text-xs sm:text-sm text-rose-700 dark:text-rose-200 mt-1 leading-relaxed break-words">
-                            {scanError}
+                            Something went wrong. There is a server error. Please try again.
                           </p>
                         </div>
                       </div>

@@ -387,7 +387,7 @@ class AITutorBackgroundManager {
 
       const fallbackReply = isGreeting
         ? `Hi there! How can I help you today? Feel free to ask me any question, or upload files, notes, or links for me to analyze.`
-        : `I'm having trouble reaching the server right now. Please try asking **"${userMsg.text.slice(0, 80)}"** again in a moment!`;
+        : `Something went wrong. There is a server error. Please try again.`;
 
       // Format AI Message without surfacing raw API or load errors
       const aiMsg: TutorMessage = data && (data.reply || data.text)
@@ -396,7 +396,7 @@ class AITutorBackgroundManager {
             sender: 'ai',
             text: data.reply || data.text,
             citations: data.citations,
-            source: data.source || 'Gemini AI',
+            source: 'StudyWeb AI Tutor',
             workspaceNotice: undefined,
             activeWorkspaceContext: data.activeWorkspaceContext,
             activeContextFiles: Array.isArray(data.activeContextFiles) ? data.activeContextFiles : [],
@@ -411,7 +411,7 @@ class AITutorBackgroundManager {
             id: `msg-ai-${Date.now()}`,
             sender: 'ai',
             text: fallbackReply,
-            source: 'AI Study Tutor',
+            source: 'StudyWeb AI Tutor',
             activeWorkspaceContext: undefined,
             followUpQuestions: rawFollowUps.slice(0, 3),
             originalQuery: userMsg.text,

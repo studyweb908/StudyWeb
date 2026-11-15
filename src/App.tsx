@@ -195,18 +195,11 @@ export default function App() {
       }
       setActiveTab('quiz-center');
     };
-    const handleOpenSettingsTestConnection = () => {
-      (window as any).__studywebPendingTestConnection = true;
-      setActiveWorkspace(null);
-      setActiveTab('profile');
-    };
     window.addEventListener('studyweb-open-quizzes-intent', handleOpenQuizzesIntent);
-    window.addEventListener('studyweb-open-settings-test-connection', handleOpenSettingsTestConnection);
     return () => {
       window.removeEventListener('studyweb-open-quizzes-intent', handleOpenQuizzesIntent);
-      window.removeEventListener('studyweb-open-settings-test-connection', handleOpenSettingsTestConnection);
     };
-  }, [setActiveTab, setActiveWorkspace]);
+  }, [setActiveTab]);
 
   // Workspace context handles persistance, but we still need to manage workspaces array locally.
   const handleUpdateWorkspace = (updated: Workspace) => {

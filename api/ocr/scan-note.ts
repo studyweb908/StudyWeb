@@ -99,9 +99,11 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       'image/jpeg',
       'image/png',
       'image/webp',
+      'image/gif',
+      'image/bmp',
+      'image/svg+xml',
       'image/heic',
-      'image/heif',
-      'application/pdf'
+      'image/heif'
     ]);
 
     const cleanedPages: Array<{ data: string; mimeType: string }> = [];
@@ -129,7 +131,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       }
       if (!allowedMimes.has(normalizedMime)) {
         return res.status(400).json({
-          error: `Unsupported file type "${normalizedMime}". Supported types: JPEG, PNG, WEBP, HEIC, PDF.`
+          error: `Unsupported file type "${normalizedMime}". Supported image types: JPEG, PNG, WEBP, GIF, BMP, SVG, HEIC.`
         });
       }
       const approxBytes = Math.floor((cleanBase64.length * 3) / 4);
@@ -154,8 +156,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     const apiKey = getGeminiApiKey();
 
     if (!apiKey) {
+      console.error('[Serverless OCR] API key is not configured on the server.');
       return res.status(503).json({
-        error: 'Gemini AI API key is not configured on the server. Unable to extract OCR text from scanned note.'
+        error: 'Something went wrong. There is a server error. Please try again.'
       });
     }
 
@@ -263,8 +266,7 @@ Strict Rules:
 
       if (!rawExtracted && !rawSummary) {
         return res.status(422).json({
-          error:
-            'No readable text or study content could be detected in the scanned image. Please retake the scan with clearer lighting and focus.'
+          error: 'Something went wrong. There is a server error. Please try again.'
         });
       }
 
@@ -301,12 +303,12 @@ Strict Rules:
     }
 
     return res.status(422).json({
-      error: 'Could not extract readable text from the scanned image. Please ensure the page is clear and well-lit, then try again.'
+      error: 'Something went wrong. There is a server error. Please try again.'
     });
   } catch (error: any) {
     console.error('[Serverless OCR Error] /api/ocr/scan-note:', error?.message || error);
     return res.status(500).json({
-      error: 'Unable to process the scanned note right now. Please try scanning again.'
+      error: 'Something went wrong. There is a server error. Please try again.'
     });
   }
 }

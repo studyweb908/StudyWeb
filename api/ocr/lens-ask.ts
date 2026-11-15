@@ -88,8 +88,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     const apiKey = getGeminiApiKey();
     if (!apiKey) {
+      console.error('[Serverless Lens Ask] API key is not configured on the server.');
       return res.status(503).json({
-        error: 'Gemini AI API key is not configured on the server. Unable to analyze this scan right now.'
+        error: 'Something went wrong. There is a server error. Please try again.'
       });
     }
 
@@ -190,12 +191,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     }
 
     return res.status(422).json({
-      error: 'Unable to analyze this scanned image right now. Please try again.'
+      error: 'Something went wrong. There is a server error. Please try again.'
     });
   } catch (error: any) {
     console.error('[Serverless Lens Ask Error] /api/ocr/lens-ask:', error?.message || error);
     return res.status(500).json({
-      error: 'Failed to process your question about this scan. Please try again.'
+      error: 'Something went wrong. There is a server error. Please try again.'
     });
   }
 }

@@ -66,10 +66,11 @@ const ALLOWED_SCAN_MIME_TYPES = new Set([
   'image/gif',
   'image/bmp',
   'image/svg+xml',
-  'application/pdf'
+  'image/heic',
+  'image/heif'
 ]);
 
-const ALLOWED_SCAN_EXTENSIONS = /\.(jpe?g|png|webp|gif|bmp|svg|pdf)$/i;
+const ALLOWED_SCAN_EXTENSIONS = /\.(jpe?g|png|webp|gif|bmp|svg|heic|heif)$/i;
 const MAX_SCAN_FILE_BYTES = 20 * 1024 * 1024; // 20 MB
 
 export function validateScanInputFile(file: {
@@ -78,13 +79,13 @@ export function validateScanInputFile(file: {
   size?: number;
 }): { valid: boolean; error?: string } {
   if (!file) {
-    return { valid: false, error: 'No file was provided for scanning.' };
+    return { valid: false, error: 'No image file was provided for scanning.' };
   }
   if (typeof file.size === 'number') {
     if (file.size <= 0) {
       return {
         valid: false,
-        error: `"${file.name || 'Selected file'}" is empty (0 bytes). Please choose a valid image or PDF.`
+        error: `"${file.name || 'Selected file'}" is empty (0 bytes). Please choose a valid image.`
       };
     }
     if (file.size > MAX_SCAN_FILE_BYTES) {
@@ -97,13 +98,21 @@ export function validateScanInputFile(file: {
 
   const mime = String(file.type || '').toLowerCase().trim();
   const name = String(file.name || '').trim();
+
+  if (mime && !mime.startsWith('image/')) {
+    return {
+      valid: false,
+      error: `Unsupported file format "${mime || name || 'unknown'}". Scan Notes accepts images only (JPEG, PNG, WEBP, GIF, BMP, SVG, HEIC).`
+    };
+  }
+
   const hasValidMime = mime ? ALLOWED_SCAN_MIME_TYPES.has(mime) : false;
   const hasValidExt = name ? ALLOWED_SCAN_EXTENSIONS.test(name) : false;
 
   if (!hasValidMime && !hasValidExt) {
     return {
       valid: false,
-      error: `Unsupported file format "${mime || name || 'unknown'}". Please upload a JPEG, PNG, WEBP, GIF, BMP, SVG, or PDF file.`
+      error: `Unsupported file format "${mime || name || 'unknown'}". Scan Notes accepts images only (JPEG, PNG, WEBP, GIF, BMP, SVG, HEIC).`
     };
   }
 
@@ -168,36 +177,29 @@ export class OCRService {
         return {
           ok: true,
           configured: true,
-          keyState: String(data.keyState || 'valid_format'),
           verified: Boolean(data.verified),
-          model: String(data.model || 'gemini-3-flash-preview'),
           durationMs: typeof data.durationMs === 'number' ? data.durationMs : undefined
         };
       }
 
       const configured = Boolean(data?.configured === true && response.status !== 503);
+      if (data?.error) {
+        console.error('[OCRService] Connection health check error:', data.error);
+      }
       return {
         ok: false,
         configured,
-        keyState: typeof data?.keyState === 'string' ? data.keyState : undefined,
         verified: false,
-        error: String(
-          data?.error ||
-            (!configured
-              ? 'GEMINI_API_KEY is not configured in Settings > Secrets.'
-              : 'Could not verify Gemini API connection.')
-        )
+        error: 'Something went wrong. There is a server error. Please try again.'
       };
     } catch (err: any) {
       clearTimeout(timeoutId);
+      console.error('[OCRService] Connection health check exception:', err);
       return {
         ok: false,
         configured: false,
         verified: false,
-        error:
-          err?.name === 'AbortError'
-            ? 'Connection check timed out. Please try again.'
-            : String(err?.message || 'Unable to reach AI health endpoint.')
+        error: 'Something went wrong. There is a server error. Please try again.'
       };
     }
   }
@@ -293,9 +295,11 @@ export class OCRService {
         const data = await response.json().catch(() => null);
 
         if (!response.ok) {
-          lastErrorMessage = String(
-            data?.error || 'Could not analyze the scanned image. Please try again.'
-          );
+          console.error('[OCRService] /api/ocr/scan-note server error:', {
+            status: response.status,
+            error: data?.error
+          });
+          lastErrorMessage = 'Something went wrong. There is a server error. Please try again.';
           if (
             response.status === 400 ||
             response.status === 401 ||
@@ -303,10 +307,7 @@ export class OCRService {
             response.status === 413 ||
             response.status === 415 ||
             response.status === 422 ||
-            response.status === 503 ||
-            data?.code === 'API_KEY_REQUIRED' ||
-            data?.code === 'API_KEY_INVALID' ||
-            data?.code === 'EMPTY_OR_UNREADABLE_IMAGE'
+            response.status === 503
           ) {
             return {
               id: toValidUuid(`scan-${Date.now()}`),
@@ -365,10 +366,8 @@ export class OCRService {
           return scanResultObj;
         }
       } catch (ocrErr: any) {
-        lastErrorMessage = ocrErr?.name === 'AbortError'
-          ? 'Scanning timed out. Please try again with good lighting and a clearer crop.'
-          : String(ocrErr?.message || 'Unable to reach scan service.');
-        console.warn(`[OCRService] /api/ocr/scan-note attempt ${attempt} notice:`, ocrErr?.message || ocrErr);
+        console.error(`[OCRService] /api/ocr/scan-note attempt ${attempt} error:`, ocrErr?.message || ocrErr);
+        lastErrorMessage = 'Something went wrong. There is a server error. Please try again.';
       }
     }
 
@@ -380,7 +379,7 @@ export class OCRService {
       highlights: [],
       formulas: [],
       tags: ['Scanned Note', 'Lens'],
-      error: lastErrorMessage || 'Could not extract readable text from the scanned image.'
+      error: lastErrorMessage || 'Something went wrong. There is a server error. Please try again.'
     };
   }
 
@@ -463,12 +462,14 @@ export class OCRService {
           data = rawBody ? JSON.parse(rawBody) : {};
         } catch {}
 
-        if (response.status === 401 || response.status === 403 || data?.code === 'API_KEY_INVALID') {
-          return String(
-            data?.answer ||
-              data?.error ||
-              'Please configure a valid GEMINI_API_KEY in Settings > Secrets to use live Lens AI.'
-          ).trim();
+        if (!response.ok) {
+          console.error('[OCRService] /api/ocr/lens-ask server error:', {
+            status: response.status,
+            error: data?.error
+          });
+          if (response.status === 401 || response.status === 403 || response.status === 503) {
+            return 'Something went wrong. There is a server error. Please try again.';
+          }
         }
 
         const answer = String(data?.answer || '').trim();
@@ -477,7 +478,7 @@ export class OCRService {
         }
       } catch (err: any) {
         clearTimeout(timeoutId);
-        console.warn(`[OCRService] /api/ocr/lens-ask attempt ${attempt} notice:`, err?.message || err);
+        console.error(`[OCRService] /api/ocr/lens-ask attempt ${attempt} error:`, err?.message || err);
       }
     }
 
@@ -487,6 +488,6 @@ export class OCRService {
     if (request.extractedText) {
       return `### Key Notes & Content from Your Scan\n\n${request.extractedText.slice(0, 1500)}`;
     }
-    return 'I inspected your scanned note. Ask any specific question about a problem, formula, or concept on the page.';
+    return 'Something went wrong. There is a server error. Please try again.';
   }
 }

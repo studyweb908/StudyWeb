@@ -819,7 +819,7 @@ export default function GlobalVoiceListener({
                     {isSpeaking ? (
                       <span className="text-cyan-300 font-semibold">Speaking response...</span>
                     ) : isThinking ? (
-                      <span className="text-amber-300 font-semibold">Analyzing with Gemini...</span>
+                      <span className="text-amber-300 font-semibold">Analyzing...</span>
                     ) : isListening ? (
                       <span className="text-cyan-300 font-semibold">Listening live...</span>
                     ) : hasError ? (

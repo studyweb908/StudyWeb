@@ -88,7 +88,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     if (!apiKey) {
       console.error(`[AI Tutor ${correlationId}] GEMINI_API_KEY is not configured.`);
       return res.status(503).json({
-        error: 'Gemini API key is not configured on the server. Please add GEMINI_API_KEY to your environment variables in Vercel or AI Studio.',
+        error: 'Something went wrong. There is a server error. Please try again.',
         correlationId
       });
     }
@@ -134,7 +134,7 @@ You are a rapid-fire active recall trainer and flashcard coach:
       return res.status(200).json({
         reply: resolvedContext.immediateEdgeCaseReply,
         text: resolvedContext.immediateEdgeCaseReply,
-        source: 'StudyWeb Context Guard',
+        source: 'StudyWeb AI Tutor',
         tutorMode: resolvedContext.selectedMode,
         intentCategory: resolvedContext.intentCategory,
         securityFlags: resolvedContext.securityFlags,
@@ -238,10 +238,10 @@ You are a rapid-fire active recall trainer and flashcard coach:
     const duration = Date.now() - startTime;
 
     if (!responseText) {
-      const errMsg = lastError?.message || 'Gemini service is temporarily unreachable.';
+      const errMsg = lastError?.message || 'AI service is temporarily unreachable.';
       console.error(`[AI Tutor ${correlationId}] All models failed after ${duration}ms:`, errMsg);
       return res.status(503).json({
-        error: `Failed to generate response from Gemini: ${errMsg}`,
+        error: 'Something went wrong. There is a server error. Please try again.',
         correlationId,
         durationMs: duration
       });
@@ -251,8 +251,7 @@ You are a rapid-fire active recall trainer and flashcard coach:
     return res.status(200).json({
       reply: responseText,
       text: responseText,
-      source: `Gemini (${usedModel})`,
-      modelUsed: usedModel,
+      source: 'StudyWeb AI Tutor',
       tutorMode: resolvedContext.selectedMode,
       intentCategory: resolvedContext.intentCategory,
       securityFlags: resolvedContext.securityFlags,
@@ -264,7 +263,7 @@ You are a rapid-fire active recall trainer and flashcard coach:
     const duration = Date.now() - startTime;
     console.error(`[AI Tutor ${correlationId}] Uncaught error after ${duration}ms:`, err);
     return res.status(500).json({
-      error: err?.message || 'Internal server error while processing AI Tutor request.',
+      error: 'Something went wrong. There is a server error. Please try again.',
       correlationId,
       durationMs: duration
     });

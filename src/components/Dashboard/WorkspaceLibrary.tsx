@@ -475,18 +475,20 @@ export default function WorkspaceLibrary({
         setIsUploading(false);
         setDriveCopyText('');
         setDriveCopyTitle('');
-      }, 220);
+      }, 2200);
 
     } catch (err: any) {
       clearInterval(progress);
       libraryProgressRef.current = null;
       setIsUploading(false);
-      const errMsg = err?.message || `Failed to analyze "${title}". Please try again.`;
-      setLibraryError(errMsg);
+      console.error('[WorkspaceLibrary Paste Analysis Error]', err);
+      const genericErr = 'Something went wrong. There is a server error. Please try again.';
+      setLibraryError(genericErr);
       window.dispatchEvent(
         new CustomEvent('studyweb-toast', {
           detail: {
-            message: errMsg,
+            title: 'Server Error',
+            message: genericErr,
             type: 'error'
           }
         })
@@ -554,7 +556,7 @@ export default function WorkspaceLibrary({
               }
             })
           );
-        }, 220);
+        }, 2200);
         return;
       }
 
@@ -590,20 +592,24 @@ export default function WorkspaceLibrary({
       }
 
       setIsUploading(false);
+      console.error('[WorkspaceLibrary ZIP Import Error] No supported study files in archive:', zipFile.name);
       window.dispatchEvent(
         new CustomEvent('studyweb-toast', {
           detail: {
-            message: `No supported study files were found inside "${zipFile.name}".`,
+            title: 'Server Error',
+            message: 'Something went wrong. There is a server error. Please try again.',
             type: 'error'
           }
         })
       );
     } catch (err: any) {
       setIsUploading(false);
+      console.error('[WorkspaceLibrary ZIP Import Error]', err);
       window.dispatchEvent(
         new CustomEvent('studyweb-toast', {
           detail: {
-            message: `Could not extract ZIP file "${zipFile.name}". Please ensure it is a valid .zip archive.`,
+            title: 'Server Error',
+            message: 'Something went wrong. There is a server error. Please try again.',
             type: 'error'
           }
         })
@@ -898,9 +904,10 @@ export default function WorkspaceLibrary({
       const validation = fileUploadService.validate(file);
       if (!validation.valid) {
         console.error('[Upload Validation Error] [UPLOAD_VALIDATION_ERR]', validation.error);
-        setLibraryError(validation.error || 'Invalid file.');
+        const genericErr = 'Something went wrong. There is a server error. Please try again.';
+        setLibraryError(genericErr);
         if (typeof (window as any).showToast === 'function') {
-          (window as any).showToast(`[UPLOAD_VALIDATION_ERR] ${validation.error}`, 'error', 5000, 'Upload Error');
+          (window as any).showToast(genericErr, 'error', 5000, 'Server Error');
         }
         return;
       }
@@ -1164,7 +1171,7 @@ export default function WorkspaceLibrary({
         onAddFile(fileData);
         setPreviewFile(fileData);
         setIsUploading(false);
-      }, 220);
+      }, 2200);
 
     } catch (err: any) {
       const parsedError = FileUploadError.fromError(err, `Upload of ${name || url}`);
@@ -1174,10 +1181,10 @@ export default function WorkspaceLibrary({
       progressIntervalRef.current = null;
       timerIntervalRef.current = null;
       setIsUploading(false);
-      const displayErr = err?.message || parsedError.message || `Could not upload or analyze "${name}".`;
-      setLibraryError(displayErr);
-      (window as any).showToast?.(displayErr, 'error', 5500, 'Upload Error');
-      fileUploadService.log('warn', `Upload analysis encountered error: [${parsedError.code}] ${displayErr}`, parsedError);
+      const genericErr = 'Something went wrong. There is a server error. Please try again.';
+      setLibraryError(genericErr);
+      (window as any).showToast?.(genericErr, 'error', 5500, 'Server Error');
+      fileUploadService.log('warn', `Upload analysis encountered error: [${parsedError.code}] ${parsedError.message}`, parsedError);
     }
   };
 
@@ -1274,8 +1281,8 @@ export default function WorkspaceLibrary({
               <div className="flex items-start gap-2.5 min-w-0">
                 <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
                 <div className="min-w-0">
-                  <p className="font-bold">Upload &amp; Analysis Error</p>
-                  <p className="mt-0.5 text-rose-700 dark:text-rose-300 leading-relaxed break-words">{libraryError}</p>
+                  <p className="font-bold">Server Error</p>
+                  <p className="mt-0.5 text-rose-700 dark:text-rose-300 leading-relaxed break-words">Something went wrong. There is a server error. Please try again.</p>
                 </div>
               </div>
               <button

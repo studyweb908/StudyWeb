@@ -38,6 +38,7 @@ import { AITutorBackgroundService } from '../../services/AITutorBackgroundServic
 import { FullScreenUploadOverlay } from './FullScreenUploadOverlay';
 import { loadStoredWorkspaces, saveStoredWorkspaces } from '../../utils/workspaceStorage';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
+import { AITutorContextDebugPanel } from './AITutorContextDebugPanel';
 import AITutorAvatar from './AITutorAvatar';
 import { ShareContentModal, triggerNativeDeviceShare } from './ShareContentModal';
 import {
@@ -824,6 +825,12 @@ export default function AITutorWorkspace() {
         throw errorWithCode;
       }
 
+      if (typeof window !== 'undefined' && data?.contextResolution) {
+        window.dispatchEvent(
+          new CustomEvent('studyweb_context_resolution', { detail: data.contextResolution })
+        );
+      }
+
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: 'ai',
@@ -1062,7 +1069,7 @@ export default function AITutorWorkspace() {
 
     setTimeout(() => {
       setTutorUploadOverlay(prev => ({ ...prev, isOpen: false }));
-    }, 260);
+    }, 2200);
 
     (window as any).showToast?.(
       `"${filesArray.map(f => f.name).join(', ')}" was uploaded and attached to your AI Tutor session.`,
@@ -1423,6 +1430,14 @@ export default function AITutorWorkspace() {
             </button>
           </div>
         </div>
+
+        {/* Developer-Only Context Resolution Debug Bar */}
+        <AITutorContextDebugPanel
+          activeWorkspaceId={targetWsId}
+          activeWorkspaceName={activeWorkspace?.name || 'Workspace'}
+          attachedFiles={attachedFiles}
+          allWorkspaces={activeWorkspace ? [activeWorkspace] : []}
+        />
 
         {/* Main Chat Feed */}
         <div

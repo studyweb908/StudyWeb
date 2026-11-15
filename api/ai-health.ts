@@ -19,11 +19,11 @@ export default async function handler(_req: ApiRequest, res: ApiResponse) {
     const diagnostic = diagnoseServerGeminiApiKey();
     const apiKey = getServerGeminiApiKey();
     if (!apiKey) {
+      console.error('[AI Health] API key not configured:', diagnostic);
       return res.status(503).json({
         status: 'error',
         configured: false,
-        keyState: diagnostic.state,
-        error: diagnostic.message
+        error: 'Something went wrong. There is a server error. Please try again.'
       });
     }
 
@@ -50,11 +50,10 @@ export default async function handler(_req: ApiRequest, res: ApiResponse) {
         });
         const text = response.text?.trim() || '';
         if (text) {
+          console.log(`[AI Health] Verified model ${modelName} in ${Date.now() - startTime}ms`);
           return res.status(200).json({
             status: 'ok',
             configured: true,
-            keyState: 'valid_format',
-            model: modelName,
             reply: text,
             verified: true,
             durationMs: Date.now() - startTime
@@ -77,21 +76,20 @@ export default async function handler(_req: ApiRequest, res: ApiResponse) {
 
     const rawMsg = String(lastErr?.message || lastErr || 'Could not complete model handshake.');
     const isInvalidKey = /api key not valid|api_key_invalid|access_token_type_unsupported|unauthenticated/i.test(rawMsg);
+    console.error('[AI Health] Handshake failed:', rawMsg);
 
     return res.status(isInvalidKey ? 401 : 500).json({
       status: 'error',
       configured: true,
-      keyState: isInvalidKey ? 'rejected_by_google' : 'handshake_failed',
-      error: isInvalidKey
-        ? 'The configured GEMINI_API_KEY was rejected by Google (API_KEY_INVALID). Please replace it with a valid Gemini API key in Settings > Secrets.'
-        : rawMsg,
+      error: 'Something went wrong. There is a server error. Please try again.',
       durationMs: Date.now() - startTime
     });
   } catch (err: any) {
+    console.error('[AI Health] Uncaught error:', err?.message || err);
     return res.status(500).json({
       status: 'error',
       configured: false,
-      error: err?.message || String(err),
+      error: 'Something went wrong. There is a server error. Please try again.',
       durationMs: Date.now() - startTime
     });
   }

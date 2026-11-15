@@ -2233,17 +2233,17 @@ async function generateTutorVisualIfNeeded(
     return `I searched for reliable web info on **"${cleanTopic}"**, but didn't find a strong direct match offline. Try rephrasing with a few more details, or upload related notes/files and I'll analyze them for you right away.`;
   }
 
-  // Diagnostic Route: Verify real Gemini API connectivity independently
+  // Diagnostic Route: Verify real AI connectivity independently
   app.get("/api/ai-health", async (_req, res) => {
     const startTime = Date.now();
     try {
       const diagnostic = diagnoseServerGeminiApiKey();
       const apiKey = getGeminiApiKey();
       if (!apiKey) {
+        console.error("[AIHealth] API key not configured:", diagnostic);
         return res.status(503).json({
           status: "error",
-          error: diagnostic.message,
-          keyState: diagnostic.state,
+          error: "Something went wrong. There is a server error. Please try again.",
           configured: false
         });
       }
@@ -2270,26 +2270,23 @@ async function generateTutorVisualIfNeeded(
 
       const text = response.text?.trim() || "";
       const durationMs = Date.now() - startTime;
+      console.log(`[AIHealth] Verified with ${modelUsed} in ${durationMs}ms`);
 
       return res.json({
         status: "ok",
         configured: true,
-        keyState: "valid_format",
-        model: modelUsed,
         reply: text,
         verified: text.length > 0,
         durationMs
       });
     } catch (err: any) {
-      const rawMsg = String(err?.message || err || "Could not verify Gemini API connection.");
+      const rawMsg = String(err?.message || err || "Could not verify AI connection.");
       const isInvalidKey = isAuthOrInvalidApiKeyError(err);
+      console.error("[AIHealth] Handshake error:", rawMsg);
       return res.status(isInvalidKey ? 401 : 500).json({
         status: "error",
         configured: true,
-        keyState: isInvalidKey ? "rejected_by_google" : "handshake_failed",
-        error: isInvalidKey
-          ? "The configured GEMINI_API_KEY was rejected by Google (API_KEY_INVALID). Please replace it with a valid Gemini API key in Settings > Secrets."
-          : rawMsg,
+        error: "Something went wrong. There is a server error. Please try again.",
         durationMs: Date.now() - startTime
       });
     }
@@ -2345,7 +2342,8 @@ async function generateTutorVisualIfNeeded(
 
       const apiKey = getGeminiApiKey();
       if (!apiKey) {
-        return res.status(500).json({ error: "Gemini API key is not configured." });
+        console.error("[Voice Query] API key is not configured.");
+        return res.status(500).json({ error: "Something went wrong. There is a server error. Please try again." });
       }
 
       const ai = new GoogleGenAI({ 
@@ -2379,7 +2377,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         spokenText: replyText
       });
     } catch (err: any) {
-      console.warn("[Voice Query Gemini Error]:", err?.message || err);
+      console.warn("[Voice Query Error]:", err?.message || err);
       return res.json({
         answer: `Here is the information for "${req.body.query}": StudyWeb AI Tutor is ready to dive deep into this topic with you.`,
         spokenText: `I have received your question regarding "${req.body.query}".`
@@ -2387,7 +2385,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
     }
   });
 
-  // API Route: Voice Transcription via Gemini Audio Understanding
+  // API Route: Voice Transcription
   app.post("/api/voice-transcribe", async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     try {
@@ -2399,7 +2397,8 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
 
       const apiKey = getGeminiApiKey();
       if (!apiKey) {
-        res.status(500).json({ error: "Gemini API key is not configured" });
+        console.error("[Voice Transcribe] API key is not configured.");
+        res.status(500).json({ error: "Something went wrong. There is a server error. Please try again." });
         return;
       }
 
@@ -3769,7 +3768,7 @@ ${citationGuideline}`;
 
             if (response && response.text && response.text.trim()) {
               responseText = response.text.trim();
-              responseSource = `Gemini (${currentModel})`;
+              responseSource = "StudyWeb AI Tutor";
               const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
               if (Array.isArray(chunks)) {
                 geminiGroundingCitations = chunks
@@ -3944,8 +3943,7 @@ ${citationGuideline}`;
       res.status(200).json({ 
         reply: responseText,
         text: responseText, 
-        source: responseSource || "Gemini AI",
-        modelUsed: responseSource || "Gemini 3 Flash",
+        source: responseSource || "StudyWeb AI Tutor",
         tutorMode: resolvedTutorContext.selectedMode,
         intentCategory: resolvedTutorContext.intentCategory,
         securityFlags: resolvedTutorContext.securityFlags,
@@ -3972,9 +3970,9 @@ ${citationGuideline}`;
       });
     } catch (error: any) {
       const totalDuration = Date.now() - routeStartTime;
-      console.warn(`[AI Tutor Error][${correlationId}] Exception in ${totalDuration}ms:`, error?.message || error);
+      console.error(`[AI Tutor Error][${correlationId}] Exception in ${totalDuration}ms:`, error?.message || error);
       res.status(503).json({
-        error: error?.message || "Unable to reach Gemini AI right now. Please retry.",
+        error: "Something went wrong. There is a server error. Please try again.",
         correlationId
       });
     }
@@ -4120,12 +4118,12 @@ ${citationGuideline}`;
 
           const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
           if (base64Audio) {
+            console.log(`[AI Tutor TTS] Synthesized with ${ttsModel}`);
             return res.json({
               success: true,
               audioBase64: base64Audio,
               mimeType: "audio/wav",
               voiceUsed: validVoice,
-              modelUsed: ttsModel,
               cleanedText: cleanText
             });
           }
@@ -4145,7 +4143,7 @@ ${citationGuideline}`;
       return res.json({
         success: false,
         fallbackToBrowser: true,
-        message: "No audio data returned from Gemini TTS."
+        message: "TTS synthesis switched to browser speech."
       });
     } catch (ttsErr: any) {
       if (isQuotaOrRateLimitError(ttsErr)) {
@@ -4287,7 +4285,8 @@ ${citationGuideline}`;
     "image/gif",
     "image/bmp",
     "image/svg+xml",
-    "application/pdf"
+    "image/heic",
+    "image/heif"
   ]);
 
   // API Route: Dedicated Optical Character Recognition (OCR) for Camera-Scanned Study Notes (Single & Multi-Page)
@@ -4332,7 +4331,7 @@ ${citationGuideline}`;
 
         if (!cleanB64 || cleanB64.length < 32) {
           res.status(400).json({
-            error: `Page ${page.pageNumber} is empty or corrupted. Please provide a valid image or PDF scan.`
+            error: `Page ${page.pageNumber} is empty or corrupted. Please provide a valid image scan.`
           });
           return;
         }
@@ -4358,7 +4357,7 @@ ${citationGuideline}`;
 
         if (!SUPPORTED_SCAN_MIMES.has(normMime)) {
           res.status(415).json({
-            error: `Unsupported file format "${normMime}". Supported formats: JPEG, PNG, WEBP, GIF, BMP, SVG, and PDF.`
+            error: `Unsupported file format "${normMime}". Supported image formats: JPEG, PNG, WEBP, GIF, BMP, SVG, and HEIC.`
           });
           return;
         }
@@ -4386,9 +4385,9 @@ ${citationGuideline}`;
       const apiKey = getGeminiApiKey();
 
       if (!apiKey) {
+        console.error("[OCR Endpoint] API key is not configured.");
         res.status(503).json({
-          error: "Scan Notes image analysis requires a valid GEMINI_API_KEY in Settings > Secrets.",
-          code: "API_KEY_REQUIRED"
+          error: "Something went wrong. There is a server error. Please try again."
         });
         return;
       }
@@ -4443,9 +4442,9 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
         );
       } catch (raceErr: any) {
         if (isAuthOrInvalidApiKeyError(raceErr)) {
+          console.error("[OCR Endpoint] API key invalid or unauthorized:", summarizeModelError(raceErr));
           res.status(401).json({
-            error: "Gemini API key is invalid or unauthorized. Please update GEMINI_API_KEY in Settings > Secrets.",
-            code: "API_KEY_INVALID"
+            error: "Something went wrong. There is a server error. Please try again."
           });
           return;
         }
@@ -4462,9 +4461,9 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
           cleaned.includes("[EMPTY_OR_UNREADABLE_IMAGE]") ||
           cleaned.replace(/[^a-zA-Z0-9]/g, "").length < 3
         ) {
+          console.warn("[OCR Endpoint] Image had no readable text or was empty.");
           res.status(422).json({
-            error: "No readable text, formulas, or diagrams could be detected in the scanned image. Please ensure the page is well-lit, in focus, and contains visible study notes.",
-            code: "EMPTY_OR_UNREADABLE_IMAGE"
+            error: "Something went wrong. There is a server error. Please try again."
           });
           return;
         }
@@ -4542,22 +4541,20 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
         return;
       }
 
+      console.error("[OCR Endpoint] OCR extraction failed to return markdown.");
       res.status(422).json({
-        error: "Could not extract readable text from the scanned image right now. Please check image clarity and try scanning again.",
-        code: "OCR_EXTRACTION_FAILED"
+        error: "Something went wrong. There is a server error. Please try again."
       });
     } catch (error: any) {
+      console.error("[OCR Endpoint Error] /api/ocr/scan-note error:", summarizeModelError(error));
       if (isAuthOrInvalidApiKeyError(error)) {
         res.status(401).json({
-          error: "Gemini API key is invalid or unauthorized. Please update GEMINI_API_KEY in Settings > Secrets.",
-          code: "API_KEY_INVALID"
+          error: "Something went wrong. There is a server error. Please try again."
         });
         return;
       }
-      console.warn("[OCR Endpoint Notice] /api/ocr/scan-note error:", summarizeModelError(error));
       res.status(500).json({
-        error: "OCR processing failed while analyzing the scanned image. Please try again.",
-        code: "OCR_PROCESSING_ERROR"
+        error: "Something went wrong. There is a server error. Please try again."
       });
     }
   });
@@ -4605,10 +4602,11 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
         }
         return textCtx
           ? `Here is the extracted content from your scan:\n\n${textCtx}`
-          : "Your scan is loaded. Configure a valid GEMINI_API_KEY in Settings > Secrets to enable live Scan Notes AI.";
+          : "Something went wrong. There is a server error. Please try again.";
       };
 
       if (!apiKey) {
+        console.error("[Lens Ask Endpoint] API key is not configured.");
         res.json({
           answer: buildFallbackLensAnswer(operation, trimmedText),
           mode: operation
@@ -4712,21 +4710,20 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
     } catch (error: any) {
       const normalizedMode = String(req.body?.mode || "ask").toLowerCase().trim();
       const trimmedText = String(req.body?.extractedText || "").trim();
+      console.error("[Lens Ask Endpoint Error] /api/ocr/lens-ask:", summarizeModelError(error));
       if (isAuthOrInvalidApiKeyError(error)) {
         res.status(401).json({
-          error: "Gemini API key is invalid or unauthorized. Please update GEMINI_API_KEY in Settings > Secrets.",
-          code: "API_KEY_INVALID",
+          error: "Something went wrong. There is a server error. Please try again.",
           answer:
             normalizedMode === "short_summary" && trimmedText
               ? trimmedText.replace(/^#{1,6}\s+[^\n]*\n+/gm, "").replace(/\s+/g, " ").trim().slice(0, 220)
-              : "Please configure a valid GEMINI_API_KEY in Settings > Secrets to use live Scan Notes AI.",
+              : "Something went wrong. There is a server error. Please try again.",
           mode: normalizedMode
         });
         return;
       }
-      console.warn("[Lens Ask Endpoint Notice] /api/ocr/lens-ask fallback:", summarizeModelError(error));
       res.json({
-        answer: "I reviewed your scanned note. Could you rephrase your question or specify which section on the page you want analyzed?",
+        answer: "Something went wrong. There is a server error. Please try again.",
         mode: normalizedMode
       });
     }
@@ -4888,7 +4885,7 @@ Return a JSON object with:
       });
     } catch (error: any) {
       console.error("Error in /api/study-materials/process:", error);
-      res.status(500).json({ error: "Failed to process study material", details: error.message });
+      res.status(500).json({ error: "Something went wrong. There is a server error. Please try again." });
     }
   });
 
@@ -5760,7 +5757,8 @@ Return ONLY valid JSON matching the requested schema.`;
             };
           });
 
-          return res.json({ questions: quizWithIds, modelUsed });
+          console.log(`[Generate Quiz] Generated ${quizWithIds.length} questions using ${modelUsed}`);
+          return res.json({ questions: quizWithIds });
         }
       }
 
@@ -5781,8 +5779,7 @@ Return ONLY valid JSON matching the requested schema.`;
       const rawType = String(questionType || "MCQ");
       const qType = rawType === "TF" ? "TF" : rawType === "FillBlank" ? "FillBlank" : rawType === "MatchFollowing" ? "MatchFollowing" : "MCQ";
       return res.json({
-        questions: buildFallbackQuizQuestions(files, notes, internetSources, internetTopic, questionCount, diffLevel, qType),
-        modelUsed: "StudyWeb Knowledge Engine"
+        questions: buildFallbackQuizQuestions(files, notes, internetSources, internetTopic, questionCount, diffLevel, qType)
       });
     }
   });
@@ -6945,9 +6942,9 @@ Your output MUST be a JSON object matching the following TypeScript schema:
         const fallbackGraph = generateFallbackMindmap(req.body.notes || [], req.body.files || [], req.body.subject || "Study Workspace");
         res.json(fallbackGraph);
       } catch (innerError: any) {
+        console.error("Error in fallback mindmap:", innerError);
         res.status(500).json({
-          error: "Failed to generate visual mind map.",
-          details: error.message
+          error: "Something went wrong. There is a server error. Please try again."
         });
       }
     }
@@ -7142,9 +7139,9 @@ You MUST return a JSON object with a "flashcards" array containing your generate
         const fallbackCards = generateFallbackFlashcards(req.body.notes || [], req.body.files || [], req.body.count || 5, req.body.difficulty || "Medium");
         res.json({ flashcards: fallbackCards });
       } catch (innerError: any) {
+        console.error("Error in fallback flashcards:", innerError);
         res.status(500).json({
-          error: "Failed to generate study flashcards.",
-          details: error.message
+          error: "Something went wrong. There is a server error. Please try again."
         });
       }
     }
@@ -7308,9 +7305,9 @@ Study Style Preference: ${activeStyle}`;
         const fallbackTasks = generateFallbackSchedule(req.body.subjects || [], req.body.intensity || "Balanced", req.body.style || "Balanced");
         res.json({ tasks: fallbackTasks });
       } catch (innerError: any) {
+        console.error("Error in fallback schedule:", innerError);
         res.status(500).json({
-          error: "Failed to generate weekly study schedule.",
-          details: error.message
+          error: "Something went wrong. There is a server error. Please try again."
         });
       }
     }

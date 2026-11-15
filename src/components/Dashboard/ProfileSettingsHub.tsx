@@ -45,7 +45,7 @@ import {
   CustomDailyGoalSelector,
   formatMinutesHuman
 } from './CustomFocusGoalAndTimer';
-import { GeminiConnectionTestCard } from './GeminiConnectionTestCard';
+import { SuccessLottieAnimation } from '../Common/SuccessLottieAnimation';
 
 type SettingsTab = 'overview' | 'personal' | 'curriculum';
 
@@ -94,27 +94,28 @@ export function ProfileSettingsHub() {
   const [isRemovingPhoto, setIsRemovingPhoto] = useState(false);
   const [showDeleteProfileConfirm, setShowDeleteProfileConfirm] = useState(false);
   const [isDeletingProfile, setIsDeletingProfile] = useState(false);
+  const [showProfileSaveSuccess, setShowProfileSaveSuccess] = useState(false);
+  const profileSaveTimerRef = useRef<number | null>(null);
   const [customAvatarUrlInput, setCustomAvatarUrlInput] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Gemini AI Connection Test State (Settings 'Test Connection' component trigger)
-  const [connectionTestTriggerCount, setConnectionTestTriggerCount] = useState(0);
-  const testConnectionSectionRef = useRef<HTMLDivElement | null>(null);
+  const triggerProfileSaveAnimation = () => {
+    if (profileSaveTimerRef.current) {
+      window.clearTimeout(profileSaveTimerRef.current);
+    }
+    setShowProfileSaveSuccess(true);
+    profileSaveTimerRef.current = window.setTimeout(() => {
+      setShowProfileSaveSuccess(false);
+      profileSaveTimerRef.current = null;
+    }, 2200);
+  };
 
   useEffect(() => {
-    const runPendingTestIfRequested = () => {
-      if ((window as any).__studywebPendingTestConnection) {
-        (window as any).__studywebPendingTestConnection = false;
-        setActiveTab('overview');
-        setTimeout(() => {
-          testConnectionSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          setConnectionTestTriggerCount((prev) => prev + 1);
-        }, 120);
+    return () => {
+      if (profileSaveTimerRef.current) {
+        window.clearTimeout(profileSaveTimerRef.current);
       }
     };
-    runPendingTestIfRequested();
-    window.addEventListener('studyweb-open-settings-test-connection', runPendingTestIfRequested);
-    return () => window.removeEventListener('studyweb-open-settings-test-connection', runPendingTestIfRequested);
   }, []);
 
   const handleDeleteProfileCompletely = async () => {
@@ -486,12 +487,7 @@ export function ProfileSettingsHub() {
       setSyncStatus(synced ? 'synced' : 'local');
       setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       triggerToast('✨ Profile and academic details saved!');
-      confetti({
-        particleCount: 30,
-        spread: 55,
-        origin: { y: 0.8 },
-        colors: ['#4F46E5', '#6366F1', '#10B981', '#38BDF8']
-      });
+      triggerProfileSaveAnimation();
     } catch (err) {
       console.warn('Save profile error:', err);
       setSyncStatus('local');
@@ -525,6 +521,7 @@ export function ProfileSettingsHub() {
       setSyncStatus(synced ? 'synced' : 'local');
       setLastSyncedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       triggerToast('🎯 Study goals and exam countdown saved!');
+      triggerProfileSaveAnimation();
     } catch (err) {
       console.warn('Save goals error:', err);
       setSyncStatus('local');
@@ -1300,11 +1297,6 @@ export function ProfileSettingsHub() {
                   />
                 </div>
               </div>
-            </div>
-
-            {/* Row 2: Visual Gemini API Connection Diagnostics Component */}
-            <div ref={testConnectionSectionRef}>
-              <GeminiConnectionTestCard triggerRunCount={connectionTestTriggerCount} />
             </div>
           </div>
         )}
@@ -2235,6 +2227,25 @@ export function ProfileSettingsHub() {
                   )}
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+        {showProfileSaveSuccess && (
+          <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 pointer-events-none">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 8 }}
+              transition={{ duration: 0.2 }}
+              className="pointer-events-auto flex flex-col items-center justify-center rounded-3xl border border-emerald-200/90 dark:border-emerald-800/70 bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl px-8 py-6 shadow-2xl text-center"
+            >
+              <SuccessLottieAnimation className="w-28 h-28" />
+              <p className="mt-1 text-base font-bold text-slate-900 dark:text-white">
+                Profile Saved!
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                Your changes have been updated.
+              </p>
             </motion.div>
           </div>
         )}
