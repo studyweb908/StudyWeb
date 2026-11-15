@@ -357,19 +357,26 @@ class AITutorBackgroundManager {
       const rawFollowUps: string[] = Array.isArray(data?.followUpQuestions)
         ? data.followUpQuestions.filter((q: any) => typeof q === 'string' && q.trim().length > 0)
         : [];
+      const qText = String(userMsg.text || '').trim();
+      const isGreeting = /^(hi+|hello+|hey+|yo|sup|how\s+are\s+you|who\s+are\s+you|what\s+can\s+you\s+do|thanks|thank\s+you|ok|okay|bye)\b[!?.]*$/i.test(qText);
       if (rawFollowUps.length < 3) {
-        const qText = String(userMsg.text || '').trim();
         const isInterview = /\b(interview|interviewer|viva|oral|behavioral|star\s+method|tell\s+me\s+about\s+yourself|hire|candidate)\b/i.test(qText);
-        const cleanSubject = qText.replace(/^(what\s+is|explain|tell\s+me\s+about|how\s+does|how\s+do\s+i\s+answer)\s+/i, '').replace(/[?!.]+$/, '').slice(0, 48).trim() || (workspaceName || 'this topic');
-        const defaultFollowUps = isInterview
+        const cleanSubject = qText.replace(/^(what\s+is|explain|tell\s+me\s+about|how\s+does|how\s+do\s+i\s+answer)\s+/i, '').replace(/[?!.]+$/, '').slice(0, 48).trim() || 'this topic';
+        const defaultFollowUps = isGreeting
+          ? [
+              `Analyze everything uploaded in my workspace`,
+              `Explain a complex concept step by step`,
+              `Create a quick practice quiz on any topic`
+            ]
+          : isInterview
           ? [
               `Ask me a harder follow-up interview question on "${cleanSubject}"`,
               `How do I deliver this answer in under 60 seconds during an interview?`,
               `What common mistakes do candidates make when answering this question?`
             ]
           : [
-              `Ask me an interview or viva question on "${cleanSubject}"`,
               `Give me a practical real-world example of "${cleanSubject}"`,
+              `Summarize the core takeaways of "${cleanSubject}"`,
               `Quiz me with 3 practice questions on "${cleanSubject}"`
             ];
         for (const df of defaultFollowUps) {
@@ -378,7 +385,9 @@ class AITutorBackgroundManager {
         }
       }
 
-      const fallbackReply = `Let's work through **${userMsg.text.slice(0, 80)}** clearly:\n\n- Break the problem down into its core definitions and relationships.\n- Check your uploaded workspace notes or open the **Quizzes** section to practice key concepts step by step.\n\nFeel free to ask a follow-up question or narrow down a specific part!`;
+      const fallbackReply = isGreeting
+        ? `Hi there! How can I help you today? Feel free to ask me any question, or upload files, notes, or links for me to analyze.`
+        : `I'm having trouble reaching the server right now. Please try asking **"${userMsg.text.slice(0, 80)}"** again in a moment!`;
 
       // Format AI Message without surfacing raw API or load errors
       const aiMsg: TutorMessage = data && (data.reply || data.text)
@@ -388,11 +397,11 @@ class AITutorBackgroundManager {
             text: data.reply || data.text,
             citations: data.citations,
             source: data.source || 'Gemini AI',
-            workspaceNotice: data.workspaceNotice,
-            activeWorkspaceContext: data.activeWorkspaceContext || workspaceName,
+            workspaceNotice: undefined,
+            activeWorkspaceContext: data.activeWorkspaceContext,
             activeContextFiles: Array.isArray(data.activeContextFiles) ? data.activeContextFiles : [],
             followUpQuestions: rawFollowUps.slice(0, 3),
-            suggestOutsideResearch: Boolean(data.suggestOutsideResearch),
+            suggestOutsideResearch: false,
             originalQuery: userMsg.text,
             generatedImageUrl: data.generatedImageUrl,
             generatedImageCaption: data.generatedImageCaption,
@@ -402,8 +411,8 @@ class AITutorBackgroundManager {
             id: `msg-ai-${Date.now()}`,
             sender: 'ai',
             text: fallbackReply,
-            source: 'StudyWeb Study Engine',
-            activeWorkspaceContext: workspaceName,
+            source: 'AI Study Tutor',
+            activeWorkspaceContext: undefined,
             followUpQuestions: rawFollowUps.slice(0, 3),
             originalQuery: userMsg.text,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })

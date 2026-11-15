@@ -18,6 +18,7 @@ export interface OCRScanResult {
   highlights: string[];
   formulas: string[];
   tags: string[];
+  error?: string;
 }
 
 export interface LensAskRequest {
@@ -31,12 +32,21 @@ export interface LensAskRequest {
   history?: Array<{ role: 'user' | 'assistant'; text: string }>;
 }
 
+export interface GeminiConnectionStatus {
+  ok: boolean;
+  configured: boolean;
+  verified?: boolean;
+  model?: string;
+  durationMs?: number;
+  error?: string;
+}
+
 const SHORT_SUMMARY_CACHE_KEY = 'studyweb_scan_short_summaries_v1';
 
 export function isPlaceholderScanSummary(summary?: string | null): boolean {
   const s = String(summary || '').trim();
   if (!s || s.length < 18) return true;
-  return /ask any question about your scanned|scanned image loaded in lens|scanned study note ready|switch to text & translate|tap listen to hear|uploading and analyzing/i.test(
+  return /ask any question about your scanned|scanned image loaded in lens|scanned study note ready|switch to text & translate|tap listen to hear|uploading and analyzing|configure a valid gemini_api_key|enable live lens ai|ready for review and q&a|i inspected your scanned note/i.test(
     s
   );
 }
@@ -71,6 +81,58 @@ export function setCachedShortSummary(fileId: string | undefined, summary: strin
 }
 
 export class OCRService {
+  /**
+   * Explicitly verifies the server-side Gemini API key and connection status via /api/ai-health
+   * before attempting OCR summarization or when testing the connection from Settings.
+   */
+  public static async verifyGeminiConnectionStatus(): Promise<GeminiConnectionStatus> {
+    const abortCtrl = new AbortController();
+    const timeoutId = setTimeout(() => abortCtrl.abort(), 8000);
+    try {
+      const response = await fetch('/api/ai-health', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: abortCtrl.signal
+      });
+      clearTimeout(timeoutId);
+
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data?.status === 'ok') {
+        return {
+          ok: true,
+          configured: true,
+          verified: Boolean(data.verified),
+          model: String(data.model || 'gemini-3-flash-preview'),
+          durationMs: typeof data.durationMs === 'number' ? data.durationMs : undefined
+        };
+      }
+
+      const configured = data?.configured !== false && response.status !== 503;
+      return {
+        ok: false,
+        configured,
+        verified: false,
+        error: String(
+          data?.error ||
+            (!configured
+              ? 'GEMINI_API_KEY is not configured in Settings > Secrets.'
+              : 'Could not verify Gemini API connection.')
+        )
+      };
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      return {
+        ok: false,
+        configured: false,
+        verified: false,
+        error:
+          err?.name === 'AbortError'
+            ? 'Connection check timed out. Please try again.'
+            : String(err?.message || 'Unable to reach AI health endpoint.')
+      };
+    }
+  }
+
   /**
    * Processes a scanned note image using server-side Gemini Vision OCR
    * to extract verbatim text content, structured summary, highlights, and formulas.
@@ -107,10 +169,12 @@ export class OCRService {
 
     onProgress?.(45, 'Scanning text, formulas & questions with Lens OCR...');
 
+    let lastErrorMessage = '';
+
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const abortCtrl = new AbortController();
-        const timeoutId = setTimeout(() => abortCtrl.abort(), 14000);
+        const timeoutId = setTimeout(() => abortCtrl.abort(), 20000);
 
         const response = await fetch('/api/ocr/scan-note', {
           method: 'POST',
@@ -131,42 +195,63 @@ export class OCRService {
 
         clearTimeout(timeoutId);
 
-        if (response.ok) {
-          const data = await response.json();
-          const rawOcr = String(data?.rawOcrText || '').trim();
-          const fullExtracted = String(
-            data?.extractedText || rawOcr || data?.transcription || data?.summary || ''
-          ).trim();
-          if (data && fullExtracted) {
-            onProgress?.(85, 'Text extracted & ready in Lens!');
-            const title = String(data.title || data.name || defaultName).trim();
-            const summary = String(data.summary || '').trim();
-            const highlights =
-              Array.isArray(data.highlights) && data.highlights.length > 0
-                ? data.highlights
-                : fullExtracted
-                    .split(/\n+/)
-                    .map((line: string) => line.replace(/^[-*•\d.)\s]+/, '').trim())
-                    .filter((line: string) => line.length > 12)
-                    .slice(0, 5);
-            const formulas = Array.isArray(data.formulas) ? data.formulas : [];
-            const tags =
-              Array.isArray(data.tags) && data.tags.length > 0
-                ? data.tags
-                : ['Scanned Note', 'OCR Extracted'];
+        const data = await response.json().catch(() => null);
 
+        if (!response.ok) {
+          lastErrorMessage = String(
+            data?.error || 'Could not analyze the scanned image. Please try again.'
+          );
+          if (response.status === 401 || response.status === 403 || response.status === 503 || data?.code === 'API_KEY_REQUIRED' || data?.code === 'API_KEY_INVALID') {
             return {
-              id: data.id || toValidUuid(`scan-${Date.now()}`),
-              title,
-              extractedText: rawOcr || fullExtracted,
-              summary,
-              highlights,
-              formulas,
-              tags
+              id: toValidUuid(`scan-${Date.now()}`),
+              title: defaultName,
+              extractedText: '',
+              summary: '',
+              highlights: [],
+              formulas: [],
+              tags: ['Scanned Note', 'Setup Required'],
+              error: lastErrorMessage
             };
           }
+          continue;
+        }
+
+        const rawOcr = String(data?.rawOcrText || '').trim();
+        const fullExtracted = String(
+          data?.extractedText || rawOcr || data?.transcription || data?.summary || ''
+        ).trim();
+        if (data && fullExtracted) {
+          onProgress?.(85, 'Text extracted & ready in Lens!');
+          const title = String(data.title || data.name || defaultName).trim();
+          const summary = String(data.summary || '').trim();
+          const highlights =
+            Array.isArray(data.highlights) && data.highlights.length > 0
+              ? data.highlights
+              : fullExtracted
+                  .split(/\n+/)
+                  .map((line: string) => line.replace(/^[-*•\d.)\s]+/, '').trim())
+                  .filter((line: string) => line.length > 12)
+                  .slice(0, 5);
+          const formulas = Array.isArray(data.formulas) ? data.formulas : [];
+          const tags =
+            Array.isArray(data.tags) && data.tags.length > 0
+              ? data.tags
+              : ['Scanned Note', 'OCR Extracted'];
+
+          return {
+            id: data.id || toValidUuid(`scan-${Date.now()}`),
+            title,
+            extractedText: rawOcr || fullExtracted,
+            summary,
+            highlights,
+            formulas,
+            tags
+          };
         }
       } catch (ocrErr: any) {
+        lastErrorMessage = ocrErr?.name === 'AbortError'
+          ? 'Scanning timed out. Please try again with good lighting and a clearer crop.'
+          : String(ocrErr?.message || 'Unable to reach scan service.');
         console.warn(`[OCRService] /api/ocr/scan-note attempt ${attempt} notice:`, ocrErr?.message || ocrErr);
       }
     }
@@ -178,7 +263,8 @@ export class OCRService {
       summary: '',
       highlights: [],
       formulas: [],
-      tags: ['Scanned Note', 'Lens']
+      tags: ['Scanned Note', 'Lens'],
+      error: lastErrorMessage || undefined
     };
   }
 
@@ -260,6 +346,14 @@ export class OCRService {
         try {
           data = rawBody ? JSON.parse(rawBody) : {};
         } catch {}
+
+        if (response.status === 401 || response.status === 403 || data?.code === 'API_KEY_INVALID') {
+          return String(
+            data?.answer ||
+              data?.error ||
+              'Please configure a valid GEMINI_API_KEY in Settings > Secrets to use live Lens AI.'
+          ).trim();
+        }
 
         const answer = String(data?.answer || '').trim();
         if (answer) {

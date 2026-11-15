@@ -45,6 +45,7 @@ import {
   CustomDailyGoalSelector,
   formatMinutesHuman
 } from './CustomFocusGoalAndTimer';
+import { GeminiConnectionTestCard } from './GeminiConnectionTestCard';
 
 type SettingsTab = 'overview' | 'personal' | 'curriculum';
 
@@ -95,6 +96,26 @@ export function ProfileSettingsHub() {
   const [isDeletingProfile, setIsDeletingProfile] = useState(false);
   const [customAvatarUrlInput, setCustomAvatarUrlInput] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Gemini AI Connection Test State (Settings 'Test Connection' component trigger)
+  const [connectionTestTriggerCount, setConnectionTestTriggerCount] = useState(0);
+  const testConnectionSectionRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const runPendingTestIfRequested = () => {
+      if ((window as any).__studywebPendingTestConnection) {
+        (window as any).__studywebPendingTestConnection = false;
+        setActiveTab('overview');
+        setTimeout(() => {
+          testConnectionSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          setConnectionTestTriggerCount((prev) => prev + 1);
+        }, 120);
+      }
+    };
+    runPendingTestIfRequested();
+    window.addEventListener('studyweb-open-settings-test-connection', runPendingTestIfRequested);
+    return () => window.removeEventListener('studyweb-open-settings-test-connection', runPendingTestIfRequested);
+  }, []);
 
   const handleDeleteProfileCompletely = async () => {
     if (isDeletingProfile) return;
@@ -1279,6 +1300,11 @@ export function ProfileSettingsHub() {
                   />
                 </div>
               </div>
+            </div>
+
+            {/* Row 2: Visual Gemini API Connection Diagnostics Component */}
+            <div ref={testConnectionSectionRef}>
+              <GeminiConnectionTestCard triggerRunCount={connectionTestTriggerCount} />
             </div>
           </div>
         )}

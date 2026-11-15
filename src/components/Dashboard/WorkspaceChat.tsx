@@ -44,6 +44,7 @@ import {
   selectBestBrowserNaturalVoice
 } from '../../utils/naturalTts';
 import { PendingQuizIntent } from '../../utils/quizHistoryStorage';
+import { GeminiConnectionTestCard } from './GeminiConnectionTestCard';
 
 function parseQuizNavigationIntent(
   promptText: string,
@@ -707,8 +708,8 @@ export default function WorkspaceChat({
         id: `welcome-${Date.now()}`,
         sender: 'ai',
         text: hasDocs
-          ? `✨ **Fresh Conversation Started!**\n\nI have **${activeFiles.length} study document${activeFiles.length === 1 ? '' : 's'}** ready in your workspace. What would you like to explore or ask about today?`
-          : `✨ **Fresh Conversation Started!**\n\nWhat would you like to learn, solve, or explore right now?`,
+          ? `✨ **Fresh Conversation Started!**\n\nI have **${activeFiles.length} uploaded item${activeFiles.length === 1 ? '' : 's'}** ready to analyze. Ask me anything about your materials or any topic you'd like to explore!`
+          : `✨ **Fresh Conversation Started!**\n\nAsk me anything—or upload notes, PDFs, images, or links and I'll analyze them for you!`,
         time: 'Just now'
       };
     }
@@ -716,8 +717,8 @@ export default function WorkspaceChat({
       id: 'welcome-msg',
       sender: 'ai',
       text: hasDocs
-        ? `👋 **Hi! I'm your AI Study Tutor${workspace.id !== 'general-study' ? ` for ${workspace.name}` : ''}!**\n\nI have your **${activeFiles.length} study document${activeFiles.length === 1 ? '' : 's'}** ready in this workspace. Ask me any question, speak using the **Voice** button, or attach documents with the **Attach** button!`
-        : `👋 **Hi! I'm your AI Study Tutor!**\n\nAsk me any question about your studies, homework, or concepts. You can type, speak using **Voice Input**, or attach study materials using **Attach** to get started!`,
+        ? `👋 **Hi! I'm your AI Tutor${workspace.id !== 'general-study' ? ` for ${workspace.name}` : ''}!**\n\nI can analyze your **${activeFiles.length} uploaded item${activeFiles.length === 1 ? '' : 's'}** or answer any question using web knowledge. Type a question, use **Voice**, or attach more materials anytime!`
+        : `👋 **Hi! How can I help you today?**\n\nAsk me any question just like ChatGPT, Claude, or Gemini—or upload notes, PDFs, images, or links using **Attach** and I'll analyze all of them for you!`,
       time: 'Just now'
     };
   }, [activeFiles.length, workspace.id, workspace.name]);
@@ -751,8 +752,8 @@ export default function WorkspaceChat({
       id: 'welcome-msg',
       sender: 'ai',
       text: hasDocs
-        ? `👋 **Hi! I'm your AI Study Tutor${workspace.id !== 'general-study' ? ` for ${workspace.name}` : ''}!**\n\nI have your **${activeFiles.length} study document${activeFiles.length === 1 ? '' : 's'}** ready in this workspace. Ask me any question, speak using the **Voice** button, or attach documents with the **Attach** button!`
-        : `👋 **Hi! I'm your AI Study Tutor!**\n\nAsk me any question about your studies, homework, or concepts. You can type, speak using **Voice Input**, or attach study materials using **Attach** to get started!`,
+        ? `👋 **Hi! I'm your AI Tutor${workspace.id !== 'general-study' ? ` for ${workspace.name}` : ''}!**\n\nI can analyze your **${activeFiles.length} uploaded item${activeFiles.length === 1 ? '' : 's'}** or answer any question using web knowledge. Type a question, use **Voice**, or attach more materials anytime!`
+        : `👋 **Hi! How can I help you today?**\n\nAsk me any question just like ChatGPT, Claude, or Gemini—or upload notes, PDFs, images, or links using **Attach** and I'll analyze all of them for you!`,
       time: 'Just now'
     }];
   });
@@ -2546,20 +2547,20 @@ export default function WorkspaceChat({
                     : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-sm shadow-xs'
                 }`}>
                   
-                  {/* AI Message Header with Active Context Attribution */}
+                  {/* AI Message Header with Workspace Material Attribution (only shown when uploaded files were analyzed) */}
                   {msg.sender === 'ai' && (
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5 pb-2 border-b border-slate-100 dark:border-slate-800 text-xs">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-bold text-indigo-600 dark:text-indigo-400">
                           AI Tutor
                         </span>
-                        {!msg.isError && msg.id !== 'welcome-msg' && !msg.id.startsWith('welcome-') && (
+                        {!msg.isError && msg.id !== 'welcome-msg' && !msg.id.startsWith('welcome-') && msg.activeContextFiles && msg.activeContextFiles.length > 0 && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-medium border border-slate-200/70 dark:border-slate-700/70">
                             <BookOpen className="w-3 h-3 text-indigo-500 shrink-0" />
                             <span className="truncate max-w-[220px] sm:max-w-[320px]">
-                              {msg.activeContextFiles && msg.activeContextFiles.length > 0
-                                ? `Context: ${msg.activeWorkspaceContext || workspace.name} (${msg.activeContextFiles.slice(0, 2).join(', ')}${msg.activeContextFiles.length > 2 ? ` +${msg.activeContextFiles.length - 2}` : ''})`
-                                : `Context: ${msg.activeWorkspaceContext || workspace.name}`}
+                              {msg.activeWorkspaceContext
+                                ? `${msg.activeWorkspaceContext}: ${msg.activeContextFiles.slice(0, 2).join(', ')}${msg.activeContextFiles.length > 2 ? ` +${msg.activeContextFiles.length - 2}` : ''}`
+                                : `${msg.activeContextFiles.slice(0, 2).join(', ')}${msg.activeContextFiles.length > 2 ? ` +${msg.activeContextFiles.length - 2}` : ''}`}
                             </span>
                           </span>
                         )}
@@ -2567,35 +2568,6 @@ export default function WorkspaceChat({
                       <span className="text-[11px] text-slate-400 tabular-nums">
                         {msg.time}
                       </span>
-                    </div>
-                  )}
-
-                  {/* Out-of-Workspace Topic Notice Banner + Research Outside Workspace Button */}
-                  {msg.sender === 'ai' && msg.workspaceNotice && !msg.isError && (
-                    <div className="mb-3.5 p-3 rounded-2xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-amber-900 dark:text-amber-200">
-                      <div className="flex items-start gap-2 leading-snug">
-                        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                        <div>
-                          <span className="font-bold block sm:inline">Workspace Context Check: </span>
-                          <span>{msg.workspaceNotice}</span>
-                        </div>
-                      </div>
-                      {msg.suggestOutsideResearch && (
-                        <button
-                          type="button"
-                          disabled={isThinking}
-                          onClick={() =>
-                            handleSend(
-                              msg.originalQuery || `Research and explain this topic in detail outside my workspace`,
-                              { allowOutsideResearch: true }
-                            )
-                          }
-                          className="h-8 px-3 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold text-[11px] inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 shadow-2xs transition-all cursor-pointer self-start sm:self-center"
-                        >
-                          <Globe className="w-3.5 h-3.5" />
-                          <span>Research outside workspace</span>
-                        </button>
-                      )}
                     </div>
                   )}
 
@@ -2616,7 +2588,7 @@ export default function WorkspaceChat({
 
                   {/* Body Text or Error Banner */}
                   {msg.isError ? (
-                    <div className="p-3.5 sm:p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 space-y-2.5">
+                    <div className="p-3.5 sm:p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 space-y-3">
                       <div className="flex items-center gap-2 font-bold text-xs sm:text-sm">
                         <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
                         <span>
@@ -2628,17 +2600,20 @@ export default function WorkspaceChat({
                       <p className="text-xs text-rose-700 dark:text-rose-300 font-normal leading-relaxed break-words">
                         {msg.text || "There was a problem contacting the Gemini API. Please try again."}
                       </p>
-                      {msg.failedPrompt && (
-                        <button
-                          type="button"
-                          onClick={() => handleSend(msg.failedPrompt)}
-                          disabled={isThinking}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs cursor-pointer transition-colors disabled:opacity-50"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          <span>Retry Question</span>
-                        </button>
-                      )}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {msg.failedPrompt && (
+                          <button
+                            type="button"
+                            onClick={() => handleSend(msg.failedPrompt)}
+                            disabled={isThinking}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs cursor-pointer transition-colors disabled:opacity-50"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Retry Question</span>
+                          </button>
+                        )}
+                      </div>
+                      <GeminiConnectionTestCard compact />
                     </div>
                   ) : (
                     renderMessageContent(visibleMsgText, isMsgStreaming)
@@ -2689,8 +2664,8 @@ export default function WorkspaceChat({
                     const effectiveFollowUps = (msg.followUpQuestions && msg.followUpQuestions.length > 0)
                       ? msg.followUpQuestions
                       : [
-                          `Ask me a follow-up interview question on ${msg.activeWorkspaceContext || workspace.name || 'this topic'}`,
-                          `Give me a real-world example and 60-second summary of this concept`,
+                          `Explain this concept step by step with an example`,
+                          `Summarize the main takeaways simply`,
                           `Create 3 practice quiz questions to test my understanding`
                         ];
                     return (
@@ -2700,22 +2675,6 @@ export default function WorkspaceChat({
                             <Sparkles className="w-3 h-3 text-indigo-500 shrink-0" />
                             <span>Suggested Follow-Up Questions</span>
                           </span>
-                          {msg.suggestOutsideResearch && (
-                            <button
-                              type="button"
-                              disabled={isThinking}
-                              onClick={() =>
-                                handleSend(
-                                  msg.originalQuery || `Research this topic in depth outside my workspace`,
-                                  { allowOutsideResearch: true }
-                                )
-                              }
-                              className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                            >
-                              <Globe className="w-3 h-3" />
-                              <span>Research outside workspace</span>
-                            </button>
-                          )}
                         </div>
                         <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2">
                           {effectiveFollowUps.slice(0, 3).map((followUpQ, fqIdx) => (

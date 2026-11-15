@@ -16,31 +16,16 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 );
 
-// Register Service Worker for Offline Capabilities in production
+// Register Service Worker for Offline Capabilities & Generated Quiz Caching
 if ('serviceWorker' in navigator) {
-  const isProd = Boolean((import.meta as any).env?.PROD);
-  if (isProd) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js')
-        .then((registration) => {
-          console.log('ServiceWorker registration successful with scope: ', registration.scope);
-        })
-        .catch((err) => {
-          console.warn('ServiceWorker registration failed: ', err);
-        });
-    });
-  } else {
-    // In development mode, automatically unregister stale service workers to prevent API interception
-    navigator.serviceWorker.getRegistrations().then((registrations) => {
-      for (const registration of registrations) {
-        registration.unregister().then((success) => {
-          if (success) {
-            console.log('[Dev] Unregistered stale service worker');
-          }
-        });
-      }
-    }).catch(() => {
-      // Ignored in dev
-    });
-  }
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then((registration) => {
+        registration.update().catch(() => {});
+      })
+      .catch((err) => {
+        console.warn('ServiceWorker registration failed: ', err);
+      });
+  });
 }

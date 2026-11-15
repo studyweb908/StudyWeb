@@ -36,6 +36,7 @@ import {
   resolveGeminiVoiceForProfile,
   selectBestBrowserNaturalVoice
 } from '../../utils/naturalTts';
+import { GeminiConnectionTestCard } from './GeminiConnectionTestCard';
 
 export interface ScannedNoteDraftPayload {
   id: string;
@@ -396,6 +397,11 @@ export default function CameraNoteScannerModal({
   const [scanResult, setScanResult] = useState<ScannedNoteSession | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [isExtractingOcr, setIsExtractingOcr] = useState(false);
+  const [isVerifyingApiKey, setIsVerifyingApiKey] = useState(false);
+  const [isRetryingSummary, setIsRetryingSummary] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [summaryFailureCount, setSummaryFailureCount] = useState(0);
+  const [geminiKeyVerified, setGeminiKeyVerified] = useState<boolean | null>(null);
   const activeScanSeqRef = useRef(0);
 
   // Google Lens interactive states (stay right inside Scan Notes without leaving)
@@ -530,6 +536,11 @@ export default function CameraNoteScannerModal({
     setDetectedBounds(null);
     setScanResult(null);
     setScanError(null);
+    setIsVerifyingApiKey(false);
+    setIsRetryingSummary(false);
+    setSummaryError(null);
+    setSummaryFailureCount(0);
+    setGeminiKeyVerified(null);
     setIsCopied(false);
     setCopiedMessageId(null);
     setLensMode('ask');
@@ -868,7 +879,7 @@ export default function CameraNoteScannerModal({
         const sw = autoCropEnabled && cropBounds ? Math.round(cropBounds.width * srcW) : srcW;
         const sh = autoCropEnabled && cropBounds ? Math.round(cropBounds.height * srcH) : srcH;
 
-        const maxDim = 840;
+        const maxDim = 1280;
         let outW = sw;
         let outH = sh;
         if (outW > maxDim || outH > maxDim) {
@@ -902,9 +913,9 @@ export default function CameraNoteScannerModal({
         ctx.fillRect(0, 0, outW, outH);
         ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
 
-        let outUrl = canvas.toDataURL('image/jpeg', 0.70);
-        if (outUrl.length > 140_000) {
-          outUrl = canvas.toDataURL('image/jpeg', 0.55);
+        let outUrl = canvas.toDataURL('image/jpeg', 0.82);
+        if (outUrl.length > 350_000) {
+          outUrl = canvas.toDataURL('image/jpeg', 0.70);
         }
         const b64 = outUrl.split(';base64,')[1] || '';
         const kb = Math.max(1, Math.round((b64.length * 0.75) / 1024));
@@ -931,6 +942,152 @@ export default function CameraNoteScannerModal({
     });
   };
 
+  const handleOpenSettingsTestConnection = () => {
+    stopCameraStream();
+    stopSpeech();
+    onClose();
+    setTimeout(() => {
+      window.dispatchEvent(
+        new CustomEvent('studyweb-open-settings-test-connection', {
+          detail: { autoRunTest: true }
+        })
+      );
+    }, 60);
+  };
+
+  // Explicitly verifies the Gemini API key status via /api/ai-health before attempting to summarize OCR text
+  const verifyApiKeyAndSummarizeOcr = async (params: {
+    id: string;
+    name: string;
+    fileBase64: string;
+    fileMimeType: string;
+    extractedText: string;
+  }): Promise<{ summary: string; error?: string }> => {
+    setIsVerifyingApiKey(true);
+    const keyStatus = await OCRService.verifyGeminiConnectionStatus();
+    setIsVerifyingApiKey(false);
+    setGeminiKeyVerified(keyStatus.ok);
+
+    if (!keyStatus.ok) {
+      const errMsg = !keyStatus.configured
+        ? 'Gemini API key is not configured or active. Please check Settings > Secrets or use Test Connection in Settings.'
+        : keyStatus.error || 'Gemini API key verification failed before summarizing OCR text.';
+      return { summary: '', error: errMsg };
+    }
+
+    const generated = await OCRService.generateShortSummaryForScannedNote({
+      id: params.id,
+      name: params.name,
+      fileBase64: params.fileBase64,
+      fileMimeType: params.fileMimeType,
+      extractedText: params.extractedText
+    });
+
+    if (!generated || isPlaceholderScanSummary(generated)) {
+      return {
+        summary: '',
+        error: 'Could not generate a short summary from the OCR text. Please retry or test your connection in Settings.'
+      };
+    }
+
+    setCachedShortSummary(params.id, generated);
+    return { summary: generated };
+  };
+
+  const handleRetrySummary = async () => {
+    if (!scanResult || isExtractingOcr || isRetryingSummary || isVerifyingApiKey) return;
+    setIsRetryingSummary(true);
+    setSummaryError(null);
+    setScanError(null);
+
+    try {
+      // Step 1: Explicitly verify Gemini API key status before attempting to summarize the OCR text
+      setIsVerifyingApiKey(true);
+      const keyStatus = await OCRService.verifyGeminiConnectionStatus();
+      setIsVerifyingApiKey(false);
+      setGeminiKeyVerified(keyStatus.ok);
+
+      if (!keyStatus.ok) {
+        const errMsg = !keyStatus.configured
+          ? 'Gemini API key verification failed: GEMINI_API_KEY is not configured. Use the Test Connection button in Settings to diagnose.'
+          : keyStatus.error || 'Gemini API key verification failed. Use the Test Connection button in Settings.';
+        setSummaryError(errMsg);
+        setSummaryFailureCount((prev) => prev + 1);
+        return;
+      }
+
+      let currentExtractedText = scanResult.extractedText;
+      let currentTitle = scanResult.title;
+      let currentTempId = scanResult.tempId;
+      let directSummary = '';
+
+      // If initial OCR extraction also failed or returned empty text, re-extract OCR text first
+      if (!currentExtractedText.trim()) {
+        const ocrResult = await OCRService.extractTextFromNoteImage({
+          fileBase64: scanResult.base64,
+          fileMimeType: scanResult.mimeType,
+          defaultName: scanResult.title,
+          sizeFormatted: scanResult.sizeFormatted
+        });
+
+        if (ocrResult.error) {
+          setSummaryError(ocrResult.error);
+          setSummaryFailureCount((prev) => prev + 1);
+          return;
+        }
+
+        currentExtractedText = ocrResult.extractedText || '';
+        currentTitle = ocrResult.title || currentTitle;
+        currentTempId = ocrResult.id || currentTempId;
+        directSummary = (ocrResult.summary || '').trim();
+
+        setScanResult((prev) =>
+          prev
+            ? {
+                ...prev,
+                tempId: currentTempId,
+                extractedText: currentExtractedText || prev.extractedText,
+                title: currentTitle,
+                highlights: ocrResult.highlights?.length ? ocrResult.highlights : prev.highlights,
+                formulas: ocrResult.formulas?.length ? ocrResult.formulas : prev.formulas,
+                tags: ocrResult.tags?.length ? ocrResult.tags : prev.tags
+              }
+            : prev
+        );
+      }
+
+      // Step 2: Summarize the OCR text now that the Gemini API key is verified
+      let resolvedSummary = !isPlaceholderScanSummary(directSummary) ? directSummary : '';
+      if (!resolvedSummary) {
+        resolvedSummary = await OCRService.generateShortSummaryForScannedNote({
+          id: currentTempId,
+          name: currentTitle,
+          fileBase64: scanResult.base64,
+          fileMimeType: scanResult.mimeType,
+          extractedText: currentExtractedText
+        });
+      }
+
+      if (!resolvedSummary || isPlaceholderScanSummary(resolvedSummary)) {
+        setSummaryError('Summary generation failed again. Please use the Test Connection button in Settings to verify your Gemini API connection.');
+        setSummaryFailureCount((prev) => prev + 1);
+        return;
+      }
+
+      setCachedShortSummary(currentTempId, resolvedSummary);
+      setSummaryError(null);
+      setScanResult((prev) => (prev ? { ...prev, summary: resolvedSummary } : prev));
+    } catch (err: any) {
+      setSummaryError(
+        String(err?.message || 'Unable to summarize OCR text. Please test your connection in Settings.')
+      );
+      setSummaryFailureCount((prev) => prev + 1);
+    } finally {
+      setIsVerifyingApiKey(false);
+      setIsRetryingSummary(false);
+    }
+  };
+
   // Instant Google Lens experience: opens the interactive Lens workspace immediately (<50ms)
   // after local crop/compression while OCR text extraction populates in the background.
   const processScannedImage = async (
@@ -944,6 +1101,10 @@ export default function CameraNoteScannerModal({
     setCapturedDataUrl(rawDataUrl);
     setOcrPreviewSnippet(null);
     setScanError(null);
+    setSummaryError(null);
+    setIsVerifyingApiKey(false);
+    setIsRetryingSummary(false);
+    setGeminiKeyVerified(null);
     setIsCopied(false);
     setLensMessages([]);
     setTranslatedText(null);
@@ -994,9 +1155,25 @@ export default function CameraNoteScannerModal({
 
       if (activeScanSeqRef.current !== scanSeq) return;
 
+      if (ocrResult.error) {
+        // Explicitly verify Gemini API key status so the user knows whether the failure is due to the API key
+        const keyCheck = await OCRService.verifyGeminiConnectionStatus();
+        if (activeScanSeqRef.current !== scanSeq) return;
+        setGeminiKeyVerified(keyCheck.ok);
+        setScanError(ocrResult.error);
+        setSummaryError(
+          !keyCheck.ok
+            ? keyCheck.error || ocrResult.error
+            : ocrResult.error
+        );
+        setSummaryFailureCount((prev) => Math.max(1, prev + 1));
+        setIsExtractingOcr(false);
+        return;
+      }
+
       let resolvedSummary = (ocrResult.summary || '').trim();
       if (isPlaceholderScanSummary(resolvedSummary)) {
-        resolvedSummary = await OCRService.generateShortSummaryForScannedNote({
+        const summaryAttempt = await verifyApiKeyAndSummarizeOcr({
           id: ocrResult.id || tempId,
           name: ocrResult.title || defaultScanName,
           fileBase64: base64,
@@ -1004,7 +1181,13 @@ export default function CameraNoteScannerModal({
           extractedText: ocrResult.extractedText
         });
         if (activeScanSeqRef.current !== scanSeq) return;
+        resolvedSummary = summaryAttempt.summary;
+        if (summaryAttempt.error) {
+          setSummaryError(summaryAttempt.error);
+          setSummaryFailureCount((prev) => Math.max(1, prev + 1));
+        }
       } else {
+        setGeminiKeyVerified(true);
         setCachedShortSummary(ocrResult.id || tempId, resolvedSummary);
       }
 
@@ -1716,25 +1899,112 @@ export default function CameraNoteScannerModal({
                       <div className="flex-1 min-h-0 overflow-y-auto p-3.5 sm:p-5 space-y-3.5 sm:space-y-4 bg-white dark:bg-slate-900">
                         {lensMessages.length === 0 ? (
                           <div className="space-y-3.5 py-1">
-                            <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 p-3.5 sm:p-4 space-y-2">
-                              <div className="flex items-center justify-between gap-2">
-                                <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white inline-flex items-center gap-1.5">
-                                  <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
-                                  <span>Short Summary</span>
-                                </p>
-                                {isExtractingOcr && !scanResult.summary && (
+                            {scanError && (
+                              <div className="rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-500/40 p-3.5 sm:p-4 flex items-start justify-between gap-3">
+                                <div className="flex items-start gap-2.5 min-w-0">
+                                  <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                                  <div className="min-w-0">
+                                    <p className="text-xs sm:text-sm font-bold text-rose-800 dark:text-rose-200">
+                                      Could Not Analyze Image
+                                    </p>
+                                    <p className="text-xs text-rose-700 dark:text-rose-300 mt-0.5 leading-relaxed">
+                                      {scanError}
+                                    </p>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => processScannedImage(scanResult.dataUrl, scanResult.title, null)}
+                                  className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shrink-0 cursor-pointer transition-colors"
+                                >
+                                  Retry
+                                </button>
+                              </div>
+                            )}
+                            <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 p-3.5 sm:p-4 space-y-2.5">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <p className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white inline-flex items-center gap-1.5">
+                                    <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                                    <span>Short Summary</span>
+                                  </p>
+                                  {geminiKeyVerified === true && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200/70 dark:border-emerald-500/30 text-[10px] font-semibold">
+                                      <CheckCircle2 className="w-2.5 h-2.5 shrink-0" />
+                                      <span>API Key Verified</span>
+                                    </span>
+                                  )}
+                                  {geminiKeyVerified === false && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200/70 dark:border-amber-500/30 text-[10px] font-semibold">
+                                      <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                                      <span>API Key Unverified</span>
+                                    </span>
+                                  )}
+                                </div>
+                                {(isExtractingOcr || isVerifyingApiKey || isRetryingSummary) && !scanResult.summary ? (
                                   <span className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 dark:text-blue-400">
                                     <Loader2 className="w-3 h-3 animate-spin" />
-                                    <span>Creating summary...</span>
+                                    <span>
+                                      {isVerifyingApiKey
+                                        ? 'Verifying Gemini API key...'
+                                        : isRetryingSummary
+                                        ? 'Retrying summary...'
+                                        : 'Creating summary...'}
+                                    </span>
                                   </span>
-                                )}
+                                ) : (summaryError || (!isExtractingOcr && isPlaceholderScanSummary(scanResult.summary))) ? (
+                                  <button
+                                    type="button"
+                                    onClick={handleRetrySummary}
+                                    disabled={isRetryingSummary || isVerifyingApiKey}
+                                    className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer transition-colors"
+                                  >
+                                    <RotateCcw className="w-3 h-3" />
+                                    <span>Retry Summary</span>
+                                  </button>
+                                ) : null}
                               </div>
                               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
                                 {scanResult.summary ||
-                                  (isExtractingOcr
+                                  (isVerifyingApiKey
+                                    ? 'Verifying Gemini API key status before summarizing OCR text...'
+                                    : isExtractingOcr || isRetryingSummary
                                     ? 'Reading your scanned note and creating a short summary...'
+                                    : summaryError
+                                    ? summaryError
+                                    : scanError
+                                    ? 'Summary unavailable until image analysis succeeds.'
                                     : 'Ask any question about your scanned notes below, switch to Text & Translate to copy or translate, or tap Listen to hear it read aloud.')}
                               </p>
+                              {(summaryError || summaryFailureCount > 0) && !scanResult.summary && !isExtractingOcr && !isRetryingSummary && (
+                                <div className="pt-2 space-y-2.5 border-t border-slate-200/70 dark:border-slate-700/70">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={handleRetrySummary}
+                                      disabled={isRetryingSummary || isVerifyingApiKey}
+                                      className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+                                    >
+                                      <RotateCcw className="w-3 h-3" />
+                                      <span>Verify Key &amp; Retry Summary</span>
+                                    </button>
+                                    {summaryFailureCount >= 1 && (
+                                      <button
+                                        type="button"
+                                        onClick={handleOpenSettingsTestConnection}
+                                        className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/40 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+                                      >
+                                        <Sparkles className="w-3 h-3" />
+                                        <span>Open Connection Test in Settings</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                  <GeminiConnectionTestCard
+                                    compact
+                                    onStatusChange={(st) => setGeminiKeyVerified(st.ok)}
+                                  />
+                                </div>
+                              )}
                             </div>
                             {scanResult.extractedText ? (
                               <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 sm:p-4">
