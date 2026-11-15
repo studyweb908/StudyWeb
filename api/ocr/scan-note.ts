@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
+import { getServerGeminiApiKey } from '../../src/utils/serverEnv.js';
 
 interface ApiRequest extends IncomingMessage {
   body?: any;
@@ -43,15 +44,7 @@ async function parseRequestBody(req: ApiRequest): Promise<any> {
 }
 
 function getGeminiApiKey(): string | null {
-  const key =
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.API_KEY;
-
-  if (!key || key.trim() === '' || key === 'MY_GEMINI_API_KEY') {
-    return null;
-  }
-  return key.trim();
+  return getServerGeminiApiKey();
 }
 
 function sanitizeTitle(rawTitle: string, fallback: string): string {
@@ -62,6 +55,8 @@ function sanitizeTitle(rawTitle: string, fallback: string): string {
   if (!cleaned || cleaned.length < 2) return fallback;
   return cleaned.length > 80 ? `${cleaned.slice(0, 77)}...` : cleaned;
 }
+
+const serverlessScanDedupCache = new Map<string, { timestamp: number; payload: any }>();
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   res.setHeader('Content-Type', 'application/json');
@@ -81,32 +76,78 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
   try {
     const body = await parseRequestBody(req);
-    const { fileBase64, fileMimeType, name } = body || {};
+    const { fileBase64, pagesBase64, fileMimeType, name } = body || {};
 
-    if (!fileBase64) {
+    const rawPages: Array<{ base64: string; mimeType?: string }> = [];
+    if (Array.isArray(pagesBase64) && pagesBase64.length > 0) {
+      for (const p of pagesBase64) {
+        if (typeof p === 'string' && p.trim()) {
+          rawPages.push({ base64: p, mimeType: fileMimeType });
+        } else if (p && typeof p === 'object' && typeof p.base64 === 'string' && p.base64.trim()) {
+          rawPages.push({ base64: p.base64, mimeType: p.mimeType || fileMimeType });
+        }
+      }
+    } else if (fileBase64) {
+      rawPages.push({ base64: String(fileBase64), mimeType: fileMimeType });
+    }
+
+    if (rawPages.length === 0) {
       return res.status(400).json({ error: 'Scanned image base64 data is required.' });
     }
 
-    let cleanBase64 = String(fileBase64);
-    let detectedMimeFromDataUrl = '';
-    if (cleanBase64.includes(';base64,')) {
-      const [prefix, b64] = cleanBase64.split(';base64,');
-      if (prefix && prefix.startsWith('data:')) {
-        detectedMimeFromDataUrl = prefix.slice(5).trim();
+    const allowedMimes = new Set([
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/heic',
+      'image/heif',
+      'application/pdf'
+    ]);
+
+    const cleanedPages: Array<{ data: string; mimeType: string }> = [];
+    let totalBytesApprox = 0;
+
+    for (const page of rawPages.slice(0, 10)) {
+      let cleanBase64 = String(page.base64 || '');
+      let detectedMimeFromDataUrl = '';
+      if (cleanBase64.includes(';base64,')) {
+        const [prefix, b64] = cleanBase64.split(';base64,');
+        if (prefix && prefix.startsWith('data:')) {
+          detectedMimeFromDataUrl = prefix.slice(5).trim();
+        }
+        cleanBase64 = b64 || '';
       }
-      cleanBase64 = b64 || '';
+      cleanBase64 = cleanBase64.replace(/[\r\n\s]/g, '');
+      if (!cleanBase64 || cleanBase64.length < 32) {
+        return res.status(400).json({ error: 'Scanned image data is empty or corrupted.' });
+      }
+      let normalizedMime = String(page.mimeType || detectedMimeFromDataUrl || 'image/jpeg')
+        .toLowerCase()
+        .trim();
+      if (normalizedMime === 'image/jpg' || normalizedMime === 'image/pjpeg' || normalizedMime === 'image/jfif') {
+        normalizedMime = 'image/jpeg';
+      }
+      if (!allowedMimes.has(normalizedMime)) {
+        return res.status(400).json({
+          error: `Unsupported file type "${normalizedMime}". Supported types: JPEG, PNG, WEBP, HEIC, PDF.`
+        });
+      }
+      const approxBytes = Math.floor((cleanBase64.length * 3) / 4);
+      totalBytesApprox += approxBytes;
+      if (approxBytes > 20 * 1024 * 1024 || totalBytesApprox > 35 * 1024 * 1024) {
+        return res.status(413).json({
+          error: 'Scanned file exceeds the maximum allowed size (20MB per page / 35MB total).'
+        });
+      }
+      cleanedPages.push({ data: cleanBase64, mimeType: normalizedMime });
     }
-    cleanBase64 = cleanBase64.replace(/[\r\n\s]/g, '');
 
-    if (!cleanBase64) {
-      return res.status(400).json({ error: 'Scanned image data is empty or unreadable.' });
-    }
-
-    let normalizedMime = String(fileMimeType || detectedMimeFromDataUrl || 'image/jpeg')
-      .toLowerCase()
-      .trim();
-    if (normalizedMime === 'image/jpg' || normalizedMime === 'image/pjpeg' || normalizedMime === 'image/jfif') {
-      normalizedMime = 'image/jpeg';
+    const dedupKey = cleanedPages
+      .map((p) => `${p.mimeType}:${p.data.length}:${p.data.slice(0, 96)}:${p.data.slice(-96)}`)
+      .join('|');
+    const cachedScan = serverlessScanDedupCache.get(dedupKey);
+    if (cachedScan && Date.now() - cachedScan.timestamp < 5 * 60 * 1000) {
+      return res.status(200).json({ ...cachedScan.payload, deduplicated: true });
     }
 
     const defaultTitle = String(name || 'Scanned Study Notes').trim();
@@ -128,16 +169,19 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       }
     });
 
-    const ocrPrompt = `You are a high-precision academic Optical Character Recognition (OCR) and study note parser.
-Carefully inspect this scanned study note image ("${defaultTitle}") and extract ALL visible handwritten and printed text, questions, problems, diagrams, and equations word-for-word.
+    const isMultiPage = cleanedPages.length > 1;
+    const ocrPrompt = `You are StudyWeb's Scan Notes AI Assistant — a high-precision academic Optical Character Recognition (OCR) and study note parser.
+Carefully inspect ${isMultiPage ? `these ${cleanedPages.length} scanned study note pages in sequential order` : 'this scanned study note image'} ("${defaultTitle}") and extract ALL visible handwritten and printed text, questions, problems, diagrams, tables, and equations word-for-word.
 
-Instructions:
-1. "extractedText": Transcribe the complete, verbatim text from the image accurately. Preserve headings, questions, choices, bullet points, numbered lists, definitions, diagram labels, tables, and mathematical/chemical equations in clean Markdown format so the student can copy or ask questions directly from this text. If the image is blank or contains no readable text/content, return an empty string "".
-2. "title": A concise, clear academic title (3 to 7 words) reflecting the actual topic or heading written on the scanned note.
-3. "summary": A clear, comprehensive summary explaining the exact concepts and subject matter covered in the scanned note.
-4. "highlights": 4 to 6 key facts, definitions, or takeaways extracted directly from the scanned note.
-5. "formulas": Any mathematical, physics, chemistry, or scientific equations/formulas visible in the note (empty array if none).
-6. "tags": 3 to 5 specific subject/topic tags.`;
+Strict Rules:
+1. "extractedText": Transcribe the complete, verbatim text from the image(s) accurately. Preserve the original language, original meaning, headings, questions, choices, bullet points, numbered lists, definitions, diagram labels, tables, and mathematical/chemical/scientific formulas in clean Markdown format.${isMultiPage ? ' Clearly mark page boundaries in order (e.g., "--- Page 1 ---", "--- Page 2 ---").' : ''}
+2. UNCLEAR HANDWRITING RULE: If specific words or handwritten sections cannot be read with confidence, mark only that unreadable segment as [Unclear text] and continue extracting all readable portions. Never invent or fabricate missing words.
+3. EMPTY/UNREADABLE IMAGE RULE: If the image is completely blank, corrupted, or contains no readable text/study content at all, return an empty string "" for "extractedText" and an empty string "" for "summary". Never fabricate extraction results.
+4. "title": A concise, clear academic title (3 to 7 words) reflecting the actual topic or heading written on the scanned note.
+5. "summary": A clear, accurate summary explaining the exact concepts and subject matter covered in the scanned note based strictly on the extracted text.
+6. "highlights": 4 to 6 key facts, definitions, or exam-important points extracted directly from the scanned note.
+7. "formulas": Any mathematical, physics, chemistry, or scientific equations/formulas visible in the note (empty array if none).
+8. "tags": 3 to 5 specific subject/topic tags.`;
 
     const ocrSchema = {
       type: Type.OBJECT,
@@ -162,13 +206,23 @@ Instructions:
     };
 
     const candidateModels = [
-      'gemini-3.1-flash-lite',
       'gemini-3-flash-preview',
+      'gemini-3.1-flash-lite',
       'gemini-4-hydrogen'
     ];
 
     let response: any = null;
     let lastOcrModelError = '';
+
+    const contentsParts: any[] = [
+      { text: ocrPrompt },
+      ...cleanedPages.map((p) => ({
+        inlineData: {
+          data: p.data,
+          mimeType: p.mimeType
+        }
+      }))
+    ];
 
     for (const modelName of candidateModels) {
       let modelTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -176,15 +230,7 @@ Instructions:
         const useLowThinking = modelName === 'gemini-4-hydrogen';
         const genPromise = ai.models.generateContent({
           model: modelName,
-          contents: [
-            { text: ocrPrompt },
-            {
-              inlineData: {
-                data: cleanBase64,
-                mimeType: normalizedMime
-              }
-            }
-          ],
+          contents: contentsParts,
           config: {
             responseMimeType: 'application/json',
             responseSchema: ocrSchema,
@@ -194,7 +240,7 @@ Instructions:
           }
         });
         const timeoutPromise = new Promise<never>((_, reject) => {
-          modelTimeoutId = setTimeout(() => reject(new Error(`OCR model ${modelName} timed out after 20s`)), 20000);
+          modelTimeoutId = setTimeout(() => reject(new Error(`OCR model ${modelName} timed out after 25s`)), 25000);
         });
         response = await Promise.race([genPromise, timeoutPromise]);
         if (modelTimeoutId) clearTimeout(modelTimeoutId);
@@ -218,7 +264,7 @@ Instructions:
       if (!rawExtracted && !rawSummary) {
         return res.status(422).json({
           error:
-            'No readable text or study content could be detected in the scanned image. Please ensure the page is well-lit and in focus.'
+            'No readable text or study content could be detected in the scanned image. Please retake the scan with clearer lighting and focus.'
         });
       }
 
@@ -237,7 +283,7 @@ Instructions:
         .filter(Boolean)
         .join('\n');
 
-      return res.status(200).json({
+      const responsePayload = {
         title: cleanTitle,
         extractedText: formattedDocument,
         rawOcrText: rawExtracted,
@@ -247,12 +293,15 @@ Instructions:
         tags:
           Array.isArray(parsed.tags) && parsed.tags.length > 0
             ? parsed.tags
-            : ['Scanned Note', 'OCR']
-      });
+            : ['Scanned Note', 'OCR'],
+        pageCount: cleanedPages.length
+      };
+      serverlessScanDedupCache.set(dedupKey, { timestamp: Date.now(), payload: responsePayload });
+      return res.status(200).json(responsePayload);
     }
 
     return res.status(422).json({
-      error: 'Could not extract text from the scanned image right now. Please ensure the page is well-lit and try scanning again.'
+      error: 'Could not extract readable text from the scanned image. Please ensure the page is clear and well-lit, then try again.'
     });
   } catch (error: any) {
     console.error('[Serverless OCR Error] /api/ocr/scan-note:', error?.message || error);

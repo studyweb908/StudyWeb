@@ -1358,12 +1358,15 @@ export class TranscriptProcessor {
     knownTitle = ''
   ): Promise<TranscriptSegment[]> {
     try {
-      const apiKey =
+      const rawEnvKey =
         process.env.GEMINI_API_KEY ||
         process.env.GOOGLE_API_KEY ||
         process.env.API_KEY ||
-        process.env.VITE_GEMINI_API_KEY ||
-        'AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A';
+        process.env.VITE_GEMINI_API_KEY;
+      const apiKey =
+        rawEnvKey && rawEnvKey.trim() !== '' && rawEnvKey.trim() !== 'MY_GEMINI_API_KEY'
+          ? rawEnvKey.trim()
+          : 'AQ.Ab8RN6LiwYGVz4cg96MDtWO57-OIcTpkoiROHUqPfZGyzvdC3g';
       if (!apiKey) return [];
 
       const { GoogleGenAI } = await import('@google/genai');
@@ -1372,7 +1375,7 @@ export class TranscriptProcessor {
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
 
-      const streamModels = ['gemini-3.8-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
+      const streamModels = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite'];
       let text = '';
 
       for (const model of streamModels) {

@@ -1,8 +1,16 @@
 import { toValidUuid } from '../utils/uuid';
+import type { ScanNotesOperationMode } from './AITutorContextService';
+
+export interface OCRScanPageInput {
+  fileBase64: string;
+  fileMimeType?: string;
+  pageNumber?: number;
+}
 
 export interface OCRScanRequest {
   fileBase64: string;
   fileMimeType?: string;
+  pagesBase64?: OCRScanPageInput[];
   defaultName?: string;
   workspaceId?: string;
   userId?: string | null;
@@ -18,6 +26,9 @@ export interface OCRScanResult {
   highlights: string[];
   formulas: string[];
   tags: string[];
+  pageCount?: number;
+  hasUnclearText?: boolean;
+  deduplicated?: boolean;
   error?: string;
 }
 
@@ -27,7 +38,7 @@ export interface LensAskRequest {
   imageUrl?: string;
   extractedText?: string;
   question?: string;
-  mode?: 'ask' | 'solve' | 'explain' | 'summarize' | 'short_summary' | 'quiz' | 'translate';
+  mode?: ScanNotesOperationMode;
   targetLanguage?: string;
   history?: Array<{ role: 'user' | 'assistant'; text: string }>;
 }
@@ -35,6 +46,7 @@ export interface LensAskRequest {
 export interface GeminiConnectionStatus {
   ok: boolean;
   configured: boolean;
+  keyState?: string;
   verified?: boolean;
   model?: string;
   durationMs?: number;
@@ -42,6 +54,61 @@ export interface GeminiConnectionStatus {
 }
 
 const SHORT_SUMMARY_CACHE_KEY = 'studyweb_scan_short_summaries_v1';
+const clientScanDedupCache = new Map<string, { timestamp: number; result: OCRScanResult }>();
+
+const ALLOWED_SCAN_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/pjpeg',
+  'image/jfif',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/bmp',
+  'image/svg+xml',
+  'application/pdf'
+]);
+
+const ALLOWED_SCAN_EXTENSIONS = /\.(jpe?g|png|webp|gif|bmp|svg|pdf)$/i;
+const MAX_SCAN_FILE_BYTES = 20 * 1024 * 1024; // 20 MB
+
+export function validateScanInputFile(file: {
+  name?: string;
+  type?: string;
+  size?: number;
+}): { valid: boolean; error?: string } {
+  if (!file) {
+    return { valid: false, error: 'No file was provided for scanning.' };
+  }
+  if (typeof file.size === 'number') {
+    if (file.size <= 0) {
+      return {
+        valid: false,
+        error: `"${file.name || 'Selected file'}" is empty (0 bytes). Please choose a valid image or PDF.`
+      };
+    }
+    if (file.size > MAX_SCAN_FILE_BYTES) {
+      return {
+        valid: false,
+        error: `"${file.name || 'Selected file'}" exceeds the 20 MB maximum file size limit.`
+      };
+    }
+  }
+
+  const mime = String(file.type || '').toLowerCase().trim();
+  const name = String(file.name || '').trim();
+  const hasValidMime = mime ? ALLOWED_SCAN_MIME_TYPES.has(mime) : false;
+  const hasValidExt = name ? ALLOWED_SCAN_EXTENSIONS.test(name) : false;
+
+  if (!hasValidMime && !hasValidExt) {
+    return {
+      valid: false,
+      error: `Unsupported file format "${mime || name || 'unknown'}". Please upload a JPEG, PNG, WEBP, GIF, BMP, SVG, or PDF file.`
+    };
+  }
+
+  return { valid: true };
+}
 
 export function isPlaceholderScanSummary(summary?: string | null): boolean {
   const s = String(summary || '').trim();
@@ -101,16 +168,18 @@ export class OCRService {
         return {
           ok: true,
           configured: true,
+          keyState: String(data.keyState || 'valid_format'),
           verified: Boolean(data.verified),
           model: String(data.model || 'gemini-3-flash-preview'),
           durationMs: typeof data.durationMs === 'number' ? data.durationMs : undefined
         };
       }
 
-      const configured = data?.configured !== false && response.status !== 503;
+      const configured = Boolean(data?.configured === true && response.status !== 503);
       return {
         ok: false,
         configured,
+        keyState: typeof data?.keyState === 'string' ? data.keyState : undefined,
         verified: false,
         error: String(
           data?.error ||
@@ -134,7 +203,7 @@ export class OCRService {
   }
 
   /**
-   * Processes a scanned note image using server-side Gemini Vision OCR
+   * Processes a scanned note image (or multi-page scan) using server-side Gemini Vision OCR
    * to extract verbatim text content, structured summary, highlights, and formulas.
    * Does NOT save anything to any workspace automatically.
    */
@@ -145,6 +214,7 @@ export class OCRService {
     const {
       fileBase64,
       fileMimeType = 'image/jpeg',
+      pagesBase64,
       defaultName = 'Scanned Study Notes',
       workspaceId,
       userId,
@@ -153,7 +223,7 @@ export class OCRService {
     } = request;
 
     let resolvedMime = String(fileMimeType || 'image/jpeg').toLowerCase().trim();
-    if (fileBase64.includes(';base64,')) {
+    if (fileBase64 && fileBase64.includes(';base64,')) {
       const mimeMatch = /^data:([^;]+);base64,/i.exec(fileBase64);
       if (mimeMatch?.[1]) {
         resolvedMime = mimeMatch[1].toLowerCase().trim();
@@ -163,9 +233,33 @@ export class OCRService {
       resolvedMime = 'image/jpeg';
     }
 
-    const cleanBase64 = fileBase64.includes(';base64,')
+    const cleanBase64 = fileBase64 && fileBase64.includes(';base64,')
       ? fileBase64.split(';base64,')[1]
-      : fileBase64;
+      : (fileBase64 || '');
+
+    if (!cleanBase64 && (!Array.isArray(pagesBase64) || pagesBase64.length === 0)) {
+      return {
+        id: toValidUuid(`scan-${Date.now()}`),
+        title: defaultName,
+        extractedText: '',
+        summary: '',
+        highlights: [],
+        formulas: [],
+        tags: ['Scanned Note'],
+        error: 'Scanned image data is empty. Please capture or select a clear photo of your notes.'
+      };
+    }
+
+    // Client-side deduplication check to prevent duplicate processing of the identical image
+    const dedupKey = Array.isArray(pagesBase64) && pagesBase64.length > 0
+      ? pagesBase64.map((p, i) => `${p.pageNumber || i + 1}:${p.fileBase64.length}:${p.fileBase64.slice(0, 48)}:${p.fileBase64.slice(-48)}`).join('|')
+      : `1:${resolvedMime}:${cleanBase64.length}:${cleanBase64.slice(0, 48)}:${cleanBase64.slice(-48)}`;
+
+    const cachedClientScan = clientScanDedupCache.get(dedupKey);
+    if (cachedClientScan && Date.now() - cachedClientScan.timestamp < 5 * 60 * 1000) {
+      onProgress?.(90, 'Loaded extracted notes from scan cache!');
+      return { ...cachedClientScan.result, deduplicated: true };
+    }
 
     onProgress?.(45, 'Scanning text, formulas & questions with Lens OCR...');
 
@@ -174,7 +268,7 @@ export class OCRService {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const abortCtrl = new AbortController();
-        const timeoutId = setTimeout(() => abortCtrl.abort(), 20000);
+        const timeoutId = setTimeout(() => abortCtrl.abort(), 22000);
 
         const response = await fetch('/api/ocr/scan-note', {
           method: 'POST',
@@ -186,6 +280,7 @@ export class OCRService {
           body: JSON.stringify({
             fileBase64: cleanBase64,
             fileMimeType: resolvedMime,
+            pagesBase64: Array.isArray(pagesBase64) && pagesBase64.length > 0 ? pagesBase64 : undefined,
             name: defaultName,
             workspaceId: workspaceId ? toValidUuid(workspaceId) : undefined,
             userId: userId || undefined,
@@ -201,7 +296,18 @@ export class OCRService {
           lastErrorMessage = String(
             data?.error || 'Could not analyze the scanned image. Please try again.'
           );
-          if (response.status === 401 || response.status === 403 || response.status === 503 || data?.code === 'API_KEY_REQUIRED' || data?.code === 'API_KEY_INVALID') {
+          if (
+            response.status === 400 ||
+            response.status === 401 ||
+            response.status === 403 ||
+            response.status === 413 ||
+            response.status === 415 ||
+            response.status === 422 ||
+            response.status === 503 ||
+            data?.code === 'API_KEY_REQUIRED' ||
+            data?.code === 'API_KEY_INVALID' ||
+            data?.code === 'EMPTY_OR_UNREADABLE_IMAGE'
+          ) {
             return {
               id: toValidUuid(`scan-${Date.now()}`),
               title: defaultName,
@@ -209,7 +315,7 @@ export class OCRService {
               summary: '',
               highlights: [],
               formulas: [],
-              tags: ['Scanned Note', 'Setup Required'],
+              tags: ['Scanned Note'],
               error: lastErrorMessage
             };
           }
@@ -238,15 +344,25 @@ export class OCRService {
               ? data.tags
               : ['Scanned Note', 'OCR Extracted'];
 
-          return {
+          const scanResultObj: OCRScanResult = {
             id: data.id || toValidUuid(`scan-${Date.now()}`),
             title,
             extractedText: rawOcr || fullExtracted,
             summary,
             highlights,
             formulas,
-            tags
+            tags,
+            pageCount: typeof data.pageCount === 'number' ? data.pageCount : 1,
+            hasUnclearText: Boolean(data.hasUnclearText)
           };
+
+          if (clientScanDedupCache.size > 40) {
+            const oldestKey = clientScanDedupCache.keys().next().value;
+            if (oldestKey) clientScanDedupCache.delete(oldestKey);
+          }
+          clientScanDedupCache.set(dedupKey, { timestamp: Date.now(), result: scanResultObj });
+
+          return scanResultObj;
         }
       } catch (ocrErr: any) {
         lastErrorMessage = ocrErr?.name === 'AbortError'
@@ -264,7 +380,7 @@ export class OCRService {
       highlights: [],
       formulas: [],
       tags: ['Scanned Note', 'Lens'],
-      error: lastErrorMessage || undefined
+      error: lastErrorMessage || 'Could not extract readable text from the scanned image.'
     };
   }
 

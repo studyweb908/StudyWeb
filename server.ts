@@ -9,7 +9,14 @@ import { studyMaterialRouter, extractYouTubeInfo, scrapeWebPage, enrichUrlWithGe
 import { TranscriptProcessor } from "./src/services/TranscriptProcessor.js";
 import { cleanNotebookLMTitle } from "./src/utils/notebookTitle.js";
 import { toValidUuid } from "./src/utils/uuid.js";
-import { getServerGeminiApiKey } from "./src/utils/serverEnv.js";
+import { getServerGeminiApiKey, diagnoseServerGeminiApiKey } from "./src/utils/serverEnv.js";
+import {
+  resolveAITutorContext,
+  isAuthorizedForUser,
+  sanitizeUntrustedDocumentText,
+  detectScanNotesOperationFromQuestion,
+  buildScanNotesSystemPrompt
+} from "./src/services/AITutorContextService.js";
 import { createClient } from "@supabase/supabase-js";
 import { streakRouter, setServerUserDailyGoal, getServerUserDailyGoal, clearServerUserStreakData } from "./src/services/streakEngineServer.js";
 
@@ -196,8 +203,17 @@ export function recordModelQuotaCooldown(model: string, err?: any): void {
 }
 
 export function getAvailableCandidateModels(preferredModels: string[]): string[] {
-  // Always ensure fast gemini-3-flash-preview is prioritized ahead of slower/quota-limited models for general text/vision
-  const reordered = [...preferredModels].sort((a, b) => {
+  // Ensure universally supported fast Gemini models are prioritized
+  const normalized = Array.from(
+    new Set(
+      [
+        ...preferredModels,
+        "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite"
+      ].filter(Boolean)
+    )
+  );
+  const reordered = [...normalized].sort((a, b) => {
     const rank = (m: string) => {
       if (m === "gemini-3.5-transcribe") return 0;
       if (m === "gemini-3-flash-preview") return 1;
@@ -2221,11 +2237,13 @@ async function generateTutorVisualIfNeeded(
   app.get("/api/ai-health", async (_req, res) => {
     const startTime = Date.now();
     try {
+      const diagnostic = diagnoseServerGeminiApiKey();
       const apiKey = getGeminiApiKey();
       if (!apiKey) {
         return res.status(503).json({
           status: "error",
-          error: "GEMINI_API_KEY is not configured",
+          error: diagnostic.message,
+          keyState: diagnostic.state,
           configured: false
         });
       }
@@ -2240,7 +2258,11 @@ async function generateTutorVisualIfNeeded(
 
       const { response, modelUsed } = await generateContentWithModelFailover(ai, {
         contents: "Reply with the word OK.",
-        preferredModels: ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"],
+        preferredModels: [
+          "gemini-3-flash-preview",
+          "gemini-3.1-flash-lite",
+          "gemini-4-hydrogen"
+        ],
         timeoutMs: 8000,
         maxPasses: 1,
         label: "AIHealth"
@@ -2251,15 +2273,23 @@ async function generateTutorVisualIfNeeded(
 
       return res.json({
         status: "ok",
+        configured: true,
+        keyState: "valid_format",
         model: modelUsed,
         reply: text,
         verified: text.length > 0,
         durationMs
       });
     } catch (err: any) {
-      return res.status(500).json({
+      const rawMsg = String(err?.message || err || "Could not verify Gemini API connection.");
+      const isInvalidKey = isAuthOrInvalidApiKeyError(err);
+      return res.status(isInvalidKey ? 401 : 500).json({
         status: "error",
-        error: err?.message || String(err),
+        configured: true,
+        keyState: isInvalidKey ? "rejected_by_google" : "handshake_failed",
+        error: isInvalidKey
+          ? "The configured GEMINI_API_KEY was rejected by Google (API_KEY_INVALID). Please replace it with a valid Gemini API key in Settings > Secrets."
+          : rawMsg,
         durationMs: Date.now() - startTime
       });
     }
@@ -2546,13 +2576,22 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         return Boolean(normalizedActiveWsUuid && toValidUuid(cStr) === normalizedActiveWsUuid);
       };
 
-      // Seed allWorkspacesMap from clientAllWorkspaces, but ONLY add files from the ACTIVE workspace into effectiveFiles!
+      const authenticatedUserId = extractUserIdFromAuthHeader(effectiveAuthHeader) || (userId ? String(userId).trim() : undefined);
+
+      // Filter client-supplied attachedFiles and allWorkspaces against authenticatedUserId to prevent cross-user leakage
+      effectiveFiles = effectiveFiles.filter((f: any) =>
+        isAuthorizedForUser(f?.userId || f?.user_id, authenticatedUserId)
+      );
+
+      // Seed allWorkspacesMap from clientAllWorkspaces, but ONLY add files owned by the authenticated user and from the ACTIVE workspace into effectiveFiles!
       clientAllWorkspaces.forEach((cws: any) => {
         if (!cws || !cws.id) return;
+        if (!isAuthorizedForUser(cws.userId || cws.user_id, authenticatedUserId)) return;
         const wsName = cws.name || 'Workspace';
         const wsFiles: any[] = [];
         const isCurrentWs = matchesActiveWorkspaceId(cws.id);
         (Array.isArray(cws.files) ? cws.files : []).forEach((cf: any) => {
+          if (!isAuthorizedForUser(cf?.userId || cf?.user_id, authenticatedUserId)) return;
           upsertFileIntoList(wsFiles, cf, wsName, cws.id);
           if (isCurrentWs) {
             upsertFileIntoList(effectiveFiles, cf, wsName, cws.id);
@@ -2990,6 +3029,41 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         return isImgOrPdf && hasBinary;
       });
 
+      // Evaluate structured 4-Mode Context Resolution & Edge-Case Verification (Modes A, B, C, D)
+      const resolvedTutorContext = resolveAITutorContext({
+        prompt,
+        authenticatedUserId: authenticatedUserId || null,
+        activeWorkspaceId: isRealWorkspaceId ? workspaceId : null,
+        activeWorkspaceName: isRealWorkspaceId ? workspaceName : null,
+        attachedFiles: effectiveFiles,
+        allWorkspaces: Array.from(allWorkspacesMap.values()),
+        inaccessibleAccountFiles: Array.isArray(bodyObj.inaccessibleAccountFiles)
+          ? bodyObj.inaccessibleAccountFiles
+          : undefined,
+        allowOutsideResearch
+      });
+
+      // If the user referenced a missing, processing, corrupted, inaccessible, or other-workspace document, return the clear explanation immediately
+      if (resolvedTutorContext.immediateEdgeCaseReply) {
+        return res.status(200).json({
+          reply: resolvedTutorContext.immediateEdgeCaseReply,
+          text: resolvedTutorContext.immediateEdgeCaseReply,
+          source: "StudyWeb Context Guard",
+          tutorMode: resolvedTutorContext.selectedMode,
+          intentCategory: resolvedTutorContext.intentCategory,
+          securityFlags: resolvedTutorContext.securityFlags,
+          citations: [],
+          activeWorkspaceContext: isRealWorkspaceId ? workspaceName || undefined : undefined,
+          activeContextFiles: [],
+          followUpQuestions: [
+            `Explain a concept using general knowledge`,
+            `How do I attach or select a file for this chat?`,
+            `What is currently in my active workspace?`
+          ],
+          suggestOutsideResearch: false
+        });
+      }
+
       // Check initial semantic relevance against active workspace materials
       const initialRagCheck = (searchableMaterials.length > 0)
         ? extractRelevantDocumentSegments(
@@ -3004,7 +3078,11 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         !allowOutsideResearch &&
         !isCasualGreeting &&
         searchableMaterials.length > 0 &&
-        (hasDirectTurnAttachment || isExplicitMaterialQuery || initialRagCheck.hasHighRelevance)
+        (resolvedTutorContext.selectedMode === 'MODE_B_WORKSPACE_STUDY' ||
+          resolvedTutorContext.selectedMode === 'MODE_C_STANDALONE_MATERIAL' ||
+          hasDirectTurnAttachment ||
+          isExplicitMaterialQuery ||
+          initialRagCheck.hasHighRelevance)
       );
 
       if (shouldUseWorkspaceFiles && effectiveFiles && effectiveFiles.length > 0) {
@@ -3489,12 +3567,14 @@ ${researchGuideline}
 ${citationGuideline}`;
 
       const systemInstruction = [
+        resolvedTutorContext.systemInstruction,
         coreSystemInstruction,
         outOfWorkspaceInstruction,
         userDatabaseContext,
         specializedFormatInstruction,
         fileOverviewContext,
-        groundedSourceContext
+        resolvedTutorContext.sanitizedMaterialContextBlock,
+        sanitizeUntrustedDocumentText(groundedSourceContext).cleanText
       ].filter(Boolean).join('\n\n');
 
       // Verified active Gemini models for fast, reliable responses
@@ -3866,6 +3946,9 @@ ${citationGuideline}`;
         text: responseText, 
         source: responseSource || "Gemini AI",
         modelUsed: responseSource || "Gemini 3 Flash",
+        tutorMode: resolvedTutorContext.selectedMode,
+        intentCategory: resolvedTutorContext.intentCategory,
+        securityFlags: resolvedTutorContext.securityFlags,
         documentCount: hasRelevantWorkspaceMaterial ? searchableMaterials.length : 0,
         workspaceNotice: undefined,
         activeWorkspaceContext: safeWorkspaceLabel,
@@ -4195,26 +4278,109 @@ ${citationGuideline}`;
     return Promise.any(tasks);
   }
 
-  // API Route: Dedicated Optical Character Recognition (OCR) for Camera-Scanned Study Notes
+  // Bounded server-side OCR deduplication cache to avoid re-processing identical scans
+  const ocrScanDedupCache = new Map<string, { timestamp: number; payload: any }>();
+  const SUPPORTED_SCAN_MIMES = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/bmp",
+    "image/svg+xml",
+    "application/pdf"
+  ]);
+
+  // API Route: Dedicated Optical Character Recognition (OCR) for Camera-Scanned Study Notes (Single & Multi-Page)
   app.post(["/api/ocr/scan-note", "/api/ocr/scan-note/"], async (req, res) => {
-    const { fileBase64, fileMimeType, name } = req.body || {};
+    const { fileBase64, fileMimeType, name, pagesBase64 } = req.body || {};
     const defaultTitle = cleanNotebookLMTitle(name || "Scanned Study Notes", "", "image");
 
     try {
-      if (!fileBase64) {
+      const rawPages: Array<{ fileBase64: string; fileMimeType?: string; pageNumber: number }> =
+        Array.isArray(pagesBase64) && pagesBase64.length > 0
+          ? pagesBase64.map((p: any, idx: number) => ({
+              fileBase64: String(p?.fileBase64 || ""),
+              fileMimeType: p?.fileMimeType || fileMimeType,
+              pageNumber: typeof p?.pageNumber === "number" ? p.pageNumber : idx + 1
+            }))
+          : fileBase64
+          ? [{ fileBase64: String(fileBase64), fileMimeType, pageNumber: 1 }]
+          : [];
+
+      if (rawPages.length === 0) {
         res.status(400).json({ error: "Scanned image base64 data is required." });
         return;
       }
 
-      let cleanBase64 = String(fileBase64);
-      if (cleanBase64.includes(";base64,")) {
-        cleanBase64 = cleanBase64.split(";base64,")[1];
+      if (rawPages.length > 15) {
+        res.status(400).json({ error: "A maximum of 15 pages can be scanned in a single batch." });
+        return;
       }
-      cleanBase64 = cleanBase64.replace(/[\r\n\s]/g, "");
 
-      let normalizedMime = String(fileMimeType || "image/jpeg").toLowerCase().trim();
-      if (normalizedMime === "image/jpg" || normalizedMime === "image/pjpeg" || normalizedMime === "image/jfif") {
-        normalizedMime = "image/jpeg";
+      const normalizedPages: Array<{ cleanBase64: string; mimeType: string; pageNumber: number }> = [];
+      for (const page of rawPages) {
+        let cleanB64 = String(page.fileBase64 || "");
+        let detectedMime = "";
+        if (cleanB64.includes(";base64,")) {
+          const [prefix, b64] = cleanB64.split(";base64,");
+          if (prefix && prefix.startsWith("data:")) {
+            detectedMime = prefix.slice(5).trim().toLowerCase();
+          }
+          cleanB64 = b64 || "";
+        }
+        cleanB64 = cleanB64.replace(/[\r\n\s]/g, "");
+
+        if (!cleanB64 || cleanB64.length < 32) {
+          res.status(400).json({
+            error: `Page ${page.pageNumber} is empty or corrupted. Please provide a valid image or PDF scan.`
+          });
+          return;
+        }
+
+        // Validate base64 characters & size (~20MB max per page)
+        if (cleanB64.length > 28_000_000) {
+          res.status(413).json({
+            error: `Page ${page.pageNumber} exceeds the 20MB maximum file size limit. Please upload a smaller or compressed scan.`
+          });
+          return;
+        }
+        if (!/^[A-Za-z0-9+/=]+$/.test(cleanB64.slice(0, 256))) {
+          res.status(400).json({
+            error: `Page ${page.pageNumber} contains corrupted or invalid image encoding.`
+          });
+          return;
+        }
+
+        let normMime = String(page.fileMimeType || detectedMime || "image/jpeg").toLowerCase().trim();
+        if (normMime === "image/jpg" || normMime === "image/pjpeg" || normMime === "image/jfif") {
+          normMime = "image/jpeg";
+        }
+
+        if (!SUPPORTED_SCAN_MIMES.has(normMime)) {
+          res.status(415).json({
+            error: `Unsupported file format "${normMime}". Supported formats: JPEG, PNG, WEBP, GIF, BMP, SVG, and PDF.`
+          });
+          return;
+        }
+
+        normalizedPages.push({
+          cleanBase64: cleanB64,
+          mimeType: normMime,
+          pageNumber: page.pageNumber
+        });
+      }
+
+      // Sort pages in ascending pageNumber order
+      normalizedPages.sort((a, b) => a.pageNumber - b.pageNumber);
+
+      // Deduplication fingerprint across all pages in this scan request
+      const dedupKey = normalizedPages
+        .map((p) => `${p.pageNumber}:${p.mimeType}:${p.cleanBase64.length}:${p.cleanBase64.slice(0, 64)}:${p.cleanBase64.slice(-64)}`)
+        .join("|");
+      const cachedScan = ocrScanDedupCache.get(dedupKey);
+      if (cachedScan && Date.now() - cachedScan.timestamp < 5 * 60 * 1000) {
+        res.json({ ...cachedScan.payload, deduplicated: true });
+        return;
       }
 
       const apiKey = getGeminiApiKey();
@@ -4237,31 +4403,43 @@ ${citationGuideline}`;
         }
       });
 
-      // Plain-text Markdown prompt (no JSON schema compilation overhead or LaTeX JSON-escaping bugs -> ~2.5x faster!)
-      const fastOcrPrompt = `Transcribe ALL visible handwritten and printed text, questions, multiple-choice options, and equations from this image word-for-word in clean Markdown.
-Output format:
-# <Concise 3 to 6 word topic title>
-Summary: <Crisp 2 to 3 sentence short summary explaining what this note is about, its main concepts or problem, and key takeaway>
+      const isMultiPage = normalizedPages.length > 1;
+      const fastOcrPrompt = `You are StudyWeb's Scan Notes AI Assistant.
+Carefully inspect ${isMultiPage ? `these ${normalizedPages.length} scanned pages in order` : "this scanned educational page"} and extract ALL visible printed and handwritten text, headings, subheadings, lists, numbered points, tables, diagram labels/captions, and mathematical/scientific formulas in the original language.
 
-<Full verbatim transcription of the page>`;
+STRICT SCAN NOTES EXTRACTION RULES:
+1. Preserve the original meaning, language, mathematical expressions, formulas, symbols, units, and scientific notation accurately.
+2. Do NOT guess or fabricate unreadable handwriting. Mark any unreadable words or sections clearly as [Unclear text].
+3. Never alter numerical values or silently rewrite scientific/mathematical statements.
+4. ${isMultiPage ? "Preserve page boundaries explicitly using '--- Page 1 ---', '--- Page 2 ---', etc. in the exact page order." : "Preserve headings, bullet points, tables, and step order."}
+5. If the image is completely blank, empty, or contains zero readable text/diagrams/equations, output EXACTLY the single token: [EMPTY_OR_UNREADABLE_IMAGE]
+
+Output format (when readable content is present):
+# <Concise 3 to 6 word topic title reflecting the actual content>
+Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions, and formulas on the page without introducing unsupported information>
+
+<Full organized verbatim transcription of the scanned notes>`;
+
+      const visionParts: any[] = [{ text: fastOcrPrompt }];
+      for (const p of normalizedPages) {
+        if (isMultiPage) {
+          visionParts.push({ text: `Page ${p.pageNumber}:` });
+        }
+        visionParts.push({
+          inlineData: {
+            data: p.cleanBase64,
+            mimeType: p.mimeType
+          }
+        });
+      }
 
       let rawMarkdown = "";
       try {
         rawMarkdown = await runFastLensVisionRace(
           ai,
-          {
-            parts: [
-              { text: fastOcrPrompt },
-              {
-                inlineData: {
-                  data: cleanBase64,
-                  mimeType: normalizedMime
-                }
-              }
-            ]
-          },
+          { parts: visionParts },
           {},
-          15000
+          18000
         );
       } catch (raceErr: any) {
         if (isAuthOrInvalidApiKeyError(raceErr)) {
@@ -4279,6 +4457,18 @@ Summary: <Crisp 2 to 3 sentence short summary explaining what this note is about
           .replace(/^```(?:markdown|md|text)?\n?/i, "")
           .replace(/\n?```$/, "")
           .trim();
+
+        if (
+          cleaned.includes("[EMPTY_OR_UNREADABLE_IMAGE]") ||
+          cleaned.replace(/[^a-zA-Z0-9]/g, "").length < 3
+        ) {
+          res.status(422).json({
+            error: "No readable text, formulas, or diagrams could be detected in the scanned image. Please ensure the page is well-lit, in focus, and contains visible study notes.",
+            code: "EMPTY_OR_UNREADABLE_IMAGE"
+          });
+          return;
+        }
+
         const lines = cleaned.split(/\r?\n/);
 
         let extractedTitle = defaultTitle;
@@ -4317,10 +4507,10 @@ Summary: <Crisp 2 to 3 sentence short summary explaining what this note is about
           .map((l) => l.replace(/^[-*•\d.)#]+\s*/, "").trim())
           .filter((l) => l.length > 8);
 
-        const highlights = nonEmptyLines.slice(0, 4);
+        const highlights = nonEmptyLines.slice(0, 5);
         const formulas = nonEmptyLines
-          .filter((l) => /[=+\-*/^]|\\frac|\\sqrt|→|⇌/.test(l) && l.length < 120)
-          .slice(0, 4);
+          .filter((l) => /[=+\-*/^]|\\frac|\\sqrt|→|⇌/.test(l) && l.length < 140)
+          .slice(0, 6);
 
         const formattedDocument = [
           `# ${cleanTitle}`,
@@ -4330,26 +4520,31 @@ Summary: <Crisp 2 to 3 sentence short summary explaining what this note is about
           .filter(Boolean)
           .join("\n");
 
-        res.json({
+        const responsePayload = {
           title: cleanTitle,
           extractedText: formattedDocument,
           rawOcrText: verbatimBody,
           summary: extractedSummary,
           highlights,
           formulas,
+          pageCount: normalizedPages.length,
+          hasUnclearText: verbatimBody.includes("[Unclear text]"),
           tags: [cleanTitle.split(" ").slice(0, 2).join(" ") || "Scanned Note", "OCR"]
-        });
+        };
+
+        if (ocrScanDedupCache.size > 100) {
+          const firstKey = ocrScanDedupCache.keys().next().value;
+          if (firstKey) ocrScanDedupCache.delete(firstKey);
+        }
+        ocrScanDedupCache.set(dedupKey, { timestamp: Date.now(), payload: responsePayload });
+
+        res.json(responsePayload);
         return;
       }
 
-      res.json({
-        title: defaultTitle,
-        extractedText: `# ${defaultTitle}\n\nScanned study note ready. Ask any question about this image in Ask & Solve.`,
-        rawOcrText: "Scanned study note ready. Ask any question about this image in Ask & Solve.",
-        summary: "Scanned image loaded in Lens. Ask any question below to analyze or solve problems on this page.",
-        highlights: ["Scanned page ready for visual Q&A"],
-        formulas: [],
-        tags: ["Scanned Note", "Lens"]
+      res.status(422).json({
+        error: "Could not extract readable text from the scanned image right now. Please check image clarity and try scanning again.",
+        code: "OCR_EXTRACTION_FAILED"
       });
     } catch (error: any) {
       if (isAuthOrInvalidApiKeyError(error)) {
@@ -4359,20 +4554,15 @@ Summary: <Crisp 2 to 3 sentence short summary explaining what this note is about
         });
         return;
       }
-      console.warn("[OCR Endpoint Notice] /api/ocr/scan-note fallback:", summarizeModelError(error));
-      res.json({
-        title: defaultTitle,
-        extractedText: `# ${defaultTitle}\n\nScanned study note ready. Ask any question about this image in Ask & Solve.`,
-        rawOcrText: "Scanned study note ready. Ask any question about this image in Ask & Solve.",
-        summary: "Scanned image loaded in Lens. Ask any question below to analyze or solve problems on this page.",
-        highlights: ["Scanned page ready for visual Q&A"],
-        formulas: [],
-        tags: ["Scanned Note", "Lens"]
+      console.warn("[OCR Endpoint Notice] /api/ocr/scan-note error:", summarizeModelError(error));
+      res.status(500).json({
+        error: "OCR processing failed while analyzing the scanned image. Please try again.",
+        code: "OCR_PROCESSING_ERROR"
       });
     }
   });
 
-  // API Route: Google Lens-style Direct Multimodal Q&A, Solver, Generator & Translator for Scanned Notes (no workspace required)
+  // API Route: Scan Notes AI Assistant — Supports all 10 Scan Notes Operations + Homework Solver + Translator
   app.post(["/api/ocr/lens-ask", "/api/ocr/lens-ask/"], async (req, res) => {
     try {
       const {
@@ -4394,9 +4584,17 @@ Summary: <Crisp 2 to 3 sentence short summary explaining what this note is about
         return;
       }
 
+      const operation = detectScanNotesOperationFromQuestion(mode, question);
+      const userQuestion = String(question || "").trim();
+
+      if (operation === "ask" && !userQuestion) {
+        res.status(400).json({ error: "Please enter a question about your scanned note." });
+        return;
+      }
+
       const apiKey = getGeminiApiKey();
-      const buildFallbackLensAnswer = (rawMode: string, textCtx: string): string => {
-        if (rawMode === "short_summary" && textCtx) {
+      const buildFallbackLensAnswer = (op: string, textCtx: string): string => {
+        if (op === "short_summary" && textCtx) {
           const plain = textCtx
             .replace(/^#{1,6}\s+[^\n]*\n+/gm, "")
             .replace(/\s+/g, " ")
@@ -4407,13 +4605,13 @@ Summary: <Crisp 2 to 3 sentence short summary explaining what this note is about
         }
         return textCtx
           ? `Here is the extracted content from your scan:\n\n${textCtx}`
-          : "Your scan is loaded. Configure a valid GEMINI_API_KEY in Settings > Secrets to enable live Lens AI Q&A.";
+          : "Your scan is loaded. Configure a valid GEMINI_API_KEY in Settings > Secrets to enable live Scan Notes AI.";
       };
 
       if (!apiKey) {
         res.json({
-          answer: buildFallbackLensAnswer(String(mode || "ask").toLowerCase().trim(), trimmedText),
-          mode: String(mode || "ask")
+          answer: buildFallbackLensAnswer(operation, trimmedText),
+          mode: operation
         });
         return;
       }
@@ -4446,55 +4644,12 @@ Summary: <Crisp 2 to 3 sentence short summary explaining what this note is about
         } catch {}
       }
 
-      const normalizedMode = String(mode || "ask").toLowerCase().trim();
-      const userQuestion = String(question || "").trim();
-
-      let modeInstruction = "";
-      if (normalizedMode === "solve") {
-        modeInstruction = `Task: Solve Step-by-Step (Homework & Problem Solver).
-Examine all questions, problems, equations, formulas, diagrams, or multiple-choice items in the scanned note.
-- Solve each problem clearly step-by-step showing every calculation, chemical reaction/balanced equation, theorem, or reasoning step.
-- Highlight the final answer clearly for each question.`;
-      } else if (normalizedMode === "explain") {
-        modeInstruction = `Task: Explain Concepts Clearly.
-Explain the exact topics, definitions, diagrams, formulas, or examples in this scanned note in clear, intuitive student-friendly language.`;
-      } else if (normalizedMode === "short_summary") {
-        modeInstruction = `Task: Create a Short Automatic Summary of This Scanned Note.
-Write a crisp, student-friendly 2 to 3 sentence short summary (under 80 words) covering what this scanned note is about, its main topic or problem, and the key takeaway. Start directly with the summary sentences (no headings or bullet lists).`;
-      } else if (normalizedMode === "summarize") {
-        modeInstruction = `Task: Summarize Scanned Note.
-Create a crisp, structured revision summary containing the core ideas, definitions, key takeaways, and formulas in this scan.`;
-      } else if (normalizedMode === "quiz") {
-        modeInstruction = `Task: Generate Practice Questions.
-Create 4–5 high-quality practice questions (with an Answer Key & brief step-by-step explanations at the bottom) strictly based on this scanned note.`;
-      } else if (normalizedMode === "translate") {
-        modeInstruction = `Task: Translate Scanned Text into ${targetLanguage || "English"}.
-Accurately translate ALL readable text from this scan into ${targetLanguage || "English"}.
-- Preserve headings, numbered items, bullet lists, and mathematical/chemical symbols accurately.
-- Return only the clean translated text in Markdown.`;
-      } else {
-        if (!userQuestion) {
-          res.status(400).json({ error: "Please enter a question about your scanned note." });
-          return;
-        }
-        modeInstruction = `Task: Answer the Student's Specific Question About This Scan.
-Student Question: "${userQuestion}"
-Answer thoroughly, accurately, and step-by-step based strictly on the scanned note.`;
-      }
-
-      const conversationContext = Array.isArray(history) && history.length > 0
-        ? `\nPrevious Q&A on this scanned note:\n${history
-            .slice(-6)
-            .map((m: any) => `${m.role === "user" ? "Student" : "Lens AI"}: ${String(m.text || "").slice(0, 1200)}`)
-            .join("\n")}\n`
-        : "";
-
-      const fullPrompt = `You are StudyWeb Visual Lens, a fast, accurate study assistant built into the camera scanner.
-Base your response directly on the scanned note and extracted text below. Format cleanly in Markdown.
-
-${trimmedText ? `=== EXTRACTED OCR TEXT FROM THIS SCAN ===\n${trimmedText.slice(0, 12000)}\n` : ""}
-${conversationContext}
-${modeInstruction}`;
+      const fullPrompt = buildScanNotesSystemPrompt(operation, {
+        userQuestion,
+        targetLanguage,
+        extractedText: trimmedText,
+        conversationHistory: Array.isArray(history) ? history : []
+      });
 
       const ai = new GoogleGenAI({
         apiKey,
@@ -4512,9 +4667,10 @@ ${modeInstruction}`;
         !trimmedText.includes("Ask any question about this image in Ask & Solve") &&
         !trimmedText.includes("Scanned study note ready");
       const questionNeedsVisualInspection =
+        operation === "extract_text" ||
+        operation === "formulas" ||
         /diagram|graph|chart|figure|image|picture|drawing|arrow|color|label|table/i.test(userQuestion);
 
-      // When OCR text is already extracted and the user isn't asking about a visual diagram, skip re-uploading image bytes so answers return in ~500ms!
       if (cleanBase64 && (!hasRealOcrText || questionNeedsVisualInspection)) {
         contentParts.push({
           inlineData: {
@@ -4526,16 +4682,15 @@ ${modeInstruction}`;
 
       let answerText = "";
       try {
-        answerText = await runFastLensVisionRace(ai, contentParts, {}, 10000);
+        answerText = await runFastLensVisionRace(ai, contentParts, {}, 12000);
       } catch (raceErr: any) {
         if (isAuthOrInvalidApiKeyError(raceErr)) {
           throw raceErr;
         }
-        // If text-only or image call failed due to transient model issues, fallback with full failover
         const fallback = await generateContentWithModelFailover(ai, {
           contents: contentParts,
           preferredModels: ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-4-hydrogen"],
-          timeoutMs: 10000,
+          timeoutMs: 12000,
           maxPasses: 2,
           label: "LensAskFallback"
         });
@@ -4545,14 +4700,14 @@ ${modeInstruction}`;
       if (answerText) {
         res.json({
           answer: answerText,
-          mode: normalizedMode
+          mode: operation
         });
         return;
       }
 
       res.json({
-        answer: buildFallbackLensAnswer(normalizedMode, trimmedText),
-        mode: normalizedMode
+        answer: buildFallbackLensAnswer(operation, trimmedText),
+        mode: operation
       });
     } catch (error: any) {
       const normalizedMode = String(req.body?.mode || "ask").toLowerCase().trim();
@@ -4564,14 +4719,14 @@ ${modeInstruction}`;
           answer:
             normalizedMode === "short_summary" && trimmedText
               ? trimmedText.replace(/^#{1,6}\s+[^\n]*\n+/gm, "").replace(/\s+/g, " ").trim().slice(0, 220)
-              : "Please configure a valid GEMINI_API_KEY in Settings > Secrets to use live Lens AI.",
+              : "Please configure a valid GEMINI_API_KEY in Settings > Secrets to use live Scan Notes AI.",
           mode: normalizedMode
         });
         return;
       }
       console.warn("[Lens Ask Endpoint Notice] /api/ocr/lens-ask fallback:", summarizeModelError(error));
       res.json({
-        answer: "I reviewed your scanned note. Could you rephrase your question or specify which problem on the page you want solved step-by-step?",
+        answer: "I reviewed your scanned note. Could you rephrase your question or specify which section on the page you want analyzed?",
         mode: normalizedMode
       });
     }

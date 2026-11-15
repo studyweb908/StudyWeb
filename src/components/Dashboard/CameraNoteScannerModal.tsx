@@ -26,9 +26,12 @@ import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import {
   OCRService,
   LensAskRequest,
+  OCRScanPageInput,
+  validateScanInputFile,
   isPlaceholderScanSummary,
   setCachedShortSummary
 } from '../../services/OCRService';
+import type { ScanNotesOperationMode } from '../../services/AITutorContextService';
 import {
   fetchNaturalTtsAudio,
   getStoredVoiceProfileGender,
@@ -1093,7 +1096,8 @@ export default function CameraNoteScannerModal({
   const processScannedImage = async (
     rawDataUrl: string,
     originalFileName?: string,
-    lockedBounds?: NormalizedDocBounds | null
+    lockedBounds?: NormalizedDocBounds | null,
+    extraPages?: OCRScanPageInput[]
   ) => {
     const scanSeq = ++activeScanSeqRef.current;
     stopCameraStream();
@@ -1145,10 +1149,16 @@ export default function CameraNoteScannerModal({
         sizeFormatted
       });
 
+      const pagesPayload: OCRScanPageInput[] | undefined =
+        Array.isArray(extraPages) && extraPages.length > 0
+          ? [{ fileBase64: base64, fileMimeType: mimeType, pageNumber: 1 }, ...extraPages]
+          : undefined;
+
       // Extract verbatim OCR text, title, short summary & formulas in the background (~1s)
       const ocrResult = await OCRService.extractTextFromNoteImage({
         fileBase64: base64,
         fileMimeType: mimeType,
+        pagesBase64: pagesPayload,
         defaultName: defaultScanName,
         sizeFormatted
       });
@@ -1213,9 +1223,9 @@ export default function CameraNoteScannerModal({
     }
   };
 
-  // Run Google Lens interactive actions directly inside Scan Notes (no workspace upload required)
+  // Run Scan Notes AI interactive operations directly inside Scan Notes (no workspace upload required)
   const runLensAction = async (
-    mode: 'ask' | 'solve' | 'explain' | 'summarize',
+    mode: ScanNotesOperationMode,
     customQuestion?: string
   ) => {
     if (!scanResult || isLensLoading) return;
@@ -1223,12 +1233,20 @@ export default function CameraNoteScannerModal({
     if (mode === 'ask' && !questionText) return;
 
     const actionLabels: Record<string, string> = {
-      solve: 'Solve step-by-step',
-      explain: 'Explain concepts',
-      summarize: 'Summarize note'
+      extract_text: 'Extract all text',
+      clean_organize: 'Clean & organize notes',
+      summarize: 'Summarize notes',
+      explain: 'Explain notes',
+      revision_notes: 'Create revision notes',
+      definitions: 'Extract definitions',
+      formulas: 'Extract formulas',
+      qa: 'Create Q&A',
+      quiz: 'Generate practice quiz',
+      exam_points: 'Identify exam points',
+      solve: 'Solve step-by-step'
     };
 
-    const displayPrompt = mode === 'ask' ? questionText : actionLabels[mode];
+    const displayPrompt = mode === 'ask' ? questionText : (actionLabels[mode] || questionText);
     const userMsg: LensMessage = {
       id: `u-${Date.now()}`,
       role: 'user',
@@ -1464,17 +1482,51 @@ export default function CameraNoteScannerModal({
     processScannedImage(dataUrl, undefined, detectedBounds);
   };
 
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        processScannedImage(reader.result, file.name, null);
-      }
-    };
-    reader.readAsDataURL(file);
+  const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+    const files: File[] = Array.from<File>(fileList).slice(0, 10);
     e.target.value = '';
+
+    for (const f of files) {
+      const validation = validateScanInputFile(f);
+      if (!validation.valid) {
+        setScanError(validation.error || 'Unsupported or invalid scan file.');
+        (window as any).showToast?.(validation.error || 'Unsupported file format.', 'error', 4000);
+        return;
+      }
+    }
+
+    const readDataUrl = (file: File) =>
+      new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () =>
+          typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Could not read file'));
+        reader.onerror = () => reject(reader.error || new Error('File read failed'));
+        reader.readAsDataURL(file);
+      });
+
+    try {
+      const firstDataUrl = await readDataUrl(files[0]);
+      if (files.length === 1) {
+        await processScannedImage(firstDataUrl, files[0].name, null);
+      } else {
+        const extraPages: OCRScanPageInput[] = [];
+        for (let i = 1; i < files.length; i++) {
+          const pageDataUrl = await readDataUrl(files[i]);
+          const compressed = await normalizeAndCompressImage(pageDataUrl, null);
+          extraPages.push({
+            fileBase64: compressed.base64,
+            fileMimeType: compressed.mimeType,
+            pageNumber: i + 1
+          });
+        }
+        const multiLabel = `${files[0].name.replace(/\.[^/.]+$/, '')} (${files.length} Pages)`;
+        await processScannedImage(firstDataUrl, multiLabel, null, extraPages);
+      }
+    } catch (readErr: any) {
+      setScanError(readErr?.message || 'Could not read the selected image file.');
+    }
   };
 
   return (
@@ -1495,7 +1547,7 @@ export default function CameraNoteScannerModal({
           <input
             ref={nativeCameraInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,application/pdf"
             capture="environment"
             onChange={handleFileInputChange}
             className="hidden"
@@ -1503,7 +1555,8 @@ export default function CameraNoteScannerModal({
           <input
             ref={galleryInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,application/pdf"
+            multiple
             onChange={handleFileInputChange}
             className="hidden"
           />
@@ -2114,32 +2167,59 @@ export default function CameraNoteScannerModal({
                         <div ref={lensChatEndRef} />
                       </div>
 
-                      {/* Ask About This Scan Input */}
-                      <form
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          runLensAction('ask');
-                        }}
-                        className="p-2.5 sm:p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900 shrink-0"
-                      >
-                        <div className="flex items-center gap-2 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/15 px-3 py-1.5 sm:px-3.5 sm:py-2 shadow-2xs">
-                          <input
-                            type="text"
-                            value={lensQuestionInput}
-                            onChange={(e) => setLensQuestionInput(e.target.value)}
-                            placeholder="Ask a question about this scan..."
-                            className="flex-1 bg-transparent text-[13px] sm:text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none min-w-0"
-                          />
-                          <button
-                            type="submit"
-                            disabled={isLensLoading || !lensQuestionInput.trim()}
-                            className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-45 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
-                          >
-                            <Send className="w-3.5 h-3.5" />
-                            <span>Ask</span>
-                          </button>
+                      {/* Quick Scan Notes Operations & Ask Input */}
+                      <div className="p-2.5 sm:p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900 shrink-0 space-y-2">
+                        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                          {(
+                            [
+                              { mode: 'clean_organize', label: 'Clean & Organize' },
+                              { mode: 'summarize', label: 'Summarize' },
+                              { mode: 'explain', label: 'Explain Notes' },
+                              { mode: 'revision_notes', label: 'Revision Notes' },
+                              { mode: 'definitions', label: 'Definitions' },
+                              { mode: 'formulas', label: 'Formulas' },
+                              { mode: 'qa', label: 'Q&A' },
+                              { mode: 'quiz', label: 'Practice Quiz' },
+                              { mode: 'exam_points', label: 'Exam Points' },
+                              { mode: 'solve', label: 'Solve Step-by-Step' }
+                            ] as Array<{ mode: ScanNotesOperationMode; label: string }>
+                          ).map((item) => (
+                            <button
+                              key={item.mode}
+                              type="button"
+                              disabled={isLensLoading}
+                              onClick={() => runLensAction(item.mode)}
+                              className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                            >
+                              {item.label}
+                            </button>
+                          ))}
                         </div>
-                      </form>
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            runLensAction('ask');
+                          }}
+                        >
+                          <div className="flex items-center gap-2 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/15 px-3 py-1.5 sm:px-3.5 sm:py-2 shadow-2xs">
+                            <input
+                              type="text"
+                              value={lensQuestionInput}
+                              onChange={(e) => setLensQuestionInput(e.target.value)}
+                              placeholder="Ask a question about this scan..."
+                              className="flex-1 bg-transparent text-[13px] sm:text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none min-w-0"
+                            />
+                            <button
+                              type="submit"
+                              disabled={isLensLoading || !lensQuestionInput.trim()}
+                              className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-45 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                            >
+                              <Send className="w-3.5 h-3.5" />
+                              <span>Ask</span>
+                            </button>
+                          </div>
+                        </form>
+                      </div>
                     </div>
                   ) : (
                     /* Text, Copy & Translate Mode */

@@ -216,7 +216,7 @@ export const GeminiConnectionTestCard: React.FC<GeminiConnectionTestCardProps> =
             className={`p-3 rounded-xl border flex items-start gap-2.5 ${
               isTesting
                 ? 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'
-                : step2Passed
+                : step2Passed && status?.keyState !== 'rejected_by_google'
                 ? 'bg-emerald-50/60 dark:bg-emerald-950/25 border-emerald-200/80 dark:border-emerald-500/30'
                 : 'bg-rose-50/60 dark:bg-rose-950/25 border-rose-200/80 dark:border-rose-500/30'
             }`}
@@ -225,7 +225,7 @@ export const GeminiConnectionTestCard: React.FC<GeminiConnectionTestCardProps> =
               className={`w-4 h-4 shrink-0 mt-0.5 ${
                 isTesting
                   ? 'text-slate-400 animate-pulse'
-                  : step2Passed
+                  : step2Passed && status?.keyState !== 'rejected_by_google'
                   ? 'text-emerald-600 dark:text-emerald-400'
                   : 'text-rose-600 dark:text-rose-400'
               }`}
@@ -238,21 +238,27 @@ export const GeminiConnectionTestCard: React.FC<GeminiConnectionTestCardProps> =
                 {!isTesting && (
                   <span
                     className={`text-[10px] font-bold uppercase ${
-                      step2Passed
+                      step2Passed && status?.keyState !== 'rejected_by_google'
                         ? 'text-emerald-700 dark:text-emerald-300'
                         : 'text-rose-700 dark:text-rose-300'
                     }`}
                   >
-                    {step2Passed ? 'Pass' : 'Fail'}
+                    {step2Passed && status?.keyState !== 'rejected_by_google' ? 'Pass' : 'Fail'}
                   </span>
                 )}
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                 {isTesting
                   ? 'Inspecting server key...'
+                  : status?.keyState === 'placeholder_my_gemini_api_key'
+                  ? 'Placeholder MY_GEMINI_API_KEY set'
+                  : status?.keyState === 'oauth_token_unsupported'
+                  ? 'OAuth token (needs AIzaSy... key)'
+                  : status?.keyState === 'rejected_by_google'
+                  ? 'Key rejected (API_KEY_INVALID)'
                   : step2Passed
-                  ? 'GEMINI_API_KEY detected'
-                  : 'Missing or placeholder key'}
+                  ? 'Valid GEMINI_API_KEY detected'
+                  : 'Missing in Settings > Secrets'}
               </p>
             </div>
           </div>
@@ -289,7 +295,7 @@ export const GeminiConnectionTestCard: React.FC<GeminiConnectionTestCardProps> =
                         : 'text-rose-700 dark:text-rose-300'
                     }`}
                   >
-                    {step3Passed ? 'Pass' : 'Fail'}
+                    {step3Passed ? 'Pass' : !step2Passed ? 'Blocked' : 'Fail'}
                   </span>
                 )}
               </div>
@@ -300,7 +306,9 @@ export const GeminiConnectionTestCard: React.FC<GeminiConnectionTestCardProps> =
                   ? `${status?.model || 'gemini-3-flash-preview'}${
                       status?.durationMs ? ` (${status.durationMs}ms)` : ''
                     }`
-                  : 'Handshake did not complete'}
+                  : !step2Passed
+                  ? 'Waiting for valid API key in Step 2'
+                  : 'Model call rejected by Google'}
               </p>
             </div>
           </div>

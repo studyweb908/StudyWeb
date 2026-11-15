@@ -1,5 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { getServerGeminiApiKey } from '../../src/utils/serverEnv.js';
+import {
+  detectScanNotesOperationFromQuestion,
+  buildScanNotesSystemPrompt
+} from '../../src/services/AITutorContextService.js';
 
 interface ApiRequest extends IncomingMessage {
   body?: any;
@@ -43,15 +48,7 @@ async function parseRequestBody(req: ApiRequest): Promise<any> {
 }
 
 function getGeminiApiKey(): string | null {
-  const key =
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.API_KEY;
-
-  if (!key || key.trim() === '' || key === 'MY_GEMINI_API_KEY') {
-    return null;
-  }
-  return key.trim();
+  return getServerGeminiApiKey();
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
@@ -114,57 +111,19 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       normalizedMime = 'image/jpeg';
     }
 
-    const normalizedMode = String(mode || 'ask').toLowerCase().trim();
+    const normalizedMode = detectScanNotesOperationFromQuestion(mode, question);
     const userQuestion = String(question || '').trim();
 
-    let modeInstruction = '';
-    if (normalizedMode === 'solve') {
-      modeInstruction = `Task: Solve Step-by-Step (Homework & Problem Solver).
-Examine all questions, problems, equations, formulas, diagrams, or multiple-choice items visible in the scanned image and extracted OCR text.
-- Solve each problem clearly step-by-step showing every calculation, chemical reaction/balanced equation, theorem, or reasoning step.
-- Highlight the final answer clearly for each question.
-- If there are multiple questions on the page, number and solve each one in order.`;
-    } else if (normalizedMode === 'explain') {
-      modeInstruction = `Task: Explain Concepts Clearly.
-Explain the exact topics, definitions, diagrams, formulas, or examples visible in this scanned note in clear, intuitive student-friendly language, referencing the actual content written on the page.`;
-    } else if (normalizedMode === 'summarize') {
-      modeInstruction = `Task: Summarize Scanned Note.
-Create a crisp, structured revision summary containing only the core ideas, definitions, key takeaways, and formulas visible in this scan.`;
-    } else if (normalizedMode === 'quiz') {
-      modeInstruction = `Task: Generate Practice Questions.
-Create 4–5 high-quality practice questions (with an Answer Key & brief step-by-step explanations at the bottom) strictly based on the concepts, problems, and facts visible in this scanned note so the student can test themselves right away.`;
-    } else if (normalizedMode === 'translate') {
-      modeInstruction = `Task: Translate Scanned Text into ${targetLanguage || 'English'}.
-Accurately translate ALL readable text visible in the scanned image and extracted text into ${targetLanguage || 'English'}.
-- Preserve headings, numbered items, bullet lists, and mathematical/chemical symbols accurately.
-- Return only the clean translated text cleanly formatted in Markdown.`;
-    } else {
-      if (!userQuestion) {
-        return res.status(400).json({ error: 'Please enter a question about your scanned note.' });
-      }
-      modeInstruction = `Task: Answer the Student's Specific Question About This Scan.
-Student Question: "${userQuestion}"
-Answer thoroughly, accurately, and step-by-step based strictly on the scanned image and its extracted text. If a detail asked about is not visible or unreadable in the scan, state that clearly instead of guessing or switching to an unrelated topic.`;
+    if (normalizedMode === 'ask' && !userQuestion) {
+      return res.status(400).json({ error: 'Please enter a question about your scanned note.' });
     }
 
-    const conversationContext =
-      Array.isArray(history) && history.length > 0
-        ? `\nPrevious Q&A on this scanned note:\n${history
-            .slice(-6)
-            .map((m: any) => `${m.role === 'user' ? 'Student' : 'Lens AI'}: ${String(m.text || '').slice(0, 1200)}`)
-            .join('\n')}\n`
-        : '';
-
-    const fullPrompt = `You are StudyWeb Visual Lens, an interactive study assistant built directly into the camera scanner (similar to Google Lens Homework, Text, and Ask modes).
-
-STRICT GROUNDING RULES:
-1. Base your response 100% on the attached scanned image and the extracted OCR text below.
-2. NEVER invent unrelated subjects or pull content from outside the scan unless applying standard formulas/steps needed to solve or explain the exact problem shown in the scan.
-3. Format your response cleanly with Markdown headings, bullet points, and step-by-step lines so it is easy to read.
-
-${trimmedText ? `=== EXTRACTED OCR TEXT FROM THIS SCAN ===\n${trimmedText.slice(0, 14000)}\n` : ''}
-${conversationContext}
-${modeInstruction}`;
+    const fullPrompt = buildScanNotesSystemPrompt(normalizedMode, {
+      userQuestion,
+      targetLanguage,
+      extractedText: trimmedText,
+      conversationHistory: Array.isArray(history) ? history : []
+    });
 
     const ai = new GoogleGenAI({
       apiKey,
