@@ -64,22 +64,6 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
   const [isMobileSearchExpanded, setIsMobileSearchExpanded] = useState(false);
   const { themeMode, toggleTheme } = useThemeMode();
   const [profilePic, setProfilePic] = useState<string | null>(() => readSyncProfileSnapshot().avatarUrl);
-  const [isOnline, setIsOnline] = useState<boolean>(() =>
-    typeof navigator !== 'undefined' ? navigator.onLine : true
-  );
-
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
 
   useEffect(() => {
     const updatePic = (e?: Event) => {
@@ -481,26 +465,6 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
 
         {/* Quick Actions & Profile Area */}
         <div className="flex items-center gap-1 sm:gap-2 md:gap-2.5 ml-auto shrink-0">
-          {/* Subtle Connectivity Status Indicator */}
-          <div
-            role="status"
-            aria-live="polite"
-            title={isOnline ? 'Connected — Online' : 'No internet connection — Offline'}
-            className={`flex items-center gap-1.5 h-8 sm:h-9 px-2 sm:px-2.5 rounded-xl border text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0 select-none ${
-              isOnline
-                ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200/70 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-300'
-                : 'bg-rose-50/80 dark:bg-rose-950/35 border-rose-200/80 dark:border-rose-800/60 text-rose-700 dark:text-rose-300'
-            }`}
-          >
-            <span
-              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                isOnline ? 'bg-emerald-500' : 'bg-rose-500 animate-pulse'
-              }`}
-              aria-hidden="true"
-            />
-            <span>{isOnline ? 'Online' : 'Offline'}</span>
-          </div>
-
           {/* Quick Actions Shortcuts (Desktop Only) */}
           <div className={`${isFocusMode ? 'hidden' : 'hidden md:flex'} items-center shrink-0`}>
             <button
