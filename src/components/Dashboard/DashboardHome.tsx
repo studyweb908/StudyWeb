@@ -30,6 +30,7 @@ import { getRealUserActivities, recordUserActivity, UserActivityItem } from '../
 import { HomeWorkspaceSkeleton, RecentActivitySkeleton } from './DashboardSkeletons';
 import { readSyncProfileSnapshot, fetchAndReconcileSupabaseProfile } from '../../utils/profileStorage';
 import { StudyTrackerService } from '../../services/StudyTrackerService';
+import { loadQuizHistory } from '../../utils/quizHistoryStorage';
 
 interface DashboardHomeProps {
   setActiveTab: (tab: string) => void;
@@ -441,7 +442,8 @@ export default function DashboardHome({
         );
         const hasCompletedPractice =
           totalQuizzesOrFlashcards > 0 ||
-          realActivities.some(a => a.iconType === 'quiz');
+          realActivities.some(a => a.iconType === 'quiz') ||
+          loadQuizHistory().length > 0;
 
         const steps = [
           {
@@ -479,16 +481,18 @@ export default function DashboardHome({
             id: 'step-practice',
             num: '03',
             title: 'Complete an interactive quiz or practice session',
-            subtitle: 'Interactive adaptive quizzes and active recall practice are launching soon.',
-            done: false,
-            locked: true,
-            icon: <Lock className="w-4 h-4" />,
-            ctaLabel: 'Coming Soon',
-            onAction: () => {}
+            subtitle: hasCompletedPractice
+              ? 'Interactive adaptive quizzes & active recall practice active'
+              : 'Take an interactive adaptive quiz or active recall practice session to master your notes.',
+            done: hasCompletedPractice,
+            locked: false,
+            icon: <Award className="w-4 h-4" />,
+            ctaLabel: hasCompletedPractice ? 'Open Quizzes' : 'Start Practice Quiz',
+            onAction: () => setActiveTab('quiz-center')
           }
         ];
 
-        const activeStepsCount = 2;
+        const activeStepsCount = 3;
         const completedCount = steps.filter(s => !s.locked && s.done).length;
         const progressPct = Math.round((completedCount / activeStepsCount) * 100);
 
