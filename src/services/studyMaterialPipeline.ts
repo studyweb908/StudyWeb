@@ -2,10 +2,10 @@ import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
-import { toValidUuid, isValidUuid, generateUuid } from '../utils/uuid';
-import { TranscriptProcessor, TranscriptResult, TranscriptValidationStatus, TranscriptValidationResult } from './TranscriptProcessor';
-import { cleanNotebookLMTitle, isRawUrlOrPlaceholderTitle } from '../utils/notebookTitle';
-import { getServerGeminiApiKey } from '../utils/serverEnv';
+import { toValidUuid, isValidUuid, generateUuid } from '../utils/uuid.js';
+import { TranscriptProcessor, TranscriptResult, TranscriptValidationStatus, TranscriptValidationResult } from './TranscriptProcessor.js';
+import { cleanNotebookLMTitle, isRawUrlOrPlaceholderTitle } from '../utils/notebookTitle.js';
+import { getServerGeminiApiKey } from '../utils/serverEnv.js';
 
 export const studyMaterialRouter = express.Router();
 

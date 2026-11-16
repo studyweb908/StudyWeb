@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
@@ -319,9 +318,15 @@ export async function generateContentWithModelFailover(
 
 // Initialize the Knowledge Engine database
 
-async function startServer() {
+let cachedExpressApp: express.Express | null = null;
+let cachedExpressAppPromise: Promise<express.Express> | null = null;
+
+export async function createExpressApp(): Promise<express.Express> {
+  if (cachedExpressApp) return cachedExpressApp;
+  if (cachedExpressAppPromise) return cachedExpressAppPromise;
+
+  cachedExpressAppPromise = (async () => {
   const app = express();
-  const PORT = 3000;
 
   // Standard baseline security headers
   app.use((req, res, next) => {
@@ -337,6 +342,14 @@ async function startServer() {
     next();
   });
 
+  // Preserve pre-parsed request bodies injected by serverless platforms (e.g. Vercel)
+  app.use((req: any, _res, next) => {
+    if (req.body !== undefined && !req._body) {
+      req._body = true;
+    }
+    next();
+  });
+
   // JSON Body Parser for API Requests (bounded to 50MB to match max file upload limit)
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -348,6 +361,16 @@ async function startServer() {
       req.body = req.body && typeof req.body === "object" ? req.body : {};
       if (req.path.startsWith("/api/ai-tutor")) {
         return next();
+      }
+      if (req.path.startsWith("/api/ocr/")) {
+        const isTooLarge = err?.type === "entity.too.large" || err?.status === 413;
+        return res.status(isTooLarge ? 413 : 400).json({
+          error: isTooLarge
+            ? "The scanned image is too large to process. Please upload a smaller or compressed photo."
+            : "The scanned image payload was malformed. Please try uploading or capturing again.",
+          code: isTooLarge ? "PAYLOAD_TOO_LARGE" : "INVALID_PAYLOAD",
+          retryable: true
+        });
       }
       if (req.path.startsWith("/api/")) {
         return res.status(200).json({
@@ -4387,7 +4410,9 @@ ${citationGuideline}`;
       if (!apiKey) {
         console.error("[OCR Endpoint] API key is not configured.");
         res.status(503).json({
-          error: "Something went wrong. There is a server error. Please try again."
+          error: "Document scanning is temporarily unavailable because the AI service is not configured.",
+          code: "AI_SERVICE_UNAVAILABLE",
+          retryable: true
         });
         return;
       }
@@ -4433,22 +4458,48 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
       }
 
       let rawMarkdown = "";
+      let lastVisionError: any = null;
       try {
         rawMarkdown = await runFastLensVisionRace(
           ai,
           { parts: visionParts },
           {},
-          18000
+          15000
         );
       } catch (raceErr: any) {
+        lastVisionError = raceErr;
         if (isAuthOrInvalidApiKeyError(raceErr)) {
           console.error("[OCR Endpoint] API key invalid or unauthorized:", summarizeModelError(raceErr));
           res.status(401).json({
-            error: "Something went wrong. There is a server error. Please try again."
+            error: "Document scanning authentication failed. Please check the server Gemini API key configuration.",
+            code: "AI_AUTH_ERROR",
+            retryable: false
           });
           return;
         }
-        console.warn("[OCR Endpoint] Fast race notice:", summarizeModelError(raceErr));
+        console.warn("[OCR Endpoint] Fast race notice, attempting failover:", summarizeModelError(raceErr));
+        try {
+          const failover = await generateContentWithModelFailover(ai, {
+            contents: { parts: visionParts },
+            preferredModels: ["gemini-3.1-flash-lite", "gemini-3-flash-preview", "gemini-4-hydrogen"],
+            timeoutMs: 14000,
+            maxPasses: 1,
+            label: "ScanNoteFailover"
+          });
+          rawMarkdown = String(failover?.response?.text || "").trim();
+        } catch (fallbackErr: any) {
+          lastVisionError = fallbackErr;
+          if (isAuthOrInvalidApiKeyError(fallbackErr)) {
+            console.error("[OCR Endpoint] Failover auth error:", summarizeModelError(fallbackErr));
+            res.status(401).json({
+              error: "Document scanning authentication failed. Please check the server Gemini API key configuration.",
+              code: "AI_AUTH_ERROR",
+              retryable: false
+            });
+            return;
+          }
+          console.warn("[OCR Endpoint] Failover extraction notice:", summarizeModelError(fallbackErr));
+        }
       }
 
       if (rawMarkdown) {
@@ -4463,7 +4514,9 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
         ) {
           console.warn("[OCR Endpoint] Image had no readable text or was empty.");
           res.status(422).json({
-            error: "Something went wrong. There is a server error. Please try again."
+            error: "No readable text or diagrams were detected in this image. Please try a clearer, well-lit photo.",
+            code: "UNREADABLE_IMAGE",
+            retryable: true
           });
           return;
         }
@@ -4541,20 +4594,35 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
         return;
       }
 
-      console.error("[OCR Endpoint] OCR extraction failed to return markdown.");
-      res.status(422).json({
-        error: "Something went wrong. There is a server error. Please try again."
+      const isQuota = isQuotaOrRateLimitError(lastVisionError);
+      const isTimeout = /timed out|timeout/i.test(String(lastVisionError?.message || ""));
+      console.error("[OCR Endpoint] OCR extraction failed to return markdown:", summarizeModelError(lastVisionError));
+      res.status(isQuota ? 429 : isTimeout ? 504 : 422).json({
+        error: isQuota
+          ? "The scanning service is temporarily busy. Please wait a few seconds and try again."
+          : isTimeout
+          ? "Scanning took longer than expected. Please try again with a clearer or smaller photo."
+          : "Unable to extract text from this scan right now. Please try again with a clearer photo.",
+        code: isQuota ? "RATE_LIMITED" : isTimeout ? "SCAN_TIMEOUT" : "OCR_EXTRACTION_FAILED",
+        retryable: true
       });
     } catch (error: any) {
       console.error("[OCR Endpoint Error] /api/ocr/scan-note error:", summarizeModelError(error));
       if (isAuthOrInvalidApiKeyError(error)) {
         res.status(401).json({
-          error: "Something went wrong. There is a server error. Please try again."
+          error: "Document scanning authentication failed. Please check the server Gemini API key configuration.",
+          code: "AI_AUTH_ERROR",
+          retryable: false
         });
         return;
       }
-      res.status(500).json({
-        error: "Something went wrong. There is a server error. Please try again."
+      const isQuota = isQuotaOrRateLimitError(error);
+      res.status(isQuota ? 429 : 500).json({
+        error: isQuota
+          ? "The scanning service is temporarily busy. Please wait a few seconds and try again."
+          : "Could not process the scanned document right now. Please try again.",
+        code: isQuota ? "RATE_LIMITED" : "OCR_SERVER_ERROR",
+        retryable: true
       });
     }
   });
@@ -4576,7 +4644,9 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
       const trimmedText = String(extractedText || "").trim();
       if (!fileBase64 && !trimmedText && !imageUrl) {
         res.status(400).json({
-          error: "A scanned image or extracted note text is required to answer or generate content."
+          error: "A scanned image or extracted note text is required to answer or generate content.",
+          code: "MISSING_SCAN_INPUT",
+          retryable: false
         });
         return;
       }
@@ -4585,7 +4655,11 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
       const userQuestion = String(question || "").trim();
 
       if (operation === "ask" && !userQuestion) {
-        res.status(400).json({ error: "Please enter a question about your scanned note." });
+        res.status(400).json({
+          error: "Please enter a question about your scanned note.",
+          code: "MISSING_QUESTION",
+          retryable: false
+        });
         return;
       }
 
@@ -4600,15 +4674,20 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
           const concise = sentences.slice(0, 2).join(" ") || plain.slice(0, 220);
           return concise.length > 220 ? `${concise.slice(0, 217)}...` : concise;
         }
-        return textCtx
-          ? `Here is the extracted content from your scan:\n\n${textCtx}`
-          : "Something went wrong. There is a server error. Please try again.";
+        return textCtx ? `Here is the extracted content from your scan:\n\n${textCtx}` : "";
       };
 
       if (!apiKey) {
         console.error("[Lens Ask Endpoint] API key is not configured.");
-        res.json({
-          answer: buildFallbackLensAnswer(operation, trimmedText),
+        const fallback = buildFallbackLensAnswer(operation, trimmedText);
+        if (fallback) {
+          res.json({ answer: fallback, mode: operation, fallback: true });
+          return;
+        }
+        res.status(503).json({
+          error: "The scan assistant is temporarily unavailable because the AI service is not configured.",
+          code: "AI_SERVICE_UNAVAILABLE",
+          retryable: true,
           mode: operation
         });
         return;
@@ -4685,14 +4764,21 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
         if (isAuthOrInvalidApiKeyError(raceErr)) {
           throw raceErr;
         }
-        const fallback = await generateContentWithModelFailover(ai, {
-          contents: contentParts,
-          preferredModels: ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-4-hydrogen"],
-          timeoutMs: 12000,
-          maxPasses: 2,
-          label: "LensAskFallback"
-        });
-        answerText = String(fallback?.response?.text || "").trim();
+        try {
+          const fallback = await generateContentWithModelFailover(ai, {
+            contents: contentParts,
+            preferredModels: ["gemini-3.1-flash-lite", "gemini-3-flash-preview", "gemini-4-hydrogen"],
+            timeoutMs: 12000,
+            maxPasses: 1,
+            label: "LensAskFallback"
+          });
+          answerText = String(fallback?.response?.text || "").trim();
+        } catch (fallbackErr: any) {
+          if (isAuthOrInvalidApiKeyError(fallbackErr)) {
+            throw fallbackErr;
+          }
+          console.warn("[Lens Ask Endpoint] Failover notice:", summarizeModelError(fallbackErr));
+        }
       }
 
       if (answerText) {
@@ -4703,27 +4789,56 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
         return;
       }
 
-      res.json({
-        answer: buildFallbackLensAnswer(operation, trimmedText),
+      const textFallback = buildFallbackLensAnswer(operation, trimmedText);
+      if (textFallback) {
+        res.json({
+          answer: textFallback,
+          mode: operation,
+          fallback: true
+        });
+        return;
+      }
+
+      res.status(503).json({
+        error: "Unable to analyze this scanned note right now. Please try again in a moment.",
+        code: "LENS_UNAVAILABLE",
+        retryable: true,
         mode: operation
       });
     } catch (error: any) {
       const normalizedMode = String(req.body?.mode || "ask").toLowerCase().trim();
       const trimmedText = String(req.body?.extractedText || "").trim();
       console.error("[Lens Ask Endpoint Error] /api/ocr/lens-ask:", summarizeModelError(error));
+
+      if (normalizedMode === "short_summary" && trimmedText) {
+        const plainSummary = trimmedText
+          .replace(/^#{1,6}\s+[^\n]*\n+/gm, "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 220);
+        if (plainSummary) {
+          res.json({ answer: plainSummary, mode: normalizedMode, fallback: true });
+          return;
+        }
+      }
+
       if (isAuthOrInvalidApiKeyError(error)) {
         res.status(401).json({
-          error: "Something went wrong. There is a server error. Please try again.",
-          answer:
-            normalizedMode === "short_summary" && trimmedText
-              ? trimmedText.replace(/^#{1,6}\s+[^\n]*\n+/gm, "").replace(/\s+/g, " ").trim().slice(0, 220)
-              : "Something went wrong. There is a server error. Please try again.",
+          error: "Scan assistant authentication failed. Please verify the Gemini API key configuration.",
+          code: "AI_AUTH_ERROR",
+          retryable: false,
           mode: normalizedMode
         });
         return;
       }
-      res.json({
-        answer: "Something went wrong. There is a server error. Please try again.",
+
+      const isQuota = isQuotaOrRateLimitError(error);
+      res.status(isQuota ? 429 : 500).json({
+        error: isQuota
+          ? "The scan assistant is temporarily busy. Please wait a few seconds and try again."
+          : "Could not complete your scan request right now. Please try again.",
+        code: isQuota ? "RATE_LIMITED" : "LENS_SERVER_ERROR",
+        retryable: true,
         mode: normalizedMode
       });
     }
@@ -7313,24 +7428,44 @@ Study Style Preference: ${activeStyle}`;
     }
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true, hmr: false },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+  // Vite middleware for local non-serverless development or static SPA in local production
+  if (!process.env.VERCEL) {
+    if (process.env.NODE_ENV !== "production") {
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        server: { middlewareMode: true, hmr: false },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), "dist");
+      app.use(express.static(distPath));
+      app.get("*", (req, res) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+    }
   }
 
+  cachedExpressApp = app;
+  return app;
+  })();
+
+  try {
+    return await cachedExpressAppPromise;
+  } catch (err) {
+    cachedExpressAppPromise = null;
+    throw err;
+  }
+}
+
+async function startServer() {
+  const PORT = Number(process.env.PORT || 3000);
+  const app = await createExpressApp();
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}

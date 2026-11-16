@@ -10,7 +10,7 @@
  * content of any video URL provided by the student.
  */
 
-import { cleanNotebookLMTitle, isRawUrlOrPlaceholderTitle } from '../utils/notebookTitle';
+import { cleanNotebookLMTitle, isRawUrlOrPlaceholderTitle } from '../utils/notebookTitle.js';
 
 export interface TranscriptSegment {
   /** Start time in seconds */
