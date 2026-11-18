@@ -1,5 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { GoogleGenAI } from '@google/genai';
+import { getServerGeminiApiKey } from '../src/utils/serverEnv.js';
+import { resolveAITutorContext } from '../src/services/AITutorContextService.js';
 
 interface ApiRequest extends IncomingMessage {
   body?: any;
@@ -44,15 +46,7 @@ async function parseRequestBody(req: ApiRequest): Promise<any> {
 }
 
 function getGeminiApiKey(): string | null {
-  const key =
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.API_KEY;
-
-  if (!key || key.trim() === '' || key === 'MY_GEMINI_API_KEY') {
-    return null;
-  }
-  return key.trim();
+  return getServerGeminiApiKey();
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
@@ -74,7 +68,13 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       persona = 'socratic',
       modelMode = 'auto',
       deepResearch = false,
-      attachedFiles = []
+      attachedFiles = [],
+      allWorkspaces = [],
+      workspaceId,
+      workspaceName,
+      userId,
+      inaccessibleAccountFiles = [],
+      allowOutsideResearch = false
     } = body || {};
 
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
@@ -88,7 +88,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     if (!apiKey) {
       console.error(`[AI Tutor ${correlationId}] GEMINI_API_KEY is not configured.`);
       return res.status(503).json({
-        error: 'Gemini API key is not configured on the server. Please add GEMINI_API_KEY to your environment variables in Vercel or AI Studio.',
+        error: 'Something went wrong. There is a server error. Please try again.',
         correlationId
       });
     }
@@ -119,44 +119,54 @@ You are a rapid-fire active recall trainer and flashcard coach:
 - Evaluate the student's answer concisely and present the next active recall card.`
     };
 
-    const selectedPersona = personaInstructions[persona] || personaInstructions.socratic;
-    const systemInstruction = `You are an intelligent, friendly, and adaptive AI Study Tutor for StudyWeb.
-${selectedPersona}
-Explain concepts clearly using simple analogies, key points, and examples. Answer thoroughly and help the student master the subject. NEVER output placeholder text or fake answers.`;
+    const resolvedContext = resolveAITutorContext({
+      prompt: prompt.trim(),
+      authenticatedUserId: userId || null,
+      activeWorkspaceId: workspaceId || null,
+      activeWorkspaceName: workspaceName || null,
+      attachedFiles,
+      allWorkspaces,
+      inaccessibleAccountFiles,
+      allowOutsideResearch: Boolean(allowOutsideResearch)
+    });
 
-    // Supported fast Gemini candidate models
-    const candidateModels = ['gemini-3-flash-preview', 'gemini-2.5-flash'];
-    if (deepResearch || modelMode === 'pro') {
-      candidateModels.push('gemini-3.1-pro-preview');
+    if (resolvedContext.immediateEdgeCaseReply) {
+      return res.status(200).json({
+        reply: resolvedContext.immediateEdgeCaseReply,
+        text: resolvedContext.immediateEdgeCaseReply,
+        source: 'StudyWeb AI Tutor',
+        tutorMode: resolvedContext.selectedMode,
+        intentCategory: resolvedContext.intentCategory,
+        securityFlags: resolvedContext.securityFlags,
+        correlationId,
+        durationMs: Date.now() - startTime
+      });
     }
+
+    const selectedPersona = personaInstructions[persona] || personaInstructions.socratic;
+    const systemInstruction = [
+      resolvedContext.systemInstruction,
+      `You are an intelligent, friendly, and adaptive AI Study Tutor for StudyWeb.\n${selectedPersona}\nExplain concepts clearly using simple analogies, key points, and examples. Answer thoroughly and help the student master the subject. NEVER output placeholder text or fake answers.`,
+      resolvedContext.sanitizedMaterialContextBlock
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    // Supported active Gemini candidate models
+    const candidateModels = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
 
     const ai = new GoogleGenAI({
       apiKey,
+      apiVersion: 'v1beta',
       httpOptions: {
         headers: {
-          'User-Agent': 'studyweb-ai-tutor'
+          'User-Agent': 'aistudio-build'
         }
       }
     });
 
     // Build multi-turn payload safely
     const currentTurnParts: any[] = [{ text: prompt.trim() }];
-
-    // Attach file extracts if present
-    if (Array.isArray(attachedFiles) && attachedFiles.length > 0) {
-      let fileContext = '\n\n--- Attached Study Materials ---\n';
-      attachedFiles.slice(0, 3).forEach((file: any) => {
-        fileContext += `Document: ${file.name || 'File'}\n`;
-        if (file.summary) fileContext += `Summary: ${file.summary}\n`;
-        if (Array.isArray(file.highlights) && file.highlights.length > 0) {
-          fileContext += `Highlights: ${file.highlights.join('; ')}\n`;
-        }
-        if (file.transcription) {
-          fileContext += `Text Excerpt: ${String(file.transcription).slice(0, 500)}\n`;
-        }
-      });
-      currentTurnParts.push({ text: fileContext });
-    }
 
     let contentsPayload: any;
     if (Array.isArray(history) && history.length > 0) {
@@ -204,12 +214,13 @@ Explain concepts clearly using simple analogies, key points, and examples. Answe
     for (const model of candidateModels) {
       try {
         console.log(`[AI Tutor ${correlationId}] Invoking candidate model: ${model}`);
+        const isHydrogen = model === 'gemini-4-hydrogen';
         const response = await ai.models.generateContent({
           model,
           contents: contentsPayload,
           config: {
             systemInstruction,
-            temperature: 0.7
+            ...(isHydrogen ? {} : { temperature: 0.7 })
           }
         });
 
@@ -227,10 +238,10 @@ Explain concepts clearly using simple analogies, key points, and examples. Answe
     const duration = Date.now() - startTime;
 
     if (!responseText) {
-      const errMsg = lastError?.message || 'Gemini service is temporarily unreachable.';
+      const errMsg = lastError?.message || 'AI service is temporarily unreachable.';
       console.error(`[AI Tutor ${correlationId}] All models failed after ${duration}ms:`, errMsg);
       return res.status(503).json({
-        error: `Failed to generate response from Gemini: ${errMsg}`,
+        error: 'Something went wrong. There is a server error. Please try again.',
         correlationId,
         durationMs: duration
       });
@@ -240,8 +251,10 @@ Explain concepts clearly using simple analogies, key points, and examples. Answe
     return res.status(200).json({
       reply: responseText,
       text: responseText,
-      source: `Gemini (${usedModel})`,
-      modelUsed: usedModel,
+      source: 'StudyWeb AI Tutor',
+      tutorMode: resolvedContext.selectedMode,
+      intentCategory: resolvedContext.intentCategory,
+      securityFlags: resolvedContext.securityFlags,
       personaUsed: persona,
       correlationId,
       durationMs: duration
@@ -250,7 +263,7 @@ Explain concepts clearly using simple analogies, key points, and examples. Answe
     const duration = Date.now() - startTime;
     console.error(`[AI Tutor ${correlationId}] Uncaught error after ${duration}ms:`, err);
     return res.status(500).json({
-      error: err?.message || 'Internal server error while processing AI Tutor request.',
+      error: 'Something went wrong. There is a server error. Please try again.',
       correlationId,
       durationMs: duration
     });

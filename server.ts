@@ -9,7 +9,14 @@ import { studyMaterialRouter, extractYouTubeInfo, scrapeWebPage, enrichUrlWithGe
 import { TranscriptProcessor } from "./src/services/TranscriptProcessor.js";
 import { cleanNotebookLMTitle } from "./src/utils/notebookTitle.js";
 import { toValidUuid } from "./src/utils/uuid.js";
-import { getServerGeminiApiKey } from "./src/utils/serverEnv.js";
+import { getServerGeminiApiKey, diagnoseServerGeminiApiKey } from "./src/utils/serverEnv.js";
+import {
+  resolveAITutorContext,
+  isAuthorizedForUser,
+  sanitizeUntrustedDocumentText,
+  detectScanNotesOperationFromQuestion,
+  buildScanNotesSystemPrompt
+} from "./src/services/AITutorContextService.js";
 import { createClient } from "@supabase/supabase-js";
 import { streakRouter, setServerUserDailyGoal, getServerUserDailyGoal, clearServerUserStreakData } from "./src/services/streakEngineServer.js";
 
@@ -124,7 +131,7 @@ function checkRateLimit(ip: string, maxRequests = 600, windowMs = 60_000): boole
 // Short-TTL server-side response cache for workspace-files to absorb burst traffic across 1,000 users
 const workspaceFilesResponseCache = new Map<string, { files: any[]; expiresAt: number }>();
 
-// Track per-model rate-limit / quota cooldowns so exhausted models are bypassed immediately
+// Track per-model failure / quota cooldowns so overloaded or failing models are bypassed immediately
 const modelQuotaCooldownMap = new Map<string, number>();
 
 export function isModelOnCooldown(model: string): boolean {
@@ -149,16 +156,75 @@ export function isQuotaOrRateLimitError(err: any): boolean {
   );
 }
 
+export function isAuthOrInvalidApiKeyError(err: any): boolean {
+  const status = err?.status || err?.statusCode || err?.error?.code;
+  const msg = String(err?.message || err?.error?.message || err || "").toLowerCase();
+  return (
+    status === 401 ||
+    status === 403 ||
+    msg.includes("api key not valid") ||
+    msg.includes("api_key_invalid") ||
+    msg.includes("access_token_type_unsupported") ||
+    msg.includes("unauthenticated") ||
+    msg.includes("permission_denied")
+  );
+}
+
+export function isTransientOrUnavailableModelError(err: any): boolean {
+  if (isAuthOrInvalidApiKeyError(err)) return false;
+  const status = err?.status || err?.statusCode || err?.error?.code;
+  const msg = String(err?.message || err?.error?.message || err || "").toLowerCase();
+  return (
+    isQuotaOrRateLimitError(err) ||
+    status === 503 ||
+    status === 502 ||
+    status === 504 ||
+    status === 500 ||
+    status === 404 ||
+    msg.includes("503") ||
+    msg.includes("404") ||
+    msg.includes("unavailable") ||
+    msg.includes("overloaded") ||
+    msg.includes("high demand") ||
+    msg.includes("not_found") ||
+    msg.includes("timed out") ||
+    msg.includes("timeout")
+  );
+}
+
 export function recordModelQuotaCooldown(model: string, err?: any): void {
+  const status = err?.status || err?.statusCode || err?.error?.code;
   const msg = String(err?.message || err?.error?.message || "");
+  const isNotFound = status === 404 || msg.includes("404") || msg.includes("NOT_FOUND");
   const isDailyQuota = msg.includes("PerDay");
-  const cooldownMs = isDailyQuota ? 5 * 60 * 1000 : 20 * 1000;
+  const baseCooldown = model === "gemini-3-flash-preview" ? 10 * 1000 : 90 * 1000;
+  const cooldownMs = isNotFound ? 30 * 60 * 1000 : isDailyQuota ? 5 * 60 * 1000 : baseCooldown;
   modelQuotaCooldownMap.set(model, Date.now() + cooldownMs);
 }
 
 export function getAvailableCandidateModels(preferredModels: string[]): string[] {
-  const available = preferredModels.filter((m) => !isModelOnCooldown(m));
-  return available.length > 0 ? available : ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-flash-latest"];
+  // Ensure universally supported fast Gemini models are prioritized
+  const normalized = Array.from(
+    new Set(
+      [
+        ...preferredModels,
+        "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite"
+      ].filter(Boolean)
+    )
+  );
+  const reordered = [...normalized].sort((a, b) => {
+    const rank = (m: string) => {
+      if (m === "gemini-3.5-transcribe") return 0;
+      if (m === "gemini-3-flash-preview") return 1;
+      if (m === "gemini-3.1-flash-lite") return 2;
+      if (m === "gemini-4-hydrogen") return 3;
+      return 4;
+    };
+    return rank(a) - rank(b);
+  });
+  const available = reordered.filter((m) => !isModelOnCooldown(m));
+  return available.length > 0 ? available : reordered;
 }
 
 export function summarizeModelError(err: any): string {
@@ -170,6 +236,85 @@ export function summarizeModelError(err: any): string {
   if (raw.includes("timed out")) return "timeout";
   if (raw.startsWith("{")) return `status_${status}`;
   return raw.slice(0, 80).replace(/[\r\n]+/g, " ");
+}
+
+export async function generateContentWithModelFailover(
+  ai: GoogleGenAI,
+  options: {
+    contents: any;
+    preferredModels?: string[];
+    config?: Record<string, any>;
+    timeoutMs?: number;
+    maxPasses?: number;
+    label?: string;
+  }
+): Promise<{ response: any; modelUsed: string }> {
+  const baseModels = options.preferredModels?.length
+    ? options.preferredModels
+    : ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-4-hydrogen"];
+  const maxPasses = options.maxPasses ?? 2;
+  const timeoutMs = options.timeoutMs ?? 14000;
+  const label = options.label || "GeminiFailover";
+
+  let lastError: any = null;
+
+  for (let pass = 0; pass < maxPasses; pass++) {
+    if (pass > 0) {
+      await new Promise((r) => setTimeout(r, 300 * pass));
+    }
+    const candidateModels = pass === 0 ? getAvailableCandidateModels(baseModels) : getAvailableCandidateModels(baseModels);
+
+    for (const modelName of candidateModels) {
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      try {
+        const isHydrogen = modelName === "gemini-4-hydrogen";
+        const supportsMinimalThinking = modelName.startsWith("gemini-3");
+        const modelConfig: Record<string, any> = { ...(options.config || {}) };
+
+        if (isHydrogen) {
+          delete modelConfig.temperature;
+          if (!modelConfig.thinkingConfig) {
+            modelConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+          }
+        } else if (supportsMinimalThinking && !modelConfig.thinkingConfig) {
+          modelConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
+        }
+
+        const genPromise = ai.models.generateContent({
+          model: modelName,
+          contents: options.contents,
+          config: modelConfig,
+        });
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(
+            () => reject(new Error(`Model ${modelName} timed out after ${timeoutMs}ms`)),
+            timeoutMs
+          );
+        });
+
+        const response: any = await Promise.race([genPromise, timeoutPromise]);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+
+        if (response && response.text && response.text.trim()) {
+          return { response, modelUsed: modelName };
+        }
+        throw new Error(`Empty response from ${modelName}`);
+      } catch (err: any) {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        lastError = err;
+        if (isAuthOrInvalidApiKeyError(err)) {
+          throw err;
+        }
+        if (isTransientOrUnavailableModelError(err)) {
+          recordModelQuotaCooldown(modelName, err);
+        }
+        console.warn(`[${label}] Switching from ${modelName}: ${summarizeModelError(err)}`);
+      }
+    }
+  }
+
+  throw lastError || new Error("All Gemini models failed");
 }
 
 // Initialize the Knowledge Engine database
@@ -1556,13 +1701,13 @@ function isImageOrDiagramRequest(prompt: string): boolean {
 function extractCleanTopicLabel(prompt: string): string {
   let cleaned = prompt
     .replace(/https?:\/\/[^\s]+/gi, "")
-    .replace(/^(hi|hello|hey|bro|please|can you|could you|will you|tell me|explain to me|explain|what is|what's|what are|how does|how do|define|describe|generate an? image of|create an? image of|make an? image of|draw a? diagram of|draw an? image of|generate a? diagram of|create a? diagram of|illustrate|show me an? image of|show me a? diagram of|give me an? explanation of|about)\s+/i, "")
+    .replace(/^(hi|hello|hey|bro|please|can you|could you|will you|tell me about|tell me|explain to me|explain|what is|what's|what are|how does|how do|define|describe|generate an? image of|create an? image of|make an? image of|draw a? diagram of|draw an? image of|generate a? diagram of|create a? diagram of|illustrate|show me an? image of|show me a? diagram of|give me an? explanation of|about)\s+/i, "")
     .replace(/^(what|how|why|the|a|an)\s+/i, "")
     .replace(/\s+(is like|works|work|in detail|in simple words|for me|please|and generate an? image|with a? diagram|with an? image)\??$/i, "")
     .replace(/[?!.]+$/g, "")
     .trim();
   if (!cleaned || cleaned.length < 2) {
-    cleaned = prompt.trim().slice(0, 60);
+    cleaned = prompt.trim().replace(/[?!.]+$/g, "").slice(0, 60);
   }
   if (cleaned.length > 60) {
     cleaned = cleaned.slice(0, 57).trim() + "...";
@@ -1735,97 +1880,413 @@ async function generateTutorVisualIfNeeded(
   return null;
 }
 
-function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], groundedSourceContext?: string, workspaceNotice?: string): string {
-  const pLower = prompt.toLowerCase().trim();
-  const files = attachedFiles || [];
+  function isConversationalGreetingOrSmallTalk(rawPrompt: string): boolean {
+    const cleaned = String(rawPrompt || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[!?.~,]+$/g, "")
+      .trim();
+    if (!cleaned) return false;
 
-  if (files.length > 0) {
-    let report = `### 📚 Study Summary & Breakdown: ${files.map((f: any) => f.name).slice(0, 2).join(" & ")}\n\n`;
-    files.forEach((file: any, idx: number) => {
-      const typeLabel = (file.type || 'Resource').toUpperCase();
-      const cleanedSummary = cleanMultilineText(file.summary || "");
-      const summaryText = (!cleanedSummary || isDummyMetadataLine(cleanedSummary))
-        ? `Comprehensive academic resource covering key concepts, principles, and explanations in "${file.name}".`
-        : cleanedSummary;
+    return (
+      /^(hi+|hello+|helo+|hey+|heyy+|yo+|sup|what'?s\s*up|whats\s*up|howdy|hola|namaste|greetings|good\s+(morning|afternoon|evening|night|day)|hi\s+there|hello\s+there|hey\s+there|hi\s+(ai|tutor|bro|friend|assistant)|hello\s+(ai|tutor|bro|friend|assistant)|hey\s+(ai|tutor|bro|friend|assistant))$/.test(cleaned) ||
+      /^(how\s+are\s+you(\s+doing|\s+today)?|how\s+r\s+u|how'?s\s+it\s+going|who\s+are\s+you|what\s+are\s+you|what\s+is\s+your\s+name|what\s+can\s+you\s+do|how\s+can\s+you\s+help(\s+me)?|help|help\s+me|thanks|thank\s+you(\s+so\s+much)?|thx|ty|ok|okay|alright|cool|great|awesome|nice|got\s+it|makes\s+sense|bye|goodbye|see\s+you|good\s+bye)$/.test(cleaned)
+    );
+  }
 
-      report += `#### ${idx + 1}. **${file.name}** *(${typeLabel}${file.url && file.url.startsWith('http') ? ` · Source Link Analyzed` : ''})*\n\n`;
-      report += `**Core Overview & Concepts:**\n${summaryText}\n\n`;
+  function buildConversationalChatGPTReply(rawPrompt: string, workspaceFilesCount: number = 0): string {
+    const cleaned = String(rawPrompt || "").trim().toLowerCase().replace(/[!?.~,]+$/g, "").trim();
+    const filesNote =
+      workspaceFilesCount > 0
+        ? `\n\nI also have **${workspaceFilesCount} uploaded item${workspaceFilesCount === 1 ? "" : "s"}** in your workspace ready whenever you'd like me to analyze, summarize, or answer questions from them.`
+        : "";
 
-      const cleanHighlights = (file.highlights && Array.isArray(file.highlights) ? file.highlights : []).filter((h: string) =>
-        h && !isDummyMetadataLine(h)
+    if (/^(thanks|thank\s+you|thx|ty)/.test(cleaned)) {
+      return `You're welcome! Let me know if you have another question, want a deeper explanation, or would like me to analyze any study material.`;
+    }
+    if (/^(bye|goodbye|good\s+bye|see\s+you)/.test(cleaned)) {
+      return `See you later! Feel free to come back anytime when you want to explore a topic or analyze your study files.`;
+    }
+    if (/^(ok|okay|alright|cool|great|awesome|nice|got\s+it|makes\s+sense)$/.test(cleaned)) {
+      return `Sounds good! Whenever you're ready, just ask a question or share any topic, file, or problem you'd like to work through.`;
+    }
+    if (/^(how\s+are\s+you|how\s+r\s+u|how'?s\s+it\s+going)/.test(cleaned)) {
+      return `I'm doing great, thanks for asking! How can I help you today? You can ask me anything—from explaining concepts and solving problems to analyzing any files, notes, or links you upload.${filesNote}`;
+    }
+    if (/^(who\s+are\s+you|what\s+are\s+you|what\s+is\s+your\s+name|what\s+can\s+you\s+do|how\s+can\s+you\s+help|help|help\s+me)/.test(cleaned)) {
+      return `I'm your AI Study Assistant! I work just like ChatGPT, Claude, or Gemini—here to give you clear, direct answers on any subject.\n\n**Here's what I can do for you:**\n- **Answer & Explain Anything:** Ask about any concept, code, math, science, or general topic and get clear, structured explanations.\n- **Analyze Your Uploads:** Upload PDFs, scanned notes, images, documents, or links and ask me to analyze all of them, summarize key ideas, or answer questions directly from your materials.\n- **Practice & Review:** Generate practice questions, comparisons, and step-by-step walkthroughs anytime.${filesNote}\n\nWhat would you like to work on first?`;
+    }
+
+    return `Hi there! How can I help you today?\n\nYou can ask me about any topic or question—or upload notes, PDFs, images, or links and I'll analyze them for you.${filesNote}`;
+  }
+
+  interface RealWebKnowledgeResult {
+    contextText: string;
+    summaryMarkdown: string;
+    webCitations: Array<{ sourceName: string; page?: number; quote: string; url?: string }>;
+  }
+
+  async function fetchRealWebKnowledge(topicLabel: string, rawPrompt: string): Promise<RealWebKnowledgeResult> {
+    const queryTerm = (topicLabel || rawPrompt || "").trim().replace(/[?!.]+$/g, "");
+    if (!queryTerm) {
+      return { contextText: "", summaryMarkdown: "", webCitations: [] };
+    }
+
+    const webCitations: Array<{ sourceName: string; page?: number; quote: string; url?: string }> = [];
+    const sections: string[] = [];
+    const contextChunks: string[] = [];
+
+    const isExplicitDefinitionQuery =
+      /\b(define|definition\s+of|meaning\s+of|what\s+does\s+.+\s+mean|synonym|synonyms|antonym|antonyms|pronounce|pronunciation|etymology)\b/i.test(
+        rawPrompt
       );
 
-      if (cleanHighlights.length > 0) {
-        report += `**Key Points Covered:**\n`;
-        cleanHighlights.slice(0, 6).forEach((h: string) => {
-          report += `- ${h.trim()} [Source: ${file.name}]\n`;
+    const dictPromise = isExplicitDefinitionQuery
+      ? fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(queryTerm.toLowerCase())}`, {
+          signal: AbortSignal.timeout(3500)
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null)
+      : Promise.resolve(null);
+
+    const wikiSearchPromise = fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(queryTerm)}&utf8=1&format=json&srlimit=4`,
+      { signal: AbortSignal.timeout(3800) }
+    )
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+
+    const ddgPromise = fetch(
+      `https://api.duckduckgo.com/?q=${encodeURIComponent(queryTerm)}&format=json&no_html=1&skip_disambig=1`,
+      { signal: AbortSignal.timeout(3800) }
+    )
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+
+    const [dictData, wikiSearchData, ddgData] = await Promise.all([dictPromise, wikiSearchPromise, ddgPromise]);
+
+    // 1. Dictionary / Word Meaning ONLY when the user explicitly asked for a word definition or meaning
+    if (isExplicitDefinitionQuery && Array.isArray(dictData) && dictData[0]) {
+      const entry = dictData[0];
+      const phonetic = entry.phonetic || entry.phonetics?.find((p: any) => p?.text)?.text || "";
+      const meanings = Array.isArray(entry.meanings) ? entry.meanings : [];
+      const defBullets: string[] = [];
+      for (const m of meanings.slice(0, 3)) {
+        const pos = m.partOfSpeech ? `*${m.partOfSpeech}*` : "";
+        const defs = Array.isArray(m.definitions) ? m.definitions.slice(0, 2) : [];
+        for (const d of defs) {
+          if (d?.definition) {
+            const ex = d.example ? ` *(Example: "${d.example}")*` : "";
+            defBullets.push(`- ${pos ? `(${pos}) ` : ""}${d.definition}${ex}`);
+          }
+        }
+      }
+      if (defBullets.length > 0) {
+        const header = `### **${entry.word || queryTerm}**${phonetic ? ` \`${phonetic}\`` : ""}`;
+        sections.push(`${header}\n\n${defBullets.join("\n")}`);
+        contextChunks.push(`Definition (${entry.word}):\n${defBullets.join("\n")}`);
+        const sourceUrl = Array.isArray(entry.sourceUrls) && entry.sourceUrls[0]
+          ? entry.sourceUrls[0]
+          : `https://en.wiktionary.org/wiki/${encodeURIComponent(queryTerm.toLowerCase())}`;
+        webCitations.push({
+          sourceName: `Wiktionary: ${entry.word || queryTerm}`,
+          page: 1,
+          quote: defBullets[0].replace(/[*`]/g, "").slice(0, 220),
+          url: sourceUrl
         });
-        report += `\n`;
       }
+    }
 
-      if (file.formulas && Array.isArray(file.formulas) && file.formulas.length > 0) {
-        report += `**Key Formulas & Relationships:**\n`;
-        file.formulas.slice(0, 5).forEach((eq: string) => {
-          report += `- \`${eq}\`\n`;
+    // 2. Wikipedia Encyclopedic Extract & Summary (try top search hits, skipping disambiguation pages)
+    const wikiSearchHits: any[] = Array.isArray(wikiSearchData?.query?.search) ? wikiSearchData.query.search : [];
+    let primaryWikiText = "";
+    for (const hit of wikiSearchHits.slice(0, 3)) {
+      const candidateTitle = String(hit?.title || "").trim();
+      if (!candidateTitle) continue;
+      try {
+        const slug = encodeURIComponent(candidateTitle.replace(/\s+/g, "_"));
+        const [summaryRes, fullIntroRes] = await Promise.all([
+          fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${slug}`, {
+            signal: AbortSignal.timeout(3500)
+          }).catch(() => null),
+          fetch(
+            `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&redirects=1&titles=${encodeURIComponent(candidateTitle)}&format=json`,
+            { signal: AbortSignal.timeout(3500) }
+          ).catch(() => null)
+        ]);
+
+        const wikiSummary: any = summaryRes && summaryRes.ok ? await summaryRes.json().catch(() => null) : null;
+        const fullIntroJson: any = fullIntroRes && fullIntroRes.ok ? await fullIntroRes.json().catch(() => null) : null;
+        const pagesObj = fullIntroJson?.query?.pages || {};
+        const firstPage: any = Object.values(pagesObj)[0] || null;
+        const introExtract = String(firstPage?.extract || "").trim();
+        const shortExtract = String(wikiSummary?.extract || "").trim();
+        const bestExtract = introExtract.length > shortExtract.length ? introExtract : shortExtract;
+        const isDisambiguation =
+          wikiSummary?.type === "disambiguation" ||
+          /\bmay refer to\s*:/i.test(bestExtract) ||
+          candidateTitle.toLowerCase().includes("(disambiguation)");
+
+        if (!isDisambiguation && bestExtract.length > 40) {
+          const pageUrl = wikiSummary?.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${slug}`;
+          const paragraphs = bestExtract
+            .split(/\n+/)
+            .map((p) => p.trim())
+            .filter((p) => p.length > 20)
+            .slice(0, 4);
+
+          primaryWikiText = paragraphs.join("\n\n");
+          sections.push(primaryWikiText);
+          contextChunks.push(`Wikipedia (${wikiSummary?.title || candidateTitle} - ${pageUrl}):\n${primaryWikiText}`);
+          webCitations.push({
+            sourceName: `Wikipedia: ${wikiSummary?.title || candidateTitle}`,
+            page: 1,
+            quote: paragraphs[0].slice(0, 220),
+            url: pageUrl
+          });
+          break;
+        }
+      } catch {
+        // try next search hit
+      }
+    }
+
+    // 3. DuckDuckGo Instant Answer & Related Context (adds extra clarity & related points cleanly)
+    const ddgAbstract = String(ddgData?.AbstractText || "").trim();
+    const ddgUrl = String(ddgData?.AbstractURL || "").trim();
+    if (ddgAbstract && ddgAbstract.length > 30 && !primaryWikiText.includes(ddgAbstract.slice(0, 45))) {
+      const ddgHeading = String(ddgData?.Heading || queryTerm).trim();
+      sections.push(`### Key Context\n\n${ddgAbstract}`);
+      contextChunks.push(`Web Reference (${ddgHeading}):\n${ddgAbstract}`);
+      webCitations.push({
+        sourceName: `${ddgData?.AbstractSource || "Web Reference"}: ${ddgHeading}`,
+        page: 1,
+        quote: ddgAbstract.slice(0, 220),
+        url: ddgUrl || undefined
+      });
+    }
+
+    // 4. Add concise related concepts from DuckDuckGo RelatedTopics or secondary Wikipedia hits if helpful
+    const ddgTopics: string[] = [];
+    if (Array.isArray(ddgData?.RelatedTopics)) {
+      for (const rt of ddgData.RelatedTopics.slice(0, 6)) {
+        const text = String(rt?.Text || "").trim();
+        if (text && text.length > 25 && !text.toLowerCase().includes("category:") && ddgTopics.length < 4) {
+          ddgTopics.push(`- ${text}`);
+        }
+      }
+    }
+
+    if (ddgTopics.length > 0 && sections.length > 0) {
+      sections.push(`### Related Concepts & Details\n\n${ddgTopics.join("\n")}`);
+      contextChunks.push(`Related Points:\n${ddgTopics.join("\n")}`);
+    } else if (sections.length === 0 && wikiSearchHits.length > 0) {
+      const snippetBullets = wikiSearchHits
+        .slice(0, 3)
+        .map((h: any) => {
+          const cleanSnip = String(h?.snippet || "").replace(/<[^>]+>/g, "").trim();
+          return h?.title && cleanSnip ? `- **${h.title}:** ${cleanSnip}...` : "";
+        })
+        .filter(Boolean);
+      if (snippetBullets.length > 0) {
+        sections.push(`Here is what I found on **${queryTerm}**:\n\n${snippetBullets.join("\n")}`);
+        contextChunks.push(snippetBullets.join("\n"));
+        webCitations.push({
+          sourceName: `Wikipedia Search: ${wikiSearchHits[0].title}`,
+          page: 1,
+          quote: snippetBullets[0].replace(/[*]/g, "").slice(0, 220),
+          url: `https://en.wikipedia.org/wiki/${encodeURIComponent(String(wikiSearchHits[0].title).replace(/\s+/g, "_"))}`
         });
-        report += `\n`;
       }
+    }
 
-      const cleanedTrans = cleanMultilineText(file.transcription || file.contentText || "");
-      if (cleanedTrans) {
-        report += `**Content Walkthrough:**\n${cleanedTrans.slice(0, 1800)}${cleanedTrans.length > 1800 ? '...' : ''}\n\n*[Source: ${file.name}]*\n\n`;
-      }
-    });
-
-    return report.trim();
+    return {
+      contextText: contextChunks.join("\n\n"),
+      summaryMarkdown: sections.join("\n\n"),
+      webCitations
+    };
   }
 
-  if (groundedSourceContext && groundedSourceContext.trim().length > 40) {
-    return `### 💡 Detailed Study Explanation\n\n${groundedSourceContext.slice(0, 2400)}`;
+  function generateLocalAITutorResponse(
+    prompt: string,
+    attachedFiles?: any[],
+    groundedSourceContext?: string,
+    _workspaceNotice?: string,
+    webKnowledge?: RealWebKnowledgeResult,
+    options?: {
+      isConversational?: boolean;
+      isWorkspaceAnalysis?: boolean;
+      retrievedSegments?: ExtractedSegment[];
+    }
+  ): string {
+    const files = attachedFiles || [];
+
+    if (options?.isConversational) {
+      return buildConversationalChatGPTReply(prompt, files.length);
+    }
+
+    if (files.length > 0) {
+      const segments = options?.retrievedSegments || [];
+      const isFullWorkspaceAnalysis = Boolean(options?.isWorkspaceAnalysis);
+
+      // If user asks a targeted question (not broad "analyze everything"), answer with best matching segments first
+      if (!isFullWorkspaceAnalysis && segments.length > 0 && segments.some((s) => s.score >= 5)) {
+        const highSegs = segments.filter((s) => s.score >= 4).slice(0, 5);
+        const citedFiles = Array.from(new Set(highSegs.map((s) => s.sourceName)));
+        let answer = `Based on your uploaded material (${citedFiles.map((n) => `**${n}**`).join(", ")}):\n\n`;
+
+        highSegs.forEach((seg) => {
+          answer += `- ${cleanMultilineText(seg.text).slice(0, 650)}${seg.text.length > 650 ? "..." : ""} *[Source: ${seg.sourceName}]*\n\n`;
+        });
+
+        // Include any relevant formulas from the matched files
+        const matchedFormulas = files
+          .filter((f: any) => citedFiles.includes(f.name) && Array.isArray(f.formulas) && f.formulas.length > 0)
+          .flatMap((f: any) => f.formulas.map((eq: string) => `\`${eq}\` *(from ${f.name})*`))
+          .slice(0, 5);
+        if (matchedFormulas.length > 0) {
+          answer += `### Relevant Formulas & Equations\n\n${matchedFormulas.map((m: string) => `- ${m}`).join("\n")}`;
+        }
+
+        return answer.trim();
+      }
+
+      // Full multi-file & note workspace analysis
+      const itemLabels = files.map((f: any) => `**${f.name}**`).slice(0, 4).join(", ");
+      const moreCount = files.length > 4 ? ` and ${files.length - 4} more` : "";
+      let report = `### Workspace Analysis (${files.length} Uploaded Item${files.length === 1 ? "" : "s"})\n\n`;
+      report += `I analyzed your uploaded materials (${itemLabels}${moreCount}). Here is a complete breakdown of everything inside:\n\n`;
+
+      const allFormulas: string[] = [];
+      const allKeyPoints: string[] = [];
+
+      files.forEach((file: any, idx: number) => {
+        const typeLabel = (file.type || "Resource").toUpperCase();
+        const cleanedSummary = cleanMultilineText(file.summary || "");
+        const cleanHighlights = (file.highlights && Array.isArray(file.highlights) ? file.highlights : []).filter(
+          (h: string) => h && !isDummyMetadataLine(h)
+        );
+        const cleanedTrans = cleanMultilineText(file.transcription || file.contentText || "");
+
+        report += `#### ${idx + 1}. **${file.name}** *(${typeLabel})*\n\n`;
+        if (cleanedSummary && !isDummyMetadataLine(cleanedSummary)) {
+          report += `**Overview:** ${cleanedSummary}\n\n`;
+        }
+        if (cleanHighlights.length > 0) {
+          report += `**Key Concepts & Highlights:**\n`;
+          cleanHighlights.slice(0, 6).forEach((h: string) => {
+            const point = h.trim();
+            report += `- ${point} *[Source: ${file.name}]*\n`;
+            if (allKeyPoints.length < 8) allKeyPoints.push(`${point} *(${file.name})*`);
+          });
+          report += `\n`;
+        }
+        if (file.formulas && Array.isArray(file.formulas) && file.formulas.length > 0) {
+          report += `**Formulas & Equations:**\n`;
+          file.formulas.slice(0, 5).forEach((eq: string) => {
+            report += `- \`${eq}\`\n`;
+            allFormulas.push(`\`${eq}\` *(${file.name})*`);
+          });
+          report += `\n`;
+        }
+        if (cleanedTrans && (!cleanedSummary || cleanedTrans.length > cleanedSummary.length + 40)) {
+          report += `**Extracted Content:**\n${cleanedTrans.slice(0, 1800)}${cleanedTrans.length > 1800 ? "..." : ""}\n\n`;
+        } else if (!cleanedSummary && cleanHighlights.length === 0 && !cleanedTrans) {
+          report += `This file is uploaded in your workspace (binary visual/document format). Re-scanning or attaching text/OCR notes lets me extract detailed line-by-line notes from it.\n\n`;
+        }
+      });
+
+      if (files.length > 1 && (allKeyPoints.length > 0 || allFormulas.length > 0)) {
+        report += `### Combined Study Takeaways\n\n`;
+        report += `Across all **${files.length}** uploaded materials, focus on connecting these core ideas and formulas together when reviewing or practicing.\n`;
+      }
+
+      return report.trim();
+    }
+
+    const cleanTopic = extractCleanTopicLabel(prompt);
+
+    if (webKnowledge && webKnowledge.summaryMarkdown) {
+      return `### ${cleanTopic}\n\n${webKnowledge.summaryMarkdown}`;
+    }
+
+    if (groundedSourceContext && groundedSourceContext.trim().length > 40 && !groundedSourceContext.includes("Inspect the attached image")) {
+      return groundedSourceContext.slice(0, 2400).trim();
+    }
+
+    // Simple arithmetic evaluation fallback when offline without Gemini
+    const mathMatch = prompt.trim().match(/^(?:what\s+is|calculate|solve|evaluate)?\s*([-+*/().\d\s^%]+)\s*\??$/i);
+    if (mathMatch && mathMatch[1] && /\d/.test(mathMatch[1]) && /[+\-*/^%]/.test(mathMatch[1])) {
+      try {
+        const expr = mathMatch[1].replace(/\^/g, "**").trim();
+        if (/^[\d+\-*/().\s*%]+$/.test(expr)) {
+          const val = Function(`"use strict"; return (${expr});`)();
+          if (typeof val === "number" && Number.isFinite(val)) {
+            return `**${mathMatch[1].trim()} = ${val}**`;
+          }
+        }
+      } catch {
+        // ignore invalid math expression
+      }
+    }
+
+    return `I searched for reliable web info on **"${cleanTopic}"**, but didn't find a strong direct match offline. Try rephrasing with a few more details, or upload related notes/files and I'll analyze them for you right away.`;
   }
 
-  return "";
-}
-
-  // Diagnostic Route: Verify real Gemini API connectivity independently
+  // Diagnostic Route: Verify real AI connectivity independently
   app.get("/api/ai-health", async (_req, res) => {
     const startTime = Date.now();
     try {
+      const diagnostic = diagnoseServerGeminiApiKey();
       const apiKey = getGeminiApiKey();
       if (!apiKey) {
+        console.error("[AIHealth] API key not configured:", diagnostic);
         return res.status(503).json({
           status: "error",
-          error: "GEMINI_API_KEY is not configured",
+          error: "Something went wrong. There is a server error. Please try again.",
           configured: false
         });
       }
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
-          headers: { "User-Agent": "studyweb-health-check" }
+          headers: { "User-Agent": "aistudio-build" }
         }
       });
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: "Reply with the word OK."
+      const { response, modelUsed } = await generateContentWithModelFailover(ai, {
+        contents: "Reply with the word OK.",
+        preferredModels: [
+          "gemini-3-flash-preview",
+          "gemini-3.1-flash-lite",
+          "gemini-4-hydrogen"
+        ],
+        timeoutMs: 8000,
+        maxPasses: 1,
+        label: "AIHealth"
       });
 
       const text = response.text?.trim() || "";
       const durationMs = Date.now() - startTime;
+      console.log(`[AIHealth] Verified with ${modelUsed} in ${durationMs}ms`);
 
       return res.json({
         status: "ok",
-        model: "gemini-3-flash-preview",
+        configured: true,
         reply: text,
         verified: text.length > 0,
         durationMs
       });
     } catch (err: any) {
-      return res.status(500).json({
+      const rawMsg = String(err?.message || err || "Could not verify AI connection.");
+      const isInvalidKey = isAuthOrInvalidApiKeyError(err);
+      console.error("[AIHealth] Handshake error:", rawMsg);
+      return res.status(isInvalidKey ? 401 : 500).json({
         status: "error",
-        error: err?.message || String(err),
+        configured: true,
+        error: "Something went wrong. There is a server error. Please try again.",
         durationMs: Date.now() - startTime
       });
     }
@@ -1881,11 +2342,13 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
 
       const apiKey = getGeminiApiKey();
       if (!apiKey) {
-        return res.status(500).json({ error: "Gemini API key is not configured." });
+        console.error("[Voice Query] API key is not configured.");
+        return res.status(500).json({ error: "Something went wrong. There is a server error. Please try again." });
       }
 
       const ai = new GoogleGenAI({ 
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build",
@@ -1893,10 +2356,12 @@ function generateLocalAITutorResponse(prompt: string, attachedFiles?: any[], gro
         }
       });
 
-      // Timeout safety: if Gemini takes more than 4 seconds, deliver clean answer
-      const geminiPromise = ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+      const { response } = await generateContentWithModelFailover(ai, {
         contents: q,
+        preferredModels: ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"],
+        timeoutMs: 6500,
+        maxPasses: 1,
+        label: "VoiceQuery",
         config: {
           systemInstruction: `You are StudyWeb's voice assistant. Answer the user's question directly, accurately, and conversationally for text-to-speech voice playback.
 Provide a clear, factual, and human-like answer in 1 to 3 concise sentences.
@@ -1905,11 +2370,6 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         }
       });
 
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error("Gemini timeout")), 4500)
-      );
-
-      const response: any = await Promise.race([geminiPromise, timeoutPromise]);
       const replyText = response.text?.trim() || "I have processed your query.";
 
       return res.json({ 
@@ -1917,7 +2377,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         spokenText: replyText
       });
     } catch (err: any) {
-      console.warn("[Voice Query Gemini Error]:", err?.message || err);
+      console.warn("[Voice Query Error]:", err?.message || err);
       return res.json({
         answer: `Here is the information for "${req.body.query}": StudyWeb AI Tutor is ready to dive deep into this topic with you.`,
         spokenText: `I have received your question regarding "${req.body.query}".`
@@ -1925,7 +2385,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
     }
   });
 
-  // API Route: Voice Transcription via Gemini Audio Understanding
+  // API Route: Voice Transcription
   app.post("/api/voice-transcribe", async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     try {
@@ -1937,12 +2397,14 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
 
       const apiKey = getGeminiApiKey();
       if (!apiKey) {
-        res.status(500).json({ error: "Gemini API key is not configured" });
+        console.error("[Voice Transcribe] API key is not configured.");
+        res.status(500).json({ error: "Something went wrong. There is a server error. Please try again." });
         return;
       }
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build",
@@ -1953,8 +2415,11 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       const cleanBase64 = audioBase64.replace(/^data:[^;]+;base64,/, "").replace(/[\r\n\s]/g, "");
       const cleanMime = mimeType.split(";")[0] || "audio/webm";
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+      const { response } = await generateContentWithModelFailover(ai, {
+        preferredModels: ["gemini-3.5-transcribe", "gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"],
+        timeoutMs: 12000,
+        maxPasses: 1,
+        label: "VoiceTranscribe",
         contents: [
           {
             inlineData: {
@@ -1972,7 +2437,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       res.json({ text: transcript });
     } catch (err: any) {
       console.error("[Voice Transcribe Error]:", err?.message || err);
-      res.status(500).json({ error: err?.message || "Failed to transcribe audio" });
+      res.status(200).json({ text: "", fallback: true });
     }
   });
 
@@ -2097,22 +2562,35 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       };
 
       const isRealWorkspaceId = Boolean(workspaceId && workspaceId !== 'general-study');
+      const clientHasAnyRealWorkspaces = clientAllWorkspaces.some((w: any) => w && w.id && w.id !== 'general-study');
       const normalizedActiveWsUuid = workspaceId ? toValidUuid(String(workspaceId)) : '';
       const matchesActiveWorkspaceId = (candidateWsId: any): boolean => {
-        if (!isRealWorkspaceId) return true;
+        if (!isRealWorkspaceId) {
+          // If the user deleted all workspaces (no real workspaces exist client-side), do not pull orphaned Supabase files
+          return clientHasAnyRealWorkspaces && Boolean(candidateWsId);
+        }
         if (!candidateWsId) return true;
         const cStr = String(candidateWsId);
         if (cStr === String(workspaceId)) return true;
         return Boolean(normalizedActiveWsUuid && toValidUuid(cStr) === normalizedActiveWsUuid);
       };
 
-      // Seed allWorkspacesMap from clientAllWorkspaces, but ONLY add files from the ACTIVE workspace into effectiveFiles!
+      const authenticatedUserId = extractUserIdFromAuthHeader(effectiveAuthHeader) || (userId ? String(userId).trim() : undefined);
+
+      // Filter client-supplied attachedFiles and allWorkspaces against authenticatedUserId to prevent cross-user leakage
+      effectiveFiles = effectiveFiles.filter((f: any) =>
+        isAuthorizedForUser(f?.userId || f?.user_id, authenticatedUserId)
+      );
+
+      // Seed allWorkspacesMap from clientAllWorkspaces, but ONLY add files owned by the authenticated user and from the ACTIVE workspace into effectiveFiles!
       clientAllWorkspaces.forEach((cws: any) => {
         if (!cws || !cws.id) return;
+        if (!isAuthorizedForUser(cws.userId || cws.user_id, authenticatedUserId)) return;
         const wsName = cws.name || 'Workspace';
         const wsFiles: any[] = [];
         const isCurrentWs = matchesActiveWorkspaceId(cws.id);
         (Array.isArray(cws.files) ? cws.files : []).forEach((cf: any) => {
+          if (!isAuthorizedForUser(cf?.userId || cf?.user_id, authenticatedUserId)) return;
           upsertFileIntoList(wsFiles, cf, wsName, cws.id);
           if (isCurrentWs) {
             upsertFileIntoList(effectiveFiles, cf, wsName, cws.id);
@@ -2132,7 +2610,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       const validAuthHeader = sanitizeSupabaseAuthHeader(effectiveAuthHeader);
       const supabase = getSupabaseServerClient(validAuthHeader);
 
-      if (supabase && (isRealWorkspaceId || userId || effectiveAuthHeader)) {
+      if (supabase && (isRealWorkspaceId || clientHasAnyRealWorkspaces || (userId && effectiveAuthHeader))) {
         try {
           const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Supabase query timeout (1500ms)")), 1500));
           const fetchPromise = (async () => {
@@ -2244,10 +2722,13 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
               fetchedFromSupabase = true;
               fileRows.forEach((sf: any) => {
                 const targetWsId = String(sf.workspace_id || workspaceId || 'general-study');
+                const wsStillExists = isRealWorkspaceId
+                  ? matchesActiveWorkspaceId(targetWsId)
+                  : wsIdToName.has(targetWsId);
+                if (!wsStillExists) return;
                 const targetWsName = wsIdToName.get(targetWsId) || workspaceName || 'Workspace';
-                const isCurrentWs = matchesActiveWorkspaceId(targetWsId);
 
-                if (isCurrentWs) {
+                if (matchesActiveWorkspaceId(targetWsId)) {
                   upsertFileIntoList(effectiveFiles, {
                     ...sf,
                     transcription: sf.transcription || sf.content_text
@@ -2278,17 +2759,19 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
               }
             }
 
-            // Scope study notes in contextParts to the active workspace when inside a specific workspace
+            // Scope study notes in contextParts to existing workspaces (respecting deletion)
             const activeWsEntry = isRealWorkspaceId ? allWorkspacesMap.get(String(workspaceId)) : null;
             const relevantNotes = isRealWorkspaceId
               ? [
                   ...noteRows.filter((n: any) => matchesActiveWorkspaceId(n.workspace_id)),
                   ...(Array.isArray(activeWsEntry?.notes) ? activeWsEntry.notes : [])
                 ]
-              : [
-                  ...noteRows,
+              : clientHasAnyRealWorkspaces || dbWsRows.length > 0
+              ? [
+                  ...noteRows.filter((n: any) => !n.workspace_id || wsIdToName.has(String(n.workspace_id))),
                   ...Array.from(allWorkspacesMap.values()).flatMap((w: any) => Array.isArray(w.notes) ? w.notes : [])
-                ];
+                ]
+              : [];
 
             if (relevantNotes.length > 0) {
               const uniqueNotes = Array.from(new Map(relevantNotes.map((n: any) => [String(n.id || n.title).toLowerCase(), n])).values()).slice(0, 12);
@@ -2383,8 +2866,13 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         qLower.includes("all my workspaces") ||
         qLower.includes("all of the workspaces");
 
+      const isWorkspaceAnalysisQuery =
+        /\b(analyze|analyse|summarize|summarise|review|inspect|explain|break\s*down|overview|check)\s+(all\s+(of\s+)?(the\s+)?)?(my|our|this|the)?\s*(workspaces?|uploads?|uploaded\s+(files?|materials?|things?|items?|docs?|documents?|notes?|images?|pdfs?|links?|videos?)|files?|documents?|notes?|materials?|things?)\b/i.test(qLower) ||
+        /\b(analyze\s+(everything|all|all\s+things)|based\s+on\s+(my|our|the)\s+(workspaces?|uploads?|files?|notes?|materials?)|what\s+did\s+i\s+upload|what\s+have\s+i\s+uploaded)\b/i.test(qLower);
+
       const isOverviewQuery = 
         isWorkspaceInventoryQuery ||
+        isWorkspaceAnalysisQuery ||
         qLower.includes("what is in it") ||
         qLower.includes("what's in it") ||
         qLower.includes("what is inside") ||
@@ -2417,13 +2905,13 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         qLower.includes("tell me about my topic") ||
         qLower.includes("tell me about the topic");
 
-      const isCasualGreeting =
-        /^(hi|hello|hey|yo|good morning|good afternoon|good evening|thanks|thank you|ok|okay|cool|great|bye)\b[!?.]*$/i.test(prompt.trim());
+      const isCasualGreeting = !hasDirectTurnAttachment && isConversationalGreetingOrSmallTalk(prompt);
 
       const isExplicitMaterialQuery =
         hasDirectTurnAttachment ||
         isOverviewQuery ||
         isWorkspaceInventoryQuery ||
+        isWorkspaceAnalysisQuery ||
         qLower.includes('this video') ||
         qLower.includes('the video') ||
         qLower.includes('this link') ||
@@ -2487,29 +2975,26 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         );
       }
 
-      // If the user has uploaded ANY real file of their own, remove the 4 hardcoded initial demo stub files
-      // so default sample stubs (Newton's Laws, Rotational Dynamics, Calculus, SN1/SN2) never override or contaminate the user's uploaded material!
+      // If the user has uploaded ANY real file of their own in the active workspace, remove demo stub files
+      // and never bleed files from other workspaces into the active workspace.
       const hasUserUploadedFilesInActive = effectiveFiles.some((f: any) => !isDefaultDemoStubFile(f));
       if (hasUserUploadedFilesInActive) {
         effectiveFiles = effectiveFiles.filter((f: any) => !isDefaultDemoStubFile(f));
-      } else {
-        // Check if the user uploaded files in any workspace when workspaceId wasn't matched
-        const allUploadedUserFiles = Array.from(allWorkspacesMap.values())
-          .flatMap(w => w.files || [])
-          .filter((f: any) => !isDefaultDemoStubFile(f));
-        if (allUploadedUserFiles.length > 0 && (!isRealWorkspaceId || effectiveFiles.every((f: any) => isDefaultDemoStubFile(f)))) {
-          effectiveFiles = [...allUploadedUserFiles];
-        }
+      } else if (isRealWorkspaceId) {
+        effectiveFiles = effectiveFiles.filter((f: any) => Boolean(f.isDirectAttachment) || !isDefaultDemoStubFile(f));
       }
 
-      // Sort effectiveFiles so direct attachments and user-uploaded files with rich content come first
+      // Sort effectiveFiles so direct attachments and newest user-uploaded/scanned files come first
       effectiveFiles.sort((a: any, b: any) => {
         const aDirect = a.isDirectAttachment ? 1 : 0;
         const bDirect = b.isDirectAttachment ? 1 : 0;
         if (aDirect !== bDirect) return bDirect - aDirect;
         const aUser = !isDefaultDemoStubFile(a) ? 1 : 0;
         const bUser = !isDefaultDemoStubFile(b) ? 1 : 0;
-        return bUser - aUser;
+        if (aUser !== bUser) return bUser - aUser;
+        const aTime = a.uploadDate ? Date.parse(String(a.uploadDate)) || 0 : 0;
+        const bTime = b.uploadDate ? Date.parse(String(b.uploadDate)) || 0 : 0;
+        return bTime - aTime;
       });
 
       const hasUserUploadedFiles = effectiveFiles.some((f: any) => !isDefaultDemoStubFile(f));
@@ -2543,13 +3028,48 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         return isImgOrPdf && hasBinary;
       });
 
+      // Evaluate structured 4-Mode Context Resolution & Edge-Case Verification (Modes A, B, C, D)
+      const resolvedTutorContext = resolveAITutorContext({
+        prompt,
+        authenticatedUserId: authenticatedUserId || null,
+        activeWorkspaceId: isRealWorkspaceId ? workspaceId : null,
+        activeWorkspaceName: isRealWorkspaceId ? workspaceName : null,
+        attachedFiles: effectiveFiles,
+        allWorkspaces: Array.from(allWorkspacesMap.values()),
+        inaccessibleAccountFiles: Array.isArray(bodyObj.inaccessibleAccountFiles)
+          ? bodyObj.inaccessibleAccountFiles
+          : undefined,
+        allowOutsideResearch
+      });
+
+      // If the user referenced a missing, processing, corrupted, inaccessible, or other-workspace document, return the clear explanation immediately
+      if (resolvedTutorContext.immediateEdgeCaseReply) {
+        return res.status(200).json({
+          reply: resolvedTutorContext.immediateEdgeCaseReply,
+          text: resolvedTutorContext.immediateEdgeCaseReply,
+          source: "StudyWeb Context Guard",
+          tutorMode: resolvedTutorContext.selectedMode,
+          intentCategory: resolvedTutorContext.intentCategory,
+          securityFlags: resolvedTutorContext.securityFlags,
+          citations: [],
+          activeWorkspaceContext: isRealWorkspaceId ? workspaceName || undefined : undefined,
+          activeContextFiles: [],
+          followUpQuestions: [
+            `Explain a concept using general knowledge`,
+            `How do I attach or select a file for this chat?`,
+            `What is currently in my active workspace?`
+          ],
+          suggestOutsideResearch: false
+        });
+      }
+
       // Check initial semantic relevance against active workspace materials
       const initialRagCheck = (searchableMaterials.length > 0)
         ? extractRelevantDocumentSegments(
             prompt,
             searchableMaterials,
             12,
-            isExplicitMaterialQuery || hasUserUploadedFiles || hasInlineImageInActiveWorkspace
+            isExplicitMaterialQuery || hasDirectTurnAttachment || isDeepStudyMaterialAnalysisQuery
           )
         : { segments: [], contextString: '', hasHighRelevance: false };
 
@@ -2557,7 +3077,11 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         !allowOutsideResearch &&
         !isCasualGreeting &&
         searchableMaterials.length > 0 &&
-        (hasUserUploadedFiles || isExplicitMaterialQuery || initialRagCheck.hasHighRelevance || hasInlineImageInActiveWorkspace)
+        (resolvedTutorContext.selectedMode === 'MODE_B_WORKSPACE_STUDY' ||
+          resolvedTutorContext.selectedMode === 'MODE_C_STANDALONE_MATERIAL' ||
+          hasDirectTurnAttachment ||
+          isExplicitMaterialQuery ||
+          initialRagCheck.hasHighRelevance)
       );
 
       if (shouldUseWorkspaceFiles && effectiveFiles && effectiveFiles.length > 0) {
@@ -2646,6 +3170,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
                 if (apiKey && (!f.transcription || f.transcription.length < 800)) {
                   const aiClient = new GoogleGenAI({
                     apiKey,
+                    apiVersion: 'v1beta',
                     httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
                   });
                   const grounded = await enrichUrlWithGeminiWebGrounding(aiClient, candidateUrl, f.name, f.transcription);
@@ -2686,14 +3211,14 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
           prompt,
           searchableMaterials,
           12,
-          hasUserUploadedFiles || isExplicitMaterialQuery || hasInlineImageInActiveWorkspace
+          isExplicitMaterialQuery || hasDirectTurnAttachment || isDeepStudyMaterialAnalysisQuery
         );
         retrievedSegments = ragResult.segments;
-        hasRelevantWorkspaceMaterial =
-          hasUserUploadedFiles ||
+        hasRelevantWorkspaceMaterial = Boolean(
+          hasDirectTurnAttachment ||
           isExplicitMaterialQuery ||
-          ragResult.hasHighRelevance ||
-          hasInlineImageInActiveWorkspace;
+          ragResult.hasHighRelevance
+        );
 
         if (hasRelevantWorkspaceMaterial) {
           groundedSourceContext = ragResult.contextString;
@@ -2705,7 +3230,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
             ...searchableMaterials.filter((f: any) => !isDefaultDemoStubFile(f) && !matchedNames.has(f.name)),
             ...searchableMaterials.filter((f: any) => isDefaultDemoStubFile(f) && matchedNames.has(f.name)),
             ...searchableMaterials.filter((f: any) => isDefaultDemoStubFile(f) && !matchedNames.has(f.name))
-          ].slice(0, 8);
+          ].slice(0, 15);
 
           const fullSourceBlocks = prioritizedFiles.map((f: any, idx: number) => {
             const parts: string[] = [];
@@ -2725,26 +3250,48 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
             const combinedBody = parts.join('\n\n').trim();
             const fallbackBody = combinedBody
               ? combinedBody
-              : `Uploaded study material titled "${f.name}" in workspace "${f.workspaceName || workspaceName || 'Active Workspace'}" (Type: ${f.type || 'document'}). Inspect the attached image/file inlineData directly to answer the student's question.`;
-            const header = `--- ACTIVE WORKSPACE MATERIAL #${idx + 1}: "${f.name || 'Study Resource'}" (Workspace: "${f.workspaceName || workspaceName || 'Active Workspace'}" | Type: ${f.type || 'resource'}${f.url && !String(f.url).startsWith('data:') ? ` | URL: ${f.url}` : ''}) ---`;
+              : `Uploaded study material titled "${f.name}" in workspace "${f.workspaceName || workspaceName || 'Workspace'}" (Type: ${f.type || 'document'}). Inspect the attached image/file inlineData directly to answer the student's question.`;
+            const header = `--- ACTIVE WORKSPACE MATERIAL #${idx + 1}: "${f.name || 'Study Resource'}" (Workspace: "${f.workspaceName || workspaceName || 'Workspace'}" | Type: ${f.type || 'resource'}${f.url && !String(f.url).startsWith('data:') ? ` | URL: ${f.url}` : ''}) ---`;
             return `${header}\n${fallbackBody}`;
           }).filter(Boolean);
 
           if (fullSourceBlocks.length > 0) {
-            groundedSourceContext += `\n=== FULL UPLOADED WORKSPACE MATERIALS & NOTES (WORKSPACE: "${workspaceName || 'Active Workspace'}") ===\n${fullSourceBlocks.join('\n\n')}\n=========================================\n`;
+            groundedSourceContext += `\n=== FULL UPLOADED WORKSPACE MATERIALS & NOTES (${fullSourceBlocks.length} ITEMS) ===\n${fullSourceBlocks.join('\n\n')}\n=========================================\n`;
           }
         }
       }
 
-      // Fast-Path Inventory: ONLY use when the user asks for an inventory list AND is NOT asking to analyze/explain their study material or an inline image
+      // Empty workspace analysis / inventory guard so asking "analyze my workspace" with 0 uploads doesn't search Wikipedia for "Workspace"
+      if ((isWorkspaceAnalysisQuery || isWorkspaceInventoryQuery) && searchableMaterials.length === 0 && !isAllWorkspacesListRequest) {
+        const emptyAnalysisReply =
+          `You don't have any uploaded files or notes in this workspace yet.\n\nOnce you upload a **PDF, image, scanned note, document, audio/video, or web link** (using **Attach** below or the **Library** tab), ask me to analyze or summarize your materials and I'll break everything down for you. In the meantime, feel free to ask me any question!`;
+
+        return res.json({
+          reply: emptyAnalysisReply,
+          text: emptyAnalysisReply,
+          citations: [],
+          source: 'AI Study Tutor',
+          workspaceNotice: undefined,
+          activeWorkspaceContext: undefined,
+          activeContextFiles: [],
+          followUpQuestions: [
+            `Explain a complex concept step by step`,
+            `What types of files or links can I upload for analysis?`,
+            `Create a quick practice quiz on a topic`
+          ],
+          suggestOutsideResearch: false
+        });
+      }
+
+      // Fast-Path Inventory: ONLY use when asking purely for a list of workspaces/files AND NOT asking to analyze/summarize/explain uploaded contents
       const shouldRunStaticInventoryFastPath =
         isWorkspaceInventoryQuery &&
+        !isWorkspaceAnalysisQuery &&
         !isDeepStudyMaterialAnalysisQuery &&
         !(hasInlineImageInActiveWorkspace && effectiveFiles.some((f: any) => !f.summary || f.summary.length < 80));
 
-      if (shouldRunStaticInventoryFastPath) {
+      if (shouldRunStaticInventoryFastPath && (isAllWorkspacesListRequest || searchableMaterials.length === 0)) {
         const allWsList = Array.from(allWorkspacesMap.values()).filter(w => w.id !== 'general-study' || w.files.length > 0 || w.notes.length > 0);
-        // If user asked about "all workspaces", show all workspaces; if they asked "what is in my workspace" inside a specific workspace, show the active workspace's files first!
         const filesToDisplay = isAllWorkspacesListRequest
           ? Array.from(allWorkspacesMap.values()).flatMap(w => w.files || [])
           : effectiveFiles;
@@ -2786,7 +3333,6 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
 
           const sections: string[] = [];
 
-          // 1. Workspaces Overview (only show other workspaces when user asks for all workspaces)
           if (isAllWorkspacesListRequest && allWsList.length > 0) {
             const wsLines = allWsList.map((ws, i) => {
               const fCount = (ws.files || []).length;
@@ -2804,7 +3350,6 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
             sections.push(`#### 🗂️ Your Workspaces (${allWsList.length} ${allWsList.length === 1 ? 'Workspace' : 'Workspaces'})\n${wsLines}`);
           }
 
-          // 2. Grouped by File Type
           if (pdfAndDocs.length > 0) {
             sections.push(
               `#### 📄 PDFs & Study Documents (${pdfAndDocs.length})\n` +
@@ -2838,22 +3383,18 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
 
           const scopeHeader = isAllWorkspacesListRequest
             ? `Across ${Math.max(1, allWsList.length)} ${allWsList.length === 1 ? 'Workspace' : 'Workspaces'}`
-            : `in Workspace "${workspaceName || 'Active Workspace'}"`;
+            : `in Workspace "${workspaceName || 'Workspace'}"`;
 
           const inventoryReply =
-            `### 📂 Workspace Inventory (${totalFilesCount} ${totalFilesCount === 1 ? 'File' : 'Files'}${totalNotesCount > 0 ? ` & ${totalNotesCount} ${totalNotesCount === 1 ? 'Note' : 'Notes'}` : ''} ${scopeHeader})\n\n` +
-            `Here is everything uploaded and indexed ${scopeHeader}, grouped by file type:\n\n` +
-            `${sections.join('\n\n')}\n\n` +
-            `---\n` +
-            `💡 **How would you like to use these materials?**\n` +
-            `- Ask me **"Tell me about [any file or topic above]"** for a complete step-by-step explanation\n` +
-            `- Ask me to **summarize**, **compare**, or **create practice quiz questions** from any of your uploaded files!`;
+            `### 📂 Workspace Summary (${totalFilesCount} ${totalFilesCount === 1 ? 'File' : 'Files'}${totalNotesCount > 0 ? ` & ${totalNotesCount} ${totalNotesCount === 1 ? 'Note' : 'Notes'}` : ''} ${scopeHeader})\n\n` +
+            `Here is everything currently uploaded ${scopeHeader}:\n\n` +
+            `${sections.join('\n\n')}`;
 
           const inventoryFollowUps = filesToDisplay.slice(0, 3).map((f: any) =>
             `Explain the full contents of "${f.name}" in detail`
           );
           if (inventoryFollowUps.length < 3) {
-            inventoryFollowUps.push(`Create practice quiz questions from my uploaded workspace materials`);
+            inventoryFollowUps.push(`Create practice quiz questions from my uploaded materials`);
           }
 
           return res.json({
@@ -2862,73 +3403,65 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
             citations: effectiveFiles.slice(0, 8).map((f: any) => ({
               sourceName: `${f.name || 'Workspace File'}${f.workspaceName ? ` (${f.workspaceName})` : ''}`,
               page: 1,
-              quote: (f.summary || f.transcription || `Uploaded ${f.type || 'study'} file in ${f.workspaceName || 'workspace'}`).slice(0, 220)
+              quote: (f.summary || f.transcription || `Uploaded ${f.type || 'study'} file`).slice(0, 220)
             })),
             source: 'Workspace Knowledge Engine',
             workspaceNotice: undefined,
-            activeWorkspaceContext: workspaceName || 'All Workspaces',
+            activeWorkspaceContext: workspaceName || undefined,
             activeContextFiles: effectiveFiles.slice(0, 6).map((f: any) => f.name).filter(Boolean),
             followUpQuestions: inventoryFollowUps.slice(0, 3),
             suggestOutsideResearch: false
           });
         } else {
           const emptyInventoryReply =
-            `### 📂 Your Workspace Inventory (0 Files Uploaded)\n\n` +
-            `You currently have **0 files** uploaded across your workspaces.\n\n` +
-            `- Click **Attach** in the chat bar or open the **Library** tab to upload a **PDF, document, image, or YouTube/web link**.\n` +
-            `- Once uploaded, ask me *"What is in our workspace?"* or ask me to explain any topic from your files!`;
+            `You don't have any files or notes uploaded right now. Feel free to attach a PDF, image, scanned note, document, or link anytime and I'll analyze all of it for you—or ask me any question directly!`;
 
           return res.json({
             reply: emptyInventoryReply,
             text: emptyInventoryReply,
             citations: [],
-            source: 'Workspace Knowledge Engine',
+            source: 'AI Study Tutor',
             workspaceNotice: undefined,
-            activeWorkspaceContext: workspaceName || 'Active Workspace',
+            activeWorkspaceContext: undefined,
             activeContextFiles: [],
             followUpQuestions: [
-              `Research a core concept in ${workspaceName || 'my subject'} outside my workspace`,
-              `What types of study materials can I upload to this workspace?`,
-              `Generate a diagnostic study quiz for ${workspaceName || 'my course'}`
+              `Explain a difficult concept step by step`,
+              `What types of files or links can I upload for analysis?`,
+              `Create a quick practice quiz on a topic`
             ],
             suggestOutsideResearch: false
           });
         }
       }
 
-      // Track whether the AI Tutor should offer the interactive "Research outside workspace" button
-      let suggestOutsideResearch = false;
+      const suggestOutsideResearch = false;
+      let webKnowledge: RealWebKnowledgeResult = { contextText: "", summaryMarkdown: "", webCitations: [] };
 
-      // When the student asks about a topic NOT in their uploaded workspace materials, build the notice banner & instruction
-      if (!hasRelevantWorkspaceMaterial && !isCasualGreeting && !isOverviewQuery && !isWorkspaceInventoryQuery && prompt.trim().length > 2) {
-        const uploadedNames = (effectiveFiles || [])
-          .slice(0, 4)
-          .map((f: any) => f.name)
-          .filter(Boolean)
-          .join(', ');
+      if (isCasualGreeting) {
+        outOfWorkspaceInstruction = `
+[CONVERSATIONAL GREETING / SMALL TALK MODE]
+The user sent a natural greeting or casual message ("${prompt.trim()}").
+1. Respond warmly, naturally, and concisely just like ChatGPT, Claude, or Gemini (e.g., greet them back and ask how you can help today).
+2. Do NOT give a dictionary definition of their greeting.
+3. Do NOT say anything like "not in your workspace", "General Study", or ask them to search the web.
+4. Keep follow-up suggestions short and friendly.`;
+      } else if (!hasRelevantWorkspaceMaterial && prompt.trim().length > 0) {
+        // Automatically search the web seamlessly without ever saying "not in your workspace"
+        webKnowledge = await fetchRealWebKnowledge(topicLabel, prompt);
 
-        if (allowOutsideResearch) {
-          workspaceNotice = `External Research Mode Active — Researching "${topicLabel}" beyond your uploaded files in ${workspaceName || 'this workspace'}.`;
-          outOfWorkspaceInstruction = `
-[EXTERNAL ACADEMIC RESEARCH MODE]
-The student clicked "Research outside workspace" to explore "${topicLabel}" beyond their uploaded workspace files.
-1. State clearly that you are researching "${topicLabel}" using broader academic knowledge outside their "${workspaceName || 'Active Workspace'}" files.
-2. Provide a comprehensive, rigorous, step-by-step academic explanation of "${topicLabel}" with definitions, mechanisms, examples, and key takeaways.`;
-        } else {
-          suggestOutsideResearch = true;
-          if (effectiveFiles && effectiveFiles.length > 0) {
-            workspaceNotice = `Checked workspace "${workspaceName || 'Active Workspace'}" (uploaded files: ${uploadedNames}) — "${topicLabel}" was not found in your uploaded materials.`;
-          } else {
-            workspaceNotice = `Checked workspace "${workspaceName || 'Active Workspace'}" (no files uploaded yet) — "${topicLabel}" is not in your workspace files.`;
-          }
-
-          outOfWorkspaceInstruction = `
-[OUT-OF-WORKSPACE CLARIFICATION & HELPFUL OVERVIEW]
-The student is asking about "${topicLabel}", which is NOT found in their uploaded workspace materials in "${workspaceName || 'Active Workspace'}"${uploadedNames ? ` (which currently contains: ${uploadedNames})` : ' (which currently has 0 uploaded files)'}.
-1. First, explicitly tell the student which context you checked (Workspace: "${workspaceName || 'Active Workspace'}"${uploadedNames ? `, Uploaded files: ${uploadedNames}` : ''}) and ask if they are trying to research "${topicLabel}" outside their uploaded workspace materials (let them know they can click "Research outside workspace" below or pick a follow-up question).
-2. Next, provide a clear, helpful academic overview of "${topicLabel}" so their question is immediately answered while keeping a strict distinction between their uploaded workspace files and external research.
-3. Do NOT mix in unrelated workspace files.`;
+        if (webKnowledge.contextText) {
+          groundedSourceContext = [
+            groundedSourceContext,
+            `=== WEB SEARCH KNOWLEDGE FOR "${topicLabel}" ===\n${webKnowledge.contextText}`
+          ].filter(Boolean).join('\n\n');
         }
+
+        outOfWorkspaceInstruction = `
+[GENERAL AI ASSISTANT & WEB SEARCH MODE]
+Answer the user's question directly, naturally, and comprehensively—just like ChatGPT, Claude, or Gemini—using accurate knowledge and live web search grounding.
+1. Start straight with a clear, helpful direct answer (no awkward disclaimers).
+2. NEVER say "not in your workspace", "was not found in your workspace", or mention missing workspace files.
+3. Do NOT output bare dictionary-style definitions unless the user explicitly asked to define a word. Give real explanations, intuition, examples, and clear structure.`;
       }
 
       // If the user asks StudyWeb to generate an image, do not generate any image and respond immediately
@@ -3012,43 +3545,42 @@ Include a clear, structured comparison (using a markdown table or side-by-side b
      [FOLLOW_UP: Second follow-up question?]
      [FOLLOW_UP: Third follow-up question?]`;
 
-      const coreSystemInstruction = `You are StudyWeb's AI Tutor, providing students with clear, accurate, and comprehensive academic explanations grounded strictly in their uploaded study materials.
+      const coreSystemInstruction = `You are StudyWeb's AI assistant—operating just like ChatGPT, Claude, and Gemini: natural, conversational, intelligent, clear, and directly helpful.
 CRITICAL INSTRUCTION DIRECTIVES:
-1. STRICT RAG GROUNDING IN UPLOADED FILES (HIGHEST PRIORITY):
-   - Carefully read the "=== RETRIEVED WORKSPACE DOCUMENT SEGMENTS ===" and "=== FULL UPLOADED WORKSPACE MATERIALS & NOTES ===" provided below, as well as any attached inlineData (PDF/image/video).
-   - When the student asks about their uploaded document, image, video, link, or any concept/question/topic present in their uploaded workspace files, base your answer 100% on the exact facts, text, figures, definitions, and details inside their uploaded material(s).
-   - NEVER hallucinate unrelated subjects, and NEVER replace the contents of the student's uploaded file with generic or unrelated textbook topics.
-2. DIRECT, PRECISE & COMPLETE: Read the student's question attentively and deliver the exact answer, definition, derivation, analysis, or explanation directly from their uploaded material.
-3. SMART WORKSPACE RELEVANCE:
-   - Always give first priority to the student's uploaded workspace files in "${workspaceName || 'Active Workspace'}".
-   - Only if the student explicitly asks about a topic that has zero connection to their uploaded workspace files, clearly state what your uploaded files cover and then answer their question without mixing up the two.
-4. MULTIMODAL ANALYSIS (VIDEOS, WEBSITES, DOCUMENTS, IMAGES, TEXT):
-   - When analyzing an uploaded or linked video, website, PDF, document, or image, provide a thorough, structured breakdown of its actual contents, key concepts, formulas, arguments, and takeaways.
-5. STRICT AVOIDANCE:
+1. WORKSPACE MATERIAL ANALYSIS (WHEN RELEVANT MATERIALS ARE UPLOADED):
+   - When the user has uploaded files, notes, scanned images, PDFs, links, or videos in their workspace and asks about them (or asks to analyze/summarize their workspace), carefully read ALL sections of "=== RETRIEVED WORKSPACE DOCUMENT SEGMENTS ===", "=== FULL UPLOADED WORKSPACE MATERIALS & NOTES ===", and all attached inlineData/fileData.
+   - Analyze ALL relevant uploaded items thoroughly, solve exact questions/equations/problems step by step, and cite sources naturally (e.g., [Source: File Name]).
+2. NATURAL CONVERSATIONAL & WEB KNOWLEDGE FALLBACK (WHEN NOT IN WORKSPACE OR GENERAL CHAT):
+   - For greetings ("hi", "hello", "how are you", etc.) or general questions not covered by uploaded workspace files, respond naturally, warmly, and directly just like ChatGPT/Claude/Gemini using general knowledge and web search grounding.
+   - NEVER say "not in your workspace", "was not found in your workspace", or mention empty/deleted workspaces like "General Study".
+   - NEVER give a bare dictionary definition unless the user explicitly asks to define a word or asks for a word's meaning.
+3. MULTIMODAL ANALYSIS:
+   - When analyzing an uploaded image, PDF, document, video, or website, provide a thorough, accurate breakdown of its contents, concepts, formulas, and takeaways.
+4. STRICT AVOIDANCE:
    - NEVER generate any image, SVG, or picture. If the user asks you to generate, create, draw, or make an image or picture, reply: "I cannot generate image. I can help you with your study tasks."
    - NEVER mention "Document 1246", "Enjoy the videos", "music you love", or "Mix".
-   - NEVER mention "Real-Time Interactive Learning Studio" or interactive widgets.
-   - NEVER provide canned repetitive filler or say you are temporarily disconnected.
+   - NEVER output canned filler or say you are disconnected.
 ${followUpDirective}
 ${unifiedTutorStyleInstruction}
 ${researchGuideline}
 ${citationGuideline}`;
 
       const systemInstruction = [
+        resolvedTutorContext.systemInstruction,
         coreSystemInstruction,
         outOfWorkspaceInstruction,
         userDatabaseContext,
         specializedFormatInstruction,
         fileOverviewContext,
-        groundedSourceContext
+        resolvedTutorContext.sanitizedMaterialContextBlock,
+        sanitizeUntrustedDocumentText(groundedSourceContext).cleanText
       ].filter(Boolean).join('\n\n');
 
-      // Verified active Gemini 3 Flash & Pro models for fast, reliable responses
+      // Verified active Gemini models for fast, reliable responses
       const baseCandidateModels: string[] = [
-        "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite-preview",
-        "gemini-flash-latest",
-        "gemini-3.1-pro-preview"
+        "gemini-4-hydrogen",
+        "gemini-3.1-flash-lite",
+        "gemini-3-flash-preview"
       ];
       const candidateModels: string[] = getAvailableCandidateModels(baseCandidateModels);
 
@@ -3066,7 +3598,7 @@ ${citationGuideline}`;
           ...effectiveFiles.filter((f: any) => !f.isDirectAttachment && !isDefaultDemoStubFile(f) && matchedSourceSet.has(f.name)),
           ...effectiveFiles.filter((f: any) => !f.isDirectAttachment && !isDefaultDemoStubFile(f) && !matchedSourceSet.has(f.name)),
           ...effectiveFiles.filter((f: any) => !f.isDirectAttachment && isDefaultDemoStubFile(f))
-        ].slice(0, 3);
+        ].slice(0, 6);
 
         for (const file of candidateAttachmentFiles) {
           let rawBase64 = "";
@@ -3161,12 +3693,13 @@ ${citationGuideline}`;
       };
 
       // Multi-pass auto-retry across active Gemini models so transient 503/429 spikes still return a real Gemini answer
-      const maxPasses = 3;
+      const maxPasses = 2;
       const allRetryModels = Array.from(new Set([...candidateModels, ...baseCandidateModels]));
+      let geminiGroundingCitations: Array<{ sourceName: string; page?: number; quote: string; url?: string }> = [];
 
       for (let pass = 0; pass < maxPasses && !responseText; pass++) {
         if (pass > 0) {
-          await new Promise(resolve => setTimeout(resolve, pass * 700));
+          await new Promise(resolve => setTimeout(resolve, pass * 500));
         }
 
         const modelsForPass = pass === 0 ? candidateModels : allRetryModels;
@@ -3182,6 +3715,7 @@ ${citationGuideline}`;
 
             const ai = new GoogleGenAI({
               apiKey,
+              apiVersion: "v1beta",
               httpOptions: {
                 headers: {
                   "User-Agent": "aistudio-build",
@@ -3197,7 +3731,9 @@ ${citationGuideline}`;
               const hasMediaOrVideoPart = activeParts.some((p: any) => Boolean(p?.fileData || p?.inlineData));
               const timeoutMs = hasMediaOrVideoPart ? 22000 : 12000;
 
+              const isHydrogen = currentModel === "gemini-4-hydrogen";
               const supportsMinimalThinking = currentModel.startsWith("gemini-3");
+              const shouldUseWebGrounding = !hasRelevantWorkspaceMaterial && !hasMediaOrVideoPart;
 
               const genPromise = ai.models.generateContent({
                 model: currentModel,
@@ -3206,11 +3742,12 @@ ${citationGuideline}`;
                   systemInstruction: pass <= 1
                     ? systemInstruction
                     : [coreSystemInstruction, outOfWorkspaceInstruction, fileOverviewContext, groundedSourceContext].filter(Boolean).join('\n\n'),
-                  temperature: 0.6,
-                  ...(supportsMinimalThinking
-                    ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
-                    : currentModel.includes("pro")
+                  ...(shouldUseWebGrounding ? { tools: [{ googleSearch: {} }] } : {}),
+                  ...(isHydrogen ? {} : { temperature: 0.6 }),
+                  ...(isHydrogen
                     ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+                    : supportsMinimalThinking
+                    ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
                     : {})
                 }
               });
@@ -3231,13 +3768,33 @@ ${citationGuideline}`;
 
             if (response && response.text && response.text.trim()) {
               responseText = response.text.trim();
-              responseSource = `Gemini (${currentModel})`;
+              responseSource = "StudyWeb AI Tutor";
+              const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+              if (Array.isArray(chunks)) {
+                geminiGroundingCitations = chunks
+                  .filter((c: any) => c?.web?.uri)
+                  .slice(0, 5)
+                  .map((c: any) => ({
+                    sourceName: c.web.title || c.web.uri,
+                    page: 1,
+                    quote: c.web.uri,
+                    url: c.web.uri
+                  }));
+              }
               console.log(`[AI Tutor][${correlationId}] Completed with ${currentModel} (pass ${pass + 1}) in ${Date.now() - modelStartTime}ms`);
               break;
             } else {
               throw new Error("Empty response from model");
             }
           } catch (err: any) {
+            if (isAuthOrInvalidApiKeyError(err) || err?.message?.includes("GEMINI_API_KEY is not configured")) {
+              lastError = {
+                model: currentModel,
+                status: err?.status || 401,
+                message: summarizeModelError(err)
+              };
+              break;
+            }
             if (isQuotaOrRateLimitError(err)) {
               recordModelQuotaCooldown(currentModel, err);
             }
@@ -3250,41 +3807,42 @@ ${citationGuideline}`;
             };
           }
         }
-      }
-
-      // Only use workspace document synthesis if Gemini was completely unreachable AND the question was actually about workspace files
-      if (!responseText && hasRelevantWorkspaceMaterial && effectiveFiles && effectiveFiles.length > 0) {
-        const localDocSynthesis = generateLocalAITutorResponse(
-          prompt,
-          effectiveFiles,
-          groundedSourceContext,
-          workspaceNotice
-        );
-        if (localDocSynthesis) {
-          responseText = localDocSynthesis;
-          responseSource = "Workspace Knowledge Engine";
+        if (lastError && (lastError.status === 401 || String(lastError.message).includes("GEMINI_API_KEY"))) {
+          break;
         }
       }
 
+      // Use real conversational, workspace, or web knowledge synthesis when Gemini is unavailable
       if (!responseText) {
-        const errCode = lastError?.status === 429 ? 'AI_QUOTA_EXCEEDED' : 'AI_MODEL_UNAVAILABLE';
-        console.error(`[AI Tutor Error][${correlationId}] All models failed:`, {
-          code: errCode,
-          lastError
-        });
-        return res.status(503).json({
-          errorCode: errCode,
-          error: lastError?.message || "Gemini AI models are temporarily busy. Please retry your question in a moment.",
-          workspaceNotice: workspaceNotice || undefined,
-          correlationId
-        });
+        const localDocSynthesis = generateLocalAITutorResponse(
+          prompt,
+          hasRelevantWorkspaceMaterial ? searchableMaterials : [],
+          groundedSourceContext,
+          workspaceNotice,
+          webKnowledge,
+          {
+            isConversational: isCasualGreeting,
+            isWorkspaceAnalysis: isWorkspaceAnalysisQuery || isOverviewQuery,
+            retrievedSegments
+          }
+        );
+        if (localDocSynthesis) {
+          responseText = localDocSynthesis;
+          responseSource = isCasualGreeting
+            ? "AI Assistant"
+            : hasRelevantWorkspaceMaterial
+            ? "Workspace Analysis Engine"
+            : webKnowledge.summaryMarkdown
+            ? "Web Knowledge Search"
+            : "StudyWeb AI";
+        }
       }
 
       // Await parallel visual/diagram generation if triggered
       const visualResult = await visualPromise;
 
-      // Extract citations ONLY when workspace files were relevant to this question
-      const responseCitations: Array<{ sourceName: string; page?: number; quote: string; snippet?: string; fileId?: string }> = [];
+      // Extract citations ONLY when workspace files were relevant OR web citations exist (never on casual greetings)
+      const responseCitations: Array<{ sourceName: string; page?: number; quote: string; snippet?: string; fileId?: string; url?: string }> = [];
 
       if (hasRelevantWorkspaceMaterial && retrievedSegments && retrievedSegments.length > 0) {
         const citedSourceNames = new Set<string>();
@@ -3314,6 +3872,14 @@ ${citationGuideline}`;
         });
       }
 
+      if (!hasRelevantWorkspaceMaterial && !isCasualGreeting) {
+        for (const wc of [...geminiGroundingCitations, ...webKnowledge.webCitations]) {
+          if (!responseCitations.some((c) => c.sourceName === wc.sourceName)) {
+            responseCitations.push(wc);
+          }
+        }
+      }
+
       // Extract any [FOLLOW_UP: ...] tags from responseText and clean responseText
       const parsedFollowUps: string[] = [];
       const followUpRegex = /\[FOLLOW_UP:\s*([^\]]+)\]/gi;
@@ -3327,24 +3893,32 @@ ${citationGuideline}`;
       responseText = responseText.replace(/\[FOLLOW_UP:\s*[^\]]+\]/gi, '').trim();
 
       const cleanT = topicLabel || 'this topic';
-      const fallbackPool = isInterviewQuery
+      const fallbackPool = isCasualGreeting
+        ? [
+            ...(effectiveFiles.length > 0
+              ? [`Analyze everything uploaded in my workspace`]
+              : [`Explain a complex concept step by step`]),
+            `Summarize key ideas with real-world examples`,
+            `Create 3 practice quiz questions on a topic`
+          ]
+        : isInterviewQuery
         ? [
             `Ask me a harder follow-up interview question on ${cleanT} and critique my approach`,
             `How do I summarize ${cleanT} in a 60-second interview answer?`,
             `What real-world scenario or edge-case interview question is asked about ${cleanT}?`
           ]
-        : (hasRelevantWorkspaceMaterial && effectiveFiles.length > 0)
+        : (hasRelevantWorkspaceMaterial && searchableMaterials.length > 0)
         ? [
-            `What are the most important exam or interview takeaways from "${effectiveFiles[0]?.name || 'this study material'}"?`,
-            `Ask me 3 interview or practice quiz questions based on "${effectiveFiles[0]?.name || 'this study material'}"`,
-            `Explain the hardest concept in "${effectiveFiles[0]?.name || 'this study material'}" with a step-by-step example`
+            `What are the most important takeaways from "${searchableMaterials[0]?.name || 'my uploaded materials'}"?`,
+            `Ask me 3 practice questions based on "${searchableMaterials[0]?.name || 'my uploaded materials'}"`,
+            `Explain the hardest concept in "${searchableMaterials[0]?.name || 'my uploaded materials'}" step by step`
           ]
         : [
-            `What top interview or exam questions are commonly asked about ${cleanT}?`,
-            `Can you give me a real-world example and step-by-step breakdown of ${cleanT}?`,
+            `Explain ${cleanT} with a real-world example`,
+            `What are the key concepts behind ${cleanT}?`,
             effectiveFiles.length > 0
-              ? `How does ${cleanT} connect to my uploaded file "${effectiveFiles[0].name}"?`
-              : `Quiz me with 3 progressive difficulty questions on ${cleanT}`
+              ? `Analyze how ${cleanT} connects to "${effectiveFiles[0].name}"`
+              : `Quiz me with 3 practice questions on ${cleanT}`
           ];
 
       for (const candidateQ of fallbackPool) {
@@ -3358,37 +3932,47 @@ ${citationGuideline}`;
       const processedFileNames = hasRelevantWorkspaceMaterial
         ? Array.from(new Set([
             ...responseCitations.map(c => c.sourceName),
-            ...effectiveFiles.slice(0, 4).map((f: any) => f.name)
+            ...searchableMaterials.slice(0, 6).map((f: any) => f.name)
           ].filter(Boolean)))
         : [];
+
+      const safeWorkspaceLabel = (workspaceId && workspaceId !== 'general-study' && workspaceName)
+        ? workspaceName
+        : undefined;
 
       res.status(200).json({ 
         reply: responseText,
         text: responseText, 
-        source: responseSource || "Gemini AI",
-        modelUsed: responseSource || "Gemini 3 Flash",
-        documentCount: hasRelevantWorkspaceMaterial ? effectiveFiles.length : 0,
-        workspaceNotice: workspaceNotice || undefined,
-        activeWorkspaceContext: workspaceName || 'Active Workspace',
+        source: responseSource || "StudyWeb AI Tutor",
+        tutorMode: resolvedTutorContext.selectedMode,
+        intentCategory: resolvedTutorContext.intentCategory,
+        securityFlags: resolvedTutorContext.securityFlags,
+        documentCount: hasRelevantWorkspaceMaterial ? searchableMaterials.length : 0,
+        workspaceNotice: undefined,
+        activeWorkspaceContext: safeWorkspaceLabel,
         activeContextFiles: processedFileNames,
         followUpQuestions: parsedFollowUps.slice(0, 3),
-        suggestOutsideResearch,
+        suggestOutsideResearch: false,
         generatedImageUrl: visualResult?.imageUrl,
         generatedImageCaption: visualResult?.caption,
         citations: responseCitations.length > 0 ? responseCitations : undefined,
         extractionFeed: {
           filesProcessed: processedFileNames,
           totalEstimatedPages: hasRelevantWorkspaceMaterial ? totalEstimatedPages : 0,
-          chunksAnalyzed: hasRelevantWorkspaceMaterial ? (effectiveFiles.length * 4 + (responseCitations.length * 2) + 3) : 0,
-          extractionMode: hasRelevantWorkspaceMaterial ? "deep_full_document" : (allowOutsideResearch ? "outside_workspace_research" : "general_knowledge"),
+          chunksAnalyzed: hasRelevantWorkspaceMaterial ? (searchableMaterials.length * 4 + (responseCitations.length * 2) + 3) : 0,
+          extractionMode: isCasualGreeting
+            ? "conversational"
+            : hasRelevantWorkspaceMaterial
+            ? "deep_full_document"
+            : "web_grounded_general",
           timestamp: new Date().toISOString()
         }
       });
     } catch (error: any) {
       const totalDuration = Date.now() - routeStartTime;
-      console.warn(`[AI Tutor Error][${correlationId}] Exception in ${totalDuration}ms:`, error?.message || error);
+      console.error(`[AI Tutor Error][${correlationId}] Exception in ${totalDuration}ms:`, error?.message || error);
       res.status(503).json({
-        error: error?.message || "Unable to reach Gemini AI right now. Please retry.",
+        error: "Something went wrong. There is a server error. Please try again.",
         correlationId
       });
     }
@@ -3410,20 +3994,21 @@ ${citationGuideline}`;
       return res.status(200).json({ success: true, cleared: true });
     }
   });
-  app.post("/api/ai-tutor-tts", async (req, res) => {
+  app.post(["/api/ai-tutor-tts", "/api/ai-tutor-tts/"], async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     try {
       const rawText = String(req.body?.text || "").trim();
       const persona = String(req.body?.persona || "socratic").trim();
-      const requestedVoice = String(req.body?.voiceName || (persona === "socratic" ? "Zephyr" : "Kore")).trim();
+      const language = req.body?.language ? String(req.body.language).trim() : "";
+      const requestedVoice = String(req.body?.voiceName || "Charon").trim();
 
       if (!rawText) {
         return res.status(400).json({ error: "Text is required for TTS synthesis." });
       }
 
-      // Strip markdown, asterisks, brackets, citation tags, and code blocks for spoken audio
-      const cleanText = rawText
-        .replace(/```[\s\S]*?```/g, "")
+      // Strip markdown, citations, code blocks, and smooth math notation into natural spoken phrasing
+      let cleanText = rawText
+        .replace(/```[\s\S]*?```/g, " ")
         .replace(/`([^`]+)`/g, "$1")
         .replace(/\[Source:[^\]]+\]/gi, "")
         .replace(/\[\d+:\d+\]/g, "")
@@ -3432,11 +4017,30 @@ ${citationGuideline}`;
         .replace(/\*(.*?)\*/g, "$1")
         .replace(/__([^_]+)__/g, "$1")
         .replace(/_([^_]+)_/g, "$1")
-        .replace(/[-*•]\s+/g, "")
+        .replace(/^[-*•]\s+/gm, "")
+        .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "$1 over $2")
+        .replace(/\\sqrt\{([^}]+)\}/g, "square root of $1")
+        .replace(/\$([^$]+)\$/g, "$1")
+        .replace(/(\w)\^2\b/g, "$1 squared")
+        .replace(/(\w)\^3\b/g, "$1 cubed")
+        .replace(/\s*×\s*/g, " times ")
+        .replace(/\s*÷\s*/g, " divided by ")
+        .replace(/(\d)\s*=\s*(\d|[A-Za-z])/g, "$1 equals $2")
         .replace(/\n{2,}/g, ". ")
-        .replace(/\n/g, " ")
-        .trim()
-        .slice(0, 1800); // Keep focused for rapid audio delivery
+        .replace(/\n+/g, ", ")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+
+      const maxTtsChars = persona === "scan_notes" ? 700 : 1800;
+      if (cleanText.length > maxTtsChars) {
+        const truncated = cleanText.slice(0, maxTtsChars);
+        const lastBreak = Math.max(
+          truncated.lastIndexOf(". "),
+          truncated.lastIndexOf("? "),
+          truncated.lastIndexOf("! ")
+        );
+        cleanText = lastBreak > maxTtsChars * 0.45 ? truncated.slice(0, lastBreak + 1).trim() : truncated.trim();
+      }
 
       if (!cleanText) {
         return res.status(400).json({ error: "Cleaned text is empty." });
@@ -3453,74 +4057,97 @@ ${citationGuideline}`;
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: { headers: { "User-Agent": "aistudio-build" } }
       });
 
-      const styleInstruction = persona === "socratic"
-        ? "Thoughtful, encouraging Socratic tutor asking guiding questions and scaffolding concepts"
-        : persona === "exam_prep"
-        ? "High-energy, focused exam coach emphasizing testable points and active recall"
-        : "Warm, articulate, friendly academic tutor explaining concepts clearly";
+      const langNote = language ? ` Speak fluently and naturally in ${language}.` : "";
+      const styleInstruction =
+        persona === "exam_prep"
+          ? `Natural, real human study coach speaking one-on-one in person—clear conversational tone, organic breathing and natural pauses at punctuation, relaxed warmth, zero robotic or announcer cadence.${langNote}`
+          : persona === "scan_notes" || persona === "explain"
+          ? `Warm, grounded, real human tutor sitting beside a student reading and explaining notes aloud—natural conversational rhythm, subtle human inflection and brief pauses at commas and periods, never monotonous or synthetic.${langNote}`
+          : `Warm, natural, thoughtful human tutor talking face-to-face in relaxed conversation—authentic human cadence, gentle emphasis on key ideas, natural breathing pauses, completely unscripted and never robotic.${langNote}`;
 
       const validVoice = ["Kore", "Puck", "Fenrir", "Charon", "Zephyr"].includes(requestedVoice)
         ? requestedVoice
-        : (persona === "socratic" ? "Zephyr" : "Kore");
+        : "Charon";
 
-      const ttsModel = "gemini-3.8-flash-lite-tts";
-      if (isModelOnCooldown(ttsModel)) {
+      // Prioritize low-latency gemini-3.8-flash-lite-tts first for fast playback
+      const ttsCandidates = ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"].filter(
+        (m) => !isModelOnCooldown(m)
+      );
+
+      if (ttsCandidates.length === 0) {
         return res.status(200).json({
           success: false,
           fallbackToBrowser: true,
-          message: "TTS model on cooldown, using client speech synthesis."
+          message: "TTS models on cooldown, using client speech synthesis."
         });
       }
 
-      const response = await ai.models.generateContent({
-        model: ttsModel,
-        contents: [
-          {
-            role: "user",
-            parts: [
+      let lastErr: any = null;
+      for (const ttsModel of ttsCandidates) {
+        try {
+          const response = await ai.models.generateContent({
+            model: ttsModel,
+            contents: [
               {
-                text: cleanText,
-                speechMetadata: {
-                  style: styleInstruction
+                role: "user",
+                parts: [
+                  {
+                    text: cleanText,
+                    speechMetadata: {
+                      style: styleInstruction
+                    }
+                  }
+                ]
+              }
+            ] as any,
+            config: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: validVoice
+                  }
                 }
               }
-            ]
-          }
-        ] as any,
-        config: {
-          responseModalities: ["AUDIO"],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: validVoice
-              }
             }
-          }
-        }
-      });
+          });
 
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (base64Audio) {
-        return res.json({
-          success: true,
-          audioBase64: base64Audio,
-          mimeType: "audio/wav",
-          voiceUsed: validVoice,
-          cleanedText: cleanText
-        });
+          const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+          if (base64Audio) {
+            console.log(`[AI Tutor TTS] Synthesized with ${ttsModel}`);
+            return res.json({
+              success: true,
+              audioBase64: base64Audio,
+              mimeType: "audio/wav",
+              voiceUsed: validVoice,
+              cleanedText: cleanText
+            });
+          }
+        } catch (modelErr: any) {
+          lastErr = modelErr;
+          if (isQuotaOrRateLimitError(modelErr)) {
+            recordModelQuotaCooldown(ttsModel, modelErr);
+          }
+          console.log(`[AI Tutor TTS] ${ttsModel} fallback notice (${summarizeModelError(modelErr)})`);
+        }
+      }
+
+      if (lastErr) {
+        console.log(`[AI Tutor TTS] Switching to client speech synthesis (${summarizeModelError(lastErr)})`);
       }
 
       return res.json({
         success: false,
         fallbackToBrowser: true,
-        message: "No audio data returned from Gemini TTS."
+        message: "TTS synthesis switched to browser speech."
       });
     } catch (ttsErr: any) {
       if (isQuotaOrRateLimitError(ttsErr)) {
-        recordModelQuotaCooldown("gemini-3.8-flash-lite-tts", ttsErr);
+        recordModelQuotaCooldown("gemini-3.8-flash-tts", ttsErr);
       }
       console.log(`[AI Tutor TTS] Switching to client speech synthesis (${summarizeModelError(ttsErr)})`);
       return res.status(200).json({
@@ -3559,16 +4186,435 @@ ${citationGuideline}`;
     }
   }
 
-  // API Route: Dedicated Optical Character Recognition (OCR) for Camera-Scanned Study Notes
-  app.post("/api/ocr/scan-note", async (req, res) => {
+  // Helper: Smart low-latency Gemini Vision runner with instant failover on error and 2.2s hedged backup
+  async function runFastLensVisionRace(
+    ai: GoogleGenAI,
+    contents: any,
+    config?: Record<string, any>,
+    perModelTimeoutMs = 15000
+  ): Promise<string> {
+    const preferred = ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"];
+    const candidates = getAvailableCandidateModels(preferred);
+    let settled = false;
+
+    // Trigger next model immediately if the previous model errors out, or after 2200ms if still pending
+    const wakeTriggerFns: Array<() => void> = [];
+
+    const tasks = candidates.map((modelName, idx) => {
+      return new Promise<string>(async (resolve, reject) => {
+        if (idx > 0) {
+          await new Promise<void>((wake) => {
+            wakeTriggerFns[idx] = wake;
+            setTimeout(wake, idx * 2200);
+          });
+          if (settled) {
+            reject(new Error("Already settled by faster model"));
+            return;
+          }
+        }
+
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        try {
+          const isHydrogen = modelName === "gemini-4-hydrogen";
+          const modelConfig: Record<string, any> = { ...(config || {}) };
+          if (isHydrogen) {
+            delete modelConfig.temperature;
+            modelConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+          } else {
+            modelConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
+          }
+
+          const normalizedContents = Array.isArray(contents) && contents[0] && !contents[0].role && !contents[0].parts
+            ? { parts: contents }
+            : contents;
+
+          const genPromise = ai.models.generateContent({
+            model: modelName,
+            contents: normalizedContents,
+            config: modelConfig
+          });
+
+          const timeoutPromise = new Promise<never>((_, rej) => {
+            timer = setTimeout(
+              () => rej(new Error(`Lens model ${modelName} timed out after ${perModelTimeoutMs}ms`)),
+              perModelTimeoutMs
+            );
+          });
+
+          const resp: any = await Promise.race([genPromise, timeoutPromise]);
+          if (timer) clearTimeout(timer);
+
+          const text = String(resp?.text || "").trim();
+          if (!text) {
+            wakeTriggerFns[idx + 1]?.();
+            reject(new Error(`Empty response from ${modelName}`));
+            return;
+          }
+          settled = true;
+          resolve(text);
+        } catch (err: any) {
+          if (timer) clearTimeout(timer);
+          if (isAuthOrInvalidApiKeyError(err)) {
+            settled = true;
+            // Wake pending tasks immediately so Promise.any resolves/rejects without waiting
+            for (let j = idx + 1; j < candidates.length; j++) {
+              wakeTriggerFns[j]?.();
+            }
+            reject(err);
+            return;
+          }
+          if (isTransientOrUnavailableModelError(err)) {
+            recordModelQuotaCooldown(modelName, err);
+          }
+          // Immediately wake the next backup model with zero delay
+          wakeTriggerFns[idx + 1]?.();
+          reject(err);
+        }
+      });
+    });
+
+    return Promise.any(tasks);
+  }
+
+  // Bounded server-side OCR deduplication cache to avoid re-processing identical scans
+  const ocrScanDedupCache = new Map<string, { timestamp: number; payload: any }>();
+  const SUPPORTED_SCAN_MIMES = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/bmp",
+    "image/svg+xml",
+    "image/heic",
+    "image/heif"
+  ]);
+
+  // API Route: Dedicated Optical Character Recognition (OCR) for Camera-Scanned Study Notes (Single & Multi-Page)
+  app.post(["/api/ocr/scan-note", "/api/ocr/scan-note/"], async (req, res) => {
+    const { fileBase64, fileMimeType, name, pagesBase64 } = req.body || {};
+    const defaultTitle = cleanNotebookLMTitle(name || "Scanned Study Notes", "", "image");
+
     try {
-      const { fileBase64, fileMimeType, name } = req.body || {};
-      if (!fileBase64) {
+      const rawPages: Array<{ fileBase64: string; fileMimeType?: string; pageNumber: number }> =
+        Array.isArray(pagesBase64) && pagesBase64.length > 0
+          ? pagesBase64.map((p: any, idx: number) => ({
+              fileBase64: String(p?.fileBase64 || ""),
+              fileMimeType: p?.fileMimeType || fileMimeType,
+              pageNumber: typeof p?.pageNumber === "number" ? p.pageNumber : idx + 1
+            }))
+          : fileBase64
+          ? [{ fileBase64: String(fileBase64), fileMimeType, pageNumber: 1 }]
+          : [];
+
+      if (rawPages.length === 0) {
         res.status(400).json({ error: "Scanned image base64 data is required." });
         return;
       }
 
-      let cleanBase64 = String(fileBase64);
+      if (rawPages.length > 15) {
+        res.status(400).json({ error: "A maximum of 15 pages can be scanned in a single batch." });
+        return;
+      }
+
+      const normalizedPages: Array<{ cleanBase64: string; mimeType: string; pageNumber: number }> = [];
+      for (const page of rawPages) {
+        let cleanB64 = String(page.fileBase64 || "");
+        let detectedMime = "";
+        if (cleanB64.includes(";base64,")) {
+          const [prefix, b64] = cleanB64.split(";base64,");
+          if (prefix && prefix.startsWith("data:")) {
+            detectedMime = prefix.slice(5).trim().toLowerCase();
+          }
+          cleanB64 = b64 || "";
+        }
+        cleanB64 = cleanB64.replace(/[\r\n\s]/g, "");
+
+        if (!cleanB64 || cleanB64.length < 32) {
+          res.status(400).json({
+            error: `Page ${page.pageNumber} is empty or corrupted. Please provide a valid image scan.`
+          });
+          return;
+        }
+
+        // Validate base64 characters & size (~20MB max per page)
+        if (cleanB64.length > 28_000_000) {
+          res.status(413).json({
+            error: `Page ${page.pageNumber} exceeds the 20MB maximum file size limit. Please upload a smaller or compressed scan.`
+          });
+          return;
+        }
+        if (!/^[A-Za-z0-9+/=]+$/.test(cleanB64.slice(0, 256))) {
+          res.status(400).json({
+            error: `Page ${page.pageNumber} contains corrupted or invalid image encoding.`
+          });
+          return;
+        }
+
+        let normMime = String(page.fileMimeType || detectedMime || "image/jpeg").toLowerCase().trim();
+        if (normMime === "image/jpg" || normMime === "image/pjpeg" || normMime === "image/jfif") {
+          normMime = "image/jpeg";
+        }
+
+        if (!SUPPORTED_SCAN_MIMES.has(normMime)) {
+          res.status(415).json({
+            error: `Unsupported file format "${normMime}". Supported image formats: JPEG, PNG, WEBP, GIF, BMP, SVG, and HEIC.`
+          });
+          return;
+        }
+
+        normalizedPages.push({
+          cleanBase64: cleanB64,
+          mimeType: normMime,
+          pageNumber: page.pageNumber
+        });
+      }
+
+      // Sort pages in ascending pageNumber order
+      normalizedPages.sort((a, b) => a.pageNumber - b.pageNumber);
+
+      // Deduplication fingerprint across all pages in this scan request
+      const dedupKey = normalizedPages
+        .map((p) => `${p.pageNumber}:${p.mimeType}:${p.cleanBase64.length}:${p.cleanBase64.slice(0, 64)}:${p.cleanBase64.slice(-64)}`)
+        .join("|");
+      const cachedScan = ocrScanDedupCache.get(dedupKey);
+      if (cachedScan && Date.now() - cachedScan.timestamp < 5 * 60 * 1000) {
+        res.json({ ...cachedScan.payload, deduplicated: true });
+        return;
+      }
+
+      const apiKey = getGeminiApiKey();
+
+      if (!apiKey) {
+        console.error("[OCR Endpoint] API key is not configured.");
+        res.status(503).json({
+          error: "Something went wrong. There is a server error. Please try again."
+        });
+        return;
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        apiVersion: "v1beta",
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build"
+          }
+        }
+      });
+
+      const isMultiPage = normalizedPages.length > 1;
+      const fastOcrPrompt = `You are StudyWeb's Scan Notes AI Assistant.
+Carefully inspect ${isMultiPage ? `these ${normalizedPages.length} scanned pages in order` : "this scanned educational page"} and extract ALL visible printed and handwritten text, headings, subheadings, lists, numbered points, tables, diagram labels/captions, and mathematical/scientific formulas in the original language.
+
+STRICT SCAN NOTES EXTRACTION RULES:
+1. Preserve the original meaning, language, mathematical expressions, formulas, symbols, units, and scientific notation accurately.
+2. Do NOT guess or fabricate unreadable handwriting. Mark any unreadable words or sections clearly as [Unclear text].
+3. Never alter numerical values or silently rewrite scientific/mathematical statements.
+4. ${isMultiPage ? "Preserve page boundaries explicitly using '--- Page 1 ---', '--- Page 2 ---', etc. in the exact page order." : "Preserve headings, bullet points, tables, and step order."}
+5. If the image is completely blank, empty, or contains zero readable text/diagrams/equations, output EXACTLY the single token: [EMPTY_OR_UNREADABLE_IMAGE]
+
+Output format (when readable content is present):
+# <Concise 3 to 6 word topic title reflecting the actual content>
+Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions, and formulas on the page without introducing unsupported information>
+
+<Full organized verbatim transcription of the scanned notes>`;
+
+      const visionParts: any[] = [{ text: fastOcrPrompt }];
+      for (const p of normalizedPages) {
+        if (isMultiPage) {
+          visionParts.push({ text: `Page ${p.pageNumber}:` });
+        }
+        visionParts.push({
+          inlineData: {
+            data: p.cleanBase64,
+            mimeType: p.mimeType
+          }
+        });
+      }
+
+      let rawMarkdown = "";
+      try {
+        rawMarkdown = await runFastLensVisionRace(
+          ai,
+          { parts: visionParts },
+          {},
+          18000
+        );
+      } catch (raceErr: any) {
+        if (isAuthOrInvalidApiKeyError(raceErr)) {
+          console.error("[OCR Endpoint] API key invalid or unauthorized:", summarizeModelError(raceErr));
+          res.status(401).json({
+            error: "Something went wrong. There is a server error. Please try again."
+          });
+          return;
+        }
+        console.warn("[OCR Endpoint] Fast race notice:", summarizeModelError(raceErr));
+      }
+
+      if (rawMarkdown) {
+        const cleaned = rawMarkdown
+          .replace(/^```(?:markdown|md|text)?\n?/i, "")
+          .replace(/\n?```$/, "")
+          .trim();
+
+        if (
+          cleaned.includes("[EMPTY_OR_UNREADABLE_IMAGE]") ||
+          cleaned.replace(/[^a-zA-Z0-9]/g, "").length < 3
+        ) {
+          console.warn("[OCR Endpoint] Image had no readable text or was empty.");
+          res.status(422).json({
+            error: "Something went wrong. There is a server error. Please try again."
+          });
+          return;
+        }
+
+        const lines = cleaned.split(/\r?\n/);
+
+        let extractedTitle = defaultTitle;
+        let extractedSummary = "";
+        const bodyLines: string[] = [];
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (i === 0 && line.startsWith("#")) {
+            const candidate = line.replace(/^#+\s*/, "").trim();
+            if (candidate.length >= 2 && candidate.length <= 90) {
+              extractedTitle = candidate;
+              continue;
+            }
+          }
+          if (!extractedSummary && /^(\*\*summary\*\*|summary)\s*:/i.test(line)) {
+            extractedSummary = line.replace(/^(\*\*summary\*\*|summary)\s*:\s*/i, "").trim();
+            continue;
+          }
+          bodyLines.push(lines[i]);
+        }
+
+        const verbatimBody = bodyLines.join("\n").trim() || cleaned;
+        const cleanTitle = cleanNotebookLMTitle(extractedTitle || defaultTitle, "", "image");
+        if (!extractedSummary) {
+          const firstSentence = verbatimBody
+            .replace(/^#+\s+/gm, "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 180);
+          extractedSummary = firstSentence || `Scanned study notes on ${cleanTitle}.`;
+        }
+
+        const nonEmptyLines = verbatimBody
+          .split(/\r?\n/)
+          .map((l) => l.replace(/^[-*•\d.)#]+\s*/, "").trim())
+          .filter((l) => l.length > 8);
+
+        const highlights = nonEmptyLines.slice(0, 5);
+        const formulas = nonEmptyLines
+          .filter((l) => /[=+\-*/^]|\\frac|\\sqrt|→|⇌/.test(l) && l.length < 140)
+          .slice(0, 6);
+
+        const formattedDocument = [
+          `# ${cleanTitle}`,
+          extractedSummary ? `\n## Summary\n${extractedSummary}` : "",
+          `\n## Verbatim Scanned Notes (OCR)\n${verbatimBody}`
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        const responsePayload = {
+          title: cleanTitle,
+          extractedText: formattedDocument,
+          rawOcrText: verbatimBody,
+          summary: extractedSummary,
+          highlights,
+          formulas,
+          pageCount: normalizedPages.length,
+          hasUnclearText: verbatimBody.includes("[Unclear text]"),
+          tags: [cleanTitle.split(" ").slice(0, 2).join(" ") || "Scanned Note", "OCR"]
+        };
+
+        if (ocrScanDedupCache.size > 100) {
+          const firstKey = ocrScanDedupCache.keys().next().value;
+          if (firstKey) ocrScanDedupCache.delete(firstKey);
+        }
+        ocrScanDedupCache.set(dedupKey, { timestamp: Date.now(), payload: responsePayload });
+
+        res.json(responsePayload);
+        return;
+      }
+
+      console.error("[OCR Endpoint] OCR extraction failed to return markdown.");
+      res.status(422).json({
+        error: "Something went wrong. There is a server error. Please try again."
+      });
+    } catch (error: any) {
+      console.error("[OCR Endpoint Error] /api/ocr/scan-note error:", summarizeModelError(error));
+      if (isAuthOrInvalidApiKeyError(error)) {
+        res.status(401).json({
+          error: "Something went wrong. There is a server error. Please try again."
+        });
+        return;
+      }
+      res.status(500).json({
+        error: "Something went wrong. There is a server error. Please try again."
+      });
+    }
+  });
+
+  // API Route: Scan Notes AI Assistant — Supports all 10 Scan Notes Operations + Homework Solver + Translator
+  app.post(["/api/ocr/lens-ask", "/api/ocr/lens-ask/"], async (req, res) => {
+    try {
+      const {
+        fileBase64,
+        fileMimeType,
+        imageUrl,
+        extractedText,
+        question,
+        mode = "ask",
+        targetLanguage = "English",
+        history = []
+      } = req.body || {};
+
+      const trimmedText = String(extractedText || "").trim();
+      if (!fileBase64 && !trimmedText && !imageUrl) {
+        res.status(400).json({
+          error: "A scanned image or extracted note text is required to answer or generate content."
+        });
+        return;
+      }
+
+      const operation = detectScanNotesOperationFromQuestion(mode, question);
+      const userQuestion = String(question || "").trim();
+
+      if (operation === "ask" && !userQuestion) {
+        res.status(400).json({ error: "Please enter a question about your scanned note." });
+        return;
+      }
+
+      const apiKey = getGeminiApiKey();
+      const buildFallbackLensAnswer = (op: string, textCtx: string): string => {
+        if (op === "short_summary" && textCtx) {
+          const plain = textCtx
+            .replace(/^#{1,6}\s+[^\n]*\n+/gm, "")
+            .replace(/\s+/g, " ")
+            .trim();
+          const sentences = plain.split(/(?<=[.!?])\s+/).filter(Boolean);
+          const concise = sentences.slice(0, 2).join(" ") || plain.slice(0, 220);
+          return concise.length > 220 ? `${concise.slice(0, 217)}...` : concise;
+        }
+        return textCtx
+          ? `Here is the extracted content from your scan:\n\n${textCtx}`
+          : "Something went wrong. There is a server error. Please try again.";
+      };
+
+      if (!apiKey) {
+        console.error("[Lens Ask Endpoint] API key is not configured.");
+        res.json({
+          answer: buildFallbackLensAnswer(operation, trimmedText),
+          mode: operation
+        });
+        return;
+      }
+
+      let cleanBase64 = fileBase64 ? String(fileBase64) : "";
       if (cleanBase64.includes(";base64,")) {
         cleanBase64 = cleanBase64.split(";base64,")[1];
       }
@@ -3579,23 +4625,33 @@ ${citationGuideline}`;
         normalizedMime = "image/jpeg";
       }
 
-      const defaultTitle = name || "Scanned Study Notes";
-      const apiKey = getGeminiApiKey();
-
-      if (!apiKey) {
-        res.json({
-          title: defaultTitle,
-          extractedText: `Scanned study note "${defaultTitle}".`,
-          summary: `Scanned study note "${defaultTitle}" uploaded for AI Tutor inspection.`,
-          highlights: [`Primary resource: ${defaultTitle}`],
-          formulas: [],
-          tags: ["Scanned Note", "OCR"]
-        });
-        return;
+      // If no inline base64 was supplied but a remote image URL was passed, fetch it once on the server
+      if (!cleanBase64 && imageUrl && String(imageUrl).startsWith("http")) {
+        try {
+          const imgRes = await fetch(String(imageUrl), { signal: AbortSignal.timeout(5000) });
+          if (imgRes.ok) {
+            const buf = Buffer.from(await imgRes.arrayBuffer());
+            if (buf.length > 0 && buf.length < 6 * 1024 * 1024) {
+              cleanBase64 = buf.toString("base64");
+              const contentType = imgRes.headers.get("content-type");
+              if (contentType && contentType.startsWith("image/")) {
+                normalizedMime = contentType.split(";")[0].trim();
+              }
+            }
+          }
+        } catch {}
       }
+
+      const fullPrompt = buildScanNotesSystemPrompt(operation, {
+        userQuestion,
+        targetLanguage,
+        extractedText: trimmedText,
+        conversationHistory: Array.isArray(history) ? history : []
+      });
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build"
@@ -3603,118 +4659,73 @@ ${citationGuideline}`;
         }
       });
 
-      const ocrPrompt = `You are a high-precision academic Optical Character Recognition (OCR) and study note parser.
-Carefully inspect this scanned study note image ("${defaultTitle}") and extract ALL visible handwritten and printed text word-for-word.
+      const contentParts: any[] = [{ text: fullPrompt }];
+      const hasRealOcrText =
+        trimmedText.length > 45 &&
+        !trimmedText.includes("Ask any question about this image in Ask & Solve") &&
+        !trimmedText.includes("Scanned study note ready");
+      const questionNeedsVisualInspection =
+        operation === "extract_text" ||
+        operation === "formulas" ||
+        /diagram|graph|chart|figure|image|picture|drawing|arrow|color|label|table/i.test(userQuestion);
 
-Instructions:
-1. "extractedText": Transcribe the complete, verbatim text from the image accurately. Preserve headings, bullet points, numbered lists, definitions, diagram labels, tables, and mathematical equations in clean Markdown format so the AI Tutor can answer any question directly from this text.
-2. "title": A concise, clear academic title (3 to 7 words) reflecting the actual topic or heading written on the scanned note.
-3. "summary": A clear, comprehensive summary explaining the core concepts and subject matter covered in the scanned note.
-4. "highlights": 4 to 6 key facts, definitions, or takeaways extracted directly from the scanned note.
-5. "formulas": Any mathematical, physics, chemistry, or scientific equations/formulas visible in the note (empty array if none).
-6. "tags": 3 to 5 specific subject/topic tags.`;
-
-      const ocrSchema = {
-        type: Type.OBJECT,
-        properties: {
-          title: { type: Type.STRING },
-          extractedText: { type: Type.STRING },
-          summary: { type: Type.STRING },
-          highlights: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING }
-          },
-          formulas: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING }
-          },
-          tags: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING }
+      if (cleanBase64 && (!hasRealOcrText || questionNeedsVisualInspection)) {
+        contentParts.push({
+          inlineData: {
+            data: cleanBase64,
+            mimeType: normalizedMime
           }
-        },
-        required: ["title", "extractedText", "summary", "highlights", "tags"]
-      };
-
-      const candidateModels = [
-        "gemini-3.8-flash",
-        "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite-preview"
-      ];
-
-      let response: any = null;
-      for (const modelName of candidateModels) {
-        try {
-          const isGemini38 = modelName === "gemini-3.8-flash";
-          response = await ai.models.generateContent({
-            model: modelName,
-            contents: [
-              { text: ocrPrompt },
-              {
-                inlineData: {
-                  data: cleanBase64,
-                  mimeType: normalizedMime
-                }
-              }
-            ],
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: ocrSchema,
-              thinkingConfig: {
-                thinkingLevel: isGemini38 ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL
-              }
-            }
-          });
-          if (response && response.text) break;
-        } catch (modelErr: any) {
-          console.warn(`[OCR Endpoint] Model ${modelName} fallback:`, modelErr?.message || modelErr);
-        }
+        });
       }
 
-      if (response && response.text) {
-        let rawText = response.text.trim();
-        if (rawText.startsWith("```")) {
-          rawText = rawText.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/, "").trim();
+      let answerText = "";
+      try {
+        answerText = await runFastLensVisionRace(ai, contentParts, {}, 12000);
+      } catch (raceErr: any) {
+        if (isAuthOrInvalidApiKeyError(raceErr)) {
+          throw raceErr;
         }
-        const parsed = JSON.parse(rawText);
-        const cleanTitle = cleanNotebookLMTitle(parsed.title || defaultTitle, "", "image");
-        const formattedDocument = [
-          `# ${cleanTitle}`,
-          parsed.summary ? `\n## Summary\n${parsed.summary}` : "",
-          parsed.extractedText ? `\n## Verbatim Scanned Notes (OCR)\n${parsed.extractedText}` : "",
-          Array.isArray(parsed.highlights) && parsed.highlights.length > 0
-            ? `\n## Key Highlights\n${parsed.highlights.map((h: string) => `- ${h}`).join("\n")}`
-            : "",
-          Array.isArray(parsed.formulas) && parsed.formulas.length > 0
-            ? `\n## Formulas & Equations\n${parsed.formulas.map((f: string) => `- ${f}`).join("\n")}`
-            : ""
-        ]
-          .filter(Boolean)
-          .join("\n");
+        const fallback = await generateContentWithModelFailover(ai, {
+          contents: contentParts,
+          preferredModels: ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-4-hydrogen"],
+          timeoutMs: 12000,
+          maxPasses: 2,
+          label: "LensAskFallback"
+        });
+        answerText = String(fallback?.response?.text || "").trim();
+      }
 
+      if (answerText) {
         res.json({
-          title: cleanTitle,
-          extractedText: formattedDocument,
-          rawOcrText: parsed.extractedText || "",
-          summary: parsed.summary || `Scanned notes on ${cleanTitle}.`,
-          highlights: Array.isArray(parsed.highlights) ? parsed.highlights : [],
-          formulas: Array.isArray(parsed.formulas) ? parsed.formulas : [],
-          tags: Array.isArray(parsed.tags) && parsed.tags.length > 0 ? parsed.tags : ["Scanned Note", "OCR"]
+          answer: answerText,
+          mode: operation
         });
         return;
       }
 
       res.json({
-        title: defaultTitle,
-        extractedText: `Scanned study note "${defaultTitle}".`,
-        summary: `Scanned study note "${defaultTitle}" ready for AI Tutor analysis.`,
-        highlights: [`Primary resource: ${defaultTitle}`],
-        formulas: [],
-        tags: ["Scanned Note", "OCR"]
+        answer: buildFallbackLensAnswer(operation, trimmedText),
+        mode: operation
       });
     } catch (error: any) {
-      console.error("[OCR Endpoint Error] /api/ocr/scan-note:", error?.message || error);
-      res.status(500).json({ error: "Failed to run OCR on scanned note", details: error?.message });
+      const normalizedMode = String(req.body?.mode || "ask").toLowerCase().trim();
+      const trimmedText = String(req.body?.extractedText || "").trim();
+      console.error("[Lens Ask Endpoint Error] /api/ocr/lens-ask:", summarizeModelError(error));
+      if (isAuthOrInvalidApiKeyError(error)) {
+        res.status(401).json({
+          error: "Something went wrong. There is a server error. Please try again.",
+          answer:
+            normalizedMode === "short_summary" && trimmedText
+              ? trimmedText.replace(/^#{1,6}\s+[^\n]*\n+/gm, "").replace(/\s+/g, " ").trim().slice(0, 220)
+              : "Something went wrong. There is a server error. Please try again.",
+          mode: normalizedMode
+        });
+        return;
+      }
+      res.json({
+        answer: "Something went wrong. There is a server error. Please try again.",
+        mode: normalizedMode
+      });
     }
   });
 
@@ -3805,7 +4816,7 @@ Instructions:
       const apiKey = getGeminiApiKey();
       if (apiKey) {
         try {
-          const ai = new GoogleGenAI({ apiKey });
+          const ai = new GoogleGenAI({ apiKey, apiVersion: 'v1beta', httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
           const analysisPrompt = `Analyze the following academic study material resource titled "${resolvedTitle}" of type "${resourceType}":
 URL: ${sourceUrl || 'N/A'}
 Content snippet: ${extractedContent.substring(0, 4000)}
@@ -3819,11 +4830,11 @@ Return a JSON object with:
   "transcription": "Detailed key topics or voice notes segment..."
 }`;
           const genMaterialPromise = ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-4-hydrogen',
             contents: analysisPrompt,
             config: {
               responseMimeType: 'application/json',
-              thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }
+              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
             }
           });
           const materialTimeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2800));
@@ -3874,7 +4885,7 @@ Return a JSON object with:
       });
     } catch (error: any) {
       console.error("Error in /api/study-materials/process:", error);
-      res.status(500).json({ error: "Failed to process study material", details: error.message });
+      res.status(500).json({ error: "Something went wrong. There is a server error. Please try again." });
     }
   });
 
@@ -3964,6 +4975,7 @@ You must return a JSON object with the following schema:
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build",
@@ -4066,13 +5078,19 @@ Return a valid JSON object matching the requested schema.`
       }
 
       let response: any = null;
-      const candidateModels = ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"];
+      const candidateModels = ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"];
       for (const m of candidateModels) {
         try {
+          const isHydrogen = m === "gemini-4-hydrogen";
+          const modelConfig = {
+            ...config,
+            ...(isHydrogen ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : { temperature: 0.2, thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } })
+          };
+          if (isHydrogen) delete modelConfig.temperature;
           response = await ai.models.generateContent({
             model: m,
             contents: contents,
-            config: config
+            config: modelConfig
           });
           if (response && response.text) break;
         } catch (modelErr: any) {
@@ -4178,268 +5196,595 @@ Return a valid JSON object matching the requested schema.`
     return result;
   }
 
-  // API Route: Generate Quiz from Notes & Resources using Gemini with structured JSON output schema
-  app.post("/api/generate-quiz", async (req, res) => {
-    try {
-      const { notes, files, count, difficulty, questionType, workspaceId } = req.body;
+  // Helper: Build local grounded analysis when upstream AI models are unreachable
+  function buildLocalQuizMaterialAnalysis(
+    files: any[] = [],
+    notes: any[] = [],
+    internetSources: any[] = [],
+    internetTopic: string = ""
+  ) {
+    const detectedTopics: string[] = [];
+    const keyConcepts: string[] = [];
 
-      const hasNotes = notes && notes.length > 0;
-      const hasFiles = files && files.length > 0;
-
-      if (!hasNotes && !hasFiles) {
-        res.status(400).json({ error: "No study notes or resource files were found in the active workspace. Please add notes or resources first." });
-        return;
+    for (const f of files.slice(0, 10)) {
+      if (f?.name) detectedTopics.push(String(f.name).replace(/\.[^/.]+$/, "").replace(/[_-]+/g, " "));
+      if (Array.isArray(f?.tags)) {
+        f.tags.slice(0, 3).forEach((t: any) => t && detectedTopics.push(String(t)));
       }
+      if (Array.isArray(f?.highlights)) {
+        f.highlights.slice(0, 2).forEach((h: any) => h && keyConcepts.push(String(h).slice(0, 140)));
+      }
+    }
+    for (const n of notes.slice(0, 8)) {
+      if (n?.title) detectedTopics.push(String(n.title));
+    }
+    for (const src of internetSources.slice(0, 6)) {
+      if (src?.name) detectedTopics.push(String(src.name));
+      if (Array.isArray(src?.highlights)) {
+        src.highlights.slice(0, 2).forEach((h: any) => h && keyConcepts.push(String(h).slice(0, 140)));
+      }
+    }
+    if (internetTopic && !detectedTopics.includes(internetTopic)) {
+      detectedTopics.unshift(internetTopic);
+    }
 
-      const questionCount = count || 5;
-      const diffLevel = difficulty || "Medium";
-      const qType = questionType || "MCQ"; // MCQ, TF, FillBlank
+    const uniqueTopics = Array.from(new Set(detectedTopics.filter(Boolean))).slice(0, 8);
+    const uniqueConcepts = Array.from(new Set(keyConcepts.filter(Boolean))).slice(0, 6);
+    const sourceCount = files.length + notes.length + internetSources.length;
 
-      let typeInstruction = "";
-      if (qType === "TF") {
-        typeInstruction = "The quiz MUST consist ONLY of True/False questions (2 options: 'True' or 'False'). correctIndex must be 0 for True or 1 for False.";
-      } else if (qType === "FillBlank") {
-        typeInstruction = "The quiz MUST consist ONLY of Fill in the Blank questions, where the question has a blank space like '_______'. The options array MUST contain exactly 1 element which is the exact correct string answer, and correctIndex MUST be 0.";
+    return {
+      summary: internetTopic
+        ? `Analyzed ${sourceCount || 1} web source(s) covering "${internetTopic}" and identified key study concepts for assessment.`
+        : `Analyzed ${sourceCount} selected study material(s) (${files.length} file(s), ${notes.length} note(s)) and identified core testable topics.`,
+      detectedTopics: uniqueTopics.length > 0 ? uniqueTopics : ["Core Concepts", "Key Terminology"],
+      keyConcepts:
+        uniqueConcepts.length > 0
+          ? uniqueConcepts
+          : uniqueTopics.map((t) => `Foundational principles and applications of ${t}.`),
+      recommendedQuestionCount: sourceCount >= 3 ? 10 : 5
+    };
+  }
+
+  // Helper: Local resilient fallback quiz generator so users never receive a hard failure
+  function buildFallbackQuizQuestions(
+    files: any[] = [],
+    notes: any[] = [],
+    internetSources: any[] = [],
+    internetTopic: string = "",
+    questionCount: number = 5,
+    diffLevel: string = "Medium",
+    qType: string = "MCQ"
+  ) {
+    const facts: Array<{ term: string; detail: string; topic: string }> = [];
+
+    const extractFromText = (text: string, topicName: string) => {
+      const cleaned = String(text || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      if (!cleaned) return;
+      const sentences = cleaned.split(/(?<=[.!?])\s+/).filter((s) => s.length > 25 && s.length < 220);
+      for (const s of sentences.slice(0, 8)) {
+        const defMatch = s.match(/^([A-Z][A-Za-z0-9\s-]{2,40}?)\s+(?:is|are|refers to|means|represents|describes)\s+(.+)$/);
+        if (defMatch) {
+          facts.push({ term: defMatch[1].trim(), detail: defMatch[2].trim(), topic: topicName });
+        } else {
+          const words = s.split(" ").filter((w) => w.length > 4);
+          const candidateTerm = (words[0] || topicName).replace(/[^A-Za-z0-9-]/g, "");
+          if (candidateTerm) {
+            facts.push({ term: candidateTerm, detail: s, topic: topicName });
+          }
+        }
+      }
+    };
+
+    files.forEach((f: any) => {
+      const tName = String(f?.name || "Study Material").replace(/\.[^/.]+$/, "");
+      if (f?.summary) extractFromText(f.summary, tName);
+      if (f?.transcription || f?.contentText) extractFromText(f.transcription || f.contentText, tName);
+      if (Array.isArray(f?.highlights)) {
+        f.highlights.forEach((h: any) => extractFromText(String(h), tName));
+      }
+    });
+    notes.forEach((n: any) => extractFromText(n?.content || "", n?.title || "Study Note"));
+    internetSources.forEach((s: any) => {
+      extractFromText(s?.summary || "", s?.name || internetTopic || "Web Resource");
+      extractFromText(s?.transcription || "", s?.name || internetTopic || "Web Resource");
+    });
+
+    if (facts.length === 0) {
+      const baseTopic = internetTopic || files[0]?.name || notes[0]?.title || "Study Concepts";
+      facts.push(
+        { term: baseTopic, detail: `Core principles and real-world applications of ${baseTopic}`, topic: baseTopic },
+        { term: "Active Recall", detail: "Testing memory retrieval from study material without passive rereading", topic: baseTopic },
+        { term: "Conceptual Synthesis", detail: "Connecting definitions, mechanisms, and cause-and-effect relationships", topic: baseTopic },
+        { term: "Problem Analysis", detail: "Breaking complex ideas into verifiable steps and principles", topic: baseTopic }
+      );
+    }
+
+    const questions: any[] = [];
+    for (let i = 0; i < questionCount; i++) {
+      const fact = facts[i % facts.length];
+      if (qType === "FillBlank") {
+        questions.push({
+          id: `ai-quiz-${Date.now()}-${i}`,
+          question: `In ${fact.topic}, _______ refers to: ${fact.detail.replace(new RegExp(fact.term, "gi"), "_______")}`,
+          options: [fact.term],
+          acceptedAnswers: [fact.term, fact.term.toLowerCase()],
+          correctIndex: 0,
+          explanation: `"${fact.term}" matches the concept described: ${fact.detail}`,
+          difficulty: diffLevel,
+          type: "FillBlank",
+          topic: fact.topic
+        });
+      } else if (qType === "MatchFollowing") {
+        const pairSlice: Array<{ id: string; left: string; right: string }> = [];
+        for (let p = 0; p < 4; p++) {
+          const item = facts[(i + p) % facts.length];
+          pairSlice.push({
+            id: `pair-${i}-${p}`,
+            left: item.term,
+            right: item.detail.slice(0, 110)
+          });
+        }
+        questions.push({
+          id: `ai-quiz-${Date.now()}-${i}`,
+          question: `Match each concept from ${fact.topic} with its accurate description:`,
+          options: [],
+          pairs: pairSlice,
+          correctIndex: 0,
+          explanation: pairSlice.map((p) => `${p.left} -> ${p.right}`).join("; "),
+          difficulty: diffLevel,
+          type: "MatchFollowing",
+          topic: fact.topic
+        });
+      } else if (qType === "TF") {
+        questions.push({
+          id: `ai-quiz-${Date.now()}-${i}`,
+          question: `True or False: Regarding ${fact.topic}, ${fact.term} relates directly to ${fact.detail}.`,
+          options: ["True", "False"],
+          correctIndex: 0,
+          explanation: `This statement accurately reflects the concept of ${fact.term} in ${fact.topic}.`,
+          difficulty: diffLevel,
+          type: "TF",
+          topic: fact.topic
+        });
       } else {
-        typeInstruction = "The quiz MUST consist of standard multiple-choice questions (MCQ) with exactly 4 distinct options.";
+        const otherFacts = facts.filter((_, idx) => idx !== i % facts.length);
+        const distractors = [
+          otherFacts[0]?.term || "Unrelated baseline constant",
+          otherFacts[1]?.term || "Secondary observation hypothesis",
+          otherFacts[2]?.term || "Passive retention effect"
+        ];
+        const allOpts = [fact.term, ...distractors.slice(0, 3)];
+        const shift = i % 4;
+        const rotated = allOpts.map((_, idx) => allOpts[(idx - shift + 4) % 4]);
+        const correctIdx = rotated.indexOf(fact.term);
+        questions.push({
+          id: `ai-quiz-${Date.now()}-${i}`,
+          question: `Which concept in "${fact.topic}" best matches: ${fact.detail}?`,
+          options: rotated,
+          correctIndex: correctIdx >= 0 ? correctIdx : 0,
+          explanation: `${fact.term} directly represents this concept: ${fact.detail}.`,
+          difficulty: diffLevel,
+          type: "MCQ",
+          topic: fact.topic
+        });
       }
+    }
+    return questions;
+  }
 
-      const systemInstruction = `You are an expert educator and academic tutor.
-Your task is to generate a comprehensive practice quiz based strictly on the provided study notes and/or indexed study resource materials.
-Generate EXACTLY ${questionCount} questions matching the difficulty level: "${diffLevel}". YOU MUST NOT GENERATE MORE THAN ${questionCount} QUESTIONS.
+  // API Route: Analyze selected uploaded materials or internet sources prior to quiz generation
+  app.post("/api/analyze-quiz-materials", async (req, res) => {
+    try {
+      const { files = [], notes = [], internetTopic = "", internetSources = [], workspaceId } = req.body || {};
+      const apiKey = getGeminiApiKey();
 
-${typeInstruction}
-
-Each question MUST:
-1. Be challenging and directly test understanding of the material in the provided context (notes and/or resources).
-2. Have options set to an array of choices (exactly 4 options for MCQ, exactly 2 options ['True', 'False'] for TF, exactly 1 correct text option for FillBlank).
-3. Have a correctIndex pointing to the correct option in the options array.
-4. Provide a detailed, encouraging, and highly educational explanation for why the correct answer is right and why other options are incorrect.
-5. Have difficulty set to "${diffLevel}".
-6. Have type set to "${qType}".
-
-Strictly return a JSON object containing a "questions" array matching the requested schema.`;
-
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
-        console.warn("GEMINI_API_KEY not configured. Using high-quality local generation fallback.");
-        const fallbackQuiz = generateFallbackQuiz(notes || [], files || [], questionCount, diffLevel, qType);
-        res.json({ questions: fallbackQuiz });
-        return;
+      if (!apiKey) {
+        return res.json(buildLocalQuizMaterialAnalysis(files, notes, internetSources, internetTopic));
       }
 
       const ai = new GoogleGenAI({
         apiKey,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build",
-          }
-        }
+        apiVersion: "v1beta",
+        httpOptions: { headers: { "User-Agent": "aistudio-build" } }
       });
 
-      const ragQuery = `Generate a ${diffLevel} difficulty ${qType} quiz containing ${questionCount} questions about the core concepts, topics, formulas, and definitions.`;
-      const contextText = await performAdvancedRAG(ai, ragQuery, files, notes, 15, workspaceId, req.headers.authorization);
+      const fileContext = (Array.isArray(files) ? files : [])
+        .slice(0, 8)
+        .map((f: any, idx: number) => {
+          const textBody = String(f.transcription || f.contentText || f.content_text || f.summary || "").trim();
+          const hl = Array.isArray(f.highlights) ? f.highlights.join("; ") : "";
+          return `Material #${idx + 1} ("${f.name || "File"}", type: ${f.type || "doc"}):\n${textBody.slice(0, 5000)}${hl ? `\nHighlights: ${hl}` : ""}`;
+        })
+        .join("\n\n");
 
-      const prompt = `Generate a practice quiz with ${questionCount} questions of difficulty "${diffLevel}" and type "${qType}" from the following study materials and contextual references:\n\n${contextText}`;
+      const noteContext = (Array.isArray(notes) ? notes : [])
+        .slice(0, 8)
+        .map((n: any, idx: number) => `Note #${idx + 1} ("${n.title || "Note"}"):\n${String(n.content || "").replace(/<[^>]+>/g, " ").slice(0, 3000)}`)
+        .join("\n\n");
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
+      const webContext = (Array.isArray(internetSources) ? internetSources : [])
+        .slice(0, 6)
+        .map((s: any, idx: number) => `Web Source #${idx + 1} ("${s.name || s.title || "Source"}", ${s.url || ""}):\n${String(s.transcription || s.summary || "").slice(0, 4000)}`)
+        .join("\n\n");
+
+      const prompt = `Analyze the following study content carefully so the student knows exactly what topics and concepts will be tested before generating a quiz.${internetTopic ? `\nTarget Internet Topic: "${internetTopic}"` : ""}
+
+${fileContext ? `=== UPLOADED FILES ===\n${fileContext}\n` : ""}
+${noteContext ? `=== STUDY NOTES ===\n${noteContext}\n` : ""}
+${webContext ? `=== INTERNET SOURCES ===\n${webContext}\n` : ""}
+
+Return ONLY JSON matching this schema:
+- summary: Clear 2-3 sentence summary of what the selected materials/sources cover.
+- detectedTopics: 4 to 8 concise topic/chapter titles actually present in these materials.
+- keyConcepts: 4 to 6 key facts, definitions, or formulas ready for quiz questions.
+- recommendedQuestionCount: Recommended integer (5, 10, or 15).`;
+
+      const analysisParts: any[] = [{ text: prompt }];
+      for (const f of (Array.isArray(files) ? files : []).slice(0, 3)) {
+        let rawB64 = String(f.fileBase64 || "");
+        let mime = String(f.fileMimeType || "");
+        if (!rawB64 && typeof f.url === "string" && f.url.startsWith("data:") && f.url.includes(";base64,")) {
+          const m = f.url.match(/^data:([^;]+);base64,(.+)$/);
+          if (m) {
+            mime = mime || m[1];
+            rawB64 = m[2];
+          }
+        }
+        if (rawB64.includes(";base64,")) rawB64 = rawB64.split(";base64,")[1];
+        if (rawB64 && rawB64.length > 20 && rawB64.length < 8_000_000 && (mime.startsWith("image/") || mime === "application/pdf")) {
+          analysisParts.push({ inlineData: { data: rawB64, mimeType: mime } });
+        }
+      }
+
+      const { response } = await generateContentWithModelFailover(ai, {
+        contents: analysisParts,
+        preferredModels: ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"],
+        timeoutMs: 14000,
+        label: "AnalyzeQuizMaterials",
         config: {
-          systemInstruction,
-          temperature: 0.7,
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              questions: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    question: { type: Type.STRING },
-                    options: {
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING }
-                    },
-                    correctIndex: { type: Type.INTEGER },
-                    explanation: { type: Type.STRING },
-                    difficulty: { type: Type.STRING },
-                    type: { type: Type.STRING }
-                  },
-                  required: ["question", "options", "correctIndex", "explanation", "difficulty", "type"]
-                }
-              }
+              summary: { type: Type.STRING },
+              detectedTopics: { type: Type.ARRAY, items: { type: Type.STRING } },
+              keyConcepts: { type: Type.ARRAY, items: { type: Type.STRING } },
+              recommendedQuestionCount: { type: Type.INTEGER }
             },
-            required: ["questions"]
+            required: ["summary", "detectedTopics", "keyConcepts"]
           }
         }
+      });
+
+      let text = String(response?.text || "").trim();
+      if (text.startsWith("```")) {
+        text = text.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/, "").trim();
+      }
+      const parsed = JSON.parse(text);
+      return res.json({
+        summary: parsed.summary || "Materials analyzed and ready for quiz generation.",
+        detectedTopics: Array.isArray(parsed.detectedTopics) ? parsed.detectedTopics : [],
+        keyConcepts: Array.isArray(parsed.keyConcepts) ? parsed.keyConcepts : [],
+        recommendedQuestionCount: Number(parsed.recommendedQuestionCount) || 5,
+        workspaceId
+      });
+    } catch (err: any) {
+      console.warn("[Analyze Quiz Materials] Using local analysis fallback:", summarizeModelError(err));
+      const { files = [], notes = [], internetSources = [], internetTopic = "" } = req.body || {};
+      return res.json(buildLocalQuizMaterialAnalysis(files, notes, internetSources, internetTopic));
+    }
+  });
+
+  // API Route: Generate Quiz from Notes, Uploaded Resources, or Internet Resources using Gemini with multi-model failover
+  app.post("/api/generate-quiz", async (req, res) => {
+    try {
+      const {
+        notes = [],
+        files = [],
+        count,
+        difficulty,
+        questionType,
+        workspaceId,
+        internetTopic = "",
+        internetSources = [],
+        focusTopics = []
+      } = req.body || {};
+
+      const hasNotes = Array.isArray(notes) && notes.length > 0;
+      const hasFiles = Array.isArray(files) && files.length > 0;
+      const hasInternet = Boolean(String(internetTopic || "").trim()) || (Array.isArray(internetSources) && internetSources.length > 0);
+
+      if (!hasNotes && !hasFiles && !hasInternet) {
+        res.status(400).json({ error: "Please select uploaded study materials, notes, or search an internet topic first." });
+        return;
+      }
+
+      const questionCount = Math.min(25, Math.max(1, Number(count) || 5));
+      const diffLevel = (difficulty === "Easy" || difficulty === "Hard" ? difficulty : "Medium") as "Easy" | "Medium" | "Hard";
+      const rawType = String(questionType || "MCQ");
+      const qType: "MCQ" | "TF" | "FillBlank" | "MatchFollowing" =
+        rawType === "TF"
+          ? "TF"
+          : rawType === "FillBlank"
+          ? "FillBlank"
+          : rawType === "MatchFollowing"
+          ? "MatchFollowing"
+          : "MCQ";
+
+      let typeInstruction = "";
+      if (qType === "TF") {
+        typeInstruction =
+          "The quiz MUST consist ONLY of True/False questions (options MUST be exactly ['True', 'False'], correctIndex MUST be 0 for True or 1 for False).";
+      } else if (qType === "FillBlank") {
+        typeInstruction =
+          "The quiz MUST consist ONLY of Fill in the Blank questions. Each question text MUST contain '_______' representing the single missing key term/value/phrase. Put the primary exact answer in options[0] (array of 1 string), set correctIndex to 0, and provide 1-3 valid accepted phrasing/spelling variants in acceptedAnswers (array of strings).";
+      } else if (qType === "MatchFollowing") {
+        typeInstruction =
+          "The quiz MUST consist ONLY of Match the Following questions. Each question MUST include a concise prompt (e.g., 'Match each concept with its correct definition/formula') AND a 'pairs' array of EXACTLY 4 objects, each with { id: 'p1'|'p2'|'p3'|'p4', left: 'concise term/premise', right: 'concise matching definition/answer' }. Set options to [] and correctIndex to 0.";
+      } else {
+        typeInstruction =
+          "The quiz MUST consist ONLY of standard Multiple-Choice Questions (MCQ) with EXACTLY 4 distinct options and a valid correctIndex (0, 1, 2, or 3).";
+      }
+
+      const focusInstruction =
+        Array.isArray(focusTopics) && focusTopics.length > 0
+          ? `Prioritize covering these analyzed topics: ${focusTopics.join(", ")}.`
+          : "";
+
+      const systemInstruction = `You are an expert educator and academic assessment designer.
+Generate EXACTLY ${questionCount} high-quality practice questions at "${diffLevel}" difficulty grounded strictly in the provided study materials and/or selected internet research sources.
+YOU MUST RETURN EXACTLY ${questionCount} QUESTIONS.
+
+${typeInstruction}
+${focusInstruction}
+
+Difficulty calibration for "${diffLevel}":
+- Easy: Direct recall of core definitions, facts, and main ideas.
+- Medium: Conceptual understanding, comparisons, and applied examples.
+- Hard: Multi-step reasoning, subtle distinctions, edge cases, and deep synthesis.
+
+Each question MUST include:
+1. "question": Clear, well-written prompt.
+2. "options": Array of choices (4 for MCQ, 2 ['True','False'] for TF, 1 exact answer string for FillBlank, [] for MatchFollowing).
+3. "correctIndex": Valid integer index into options (0 for FillBlank/MatchFollowing).
+4. "acceptedAnswers": (Required for FillBlank) Array of valid short answer variants.
+5. "pairs": (Required for MatchFollowing) Array of 4 { id, left, right } objects.
+6. "explanation": Detailed, encouraging educational explanation of why the answer is right and how concepts connect.
+7. "difficulty": "${diffLevel}"
+8. "type": "${qType}"
+9. "topic": Concise subtopic label.
+
+Return ONLY valid JSON matching the requested schema.`;
+
+      const apiKey = getGeminiApiKey();
+      if (!apiKey) {
+        return res.json({
+          questions: buildFallbackQuizQuestions(files, notes, internetSources, internetTopic, questionCount, diffLevel, qType)
+        });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        apiVersion: "v1beta",
+        httpOptions: {
+          headers: { "User-Agent": "aistudio-build" }
+        }
+      });
+
+      let contextText = "";
+      if (hasFiles || hasNotes) {
+        const ragQuery = `Generate a ${diffLevel} difficulty ${qType} quiz with ${questionCount} questions covering key concepts, definitions, formulas, and examples.`;
+        contextText = await performAdvancedRAG(ai, ragQuery, files, notes, 15, workspaceId, req.headers.authorization);
+      }
+
+      const directFilesContext = (Array.isArray(files) ? files : [])
+        .slice(0, 6)
+        .map((f: any, idx: number) => {
+          const textBody = String(f.transcription || f.contentText || f.content_text || f.summary || "").trim();
+          const hl = Array.isArray(f.highlights) ? f.highlights.join("; ") : "";
+          return `File #${idx + 1}: "${f.name || "Uploaded File"}"\n${textBody.slice(0, 8000)}${hl ? `\nHighlights: ${hl}` : ""}`;
+        })
+        .join("\n\n");
+
+      const directNotesContext = (Array.isArray(notes) ? notes : [])
+        .slice(0, 6)
+        .map((n: any, idx: number) => `Note #${idx + 1}: "${n.title || "Study Note"}"\n${String(n.content || "").replace(/<[^>]+>/g, " ").slice(0, 4000)}`)
+        .join("\n\n");
+
+      const internetSourcesContext = (Array.isArray(internetSources) ? internetSources : [])
+        .slice(0, 6)
+        .map((src: any, idx: number) => {
+          const body = String(src.transcription || src.summary || "").trim();
+          const hl = Array.isArray(src.highlights) ? src.highlights.join("; ") : "";
+          return `Internet Source #${idx + 1}: "${src.name || src.title || internetTopic || "Web Source"}" (${src.domain || src.url || "Web"})\n${body.slice(0, 7000)}${hl ? `\nKey Takeaways: ${hl}` : ""}`;
+        })
+        .join("\n\n");
+
+      const sourceBlock = [
+        internetTopic ? `Internet Topic Selected: "${internetTopic}"` : "",
+        internetSourcesContext,
+        directFilesContext,
+        directNotesContext,
+        contextText
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+
+      const prompt = `Generate EXACTLY ${questionCount} quiz questions of difficulty "${diffLevel}" and type "${qType}" strictly grounded in the materials/topic below:\n\n${sourceBlock}`;
+
+      const quizParts: any[] = [{ text: prompt }];
+      for (const f of (Array.isArray(files) ? files : []).slice(0, 3)) {
+        let rawB64 = String(f.fileBase64 || "");
+        let mime = String(f.fileMimeType || "");
+        if (!rawB64 && typeof f.url === "string" && f.url.startsWith("data:") && f.url.includes(";base64,")) {
+          const m = f.url.match(/^data:([^;]+);base64,(.+)$/);
+          if (m) {
+            mime = mime || m[1];
+            rawB64 = m[2];
+          }
+        }
+        if (rawB64.includes(";base64,")) rawB64 = rawB64.split(";base64,")[1];
+        if (rawB64 && rawB64.length > 20 && rawB64.length < 10_000_000 && (mime.startsWith("image/") || mime === "application/pdf")) {
+          quizParts.push({ inlineData: { data: rawB64, mimeType: mime } });
+        }
+      }
+
+      const useSearchTool = hasInternet && (!internetSourcesContext || internetSourcesContext.length < 150);
+      const quizConfig: Record<string, any> = {
+        systemInstruction,
+        temperature: 0.4,
+        ...(useSearchTool ? { tools: [{ googleSearch: {} }] } : { responseMimeType: "application/json" }),
+        ...(!useSearchTool
+          ? {
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  questions: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        question: { type: Type.STRING },
+                        options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        correctIndex: { type: Type.INTEGER },
+                        acceptedAnswers: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        pairs: {
+                          type: Type.ARRAY,
+                          items: {
+                            type: Type.OBJECT,
+                            properties: {
+                              id: { type: Type.STRING },
+                              left: { type: Type.STRING },
+                              right: { type: Type.STRING }
+                            },
+                            required: ["left", "right"]
+                          }
+                        },
+                        explanation: { type: Type.STRING },
+                        difficulty: { type: Type.STRING },
+                        type: { type: Type.STRING },
+                        topic: { type: Type.STRING }
+                      },
+                      required: ["question", "options", "correctIndex", "explanation", "difficulty", "type"]
+                    }
+                  }
+                },
+                required: ["questions"]
+              }
+            }
+          : {})
+      };
+
+      const { response, modelUsed } = await generateContentWithModelFailover(ai, {
+        contents: quizParts,
+        preferredModels: ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"],
+        config: quizConfig,
+        timeoutMs: 22000,
+        maxPasses: 2,
+        label: "GenerateQuiz"
       });
 
       if (response && response.text) {
         let text = response.text.trim();
-        // Sometimes Gemini wraps JSON in markdown block
-        if (text.startsWith("```json")) {
-           text = text.replace(/^```json\n/, "").replace(/\n```$/, "");
+        if (text.startsWith("```")) {
+          text = text.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/, "").trim();
         }
-        const data = JSON.parse(text);
-        if (data && data.questions) {
-          // Strictly enforce count
-          let quizQuestions = data.questions;
-          if (quizQuestions.length > questionCount) {
-             quizQuestions = quizQuestions.slice(0, questionCount);
-          }
-          
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        const data = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+        if (data && Array.isArray(data.questions) && data.questions.length > 0) {
+          let quizQuestions = data.questions.slice(0, questionCount);
+
           const quizWithIds = quizQuestions.map((q: any, i: number) => {
-            // Strictly enforce type and difficulty
-            let safeOptions = q.options;
-            
+            let safeOptions = Array.isArray(q.options) ? q.options.map((o: any) => String(o)) : [];
+            let safeCorrectIndex = Number.isInteger(q.correctIndex) ? q.correctIndex : 0;
+            let safePairs = Array.isArray(q.pairs)
+              ? q.pairs
+                  .filter((p: any) => p && p.left && p.right)
+                  .map((p: any, pIdx: number) => ({
+                    id: String(p.id || `p-${i}-${pIdx}`),
+                    left: String(p.left).trim(),
+                    right: String(p.right).trim()
+                  }))
+              : undefined;
+
             if (qType === "TF") {
-               safeOptions = ["True", "False"];
-               if (q.correctIndex !== 0 && q.correctIndex !== 1) {
-                  q.correctIndex = 0; // fallback safe
-               }
+              safeOptions = ["True", "False"];
+              if (safeCorrectIndex !== 0 && safeCorrectIndex !== 1) {
+                safeCorrectIndex = 0;
+              }
+            } else if (qType === "FillBlank") {
+              const primaryAns = String(safeOptions[0] || q.acceptedAnswers?.[0] || "Answer").trim();
+              safeOptions = [primaryAns];
+              safeCorrectIndex = 0;
+            } else if (qType === "MatchFollowing") {
+              if (!safePairs || safePairs.length < 2) {
+                const fallbackPairs = buildFallbackQuizQuestions(files, notes, internetSources, internetTopic, 1, diffLevel, "MatchFollowing")[0].pairs;
+                safePairs = fallbackPairs;
+              }
+              safeOptions = [];
+              safeCorrectIndex = 0;
+            } else {
+              while (safeOptions.length < 4) {
+                safeOptions.push(`Option ${safeOptions.length + 1}`);
+              }
+              safeOptions = safeOptions.slice(0, 4);
+              if (safeCorrectIndex < 0 || safeCorrectIndex >= safeOptions.length) {
+                safeCorrectIndex = 0;
+              }
             }
-            
+
             return {
               id: `ai-quiz-${Date.now()}-${i}`,
-              ...q,
+              question: String(q.question || "Review question"),
               options: safeOptions,
+              correctIndex: safeCorrectIndex,
+              acceptedAnswers:
+                qType === "FillBlank"
+                  ? Array.from(
+                      new Set(
+                        [
+                          safeOptions[0],
+                          ...(Array.isArray(q.acceptedAnswers) ? q.acceptedAnswers.map((a: any) => String(a).trim()) : [])
+                        ].filter(Boolean)
+                      )
+                    )
+                  : undefined,
+              pairs: qType === "MatchFollowing" ? safePairs : undefined,
+              explanation: String(q.explanation || "Review the source material for full details."),
               difficulty: diffLevel,
-              type: qType
+              type: qType,
+              topic: q.topic ? String(q.topic) : internetTopic || undefined
             };
           });
-          res.json({ questions: quizWithIds });
-        } else {
-          throw new Error("Invalid response schema from Gemini API.");
+
+          console.log(`[Generate Quiz] Generated ${quizWithIds.length} questions using ${modelUsed}`);
+          return res.json({ questions: quizWithIds });
         }
-      } else {
-        throw new Error("No response text received from Gemini API.");
       }
+
+      throw new Error("Invalid quiz payload returned");
     } catch (error: any) {
-      console.error("Error in /api/generate-quiz, falling back to local quiz generator:", error);
-      try {
-        const fallbackQuiz = generateFallbackQuiz(
-          req.body.notes || [], 
-          req.body.files || [], 
-          req.body.count || 5, 
-          req.body.difficulty || "Medium",
-          req.body.questionType || "MCQ"
-        );
-        res.json({ questions: fallbackQuiz });
-      } catch (innerError: any) {
-        res.status(500).json({
-          error: "Failed to generate quiz.",
-          details: error.message
-        });
-      }
+      console.warn("[Generate Quiz] Switching to resilient local quiz synthesis:", summarizeModelError(error));
+      const {
+        notes = [],
+        files = [],
+        count,
+        difficulty,
+        questionType,
+        internetTopic = "",
+        internetSources = []
+      } = req.body || {};
+      const questionCount = Math.min(25, Math.max(1, Number(count) || 5));
+      const diffLevel = difficulty === "Easy" || difficulty === "Hard" ? difficulty : "Medium";
+      const rawType = String(questionType || "MCQ");
+      const qType = rawType === "TF" ? "TF" : rawType === "FillBlank" ? "FillBlank" : rawType === "MatchFollowing" ? "MatchFollowing" : "MCQ";
+      return res.json({
+        questions: buildFallbackQuizQuestions(files, notes, internetSources, internetTopic, questionCount, diffLevel, qType)
+      });
     }
   });
 
-  function generateFallbackQuiz(notes: any[], files: any[], count: number, difficulty: string, qType: string = 'MCQ') {
-    let combinedText = "";
-    if (notes && notes.length > 0) {
-      combinedText += notes.map((n: any) => `${n.title} ${n.content}`).join(" ");
-    }
-    if (files && files.length > 0) {
-      combinedText += files.map((f: any) => `${f.name} ${f.summary || ""} ${(f.highlights || []).join(" ")}`).join(" ");
-    }
-    if (!combinedText) {
-      combinedText = "Mendel Genetics active recall spaced repetition Feynman Technique Cellular Respiration photosynthesis";
-    }
-
-    const keywords = Array.from(new Set(combinedText.match(/\b[A-Za-z]{5,15}\b/g) || []))
-      .filter(w => !["about", "these", "their", "there", "would", "could", "should", "which", "other"].includes(w.toLowerCase()))
-      .slice(0, 10);
-
-    const basePool = [
-      {
-        question: `Regarding ${keywords[0] || 'active recall'} and study notes, which of the following practices is most effective for long-term retention?`,
-        options: [
-          'Passive re-reading of highlighting notes',
-          'Testing yourself using active recall & spaced repetition',
-          'Cramming all information 3 hours before the examination',
-          'Summarizing without self-testing'
-        ],
-        correctIndex: 1,
-        explanation: 'Active recall forces the brain to retrieve information, which strengthens neural pathways and memory consolidation.',
-      },
-      {
-        question: `How does linking concepts in a mind map or visual study graph (like ${keywords[1] || 'synthesis'}) help cognitive synthesis?`,
-        options: [
-          'It increases raw memorization speed by 200%',
-          'It contextualizes isolated facts into a relational network',
-          'It bypasses the need for active review entirely',
-          'It is only useful for visual learners'
-        ],
-        correctIndex: 1,
-        explanation: 'Connecting terms like a web allows the brain to establish associative memories, easing recall during exams.',
-      },
-      {
-        question: `When dealing with complex academic themes such as ${keywords[2] || 'theories'}, what is the "Feynman Technique"?`,
-        options: [
-          'Reading a textbook chapter backwards to test recall',
-          'Explaining a concept in simple terms as if teaching a child',
-          'Using highlighters with 4 distinct colors',
-          'Listening to binary beats while sleeping'
-        ],
-        correctIndex: 1,
-        explanation: 'The Feynman Technique highlights knowledge gaps by forcing you to simplify and explain concepts cleanly.',
-      },
-      {
-        question: `Which of the following is a primary benefit of creating structured review quizzes?`,
-        options: [
-          'Guaranteed 100% exam score on any subject',
-          'Identifying specific blind spots in your conceptual understanding',
-          'Saves time by replacing actual studying completely',
-          'Increases your brain capacity'
-        ],
-        correctIndex: 1,
-        explanation: 'Quizzes act as low-stakes self-testing, immediately revealing which subtopics require further review.',
-      },
-      {
-        question: `In standard study pathways, how does the "Spaced Repetition" schedule fight the "Forgetting Curve"?`,
-        options: [
-          'By reviewing facts right after you have completely forgotten them',
-          'By reviewing information at expanding intervals just before it fades',
-          'By studying for 10 hours consecutively once a week',
-          'By never reviewing a topic more than once'
-        ],
-        correctIndex: 1,
-        explanation: 'Spaced repetition resets the forgetting curve at strategic intervals, progressively moving data into long-term memory.',
-      }
-    ];
-
-    const result = [];
-    for (let i = 0; i < count; i++) {
-      const baseQ = basePool[i % basePool.length];
-      
-      let finalOptions = baseQ.options;
-      let finalCorrectIndex = baseQ.correctIndex;
-      
-      if (qType === 'TF') {
-         finalOptions = ['True', 'False'];
-         finalCorrectIndex = Math.random() > 0.5 ? 0 : 1;
-      } else if (qType === 'FillBlank') {
-         finalOptions = [baseQ.options[baseQ.correctIndex]];
-         finalCorrectIndex = 0;
-      }
-      
-      result.push({
-        id: `fallback-quiz-${Date.now()}-${i}`,
-        question: baseQ.question,
-        options: finalOptions,
-        correctIndex: finalCorrectIndex,
-        explanation: baseQ.explanation,
-        difficulty: difficulty,
-        type: qType
-      });
-    }
-
-    return result;
-  }
-
-  // API Route: AI-driven explanations for incorrect quiz answers using Gemini
+  // API Route: AI-driven explanations for incorrect quiz answers using Gemini with multi-model failover
   app.post("/api/explain-incorrect", async (req, res) => {
     const { incorrectQuestions } = req.body || {};
     try {
@@ -4448,12 +5793,11 @@ Strictly return a JSON object containing a "questions" array matching the reques
         return;
       }
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
-        console.warn("GEMINI_API_KEY not configured. Using high-quality local generation fallback for explaining incorrect answers.");
+      const apiKey = getGeminiApiKey();
+      if (!apiKey) {
         const localExplanations = incorrectQuestions.map((q: any) => ({
           question: q.question,
-          explanation: `**Local tutoring insight:** The correct answer is **${q.correctAns}**. You selected **${q.userAns}**. \n\nThis core concept revolves around key academic foundations. Understanding the difference between these options helps clarify knowledge gaps. ${q.explanation || 'Review this material in your study notes to reinforce retention.'}`
+          explanation: `The correct answer is **${q.correctAns}**. You selected **${q.userAns}**. ${q.explanation || "Review this concept in your study notes to reinforce retention."}`
         }));
         res.json({ explanations: localExplanations });
         return;
@@ -4461,35 +5805,36 @@ Strictly return a JSON object containing a "questions" array matching the reques
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build",
-          }
+          headers: { "User-Agent": "aistudio-build" }
         }
       });
 
-      const questionsPrompt = incorrectQuestions.map((q: any, i: number) => {
-        return `Question ${i + 1}: ${q.question}
+      const questionsPrompt = incorrectQuestions
+        .map((q: any, i: number) => {
+          return `Question ${i + 1}: ${q.question}
 Options: ${q.options ? q.options.join(", ") : "N/A"}
 Student Selected: ${q.userAns}
 Correct Answer: ${q.correctAns}
 Short static explanation: ${q.explanation || "None"}`;
-      }).join("\n\n---\n\n");
+        })
+        .join("\n\n---\n\n");
 
       const systemInstruction = `You are an elite academic tutor.
-Your task is to analyze the student's incorrect answers from a quiz and provide a highly educational, clear, and encouraging explanation for each question, explaining the underlying concept in depth.
-For each incorrect answer in the array, you must:
-1. Explain the underlying scientific or academic concept in simple, engaging terms.
-2. Clearly explain why the correct answer is correct and why the student's chosen answer was incorrect or represents a common misconception.
-3. Keep the tone warm, encouraging, and educational, helping the student learn from the mistake.
-4. Format your explanation using elegant Markdown (using bold text, lists, or headers where appropriate).`;
+Analyze the student's incorrect quiz answers and provide a clear, encouraging explanation for each question:
+1. Explain the underlying concept in intuitive terms.
+2. Clarify why the correct answer is right and address the misconception behind the student's answer.
+3. Format cleanly using Markdown.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+      const { response } = await generateContentWithModelFailover(ai, {
         contents: `Explain the following incorrect quiz answers to help the student learn the underlying concepts:\n\n${questionsPrompt}`,
+        preferredModels: ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"],
+        timeoutMs: 16000,
+        label: "ExplainIncorrect",
         config: {
           systemInstruction,
-          temperature: 0.7,
+          temperature: 0.6,
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -4512,21 +5857,22 @@ For each incorrect answer in the array, you must:
       });
 
       if (response && response.text) {
-        const data = JSON.parse(response.text.trim());
+        let text = response.text.trim();
+        if (text.startsWith("```")) {
+          text = text.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/, "").trim();
+        }
+        const data = JSON.parse(text);
         if (data && data.explanations) {
           res.json({ explanations: data.explanations });
-        } else {
-          throw new Error("Invalid response schema from Gemini API.");
+          return;
         }
-      } else {
-        throw new Error("No response text received from Gemini API.");
       }
+      throw new Error("Invalid explanation payload");
     } catch (error: any) {
-      console.error("Error in /api/explain-incorrect:", error);
-      // Fallback
-      const fallbackExplanations = incorrectQuestions.map((q: any) => ({
+      console.warn("[Explain Incorrect] Using fallback explanations:", summarizeModelError(error));
+      const fallbackExplanations = (incorrectQuestions || []).map((q: any) => ({
         question: q.question,
-        explanation: `The correct answer is **${q.correctAns}**. You chose **${q.userAns}**. \n\n*Recall:* ${q.explanation || 'Review this material in your study notes to reinforce retention.'}`
+        explanation: `The correct answer is **${q.correctAns}**. You chose **${q.userAns}**. \n\n*Recall:* ${q.explanation || "Review this material in your study notes to reinforce retention."}`
       }));
       res.json({ explanations: fallbackExplanations });
     }
@@ -4653,7 +5999,15 @@ For each incorrect answer in the array, you must:
   // API Route: Gemini Notebook / NotebookLM Style Web Research & Multi-Source Discovery
   app.post("/api/web-search-sources", async (req, res) => {
     try {
-      const { query, mode, resourceType = 'all', subject = '' } = req.body;
+      const {
+        query,
+        mode,
+        resourceType = 'all',
+        subject = '',
+        excludeUrls = [],
+        excludeTitles = [],
+        attemptIndex = 0
+      } = req.body || {};
 
       if (!query || query.trim() === "") {
         res.status(400).json({ error: "A search query is required to discover new web sources." });
@@ -4663,7 +6017,86 @@ For each incorrect answer in the array, you must:
       const searchQuery = query.trim();
       const requestedType = String(resourceType || 'all').toLowerCase(); // 'all' | 'pdf' | 'video' | 'wikipedia' | 'text' | 'website'
       const isDeepMode = mode === 'web' || mode === 'deep';
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = getGeminiApiKey();
+
+      const excludedUrlSet = new Set<string>(
+        Array.isArray(excludeUrls)
+          ? excludeUrls.map((u: any) => String(u || '').trim().toLowerCase()).filter(Boolean)
+          : []
+      );
+      const excludedTitleSet = new Set<string>(
+        Array.isArray(excludeTitles)
+          ? excludeTitles
+              .map((t: any) =>
+                String(t || '')
+                  .toLowerCase()
+                  .replace(/— wikipedia.*$/i, '')
+                  .replace(/\(arxiv pdf\)/i, '')
+                  .replace(/[^\w\s]/g, '')
+                  .trim()
+              )
+              .filter(Boolean)
+          : []
+      );
+
+      const normalizeTitleForDedup = (rawTitle: string): string =>
+        String(rawTitle || '')
+          .toLowerCase()
+          .replace(/— wikipedia.*$/i, '')
+          .replace(/\(arxiv pdf\)/i, '')
+          .replace(/[^\w\s]/g, '')
+          .trim();
+
+      const isSourceExcluded = (url?: string, title?: string): boolean => {
+        const cleanUrl = String(url || '').trim().toLowerCase();
+        if (cleanUrl && excludedUrlSet.has(cleanUrl)) return true;
+        const cleanTitle = normalizeTitleForDedup(title || '');
+        if (cleanTitle && excludedTitleSet.has(cleanTitle)) return true;
+        return false;
+      };
+
+      const rotationAngles = [
+        {
+          label: 'Foundational Principles & Core Theory',
+          ytSuffix: 'lecture explanation tutorial',
+          wikiQuerySuffix: '',
+          focusPrompt: 'foundational principles, core definitions, and primary mechanisms'
+        },
+        {
+          label: 'Real-World Phenomena, Experiments & Applications',
+          ytSuffix: 'experiments demonstrations real world applications',
+          wikiQuerySuffix: 'applications phenomena experiments',
+          focusPrompt: 'real-world applications, experimental demonstrations, optical/physical phenomena, and practical case studies'
+        },
+        {
+          label: 'Mathematical Models, Formulas & Problem Solving',
+          ytSuffix: 'problem solving worked examples equations',
+          wikiQuerySuffix: 'equations theory models',
+          focusPrompt: 'mathematical formulations, quantitative laws, derivations, and worked problem-solving examples'
+        },
+        {
+          label: 'Advanced Mechanisms, Modern Research & Deep Dive',
+          ytSuffix: 'university lecture advanced concepts deep dive',
+          wikiQuerySuffix: 'quantum modern physics mechanisms',
+          focusPrompt: 'advanced theoretical mechanisms, university-level analysis, and modern scientific developments'
+        },
+        {
+          label: 'Historical Discoveries, Classical vs Modern Models & Exam Prep',
+          ytSuffix: 'history discovery crash course revision',
+          wikiQuerySuffix: 'history discovery timeline',
+          focusPrompt: 'historical milestones, key scientific discoveries, comparative models, and high-yield exam takeaways'
+        }
+      ];
+
+      const numericAttempt = Math.max(
+        0,
+        Number.isFinite(Number(attemptIndex))
+          ? Number(attemptIndex)
+          : excludedUrlSet.size > 0
+          ? Math.floor(excludedUrlSet.size / 3)
+          : 0
+      );
+      const activeAngle = rotationAngles[numericAttempt % rotationAngles.length];
 
       // Helper to check if a URL is a generic search results page instead of a real direct resource
       const isGenericSearchUrl = (u: string): boolean => {
@@ -4708,7 +6141,7 @@ For each incorrect answer in the array, you must:
         try {
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), 4000);
-          const ytQuery = `${searchQuery} ${subject ? subject + ' ' : ''}lecture explanation tutorial`.trim();
+          const ytQuery = `${searchQuery} ${subject ? subject + ' ' : ''}${activeAngle.ytSuffix}`.trim();
           const ytRes = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(ytQuery)}&hl=en`, {
             signal: controller.signal,
             headers: {
@@ -4736,12 +6169,16 @@ For each incorrect answer in the array, you must:
                   }
                 }
 
-                for (const vr of renderers.slice(0, maxVideos)) {
+                for (const vr of renderers) {
+                  if (videos.length >= maxVideos) break;
                   const videoId = vr.videoId;
                   const title =
                     vr.title?.runs?.map((r: any) => r.text).join('') ||
                     vr.title?.simpleText ||
                     `${searchQuery} Video Lecture`;
+                  const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+                  if (isSourceExcluded(watchUrl, title)) continue;
+
                   const channelName =
                     vr.ownerText?.runs?.[0]?.text ||
                     vr.longBylineText?.runs?.[0]?.text ||
@@ -4752,12 +6189,11 @@ For each incorrect answer in the array, you must:
                     vr.descriptionSnippet?.runs?.map((r: any) => r.text).join('') ||
                     '';
                   const cleanSnippet = snippetRuns.replace(/\s+/g, ' ').trim();
-                  const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
                   const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}`;
                   const thumbnail = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
 
                   videos.push({
-                    id: `web-yt-${videoId}`,
+                    id: `web-yt-${videoId}-${Date.now()}`,
                     name: title,
                     type: 'video',
                     resourceCategory: 'video',
@@ -4795,11 +6231,11 @@ For each incorrect answer in the array, you must:
               while ((match = regex.exec(html)) !== null && videos.length < maxVideos) {
                 const videoId = match[1];
                 const rawTitle = match[2].replace(/\\u0026/g, '&').replace(/\\"/g, '"');
-                if (!seenIds.has(videoId)) {
+                const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+                if (!seenIds.has(videoId) && !isSourceExcluded(watchUrl, rawTitle)) {
                   seenIds.add(videoId);
-                  const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
                   videos.push({
-                    id: `web-yt-${videoId}`,
+                    id: `web-yt-${videoId}-${Date.now()}`,
                     name: rawTitle,
                     type: 'video',
                     resourceCategory: 'video',
@@ -4833,7 +6269,11 @@ For each incorrect answer in the array, you must:
         try {
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), 3500);
-          const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(searchQuery)}&utf8=1&format=json&srlimit=4`;
+          const wikiSearchTerm =
+            numericAttempt > 0 && activeAngle.wikiQuerySuffix
+              ? `${searchQuery} ${activeAngle.wikiQuerySuffix}`
+              : searchQuery;
+          const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(wikiSearchTerm)}&utf8=1&format=json&srlimit=12`;
           const searchRes = await fetch(searchUrl, {
             signal: controller.signal,
             headers: { 'User-Agent': 'StudyWeb-Academic-Notebook/1.0' }
@@ -4841,11 +6281,27 @@ For each incorrect answer in the array, you must:
           clearTimeout(timer);
           if (!searchRes.ok) return { wikiArticles: [], wikiPdfs: [] };
           const searchData: any = await searchRes.json();
-          const hits = searchData?.query?.search || [];
-          if (hits.length === 0) return { wikiArticles: [], wikiPdfs: [] };
+          const rawHits: any[] = searchData?.query?.search || [];
+          if (rawHits.length === 0) return { wikiArticles: [], wikiPdfs: [] };
+
+          // Filter out previously seen Wikipedia articles first; if all 12 were seen, rotate by offset
+          const unseenHits = rawHits.filter((hit: any) => {
+            const slug = encodeURIComponent(String(hit.title || '').replace(/\s+/g, '_'));
+            const candidateUrl = `https://en.wikipedia.org/wiki/${slug}`;
+            const candidatePdfUrl = `https://en.wikipedia.org/api/rest_v1/page/pdf/${slug}`;
+            return (
+              !isSourceExcluded(candidateUrl, hit.title) &&
+              !isSourceExcluded(candidatePdfUrl, hit.title)
+            );
+          });
+
+          const chosenHits =
+            unseenHits.length > 0
+              ? unseenHits.slice(0, 4)
+              : rawHits.slice((numericAttempt * 2) % Math.max(1, rawHits.length)).concat(rawHits).slice(0, 4);
 
           const detailedHits = await Promise.all(
-            hits.slice(0, 4).map(async (hit: any, idx: number) => {
+            chosenHits.map(async (hit: any, idx: number) => {
               const title = hit.title;
               const slug = encodeURIComponent(title.replace(/\s+/g, '_'));
               let extract = (hit.snippet || '').replace(/<\/?[^>]+(>|$)/g, '');
@@ -4933,7 +6389,8 @@ For each incorrect answer in the array, you must:
           try {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), 3800);
-            const oaUrl = `https://api.openalex.org/works?search=${encodeURIComponent(searchQuery)}&filter=is_oa:true&per-page=4`;
+            const oaPage = (numericAttempt % 4) + 1;
+            const oaUrl = `https://api.openalex.org/works?search=${encodeURIComponent(searchQuery)}&filter=is_oa:true&per-page=10&page=${oaPage}`;
             const oaRes = await fetch(oaUrl, {
               signal: controller.signal,
               headers: { 'User-Agent': 'StudyWeb-Academic-Notebook/1.0 (mailto:research@studyweb.edu)' }
@@ -4954,6 +6411,8 @@ For each incorrect answer in the array, you must:
               if (!directPdf || !directPdf.startsWith('http')) continue;
 
               const title = work.display_name || work.title || `${searchQuery} Study Paper`;
+              if (isSourceExcluded(directPdf, title)) continue;
+
               const year = work.publication_year ? ` (${work.publication_year})` : '';
               const authors = (work.authorships || [])
                 .slice(0, 2)
@@ -4989,6 +6448,7 @@ For each incorrect answer in the array, you must:
                   abstractText || `Full-text open-access PDF paper analyzing ${title}.`
                 }`
               });
+              if (items.length >= 4) break;
             }
             return items;
           } catch {
@@ -5001,8 +6461,8 @@ For each incorrect answer in the array, you must:
           try {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), 3500);
-            const maxResults = requestedType === 'pdf' ? 3 : 2;
-            const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(searchQuery)}&start=0&max_results=${maxResults}`;
+            const startOffset = (numericAttempt * 3) % 15;
+            const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(searchQuery)}&start=${startOffset}&max_results=8`;
             const arxivRes = await fetch(arxivUrl, { signal: controller.signal });
             clearTimeout(timer);
             if (!arxivRes.ok) return [];
@@ -5018,6 +6478,8 @@ For each incorrect answer in the array, you must:
                 const rawIdUrl = (idMatch?.[1] || '').trim().replace(/^http:\/\//i, 'https://');
                 if (!rawIdUrl) return null;
                 const pdfUrl = rawIdUrl.replace('/abs/', '/pdf/') + (rawIdUrl.endsWith('.pdf') ? '' : '.pdf');
+                if (isSourceExcluded(pdfUrl, rawTitle)) return null;
+
                 const sentences = rawSummary.split(/(?<=[.!?])\s+/).filter(Boolean);
 
                 return {
@@ -5036,7 +6498,8 @@ For each incorrect answer in the array, you must:
                   transcription: `# ${rawTitle}\n\n## Abstract & PDF Text Preview\n${rawSummary}\n\nDirect PDF Link: ${pdfUrl}`
                 };
               })
-              .filter(Boolean);
+              .filter(Boolean)
+              .slice(0, requestedType === 'pdf' ? 3 : 2);
           } catch {
             return [];
           }
@@ -5055,6 +6518,7 @@ For each incorrect answer in the array, you must:
 
         const ai = new GoogleGenAI({
           apiKey,
+          apiVersion: "v1beta",
           httpOptions: {
             headers: {
               "User-Agent": "aistudio-build",
@@ -5062,15 +6526,21 @@ For each incorrect answer in the array, you must:
           }
         });
 
+        const exclusionDirective =
+          excludedUrlSet.size > 0 || excludedTitleSet.size > 0
+            ? `\nCRITICAL FRESHNESS REQUIREMENT: The student has already seen the following resources in previous searches. DO NOT repeat any of these URLs or titles—find completely DIFFERENT, fresh web sources and cover a new perspective (${activeAngle.label}):\n- Excluded URLs: ${Array.from(excludedUrlSet).slice(0, 12).join(', ')}\n- Excluded Titles: ${Array.from(excludedTitleSet).slice(0, 12).join(', ')}\n`
+            : `\nFocus Perspective: ${activeAngle.label} (${activeAngle.focusPrompt}).\n`;
+
         const prompt = `You are a Gemini Notebook (NotebookLM) Research Engine helping a student research "${searchQuery}"${subject ? ` for their workspace in "${subject}"` : ''}.
-Use Google Search to synthesize a comprehensive academic Research Brief and identify 3 authoritative educational articles/study guides (e.g. Khan Academy, MIT OpenCourseWare, Britannica, LibreTexts, GeeksforGeeks, Nature, Stanford Encyclopedia).
+Use Google Search to synthesize a fresh, comprehensive academic Research Brief focused on **${activeAngle.label}** (${activeAngle.focusPrompt}) and identify 3 authoritative educational articles/study guides (e.g. Khan Academy, MIT OpenCourseWare, Britannica, LibreTexts, HyperPhysics, Physics Classroom, Nature, Stanford Encyclopedia, National Geographic, NASA, OpenStax).
+${exclusionDirective}
 IMPORTANT: Never output generic search URLs like youtube.com/results or google.com/search. Only include real, direct article URLs from your Google Search grounding.
 
 Return ONLY valid JSON (no markdown fences) matching this exact structure:
 {
   "researchBrief": {
-    "title": "Comprehensive Research Synthesis: ${searchQuery}",
-    "overview": "A rich, clear, multi-paragraph academic synthesis explaining the core concepts, mechanisms, real-world significance, and key structure of ${searchQuery}.",
+    "title": "Research Synthesis: ${searchQuery} (${activeAngle.label})",
+    "overview": "A rich, clear, multi-paragraph academic synthesis explaining ${activeAngle.focusPrompt} for ${searchQuery}.",
     "keyTakeaways": [
       "Key takeaway 1 with concrete detail",
       "Key takeaway 2 with concrete detail",
@@ -5107,18 +6577,21 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
   ]
 }`;
 
-        const candidateModels = isDeepMode
-          ? ["gemini-3-flash-preview", "gemini-2.5-flash"]
-          : ["gemini-3-flash-preview", "gemini-2.5-flash"];
+        const candidateModels = getAvailableCandidateModels([
+          "gemini-3-flash-preview",
+          "gemini-3.1-flash-lite",
+          "gemini-4-hydrogen"
+        ]);
 
         let lastErr: any = null;
         for (const model of candidateModels) {
           try {
+            const isHydrogen = model === "gemini-4-hydrogen";
             const response = await ai.models.generateContent({
               model,
               contents: prompt,
               config: {
-                temperature: 0.25,
+                ...(isHydrogen ? {} : { temperature: 0.65 }),
                 tools: [{ googleSearch: {} }],
               }
             });
@@ -5130,18 +6603,18 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
             const groundingChunks = (response as any)?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
             const groundedWebLinks = groundingChunks
               .map((c: any) => c?.web)
-              .filter((w: any) => w && w.uri && !isGenericSearchUrl(w.uri));
+              .filter((w: any) => w && w.uri && !isGenericSearchUrl(w.uri) && !isSourceExcluded(w.uri, w.title));
 
             const rawSources = Array.isArray(parsed.sources) ? parsed.sources : [];
             const normalizedSources: any[] = [];
 
             rawSources.forEach((src: any, idx: number) => {
               let url = src.url || '';
-              if (isGenericSearchUrl(url)) {
+              if (isGenericSearchUrl(url) || isSourceExcluded(url, src.name)) {
                 if (groundedWebLinks[idx]?.uri) {
                   url = groundedWebLinks[idx].uri;
                 } else {
-                  return; // Skip any source without a real direct URL
+                  return; // Skip any source without a real direct non-excluded URL
                 }
               }
 
@@ -5153,15 +6626,15 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
               }
 
               normalizedSources.push({
-                id: src.id || `web-gemini-${Date.now()}-${idx}`,
-                name: src.name || groundedWebLinks[idx]?.title || `${searchQuery} Study Guide`,
+                id: `web-gemini-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
+                name: src.name || groundedWebLinks[idx]?.title || `${searchQuery} — ${activeAngle.label}`,
                 type: requestedType === 'text' ? 'doc' : (['pdf', 'video', 'doc', 'url'].includes(src.type) ? src.type : 'url'),
                 resourceCategory: src.resourceCategory || 'text',
                 sourcePlatform: src.sourcePlatform || 'Web Study Guide',
                 domain,
                 size: src.size || 'Study Article',
                 url,
-                summary: src.summary || `Authoritative educational guide covering ${searchQuery}.`,
+                summary: src.summary || `Authoritative educational guide covering ${searchQuery} (${activeAngle.label}).`,
                 tags: Array.isArray(src.tags) && src.tags.length > 0 ? src.tags : [searchQuery, 'Study Guide'],
                 highlights: Array.isArray(src.highlights) && src.highlights.length > 0 ? src.highlights : [`Key concepts and principles of ${searchQuery}.`],
                 formulas: Array.isArray(src.formulas) ? src.formulas : [],
@@ -5176,8 +6649,12 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
                   : [],
               researchBrief: parsed.researchBrief || null
             };
-          } catch (err) {
+          } catch (err: any) {
             lastErr = err;
+            if (isTransientOrUnavailableModelError(err)) {
+              recordModelQuotaCooldown(model, err);
+            }
+            console.warn(`[WebSearch Grounding] Switching from ${model}: ${summarizeModelError(err)}`);
           }
         }
         throw lastErr || new Error("Gemini grounded research failed");
@@ -5195,11 +6672,12 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
       const academicPdfs = pdfRes.status === 'fulfilled' ? pdfRes.value : [];
       const geminiData = geminiRes.status === 'fulfilled' ? geminiRes.value : { sources: [], researchBrief: null };
 
-      // Combine and deduplicate by URL/name, prioritizing exact direct resources
+      // Combine and deduplicate by URL/name, prioritizing fresh direct resources not in excludedUrlSet/excludedTitleSet
       const combined: any[] = [];
       const seenKeys = new Set<string>();
-      const pushUnique = (item: any) => {
+      const pushUnique = (item: any, allowIfExcludedFallback = false) => {
         if (!item || !item.url || isGenericSearchUrl(item.url)) return;
+        if (!allowIfExcludedFallback && isSourceExcluded(item.url, item.name)) return;
         const key = `${(item.url || '').toLowerCase()}`;
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
@@ -5208,73 +6686,67 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
       };
 
       if (requestedType === 'video') {
-        ytSources.forEach(pushUnique);
+        ytSources.forEach((s) => pushUnique(s));
       } else if (requestedType === 'pdf') {
-        academicPdfs.forEach(pushUnique);
-        wikiPdfs.forEach(pushUnique);
+        academicPdfs.forEach((s) => pushUnique(s));
+        wikiPdfs.forEach((s) => pushUnique(s));
       } else if (requestedType === 'wikipedia') {
-        wikiArticles.forEach(pushUnique);
+        wikiArticles.forEach((s) => pushUnique(s));
       } else if (requestedType === 'text' || requestedType === 'website') {
-        geminiData.sources.forEach(pushUnique);
-        wikiArticles.forEach(pushUnique);
+        geminiData.sources.forEach((s) => pushUnique(s));
+        wikiArticles.forEach((s) => pushUnique(s));
       } else {
         // 'all' — balanced mix of exact YouTube videos, direct PDFs, exact Wikipedia articles, and Web study guides
-        ytSources.slice(0, 2).forEach(pushUnique);
-        academicPdfs.slice(0, 2).forEach(pushUnique);
-        wikiPdfs.slice(0, 1).forEach(pushUnique);
-        wikiArticles.slice(0, 2).forEach(pushUnique);
-        geminiData.sources.slice(0, 2).forEach(pushUnique);
+        ytSources.slice(0, 2).forEach((s) => pushUnique(s));
+        academicPdfs.slice(0, 2).forEach((s) => pushUnique(s));
+        wikiPdfs.slice(0, 1).forEach((s) => pushUnique(s));
+        wikiArticles.slice(0, 2).forEach((s) => pushUnique(s));
+        geminiData.sources.slice(0, 2).forEach((s) => pushUnique(s));
+      }
+
+      // If strict exclusion filtered out everything, allow remaining non-seen items from the fetched pools
+      if (combined.length === 0) {
+        [...geminiData.sources, ...ytSources, ...academicPdfs, ...wikiArticles, ...wikiPdfs].forEach((s) =>
+          pushUnique(s, true)
+        );
       }
 
       // Guaranteed direct fallback if all upstream calls were offline or filtered out
       if (combined.length === 0) {
-        const cleanSlug = encodeURIComponent(searchQuery.replace(/\s+/g, '_'));
-        pushUnique({
-          id: `web-src-wiki-${Date.now()}-1`,
-          name: `${searchQuery} — Wikipedia Encyclopedia Article`,
-          type: 'url',
-          resourceCategory: 'wikipedia',
-          sourcePlatform: 'Wikipedia',
-          domain: 'en.wikipedia.org',
-          size: 'Wikipedia Article',
-          url: `https://en.wikipedia.org/wiki/${cleanSlug}`,
-          pdfUrl: `https://en.wikipedia.org/api/rest_v1/page/pdf/${cleanSlug}`,
-          summary: `Comprehensive encyclopedia article analyzing foundational theories, definitions, historical context, and scientific consensus on ${searchQuery}.`,
-          tags: [searchQuery, 'Wikipedia', 'Encyclopedia'],
-          highlights: [
-            `Establishes core definitions, foundational principles, and terminology of ${searchQuery}.`,
-            `Reviews historical milestones and modern academic applications.`
-          ],
-          formulas: [],
-          transcription: `# ${searchQuery} — Wikipedia Reference\n\nThis comprehensive reference covers the foundational principles, mechanisms, and applications of ${searchQuery}.`
-        });
-        pushUnique({
-          id: `web-src-wikipdf-${Date.now()}-2`,
-          name: `${searchQuery} — Printable Study Guide & Reference (PDF)`,
-          type: 'pdf',
-          resourceCategory: 'pdf',
-          sourcePlatform: 'Wikipedia PDF',
-          domain: 'en.wikipedia.org',
-          size: 'Direct PDF Document',
-          url: `https://en.wikipedia.org/api/rest_v1/page/pdf/${cleanSlug}`,
-          summary: `Direct downloadable PDF document covering key definitions, structure, and academic summary of ${searchQuery}.`,
-          tags: [searchQuery, 'PDF Document', 'Study Guide'],
-          highlights: [
-            `Full printable PDF edition for ${searchQuery}.`,
-            `Structured for workspace annotation and exam preparation.`
-          ],
-          formulas: [],
-          transcription: `# ${searchQuery} — Direct Reference PDF\n\nDirect downloadable PDF reference for ${searchQuery}.`
-        });
+        const cleanSlug = encodeURIComponent(
+          `${searchQuery}${numericAttempt > 0 ? `_(${activeAngle.wikiQuerySuffix.split(' ')[0] || 'overview'})` : ''}`.replace(/\s+/g, '_')
+        );
+        pushUnique(
+          {
+            id: `web-src-wiki-${Date.now()}-1`,
+            name: `${searchQuery} (${activeAngle.label}) — Encyclopedia Reference`,
+            type: 'url',
+            resourceCategory: 'wikipedia',
+            sourcePlatform: 'Wikipedia',
+            domain: 'en.wikipedia.org',
+            size: 'Wikipedia Article',
+            url: `https://en.wikipedia.org/wiki/${cleanSlug}`,
+            pdfUrl: `https://en.wikipedia.org/api/rest_v1/page/pdf/${cleanSlug}`,
+            summary: `Comprehensive reference analyzing ${activeAngle.focusPrompt} for ${searchQuery}.`,
+            tags: [searchQuery, activeAngle.label, 'Encyclopedia'],
+            highlights: [
+              `Explores ${activeAngle.focusPrompt} in ${searchQuery}.`,
+              `Reviews historical milestones and modern academic applications.`
+            ],
+            formulas: [],
+            transcription: `# ${searchQuery} — ${activeAngle.label}\n\nThis comprehensive reference covers ${activeAngle.focusPrompt} of ${searchQuery}.`
+          },
+          true
+        );
       }
 
       const researchBrief = geminiData.researchBrief || {
-        title: `Research Synthesis: ${searchQuery}`,
-        overview: `This research brief synthesizes key insights on **${searchQuery}** across ${combined.length} verified sources including direct PDFs, exact YouTube video lectures, and encyclopedia references. Preview any resource directly below or import them into your workspace and AI Tutor.`,
+        title: `Research Synthesis: ${searchQuery} — ${activeAngle.label}`,
+        overview: `This research brief synthesizes fresh insights on **${searchQuery}** focused on **${activeAngle.label.toLowerCase()}** across ${combined.length} verified web sources. Select at least one web source below to analyze and generate your quiz.`,
         keyTakeaways: combined.slice(0, 4).map((s: any) => `${s.name}: ${s.summary}`),
         formulas: [],
         suggestedQuestions: [
-          `Explain the core concepts of ${searchQuery} using my imported research sources.`,
+          `Explain ${activeAngle.focusPrompt} of ${searchQuery}.`,
           `What are the most important exam takeaways and formulas for ${searchQuery}?`,
           `Create a step-by-step study summary comparing all my sources on ${searchQuery}.`
         ]
@@ -5284,7 +6756,8 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
         sources: combined,
         researchBrief,
         query: searchQuery,
-        resourceType: requestedType
+        resourceType: requestedType,
+        angleLabel: activeAngle.label
       });
     } catch (err: any) {
       console.error("Error in /api/web-search-sources:", err);
@@ -5335,8 +6808,8 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
 
       const workspaceSubject = subject || "Study Workspace";
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
+      const apiKey = getGeminiApiKey();
+      if (!apiKey) {
         console.warn("GEMINI_API_KEY not configured. Falling back to local mind map generator.");
         const fallbackNodes = generateFallbackMindmap(notes || [], files || [], workspaceSubject);
         res.json(fallbackNodes);
@@ -5345,6 +6818,7 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build",
@@ -5468,9 +6942,9 @@ Your output MUST be a JSON object matching the following TypeScript schema:
         const fallbackGraph = generateFallbackMindmap(req.body.notes || [], req.body.files || [], req.body.subject || "Study Workspace");
         res.json(fallbackGraph);
       } catch (innerError: any) {
+        console.error("Error in fallback mindmap:", innerError);
         res.status(500).json({
-          error: "Failed to generate visual mind map.",
-          details: error.message
+          error: "Something went wrong. There is a server error. Please try again."
         });
       }
     }
@@ -5575,8 +7049,8 @@ Your output MUST be a JSON object matching the following TypeScript schema:
       const cardCount = count || 5;
       const diffLevel = difficulty || "Medium";
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
+      const apiKey = getGeminiApiKey();
+      if (!apiKey) {
         console.warn("GEMINI_API_KEY not configured. Falling back to local flashcard generator.");
         const fallbackCards = generateFallbackFlashcards(notes || [], files || [], cardCount, diffLevel);
         res.json({ flashcards: fallbackCards });
@@ -5585,6 +7059,7 @@ Your output MUST be a JSON object matching the following TypeScript schema:
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build",
@@ -5664,9 +7139,9 @@ You MUST return a JSON object with a "flashcards" array containing your generate
         const fallbackCards = generateFallbackFlashcards(req.body.notes || [], req.body.files || [], req.body.count || 5, req.body.difficulty || "Medium");
         res.json({ flashcards: fallbackCards });
       } catch (innerError: any) {
+        console.error("Error in fallback flashcards:", innerError);
         res.status(500).json({
-          error: "Failed to generate study flashcards.",
-          details: error.message
+          error: "Something went wrong. There is a server error. Please try again."
         });
       }
     }
@@ -5739,8 +7214,8 @@ You MUST return a JSON object with a "flashcards" array containing your generate
       const activeIntensity = intensity || "Balanced";
       const activeStyle = style || "Balanced";
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
+      const apiKey = getGeminiApiKey();
+      if (!apiKey) {
         console.warn("GEMINI_API_KEY not configured. Falling back to local study schedule generator.");
         const fallbackTasks = generateFallbackSchedule(activeSubjects, activeIntensity, activeStyle);
         res.json({ tasks: fallbackTasks });
@@ -5749,6 +7224,7 @@ You MUST return a JSON object with a "flashcards" array containing your generate
 
       const ai = new GoogleGenAI({
         apiKey,
+        apiVersion: "v1beta",
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build",
@@ -5829,9 +7305,9 @@ Study Style Preference: ${activeStyle}`;
         const fallbackTasks = generateFallbackSchedule(req.body.subjects || [], req.body.intensity || "Balanced", req.body.style || "Balanced");
         res.json({ tasks: fallbackTasks });
       } catch (innerError: any) {
+        console.error("Error in fallback schedule:", innerError);
         res.status(500).json({
-          error: "Failed to generate weekly study schedule.",
-          details: error.message
+          error: "Something went wrong. There is a server error. Please try again."
         });
       }
     }
