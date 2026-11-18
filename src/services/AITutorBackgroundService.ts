@@ -350,33 +350,35 @@ class AITutorBackgroundManager {
       }
 
       if (!data || (!data.reply && !data.text)) {
-        console.warn('[AI Tutor] Network/server fallback used:', lastErrorText);
+        const displayError = lastErrorText || '[AI_TUTOR_UNAVAILABLE] Unable to reach Gemini AI right now.';
+        console.error('[AI Tutor Error] Final failure:', displayError);
+        if (typeof window !== 'undefined' && typeof (window as any).showToast === 'function') {
+          (window as any).showToast(
+            displayError,
+            'error',
+            5500,
+            'AI Tutor Error'
+          );
+        }
       }
 
       // Guarantee 3 contextual follow-up questions for every single AI response
       const rawFollowUps: string[] = Array.isArray(data?.followUpQuestions)
         ? data.followUpQuestions.filter((q: any) => typeof q === 'string' && q.trim().length > 0)
         : [];
-      const qText = String(userMsg.text || '').trim();
-      const isGreeting = /^(hi+|hello+|hey+|yo|sup|how\s+are\s+you|who\s+are\s+you|what\s+can\s+you\s+do|thanks|thank\s+you|ok|okay|bye)\b[!?.]*$/i.test(qText);
-      if (rawFollowUps.length < 3) {
+      if (rawFollowUps.length < 3 && data && (data.reply || data.text)) {
+        const qText = String(userMsg.text || '').trim();
         const isInterview = /\b(interview|interviewer|viva|oral|behavioral|star\s+method|tell\s+me\s+about\s+yourself|hire|candidate)\b/i.test(qText);
-        const cleanSubject = qText.replace(/^(what\s+is|explain|tell\s+me\s+about|how\s+does|how\s+do\s+i\s+answer)\s+/i, '').replace(/[?!.]+$/, '').slice(0, 48).trim() || 'this topic';
-        const defaultFollowUps = isGreeting
-          ? [
-              `Analyze everything uploaded in my workspace`,
-              `Explain a complex concept step by step`,
-              `Create a quick practice quiz on any topic`
-            ]
-          : isInterview
+        const cleanSubject = qText.replace(/^(what\s+is|explain|tell\s+me\s+about|how\s+does|how\s+do\s+i\s+answer)\s+/i, '').replace(/[?!.]+$/, '').slice(0, 48).trim() || (workspaceName || 'this topic');
+        const defaultFollowUps = isInterview
           ? [
               `Ask me a harder follow-up interview question on "${cleanSubject}"`,
               `How do I deliver this answer in under 60 seconds during an interview?`,
               `What common mistakes do candidates make when answering this question?`
             ]
           : [
+              `Ask me an interview or viva question on "${cleanSubject}"`,
               `Give me a practical real-world example of "${cleanSubject}"`,
-              `Summarize the core takeaways of "${cleanSubject}"`,
               `Quiz me with 3 practice questions on "${cleanSubject}"`
             ];
         for (const df of defaultFollowUps) {
@@ -385,23 +387,19 @@ class AITutorBackgroundManager {
         }
       }
 
-      const fallbackReply = isGreeting
-        ? `Hi there! How can I help you today? Feel free to ask me any question, or upload files, notes, or links for me to analyze.`
-        : `Something went wrong. There is a server error. Please try again.`;
-
-      // Format AI Message without surfacing raw API or load errors
+      // Format AI Message (never fabricate dummy fallback text)
       const aiMsg: TutorMessage = data && (data.reply || data.text)
         ? {
             id: `msg-ai-${Date.now()}`,
             sender: 'ai',
             text: data.reply || data.text,
             citations: data.citations,
-            source: 'StudyWeb AI Tutor',
-            workspaceNotice: undefined,
-            activeWorkspaceContext: data.activeWorkspaceContext,
+            source: data.source || 'Gemini AI',
+            workspaceNotice: data.workspaceNotice,
+            activeWorkspaceContext: data.activeWorkspaceContext || workspaceName,
             activeContextFiles: Array.isArray(data.activeContextFiles) ? data.activeContextFiles : [],
             followUpQuestions: rawFollowUps.slice(0, 3),
-            suggestOutsideResearch: false,
+            suggestOutsideResearch: Boolean(data.suggestOutsideResearch),
             originalQuery: userMsg.text,
             generatedImageUrl: data.generatedImageUrl,
             generatedImageCaption: data.generatedImageCaption,
@@ -410,11 +408,9 @@ class AITutorBackgroundManager {
         : {
             id: `msg-ai-${Date.now()}`,
             sender: 'ai',
-            text: fallbackReply,
-            source: 'StudyWeb AI Tutor',
-            activeWorkspaceContext: undefined,
-            followUpQuestions: rawFollowUps.slice(0, 3),
-            originalQuery: userMsg.text,
+            text: lastErrorText || '[AI_TUTOR_UNAVAILABLE] Unable to reach Gemini AI right now. Please click Retry Question.',
+            isError: true,
+            failedPrompt: userMsg.text,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           };
 

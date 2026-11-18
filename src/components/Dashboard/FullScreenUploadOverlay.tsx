@@ -2,7 +2,6 @@ import React, { useEffect, useRef } from 'react';
 import { CheckCircle2, FileText, UploadCloud, Video, Image as ImageIcon } from 'lucide-react';
 import { playGlassPopSound } from '../../utils/soundEffects';
 import { StudyTrackerService } from '../../services/StudyTrackerService';
-import { SuccessLottieAnimation } from '../Common/SuccessLottieAnimation';
 
 interface FullScreenUploadOverlayProps {
   isOpen: boolean;
@@ -163,8 +162,8 @@ export const FullScreenUploadOverlay: React.FC<FullScreenUploadOverlayProps> = (
           {/* Center Upload Animation & Percentage */}
           <div className="absolute inset-0 flex flex-col items-center justify-center px-4">
             {isComplete ? (
-              <div className="flex items-center justify-center mb-0.5">
-                <SuccessLottieAnimation className="w-20 h-20 sm:w-24 sm:h-24" />
+              <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center mb-1 text-emerald-600 dark:text-emerald-400 animate-in zoom-in-75 duration-200">
+                <CheckCircle2 className="w-6 h-6" />
               </div>
             ) : (
               <img

@@ -156,8 +156,8 @@ function resolveNotificationMeta(toast: Toast) {
 
   if (toast.type === 'error') {
     return {
-      title: 'Server Error',
-      badge: 'Server Error',
+      title: toast.title || 'Something Went Wrong',
+      badge: toast.badge || 'System Alert',
       Icon: AlertCircle,
       accentBar: 'from-rose-500 via-red-500 to-pink-500',
       iconBg:
@@ -225,29 +225,12 @@ export default function ToastContainer() {
 
       const id = `toast-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
       const duration = customEvent.detail.duration ?? 3400;
-      const toastType = customEvent.detail.type || 'info';
-
-      if (toastType === 'error') {
-        console.error('[StudyWeb Error]', {
-          title: customEvent.detail.title,
-          message: customEvent.detail.message
-        });
-      }
-
-      const sanitizedNonErrorMsg = String(customEvent.detail.message || '')
-        .replace(/\bsaved to supabase\b/gi, 'saved to your workspace')
-        .replace(/\bsupabase\b/gi, 'cloud storage')
-        .replace(/\bgemini(?:\s+[0-9.a-z-]+)*\b/gi, 'AI');
-
       const newToast: Toast = {
         id,
-        title: toastType === 'error' ? 'Server Error' : customEvent.detail.title,
-        badge: toastType === 'error' ? 'Server Error' : customEvent.detail.badge,
-        message:
-          toastType === 'error'
-            ? 'Something went wrong. There is a server error. Please try again.'
-            : sanitizedNonErrorMsg,
-        type: toastType,
+        title: customEvent.detail.title,
+        badge: customEvent.detail.badge,
+        message: customEvent.detail.message,
+        type: customEvent.detail.type || 'info',
         duration,
         actionLabel: customEvent.detail.actionLabel,
         onAction: customEvent.detail.onAction,

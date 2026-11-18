@@ -648,7 +648,7 @@ export default function Navigation() {
                       <div className="space-y-2">
                         <h4 className="text-base font-bold text-brand-text">Check Your Email Inbox</h4>
                         <p className="text-xs text-brand-text-light leading-relaxed">
-                          We sent a password reset link to <span className="font-bold text-brand-primary">{email}</span>.
+                          We sent a password reset link to <span className="font-bold text-brand-primary">{email}</span> through Supabase.
                         </p>
                         <p className="text-[11px] text-brand-text-light/80 italic">
                           Please check your inbox (and spam folder). Click the link in that email to reset your password.
@@ -710,8 +710,8 @@ export default function Navigation() {
                           setResetEmailSent(true);
                           (window as any).showToast?.('Password reset email sent!', 'success');
                         } catch (err: any) {
-                          console.error('Password reset error:', err);
-                          setAuthError('Something went wrong. There is a server error. Please try again.');
+                          console.warn('Password reset notice:', err?.message || err);
+                          setAuthError(err.message || 'Failed to send password reset email. Please try again.');
                         } finally {
                           setAuthLoading(false);
                         }
@@ -1115,14 +1115,15 @@ export default function Navigation() {
                         setIsAuthModalOpen(false);
                       }
                     } catch (err: any) {
-                      console.error('Auth error:', err);
-                      const rawLower = String(err?.message || '').toLowerCase();
-                      let errMsg = 'Something went wrong. There is a server error. Please try again.';
-                      if (rawLower.includes('invalid login credentials')) {
-                        errMsg = 'Invalid login credentials. Please verify your email and password.';
-                      } else if (rawLower.includes('user already registered')) {
+                      console.warn('Auth validation notice:', err?.message || err);
+                      let errMsg = err.message || 'Authentication failed';
+                      if (errMsg === 'Failed to fetch') {
+                        errMsg = 'Network error or adblocker prevented connection to auth server. Please check your connection.';
+                      } else if (errMsg.toLowerCase().includes('invalid login credentials')) {
+                        errMsg = 'Invalid login credentials. Please verify your email and password, or create an account if you are new.';
+                      } else if (errMsg.toLowerCase().includes('user already registered')) {
                         errMsg = 'User already registered with this email. Please switch to Log In.';
-                      } else if (rawLower.includes('password should be at least')) {
+                      } else if (errMsg.toLowerCase().includes('password should be at least')) {
                         errMsg = 'Password should be at least 6 characters.';
                       }
                       setAuthError(errMsg);

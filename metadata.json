@@ -1,6 +1,17 @@
 {
   "name": "StudyWeb",
-  "description": "# StudyWeb – AI-Powered Learning for Every Student\n\nStudyWeb is an AI-powered learning platform designed to help students study smarter, stay organized, and achieve better academic results. Instead of relying on multiple apps and websites, StudyWeb brings everything students need into one intelligent workspace.\n\nFrom AI tutoring and personalized study plans to flashcards, quizzes, note-taking, PDF analysis, and progress tracking, StudyWeb transforms the way students learn. Whether you're preparing for school exams, competitive tests, or building new skills, StudyWeb adapts to your learning style and helps you understand concepts faster.\n\nOur mission is to make high-quality education accessible, engaging, and personalized for every learner. By combining modern AI technology with proven learning techniques such as active recall, spaced repetition, and personalized practice, StudyWeb helps students build confidence instead of simply memorizing information.\n\nStudyWeb is built not only for students but also for parents who want to support their children's education with a safe, reliable, and effective learning platform. Our goal is to become the all-in-one AI study companion that empowers millions of learners to unlock their full potential.\n\n**Study smarter. Learn faster. Achieve more.**\n",
+  "description": "# StudyWeb – AI-Powered Learning for Every Student
+
+StudyWeb is an AI-powered learning platform designed to help students study smarter, stay organized, and achieve better academic results. Instead of relying on multiple apps and websites, StudyWeb brings everything students need into one intelligent workspace.
+
+From AI tutoring and personalized study plans to flashcards, quizzes, note-taking, PDF analysis, and progress tracking, StudyWeb transforms the way students learn. Whether you're preparing for school exams, competitive tests, or building new skills, StudyWeb adapts to your learning style and helps you understand concepts faster.
+
+Our mission is to make high-quality education accessible, engaging, and personalized for every learner. By combining modern AI technology with proven learning techniques such as active recall, spaced repetition, and personalized practice, StudyWeb helps students build confidence instead of simply memorizing information.
+
+StudyWeb is built not only for students but also for parents who want to support their children's education with a safe, reliable, and effective learning platform. Our goal is to become the all-in-one AI study companion that empowers millions of learners to unlock their full potential.
+
+**Study smarter. Learn faster. Achieve more.**
+",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -100,7 +100,7 @@ export default function WorkspaceNavbar({
     { id: 'chat' as const, label: 'AI Tutor', icon: MessageSquare, desc: 'Interactive help' },
     { id: 'notes' as const, label: 'Notes', icon: Edit3, desc: 'Notebook draft', badge: noteCount, comingSoon: true },
     { id: 'flashcards' as const, label: 'Flashcards', icon: BrainCircuit, desc: 'Leitner system', badge: flashcardCount, comingSoon: true },
-    { id: 'quiz' as const, label: 'Quizzes', icon: Award, desc: 'Practice exam', badge: quizCount },
+    { id: 'quiz' as const, label: 'Quizzes', icon: Award, desc: 'Practice exam', badge: quizCount, comingSoon: true },
   ];
 
   return (

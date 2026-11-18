@@ -3,16 +3,7 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "cleanUrls": false,
-  "functions": {
-    "api/index.ts": {
-      "maxDuration": 60
-    }
-  },
   "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/index?__vercel_path=$1"
-    },
     {
       "source": "/((?!assets/|api/|.*\\.[\\w]+$).*)",
       "destination": "/index.html"

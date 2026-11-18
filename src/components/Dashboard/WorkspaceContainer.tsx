@@ -519,7 +519,7 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
   const currentTheme = themeColors[workspace.colorTheme] || themeColors.indigo;
 
   return (
-    <div className={`w-full min-w-0 ${activeTab === 'chat' ? 'h-full flex-1 flex flex-col min-h-0' : 'space-y-4 sm:space-y-6'} relative`}>
+    <div className={`w-full ${activeTab === 'chat' ? 'h-full flex-1 flex flex-col min-h-0' : 'space-y-6'} relative`}>
       <AnimatePresence>
         {isGlobalDragging && (
           <motion.div
@@ -539,15 +539,7 @@ export default function WorkspaceContainer({ workspace, workspaces = [], onSwitc
         )}
       </AnimatePresence>
       {/* RENDER ACTIVE TAB COMPONENT CONTAINER */}
-      <div
-        className={
-          activeTab === 'chat'
-            ? 'h-full flex-1 flex flex-col min-h-0 w-full min-w-0 bg-transparent rounded-none'
-            : activeTab === 'overview'
-            ? 'w-full min-w-0 bg-transparent rounded-none'
-            : 'w-full min-w-0 bg-white dark:bg-slate-900 rounded-2xl sm:rounded-[24px]'
-        }
-      >
+      <div className={activeTab === 'chat' ? 'h-full flex-1 flex flex-col min-h-0 bg-transparent rounded-none' : 'bg-white dark:bg-slate-900 rounded-[24px]'}>
         {activeTab === 'overview' && (
           <WorkspaceOverview 
             workspace={workspace} 

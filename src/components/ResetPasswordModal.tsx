@@ -139,7 +139,7 @@ export default function ResetPasswordModal({ isOpen: externalIsOpen, onClose: ex
       }
     } catch (err: any) {
       console.error('Password update error:', err);
-      setError('Something went wrong. There is a server error. Please try again.');
+      setError(err?.message || 'Failed to update password. Please request a new password reset link.');
     } finally {
       setLoading(false);
     }

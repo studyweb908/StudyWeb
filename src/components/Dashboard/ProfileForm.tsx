@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { z } from 'zod';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SuccessLottieAnimation } from '../Common/SuccessLottieAnimation';
 import {
   readSyncProfileSnapshot,
   fetchAndReconcileSupabaseProfile,
@@ -98,7 +97,7 @@ export function ProfileForm() {
       setTimeout(() => setSuccess(false), 3000);
     } catch (error: any) {
       console.error('Error updating profile:', error);
-      setFetchError('Something went wrong. There is a server error. Please try again.');
+      setFetchError(error.message || 'Failed to update profile.');
     } finally {
       setSaving(false);
     }
@@ -109,7 +108,7 @@ export function ProfileForm() {
       <div className="mb-6">
         <h3 className="text-xl font-bold text-slate-900 dark:text-white">Profile Settings</h3>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          Manage your personal information, school, and study goals.
+          Manage your personal information, school, and study goals in Supabase.
         </p>
       </div>
 
@@ -208,10 +207,10 @@ export function ProfileForm() {
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0 }}
-                className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 text-sm font-medium"
+                className="flex items-center text-emerald-600 dark:text-emerald-400 text-sm font-medium"
               >
-                <SuccessLottieAnimation className="w-10 h-10 shrink-0" />
-                <span>Saved</span>
+                <CheckCircle2 className="w-4 h-4 mr-1.5" />
+                Saved to Supabase
               </motion.div>
             )}
           </AnimatePresence>

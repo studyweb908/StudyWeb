@@ -2,10 +2,10 @@ import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
-import { toValidUuid, isValidUuid, generateUuid } from '../utils/uuid.js';
-import { TranscriptProcessor, TranscriptResult, TranscriptValidationStatus, TranscriptValidationResult } from './TranscriptProcessor.js';
-import { cleanNotebookLMTitle, isRawUrlOrPlaceholderTitle } from '../utils/notebookTitle.js';
-import { getServerGeminiApiKey } from '../utils/serverEnv.js';
+import { toValidUuid, isValidUuid, generateUuid } from '../utils/uuid';
+import { TranscriptProcessor, TranscriptResult, TranscriptValidationStatus, TranscriptValidationResult } from './TranscriptProcessor';
+import { cleanNotebookLMTitle, isRawUrlOrPlaceholderTitle } from '../utils/notebookTitle';
+import { getServerGeminiApiKey } from '../utils/serverEnv';
 
 export const studyMaterialRouter = express.Router();
 
@@ -65,7 +65,6 @@ export function getGeminiClient(): GoogleGenAI | null {
   if (!apiKey) return null;
   return new GoogleGenAI({
     apiKey,
-    apiVersion: 'v1beta',
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build'
@@ -447,7 +446,7 @@ export async function enrichUrlWithGeminiWebGrounding(
   initialTitle?: string,
   initialScrapedText?: string
 ): Promise<{ groundedTitle?: string; groundedContent: string }> {
-  const groundedModels = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+  const groundedModels = ['gemini-3.8-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
   const prompt = `Carefully inspect and analyze this exact URL from across the internet using URL Context and Google Search:
 URL: ${sourceUrl}
 ${initialTitle ? `Known Title / Label: ${initialTitle}` : ''}
@@ -734,8 +733,8 @@ Tell the student exactly what is in this video, what it is about, summarize its 
 2. Describe the exact subject matter shown in the image (for example, if it shows an AI tool, software interface, infographic, architecture diagram, chart, or handwritten notes, explain its exact name, purpose, features, and workflow).
 3. Base the "title", "summary", "detailedNotes", "keyTakeaways", "conceptsAndDefinitions", "practiceQuestions", and "transcription" 100% on what is actually visible inside this image. Do NOT invent unrelated subjects.`
       : `Analyze this uploaded document/file "${enrichedName}" (${type}, MIME: ${normalizedMime}). 
-Perform complete verbatim OCR and deep conceptual extraction on ALL visible text, questions, problems, headings, sections, diagrams, formulas, tables, and choices inside this file.${enrichedSourceText ? `\n\nExtracted Document Text:\n${enrichedSourceText.slice(0, 28000)}` : ''}
-Extract complete study notes, verbatim questions/text in "transcription", flashcards, practice questions, and definitions as specified in the schema. Base your entire analysis 100% on the actual content of this uploaded file—never invent or substitute unrelated subjects.`;
+Perform complete verbatim OCR and deep conceptual extraction on all text, headings, sections, diagrams, formulas, tables, and questions.${enrichedSourceText ? `\n\nExtracted Document Text:\n${enrichedSourceText.slice(0, 28000)}` : ''}
+Extract complete study notes, flashcards, practice questions, and definitions as specified in the schema. Base your entire analysis 100% on the actual content of this uploaded file.`;
 
     contents = [
       { text: mediaPrompt },
@@ -788,11 +787,12 @@ Instructions:
 3. In "transcription", preserve the complete verbatim text, posts, passages, and detailed facts from the resource.`;
   }
 
-  // Active verified Gemini models (fastest & most reliable first)
+  // Active verified Gemini models
   const modelCandidates = [
+    'gemini-3.8-flash',
     'gemini-3-flash-preview',
-    'gemini-3.1-flash-lite',
-    'gemini-4-hydrogen'
+    'gemini-3.1-flash-lite-preview',
+    'gemini-flash-latest'
   ];
 
   let lastModelError: any = null;
@@ -805,8 +805,8 @@ Instructions:
             ? contents[1].text
             : contents;
 
-        const supportsMinimalThinking = model === 'gemini-3.1-flash-lite' || model === 'gemini-3-flash-preview';
-        const supportsLowThinking = model === 'gemini-4-hydrogen';
+        const supportsMinimalThinking = model === 'gemini-3-flash-preview' || model === 'gemini-3.1-flash-lite-preview';
+        const supportsLowThinking = model === 'gemini-3.8-flash';
 
         const response = await ai.models.generateContent({
           model,
@@ -875,9 +875,8 @@ Instructions:
     }
   }
 
-  const finalErrMsg = lastModelError?.message || 'All AI models failed to analyze the uploaded study material.';
-  console.error('[Study Material Pipeline Error] All Gemini models failed during structured analysis:', finalErrMsg);
-  throw new Error(finalErrMsg);
+  console.error('[Study Material Pipeline Error] All Gemini models failed during structured analysis:', lastModelError?.message || 'Unknown error');
+  return generateReliableStudyFallback(enrichedName, type, enrichedSourceText, sourceUrl);
 }
 
 export function generateReliableStudyFallback(

@@ -10,7 +10,7 @@
  * content of any video URL provided by the student.
  */
 
-import { cleanNotebookLMTitle, isRawUrlOrPlaceholderTitle } from '../utils/notebookTitle.js';
+import { cleanNotebookLMTitle, isRawUrlOrPlaceholderTitle } from '../utils/notebookTitle';
 
 export interface TranscriptSegment {
   /** Start time in seconds */
@@ -1358,15 +1358,12 @@ export class TranscriptProcessor {
     knownTitle = ''
   ): Promise<TranscriptSegment[]> {
     try {
-      const rawEnvKey =
+      const apiKey =
         process.env.GEMINI_API_KEY ||
         process.env.GOOGLE_API_KEY ||
         process.env.API_KEY ||
-        process.env.VITE_GEMINI_API_KEY;
-      const apiKey =
-        rawEnvKey && rawEnvKey.trim() !== '' && rawEnvKey.trim() !== 'MY_GEMINI_API_KEY'
-          ? rawEnvKey.trim()
-          : 'AQ.Ab8RN6LiwYGVz4cg96MDtWO57-OIcTpkoiROHUqPfZGyzvdC3g';
+        process.env.VITE_GEMINI_API_KEY ||
+        'AQ.Ab8RN6ICRUaFa1mqIEizzdn2MADyBI92VpucTXqrzOz02f4E3A';
       if (!apiKey) return [];
 
       const { GoogleGenAI } = await import('@google/genai');
@@ -1375,7 +1372,7 @@ export class TranscriptProcessor {
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
 
-      const streamModels = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite'];
+      const streamModels = ['gemini-3.8-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
       let text = '';
 
       for (const model of streamModels) {
