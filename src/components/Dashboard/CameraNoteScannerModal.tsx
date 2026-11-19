@@ -951,37 +951,32 @@ export default function CameraNoteScannerModal({
     fileMimeType: string;
     extractedText: string;
   }): Promise<{ summary: string; error?: string }> => {
-    setIsVerifyingApiKey(true);
-    const keyStatus = await OCRService.verifyGeminiConnectionStatus();
-    setIsVerifyingApiKey(false);
-    setGeminiKeyVerified(keyStatus.ok);
+    try {
+      const generated = await OCRService.generateShortSummaryForScannedNote({
+        id: params.id,
+        name: params.name,
+        fileBase64: params.fileBase64,
+        fileMimeType: params.fileMimeType,
+        extractedText: params.extractedText
+      });
 
-    if (!keyStatus.ok) {
-      console.error('[Scan Notes Summary Error]', keyStatus.error);
+      if (!generated || isPlaceholderScanSummary(generated)) {
+        return {
+          summary: '',
+          error: 'Could not generate a short summary right now. Tap Retry Summary to try again.'
+        };
+      }
+
+      setGeminiKeyVerified(true);
+      setCachedShortSummary(params.id, generated);
+      return { summary: generated };
+    } catch (err: any) {
+      console.error('[Scan Notes Summary Error]', err);
       return {
         summary: '',
-        error: 'Something went wrong. There is a server error. Please try again.'
+        error: err?.message || 'Could not generate a short summary right now. Tap Retry Summary to try again.'
       };
     }
-
-    const generated = await OCRService.generateShortSummaryForScannedNote({
-      id: params.id,
-      name: params.name,
-      fileBase64: params.fileBase64,
-      fileMimeType: params.fileMimeType,
-      extractedText: params.extractedText
-    });
-
-    if (!generated || isPlaceholderScanSummary(generated)) {
-      console.error('[Scan Notes Summary Error] Empty or placeholder summary returned');
-      return {
-        summary: '',
-        error: 'Something went wrong. There is a server error. Please try again.'
-      };
-    }
-
-    setCachedShortSummary(params.id, generated);
-    return { summary: generated };
   };
 
   const handleRetrySummary = async () => {
@@ -991,18 +986,6 @@ export default function CameraNoteScannerModal({
     setScanError(null);
 
     try {
-      setIsVerifyingApiKey(true);
-      const keyStatus = await OCRService.verifyGeminiConnectionStatus();
-      setIsVerifyingApiKey(false);
-      setGeminiKeyVerified(keyStatus.ok);
-
-      if (!keyStatus.ok) {
-        console.error('[Scan Notes Retry Summary Error]', keyStatus.error);
-        setSummaryError('Something went wrong. There is a server error. Please try again.');
-        setSummaryFailureCount((prev) => prev + 1);
-        return;
-      }
-
       let currentExtractedText = scanResult.extractedText;
       let currentTitle = scanResult.title;
       let currentTempId = scanResult.tempId;
@@ -1018,7 +1001,7 @@ export default function CameraNoteScannerModal({
 
         if (ocrResult.error) {
           console.error('[Scan Notes OCR Error]', ocrResult.error);
-          setSummaryError('Something went wrong. There is a server error. Please try again.');
+          setSummaryError(ocrResult.error);
           setSummaryFailureCount((prev) => prev + 1);
           return;
         }
@@ -1056,17 +1039,18 @@ export default function CameraNoteScannerModal({
 
       if (!resolvedSummary || isPlaceholderScanSummary(resolvedSummary)) {
         console.error('[Scan Notes Summary Error] Retry failed to produce summary');
-        setSummaryError('Something went wrong. There is a server error. Please try again.');
+        setSummaryError('Could not generate a short summary right now. Please try again in a moment.');
         setSummaryFailureCount((prev) => prev + 1);
         return;
       }
 
+      setGeminiKeyVerified(true);
       setCachedShortSummary(currentTempId, resolvedSummary);
       setSummaryError(null);
       setScanResult((prev) => (prev ? { ...prev, summary: resolvedSummary } : prev));
     } catch (err: any) {
       console.error('[Scan Notes Summary Error]', err);
-      setSummaryError('Something went wrong. There is a server error. Please try again.');
+      setSummaryError(err?.message || 'Could not generate a short summary right now. Please try again.');
       setSummaryFailureCount((prev) => prev + 1);
     } finally {
       setIsVerifyingApiKey(false);
@@ -1150,10 +1134,7 @@ export default function CameraNoteScannerModal({
 
       if (ocrResult.error) {
         console.error('[Scan Notes OCR Error]', ocrResult.error);
-        const genericErr = 'Something went wrong. There is a server error. Please try again.';
-        setScanError(genericErr);
-        setSummaryError(genericErr);
-        setSummaryFailureCount((prev) => Math.max(1, prev + 1));
+        setScanError(ocrResult.error);
         setIsExtractingOcr(false);
         return;
       }
@@ -1170,7 +1151,7 @@ export default function CameraNoteScannerModal({
         if (activeScanSeqRef.current !== scanSeq) return;
         resolvedSummary = summaryAttempt.summary;
         if (summaryAttempt.error) {
-          setSummaryError('Something went wrong. There is a server error. Please try again.');
+          setSummaryError(summaryAttempt.error);
           setSummaryFailureCount((prev) => Math.max(1, prev + 1));
         }
       } else {
@@ -1195,6 +1176,9 @@ export default function CameraNoteScannerModal({
     } catch (error: any) {
       if (activeScanSeqRef.current !== scanSeq) return;
       console.warn('Notice during background OCR:', error);
+      setScanError(
+        error?.message || 'Unable to process the scanned document right now. Please try again.'
+      );
       setIsProcessing(false);
       setIsExtractingOcr(false);
     }
@@ -1263,17 +1247,18 @@ export default function CameraNoteScannerModal({
           actionLabel: mode !== 'ask' ? actionLabels[mode] : undefined
         }
       ]);
-    } catch {
-      const fallbackAnswer = scanResult.extractedText
-        ? `### Key Content from Your Scan\n\n${scanResult.extractedText.slice(0, 1200)}`
-        : scanResult.summary || 'I inspected your scanned note. Ask any question about a specific line or problem on the page.';
+    } catch (err: any) {
       setLensMessages((prev) => [
         ...prev,
         {
           id: `a-${Date.now()}`,
           role: 'assistant',
-          text: fallbackAnswer,
-          actionLabel: mode !== 'ask' ? actionLabels[mode] : undefined
+          text:
+            err?.message ||
+            'Unable to complete your scan question right now. Please tap Retry to try again.',
+          actionLabel: mode !== 'ask' ? actionLabels[mode] : undefined,
+          isError: true,
+          retryPayload: requestPayload
         }
       ]);
     } finally {
@@ -1291,14 +1276,16 @@ export default function CameraNoteScannerModal({
           m.id === failedMsg.id ? { ...m, text: answer, isError: false } : m
         )
       );
-    } catch {
+    } catch (err: any) {
       setLensMessages((prev) =>
         prev.map((m) =>
           m.id === failedMsg.id
             ? {
                 ...m,
-                text: scanResult?.extractedText || 'Scanned note analyzed and ready.',
-                isError: false
+                text:
+                  err?.message ||
+                  'Still unable to reach the scan assistant. Please try again in a moment.',
+                isError: true
               }
             : m
         )
@@ -1323,8 +1310,10 @@ export default function CameraNoteScannerModal({
         targetLanguage
       });
       setTranslatedText(translated);
-    } catch {
-      setTranslatedText(scanResult.extractedText || scanResult.summary);
+    } catch (err: any) {
+      setTranslationError(
+        err?.message || 'Unable to translate your scanned note right now. Please try again.'
+      );
     } finally {
       setIsTranslating(false);
     }
@@ -1408,7 +1397,7 @@ export default function CameraNoteScannerModal({
       }
     } catch (err: any) {
       console.error('[Scan Notes Workspace Save Error]', err);
-      setSaveWorkspaceError('Something went wrong. There is a server error. Please try again.');
+      setSaveWorkspaceError('Could not save your scanned note to the workspace. Please try again.');
     } finally {
       setIsSavingToWorkspace(false);
     }
@@ -1469,9 +1458,12 @@ export default function CameraNoteScannerModal({
     for (const f of files) {
       const validation = validateScanInputFile(f);
       if (!validation.valid) {
-        console.error('[Scan Notes File Validation Error]', validation.error);
-        setScanError('Something went wrong. There is a server error. Please try again.');
-        (window as any).showToast?.('Something went wrong. There is a server error. Please try again.', 'error', 4000, 'Server Error');
+        const msg =
+          validation.error ||
+          'Unsupported file selected. Scan Notes accepts images only (JPEG, PNG, WEBP, GIF, BMP, SVG, HEIC).';
+        console.warn('[Scan Notes File Validation]', msg);
+        setScanError(msg);
+        (window as any).showToast?.(msg, 'error', 4000, 'Unsupported File');
         return;
       }
     }
@@ -1937,10 +1929,10 @@ export default function CameraNoteScannerModal({
                                   <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
                                   <div className="min-w-0">
                                     <p className="text-xs sm:text-sm font-bold text-rose-800 dark:text-rose-200">
-                                      Server Error
+                                      Unable to Process Scan
                                     </p>
                                     <p className="text-xs text-rose-700 dark:text-rose-300 mt-0.5 leading-relaxed">
-                                      Something went wrong. There is a server error. Please try again.
+                                      {scanError}
                                     </p>
                                   </div>
                                 </div>
@@ -1984,8 +1976,10 @@ export default function CameraNoteScannerModal({
                                 {scanResult.summary ||
                                   (isExtractingOcr || isVerifyingApiKey || isRetryingSummary
                                     ? 'Reading your scanned note and creating a short summary...'
-                                    : summaryError || scanError
-                                    ? 'Something went wrong. There is a server error. Please try again.'
+                                    : summaryError
+                                    ? summaryError
+                                    : scanError
+                                    ? 'Text extraction did not complete yet. Tap Retry above or ask any question below about the image.'
                                     : 'Ask any question about your scanned notes below, switch to Text & Translate to copy or translate, or tap Listen to hear it read aloud.')}
                               </p>
                             </div>
@@ -2032,10 +2026,10 @@ export default function CameraNoteScannerModal({
                                     <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
                                     <div className="min-w-0 flex-1">
                                       <p className="text-xs font-semibold text-rose-800 dark:text-rose-200">
-                                        Server Error
+                                        Couldn&apos;t Complete Request
                                       </p>
                                       <p className="text-xs text-rose-700 dark:text-rose-200/90 mt-0.5 break-words">
-                                        Something went wrong. There is a server error. Please try again.
+                                        {msg.text}
                                       </p>
                                     </div>
                                   </div>
@@ -2235,8 +2229,8 @@ export default function CameraNoteScannerModal({
                           <div className="rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-500/40 p-4 flex items-start gap-2.5">
                             <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
                             <div className="min-w-0 flex-1">
-                              <p className="text-xs font-semibold text-rose-800 dark:text-rose-200">Server Error</p>
-                              <p className="text-xs text-rose-700 dark:text-rose-200/90 mt-0.5 break-words">Something went wrong. There is a server error. Please try again.</p>
+                              <p className="text-xs font-semibold text-rose-800 dark:text-rose-200">Translation Unavailable</p>
+                              <p className="text-xs text-rose-700 dark:text-rose-200/90 mt-0.5 break-words">{translationError}</p>
                             </div>
                           </div>
                         )}
@@ -2333,10 +2327,10 @@ export default function CameraNoteScannerModal({
                         </div>
                         <div className="min-w-0">
                           <h4 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
-                            Server Error
+                            Unable to Process Scan
                           </h4>
                           <p className="text-xs sm:text-sm text-rose-700 dark:text-rose-200 mt-1 leading-relaxed break-words">
-                            Something went wrong. There is a server error. Please try again.
+                            {scanError}
                           </p>
                         </div>
                       </div>

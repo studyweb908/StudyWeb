@@ -38,8 +38,16 @@ import { AITutorBackgroundService } from '../../services/AITutorBackgroundServic
 import { FullScreenUploadOverlay } from './FullScreenUploadOverlay';
 import { loadStoredWorkspaces, saveStoredWorkspaces } from '../../utils/workspaceStorage';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
+import { AITutorContextDebugPanel } from './AITutorContextDebugPanel';
 import AITutorAvatar from './AITutorAvatar';
 import { ShareContentModal, triggerNativeDeviceShare } from './ShareContentModal';
+import {
+  fetchNaturalTtsAudio,
+  getStoredVoiceProfileGender,
+  prepareTextForNaturalSpeech,
+  resolveGeminiVoiceForProfile,
+  selectBestBrowserNaturalVoice
+} from '../../utils/naturalTts';
 
 interface Message {
   id: string;
@@ -268,8 +276,15 @@ export default function AITutorWorkspace() {
   // Auditory TTS state
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const ttsAbortRef = useRef<AbortController | null>(null);
+  const ttsSeqRef = useRef(0);
 
   const stopTutorSpeech = () => {
+    ttsSeqRef.current += 1;
+    if (ttsAbortRef.current) {
+      try { ttsAbortRef.current.abort(); } catch {}
+      ttsAbortRef.current = null;
+    }
     if (audioPlayerRef.current) {
       try { audioPlayerRef.current.pause(); } catch {}
       audioPlayerRef.current = null;
@@ -287,50 +302,51 @@ export default function AITutorWorkspace() {
     }
     stopTutorSpeech();
 
-    const clean = text
-      .replace(/```[\s\S]*?```/g, '')
-      .replace(/`([^`]+)`/g, '$1')
-      .replace(/\[Source:[^\]]+\]/gi, '')
-      .replace(/\[\d+:\d+\]/g, '')
-      .replace(/#{1,6}\s+/g, '')
-      .replace(/\*\*(.*?)\*\*/g, '$1')
-      .replace(/\*(.*?)\*/g, '$1')
-      .replace(/[-*•]\s+/g, '')
-      .replace(/\n+/g, '. ')
-      .trim();
-
+    const clean = prepareTextForNaturalSpeech(text);
     if (!clean) return;
+
+    const seq = ++ttsSeqRef.current;
+    const abortCtrl = new AbortController();
+    ttsAbortRef.current = abortCtrl;
+    const gender = getStoredVoiceProfileGender();
+    const resolvedVoice = resolveGeminiVoiceForProfile(gender);
 
     try {
       setSpeakingMsgId(id);
-      const storedVoice = localStorage.getItem('study_tutor_voice_profile') || 'male';
-      const geminiVoiceMap: Record<string, string> = {
-        male: 'Fenrir',
-        female: 'Kore'
-      };
-      const resolvedVoice = geminiVoiceMap[storedVoice] || 'Fenrir';
-
-      const res = await fetch('/api/ai-tutor-tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: clean, persona: 'socratic', voiceName: resolvedVoice })
+      const ttsResult = await fetchNaturalTtsAudio({
+        text: clean,
+        persona: 'socratic',
+        voiceName: resolvedVoice,
+        timeoutMs: 25000,
+        signal: abortCtrl.signal
       });
-      if (res.ok) {
-        const data = await res.json().catch(() => null);
-        if (data?.success && data?.audioBase64) {
-          const audio = new Audio(`data:${data.mimeType || 'audio/wav'};base64,${data.audioBase64}`);
-          audioPlayerRef.current = audio;
-          audio.onended = () => setSpeakingMsgId(null);
-          audio.onerror = () => setSpeakingMsgId(null);
-          await audio.play();
-          return;
-        }
+
+      if (ttsSeqRef.current !== seq || abortCtrl.signal.aborted) return;
+
+      if (ttsResult?.audioBase64) {
+        const audio = new Audio(`data:${ttsResult.mimeType};base64,${ttsResult.audioBase64}`);
+        audioPlayerRef.current = audio;
+        audio.onended = () => {
+          audioPlayerRef.current = null;
+          setSpeakingMsgId(null);
+        };
+        audio.onerror = () => {
+          audioPlayerRef.current = null;
+          setSpeakingMsgId(null);
+        };
+        await audio.play();
+        return;
       }
     } catch {}
 
+    if (ttsSeqRef.current !== seq || abortCtrl.signal.aborted) return;
+
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       const u = new SpeechSynthesisUtterance(clean.slice(0, 1500));
-      u.rate = 0.95;
+      const bestVoice = selectBestBrowserNaturalVoice(gender);
+      if (bestVoice) u.voice = bestVoice;
+      u.rate = 1.0;
+      u.pitch = 1.0;
       u.onend = () => setSpeakingMsgId(null);
       u.onerror = () => setSpeakingMsgId(null);
       window.speechSynthesis.speak(u);
@@ -809,6 +825,12 @@ export default function AITutorWorkspace() {
         throw errorWithCode;
       }
 
+      if (typeof window !== 'undefined' && data?.contextResolution) {
+        window.dispatchEvent(
+          new CustomEvent('studyweb_context_resolution', { detail: data.contextResolution })
+        );
+      }
+
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: 'ai',
@@ -1047,7 +1069,7 @@ export default function AITutorWorkspace() {
 
     setTimeout(() => {
       setTutorUploadOverlay(prev => ({ ...prev, isOpen: false }));
-    }, 260);
+    }, 2200);
 
     (window as any).showToast?.(
       `"${filesArray.map(f => f.name).join(', ')}" was uploaded and attached to your AI Tutor session.`,
@@ -1408,6 +1430,14 @@ export default function AITutorWorkspace() {
             </button>
           </div>
         </div>
+
+        {/* Developer-Only Context Resolution Debug Bar */}
+        <AITutorContextDebugPanel
+          activeWorkspaceId={targetWsId}
+          activeWorkspaceName={activeWorkspace?.name || 'Workspace'}
+          attachedFiles={attachedFiles}
+          allWorkspaces={activeWorkspace ? [activeWorkspace] : []}
+        />
 
         {/* Main Chat Feed */}
         <div

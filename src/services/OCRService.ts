@@ -122,7 +122,7 @@ export function validateScanInputFile(file: {
 export function isPlaceholderScanSummary(summary?: string | null): boolean {
   const s = String(summary || '').trim();
   if (!s || s.length < 18) return true;
-  return /ask any question about your scanned|scanned image loaded in lens|scanned study note ready|switch to text & translate|tap listen to hear|uploading and analyzing|configure a valid gemini_api_key|enable live lens ai|ready for review and q&a|i inspected your scanned note/i.test(
+  return /ask any question about your scanned|scanned image loaded in lens|scanned study note ready|switch to text & translate|tap listen to hear|uploading and analyzing|configure a valid gemini_api_key|enable live lens ai|ready for review and q&a|i inspected your scanned note|something went wrong|there is a server error|temporarily unavailable|temporarily busy|authentication failed|could not process|could not complete|unable to (analyze|extract|read|complete)/i.test(
     s
   );
 }
@@ -183,6 +183,10 @@ export class OCRService {
       }
 
       const configured = Boolean(data?.configured === true && response.status !== 503);
+      const friendlyError =
+        typeof data?.error === 'string' && data.error.trim() && !/server error/i.test(data.error)
+          ? data.error.trim()
+          : 'Unable to reach the document scanning service right now. Please try again shortly.';
       if (data?.error) {
         console.error('[OCRService] Connection health check error:', data.error);
       }
@@ -190,16 +194,19 @@ export class OCRService {
         ok: false,
         configured,
         verified: false,
-        error: 'Something went wrong. There is a server error. Please try again.'
+        error: friendlyError
       };
     } catch (err: any) {
       clearTimeout(timeoutId);
       console.error('[OCRService] Connection health check exception:', err);
+      const isAbort = err?.name === 'AbortError';
       return {
         ok: false,
         configured: false,
         verified: false,
-        error: 'Something went wrong. There is a server error. Please try again.'
+        error: isAbort
+          ? 'The connection check timed out. Please try again.'
+          : 'Unable to connect to the scanning service right now. Please check your connection and try again.'
       };
     }
   }
@@ -295,11 +302,41 @@ export class OCRService {
         const data = await response.json().catch(() => null);
 
         if (!response.ok) {
-          console.error('[OCRService] /api/ocr/scan-note server error:', {
+          const backendError =
+            typeof data?.error === 'string' && data.error.trim() ? data.error.trim() : '';
+          console.error('[OCRService] /api/ocr/scan-note error:', {
             status: response.status,
-            error: data?.error
+            code: data?.code,
+            error: backendError || response.statusText
           });
-          lastErrorMessage = 'Something went wrong. There is a server error. Please try again.';
+
+          if (response.status === 413) {
+            lastErrorMessage =
+              backendError ||
+              'The scanned image is too large. Please try capturing or uploading a smaller photo.';
+          } else if (response.status === 415 || response.status === 400) {
+            lastErrorMessage =
+              backendError ||
+              'Please choose a supported image file (JPEG, PNG, WEBP, GIF, BMP, SVG, or HEIC).';
+          } else if (response.status === 422) {
+            lastErrorMessage =
+              backendError ||
+              'No readable text or diagrams were detected. Please try a clearer, well-lit photo.';
+          } else if (response.status === 429) {
+            lastErrorMessage =
+              backendError ||
+              'The scanning service is temporarily busy. Please wait a few seconds and try again.';
+          } else if (response.status === 504) {
+            lastErrorMessage =
+              backendError ||
+              'Scanning took longer than expected. Please try again with a clearer or single-page photo.';
+          } else {
+            lastErrorMessage =
+              backendError && !/there is a server error/i.test(backendError)
+                ? backendError
+                : 'Unable to scan this note right now. Please try again in a moment.';
+          }
+
           if (
             response.status === 400 ||
             response.status === 401 ||
@@ -365,9 +402,16 @@ export class OCRService {
 
           return scanResultObj;
         }
+
+        if (data?.error) {
+          lastErrorMessage = String(data.error).trim();
+        }
       } catch (ocrErr: any) {
         console.error(`[OCRService] /api/ocr/scan-note attempt ${attempt} error:`, ocrErr?.message || ocrErr);
-        lastErrorMessage = 'Something went wrong. There is a server error. Please try again.';
+        const isAbort = ocrErr?.name === 'AbortError';
+        lastErrorMessage = isAbort
+          ? 'Scanning timed out. Please check your connection and try again.'
+          : 'Could not reach the scanning service. Please check your connection and try again.';
       }
     }
 
@@ -379,7 +423,7 @@ export class OCRService {
       highlights: [],
       formulas: [],
       tags: ['Scanned Note', 'Lens'],
-      error: lastErrorMessage || 'Something went wrong. There is a server error. Please try again.'
+      error: lastErrorMessage || 'Unable to process this scanned image right now. Please try again.'
     };
   }
 
@@ -405,22 +449,26 @@ export class OCRService {
       resolvedBase64 = params.imageUrl.split(';base64,')[1] || '';
     }
 
-    const answer = await this.askLensQuestion({
-      fileBase64: resolvedBase64 || undefined,
-      fileMimeType: resolvedMime,
-      imageUrl: params.imageUrl && params.imageUrl.startsWith('http') ? params.imageUrl : undefined,
-      extractedText: params.extractedText || params.name || '',
-      mode: 'short_summary'
-    });
+    try {
+      const answer = await this.askLensQuestion({
+        fileBase64: resolvedBase64 || undefined,
+        fileMimeType: resolvedMime,
+        imageUrl: params.imageUrl && params.imageUrl.startsWith('http') ? params.imageUrl : undefined,
+        extractedText: params.extractedText || params.name || '',
+        mode: 'short_summary'
+      });
 
-    const cleaned = answer
-      .replace(/^#{1,6}\s+[^\n]*\n+/g, '')
-      .replace(/^\*{0,2}(?:short\s+)?summary\*{0,2}\s*:\s*/i, '')
-      .trim();
+      const cleaned = answer
+        .replace(/^#{1,6}\s+[^\n]*\n+/g, '')
+        .replace(/^\*{0,2}(?:short\s+)?summary\*{0,2}\s*:\s*/i, '')
+        .trim();
 
-    if (cleaned && !isPlaceholderScanSummary(cleaned)) {
-      setCachedShortSummary(params.id, cleaned);
-      return cleaned;
+      if (cleaned && !isPlaceholderScanSummary(cleaned)) {
+        setCachedShortSummary(params.id, cleaned);
+        return cleaned;
+      }
+    } catch (summaryErr: any) {
+      console.warn('[OCRService] Short summary generation fallback:', summaryErr?.message || summaryErr);
     }
 
     if (params.extractedText) {
@@ -429,10 +477,12 @@ export class OCRService {
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 220);
-      return fallback.length >= 220 ? `${fallback}...` : fallback;
+      if (fallback && !isPlaceholderScanSummary(fallback)) {
+        return fallback.length >= 220 ? `${fallback}...` : fallback;
+      }
     }
 
-    return `Study notes from "${params.name || 'Scanned Note'}" ready for review and Q&A.`;
+    return '';
   }
 
   /**
@@ -440,9 +490,11 @@ export class OCRService {
    * directly on a scanned image + OCR text without requiring workspace upload first.
    */
   public static async askLensQuestion(request: LensAskRequest): Promise<string> {
+    let lastError = 'Unable to analyze this scanned note right now. Please try again.';
+
     for (let attempt = 1; attempt <= 2; attempt++) {
       const abortCtrl = new AbortController();
-      const timeoutId = setTimeout(() => abortCtrl.abort(), 15000);
+      const timeoutId = setTimeout(() => abortCtrl.abort(), 18000);
 
       try {
         const response = await fetch('/api/ocr/lens-ask', {
@@ -463,31 +515,38 @@ export class OCRService {
         } catch {}
 
         if (!response.ok) {
-          console.error('[OCRService] /api/ocr/lens-ask server error:', {
+          const backendErr =
+            typeof data?.error === 'string' && data.error.trim() ? data.error.trim() : '';
+          console.error('[OCRService] /api/ocr/lens-ask error:', {
             status: response.status,
-            error: data?.error
+            code: data?.code,
+            error: backendErr || response.statusText
           });
-          if (response.status === 401 || response.status === 403 || response.status === 503) {
-            return 'Something went wrong. There is a server error. Please try again.';
+          lastError =
+            backendErr && !/there is a server error/i.test(backendErr)
+              ? backendErr
+              : 'Unable to analyze this scanned note right now. Please try again.';
+
+          if (response.status === 400 || response.status === 401 || response.status === 403) {
+            break;
           }
+          continue;
         }
 
         const answer = String(data?.answer || '').trim();
-        if (answer) {
+        if (answer && !/something went wrong|there is a server error/i.test(answer)) {
           return answer;
         }
       } catch (err: any) {
         clearTimeout(timeoutId);
         console.error(`[OCRService] /api/ocr/lens-ask attempt ${attempt} error:`, err?.message || err);
+        lastError =
+          err?.name === 'AbortError'
+            ? 'The scan request timed out. Please try again.'
+            : 'Could not reach the scan assistant. Please check your connection and try again.';
       }
     }
 
-    if (request.extractedText && request.mode === 'translate') {
-      return request.extractedText;
-    }
-    if (request.extractedText) {
-      return `### Key Notes & Content from Your Scan\n\n${request.extractedText.slice(0, 1500)}`;
-    }
-    return 'Something went wrong. There is a server error. Please try again.';
+    throw new Error(lastError);
   }
 }

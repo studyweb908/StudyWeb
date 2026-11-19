@@ -9,9 +9,9 @@ const WORKSPACES_CACHE_TTL_MS = 15_000;
 let lastSupabaseToastTime = 0;
 
 function reportSupabaseError(context: string, err: any, notifyToast = true): void {
-  const code = err?.code || err?.status || err?.statusCode || 'SUPABASE_ERR';
+  const code = err?.code || err?.status || err?.statusCode || 'SERVER_ERR';
   const message = err?.message || err?.error_description || String(err || 'Database operation failed');
-  console.error(`[Supabase Error][${context}] [${code}] ${message}`, {
+  console.error(`[Server Error][${context}] [${code}] ${message}`, {
     code,
     message,
     details: err?.details,
@@ -23,15 +23,15 @@ function reportSupabaseError(context: string, err: any, notifyToast = true): voi
     const now = Date.now();
     if (now - lastSupabaseToastTime > 3000) {
       lastSupabaseToastTime = now;
-      const toastText = `[${code}] ${message}`;
+      const genericMsg = 'Something went wrong. There is a server error. Please try again.';
       if (typeof (window as any).showToast === 'function') {
-        (window as any).showToast(toastText, 'error', 5500, `Supabase Error (${context})`);
+        (window as any).showToast(genericMsg, 'error', 5000, 'Server Error');
       } else {
         window.dispatchEvent(
           new CustomEvent('studyweb-toast', {
             detail: {
-              title: `Supabase Error (${code})`,
-              message: `${context}: ${message}`,
+              title: 'Server Error',
+              message: genericMsg,
               type: 'error'
             }
           })

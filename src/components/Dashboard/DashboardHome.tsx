@@ -30,6 +30,7 @@ import { getRealUserActivities, recordUserActivity, UserActivityItem } from '../
 import { HomeWorkspaceSkeleton, RecentActivitySkeleton } from './DashboardSkeletons';
 import { readSyncProfileSnapshot, fetchAndReconcileSupabaseProfile } from '../../utils/profileStorage';
 import { StudyTrackerService } from '../../services/StudyTrackerService';
+import { loadQuizHistory } from '../../utils/quizHistoryStorage';
 
 interface DashboardHomeProps {
   setActiveTab: (tab: string) => void;
@@ -253,7 +254,7 @@ export default function DashboardHome({
       variants={containerVariants}
       initial="hidden"
       animate="show"
-      className="pb-16 space-y-6 max-w-7xl mx-auto w-full text-slate-900 dark:text-slate-100"
+      className="pb-4 sm:pb-12 space-y-4 sm:space-y-6 max-w-7xl mx-auto w-full min-w-0 text-slate-900 dark:text-slate-100"
     >
       <input 
         type="file" 
@@ -305,15 +306,15 @@ export default function DashboardHome({
             </svg>
           </div>
 
-          <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5 sm:gap-6">
-            <div className="space-y-1.5 sm:space-y-2 max-w-2xl text-left">
-              <div className="flex items-center gap-2 text-[11px] sm:text-xs font-semibold text-indigo-600 dark:text-indigo-400 tracking-wide uppercase">
+          <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6">
+            <div className="space-y-1.5 sm:space-y-2 max-w-2xl text-left min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] sm:text-xs font-semibold text-indigo-600 dark:text-indigo-400 tracking-wide uppercase">
                 <img src="/logo-inner.png" alt="StudyWeb" className="w-5 h-5 object-contain select-none shrink-0" />
                 <span>{formattedDate}</span>
                 <span aria-hidden="true">·</span>
                 <span>StudyWeb Learning Core</span>
               </div>
-              <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white leading-tight">
+              <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white leading-tight break-words">
                 {greeting}, {firstName}! 👋
               </h1>
               <p className="text-xs sm:text-sm md:text-base text-slate-600 dark:text-slate-300 font-medium leading-relaxed">
@@ -324,13 +325,13 @@ export default function DashboardHome({
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 shrink-0 w-full sm:w-auto">
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 sm:gap-3 shrink-0 w-full md:w-auto">
               <button
                 data-tour="home-workspaces-btn"
                 onClick={() => setActiveTab('workspaces')}
-                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs sm:text-sm shadow-sm transition-all duration-200 focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none cursor-pointer active:scale-95 text-center"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs sm:text-sm shadow-sm transition-all duration-200 focus-visible:ring-2 focus-visible:ring-indigo-500 outline-none cursor-pointer active:scale-95 text-center whitespace-nowrap"
               >
-                <Folder className="w-4 h-4" />
+                <Folder className="w-4 h-4 shrink-0" />
                 <span>Open Workspaces</span>
               </button>
               <button
@@ -341,9 +342,9 @@ export default function DashboardHome({
                   }
                   setActiveTab('ai-tutor');
                 }}
-                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm shadow-xs transition-all duration-200 cursor-pointer active:scale-95 text-center"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm shadow-xs transition-all duration-200 cursor-pointer active:scale-95 text-center whitespace-nowrap"
               >
-                <Bot className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+                <Bot className="w-4 h-4 text-violet-600 dark:text-violet-400 shrink-0" />
                 <span>Ask AI Tutor</span>
               </button>
             </div>
@@ -393,9 +394,9 @@ export default function DashboardHome({
             </div>
 
             {/* 7-Day Weekly Streak Progress */}
-            <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2 bg-white/70 dark:bg-slate-800/60 backdrop-blur-xs px-3 py-2 rounded-xl border border-slate-200/70 dark:border-slate-700/60">
+            <div className="grid grid-cols-7 sm:flex items-center justify-items-center sm:justify-end gap-1 sm:gap-2 w-full sm:w-auto bg-white/70 dark:bg-slate-800/60 backdrop-blur-xs px-2 sm:px-3 py-2 rounded-xl border border-slate-200/70 dark:border-slate-700/60 shrink-0">
               {homeStreak.weekly.map((day) => (
-                <div key={day.dateStr} className="flex flex-col items-center gap-1 min-w-[28px]">
+                <div key={day.dateStr} className="flex flex-col items-center gap-1 min-w-0 w-full sm:w-7">
                   <span className={`text-[10px] font-bold uppercase tracking-wider ${
                     day.isToday
                       ? 'text-indigo-600 dark:text-indigo-400'
@@ -441,7 +442,8 @@ export default function DashboardHome({
         );
         const hasCompletedPractice =
           totalQuizzesOrFlashcards > 0 ||
-          realActivities.some(a => a.iconType === 'quiz');
+          realActivities.some(a => a.iconType === 'quiz') ||
+          loadQuizHistory().length > 0;
 
         const steps = [
           {
@@ -479,25 +481,27 @@ export default function DashboardHome({
             id: 'step-practice',
             num: '03',
             title: 'Complete an interactive quiz or practice session',
-            subtitle: 'Interactive adaptive quizzes and active recall practice are launching soon.',
-            done: false,
-            locked: true,
-            icon: <Lock className="w-4 h-4" />,
-            ctaLabel: 'Coming Soon',
-            onAction: () => {}
+            subtitle: hasCompletedPractice
+              ? 'Interactive adaptive quizzes & active recall practice active'
+              : 'Take an interactive adaptive quiz or active recall practice session to master your notes.',
+            done: hasCompletedPractice,
+            locked: false,
+            icon: <Award className="w-4 h-4" />,
+            ctaLabel: hasCompletedPractice ? 'Open Quizzes' : 'Start Practice Quiz',
+            onAction: () => setActiveTab('quiz-center')
           }
         ];
 
-        const activeStepsCount = 2;
+        const activeStepsCount = 3;
         const completedCount = steps.filter(s => !s.locked && s.done).length;
         const progressPct = Math.round((completedCount / activeStepsCount) * 100);
 
         return (
           <motion.div variants={itemVariants} className="w-full">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-5 sm:p-6 shadow-xs">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 pb-4 border-b border-slate-100 dark:border-slate-800/80">
-                <div>
-                  <div className="flex items-center gap-2 text-xs font-bold text-indigo-600 dark:text-indigo-400">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 sm:p-6 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-5 pb-3.5 sm:pb-4 border-b border-slate-100 dark:border-slate-800/80">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs font-bold text-indigo-600 dark:text-indigo-400">
                     <span>Quick-Start Launchpad</span>
                     <span aria-hidden="true">·</span>
                     <span className="tabular-nums">{completedCount} of {activeStepsCount} active steps completed</span>
@@ -506,11 +510,11 @@ export default function DashboardHome({
                     Your 3 steps to exam &amp; interview mastery
                   </h2>
                 </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <span className="text-xs font-bold tabular-nums text-slate-500 dark:text-slate-400">
+                <div className="flex items-center gap-3 w-full sm:w-auto shrink-0">
+                  <span className="text-xs font-bold tabular-nums text-slate-500 dark:text-slate-400 shrink-0">
                     {progressPct}%
                   </span>
-                  <div className="w-full sm:w-36 h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                  <div className="flex-1 sm:w-36 h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
                     <div
                       className="h-full bg-gradient-to-r from-indigo-600 to-violet-500 rounded-full transition-all duration-300"
                       style={{ width: `${Math.max(8, progressPct)}%` }}
@@ -679,21 +683,21 @@ export default function DashboardHome({
       {/* ========================================================= */}
       {/* 3. MAIN DASHBOARD CONTENT GRID (Left 7-8 cols / Right 4-5) */}
       {/* ========================================================= */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start">
         
         {/* ======================================================= */}
         {/* LEFT COLUMN: Real Workspaces & Real Activities (8 Cols) */}
         {/* ======================================================= */}
-        <div className="lg:col-span-7 xl:col-span-8 space-y-5 sm:space-y-6">
+        <div className="lg:col-span-7 xl:col-span-8 space-y-4 sm:space-y-6 min-w-0">
 
           {/* 3A. YOUR WORKSPACES (Continue Learning) */}
           <motion.div variants={itemVariants} className="w-full">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-6 sm:p-7 shadow-sm">
-              <div className="flex items-center justify-between gap-3 mb-5">
-                <div>
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 sm:p-6 md:p-7 shadow-sm">
+              <div className="flex items-center justify-between gap-3 mb-4 sm:mb-5">
+                <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <BookOpen className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                    <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">Your Workspaces</h2>
+                    <BookOpen className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                    <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight truncate">Your Workspaces</h2>
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     Jump straight into your course materials and notes.
@@ -702,7 +706,7 @@ export default function DashboardHome({
 
                 <button
                   onClick={() => setActiveTab('workspaces')}
-                  className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-1 cursor-pointer"
+                  className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <span>View All</span>
                   <ChevronRight className="w-3.5 h-3.5" />
@@ -832,12 +836,12 @@ export default function DashboardHome({
 
           {/* 3B. RECENT ACTIVITY — REAL USER EVENTS ONLY */}
           <motion.div variants={itemVariants} className="w-full">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-6 sm:p-7 shadow-sm">
-              <div className="flex items-center justify-between gap-3 mb-5">
-                <div>
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 sm:p-6 md:p-7 shadow-sm">
+              <div className="flex items-center justify-between gap-3 mb-4 sm:mb-5">
+                <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <Clock className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                    <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">Recent Activity</h2>
+                    <Clock className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                    <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight truncate">Recent Activity</h2>
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     Your real-time study timeline and recent learning sessions.
@@ -848,7 +852,7 @@ export default function DashboardHome({
               {isLoading ? (
                 <RecentActivitySkeleton />
               ) : realActivities.length === 0 ? (
-                <div className="py-10 px-6 text-center space-y-3 bg-slate-50/60 dark:bg-slate-850/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
+                <div className="py-8 sm:py-10 px-4 sm:px-6 text-center space-y-3 bg-slate-50/60 dark:bg-slate-850/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
                   <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto shadow-xs">
                     <Clock className="w-6 h-6" />
                   </div>
@@ -858,10 +862,10 @@ export default function DashboardHome({
                       Upload study materials in your Workspace or chat with your AI Tutor to start your learning journey!
                     </p>
                   </div>
-                  <div className="flex items-center justify-center gap-2 pt-1">
+                  <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                     <button
                       onClick={() => setActiveTab('workspaces')}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 text-xs font-semibold hover:bg-indigo-100 transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 text-xs font-semibold hover:bg-indigo-100 transition-colors cursor-pointer whitespace-nowrap"
                     >
                       <Folder className="w-3.5 h-3.5" />
                       <span>Open Workspaces</span>
@@ -873,7 +877,7 @@ export default function DashboardHome({
                         }
                         setActiveTab('ai-tutor');
                       }}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-violet-50 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 text-xs font-semibold hover:bg-violet-100 transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-violet-50 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 text-xs font-semibold hover:bg-violet-100 transition-colors cursor-pointer whitespace-nowrap"
                     >
                       <Bot className="w-3.5 h-3.5" />
                       <span>Ask AI Tutor</span>
@@ -887,7 +891,7 @@ export default function DashboardHome({
                       key={act.id}
                       className="flex items-start sm:items-center justify-between gap-3 p-3 sm:p-3.5 rounded-xl bg-slate-50/60 dark:bg-slate-850/40 border border-slate-200/60 dark:border-slate-800/60 hover:bg-slate-100/60 dark:hover:bg-slate-800/50 transition-colors"
                     >
-                      <div className="flex items-start sm:items-center gap-3 min-w-0">
+                      <div className="flex items-start sm:items-center gap-3 flex-1 min-w-0">
                         <div className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 mt-0.5 sm:mt-0 ${
                           act.iconType === 'workspace-create' ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200/80 dark:border-emerald-900/40 text-emerald-600 dark:text-emerald-400' :
                           act.iconType === 'delete' ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-200/80 dark:border-rose-900/40 text-rose-600 dark:text-rose-400' :
@@ -931,7 +935,7 @@ export default function DashboardHome({
         {/* ======================================================= */}
         {/* RIGHT COLUMN: Quote, AI Tutor Preview & Storage (4-5)   */}
         {/* ======================================================= */}
-        <div className="lg:col-span-5 xl:col-span-4 space-y-6">
+        <div className="lg:col-span-5 xl:col-span-4 space-y-4 sm:space-y-6 min-w-0">
 
           {/* 4A. DAILY INSPIRATION QUOTE */}
           <motion.div variants={itemVariants} className="w-full">
@@ -940,7 +944,7 @@ export default function DashboardHome({
 
           {/* 4B. AI TUTOR PREVIEW */}
           <motion.div variants={itemVariants} className="w-full">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-6 shadow-sm">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-2xl p-4 sm:p-6 shadow-sm">
               <div className="flex items-center gap-2.5 mb-1">
                 {(() => {
                   const homeWs = activeWorkspace || (workspaces && workspaces[0]) || null;

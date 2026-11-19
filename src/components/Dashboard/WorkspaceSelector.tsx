@@ -178,17 +178,17 @@ function SortableWorkspaceCard({
             </div>
           </div>
 
-          <div className="p-6 space-y-3.5 text-left flex-1 flex flex-col justify-between">
-            <div className="space-y-3.5">
-              <div className="flex items-center gap-2">
+          <div className="p-4 sm:p-6 space-y-3 sm:space-y-3.5 text-left flex-1 flex flex-col justify-between min-w-0">
+            <div className="space-y-3 sm:space-y-3.5 min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
                 {/* Subject Section - MAX VISIBILITY */}
-                <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 border border-indigo-100 dark:border-indigo-900/60 ${textClass}`}>
+                <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 border border-indigo-100 dark:border-indigo-900/60 shrink-0 ${textClass}`}>
                   {ws.subject}
                 </span>
                 <span className="text-slate-300 dark:text-slate-700">•</span>
-                <span className="flex items-center gap-1 text-[10px] font-bold text-slate-450 dark:text-slate-500" title="Last Accessed">
+                <span className="flex items-center gap-1 text-[10px] font-bold text-slate-450 dark:text-slate-500 min-w-0 truncate" title="Last Accessed">
                   <Clock className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
-                  <span>Last Accessed: {ws.lastOpened}</span>
+                  <span className="truncate">Last Accessed: {ws.lastOpened}</span>
                 </span>
               </div>
 
@@ -206,7 +206,7 @@ function SortableWorkspaceCard({
         </div>
 
         {/* Card Footer actions */}
-        <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-950/20 flex items-center justify-between">
+        <div className="px-4 sm:px-5 py-3 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-950/20 flex items-center justify-between gap-2">
           <div className="flex gap-4 text-[11px] font-extrabold text-slate-500">
             <div className="flex items-center gap-1">
               <FileText className="w-3.5 h-3.5" />
@@ -440,15 +440,15 @@ export default function WorkspaceSelector({
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 md:px-6 text-left">
+    <div className="space-y-4 sm:space-y-6 max-w-7xl mx-auto px-0 sm:px-1 md:px-2 text-left min-w-0">
       {/* WORKSPACE SECTION HEADER & CREATE ACTION */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800/80">
-        <div>
-          <div className="flex items-center gap-2.5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 pb-4 border-b border-slate-100 dark:border-slate-800/80">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
             <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
               Study Workspaces
             </h2>
-            <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/70 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800/60">
+            <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/70 text-indigo-600 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-800/60 shrink-0">
               {workspaces.length} {workspaces.length === 1 ? 'space' : 'spaces'}
             </span>
           </div>
@@ -460,7 +460,7 @@ export default function WorkspaceSelector({
         {/* PRIMARY CREATE WORKSPACE BUTTON */}
         <button
           onClick={() => setShowCreateModal(true)}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-extrabold text-xs rounded-xl shadow-md shadow-indigo-600/20 transition-all cursor-pointer shrink-0 self-start sm:self-auto"
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-extrabold text-xs rounded-xl shadow-md shadow-indigo-600/20 transition-all cursor-pointer shrink-0"
         >
           <Plus className="w-4 h-4 stroke-[2.5]" />
           <span>Create New Workspace</span>
@@ -469,8 +469,8 @@ export default function WorkspaceSelector({
 
       {/* SEARCH AND FILTERS (WHEN WORKSPACES EXIST) */}
       {workspaces.length > 0 && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="relative flex-1 max-w-md">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
+          <div className="relative flex-1 w-full sm:max-w-md min-w-0">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
@@ -481,11 +481,11 @@ export default function WorkspaceSelector({
             />
           </div>
 
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+          <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
             <select
               value={selectedSubject}
               onChange={(e) => setSelectedSubject(e.target.value)}
-              className="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
+              className="w-full sm:w-auto min-w-0 text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
             >
               {subjects.map((sub) => (
                 <option key={sub} value={sub}>{sub === 'All' ? 'All Subjects' : sub}</option>
@@ -495,7 +495,7 @@ export default function WorkspaceSelector({
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
+              className="w-full sm:w-auto min-w-0 text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
             >
               <option value="manual">Custom Order</option>
               <option value="lastOpened">Recently Opened</option>
@@ -508,7 +508,7 @@ export default function WorkspaceSelector({
 
       {/* WORKSPACE CARDS GRID OR EMPTY STATES */}
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {[1, 2, 3, 4, 5, 6].map((i) => (
             <WorkspaceCardSkeleton key={i} />
           ))}
@@ -581,7 +581,7 @@ export default function WorkspaceSelector({
             items={filteredWorkspaces.map(ws => ws.id)}
             strategy={rectSortingStrategy}
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
               {filteredWorkspaces.map((ws) => (
                 <SortableWorkspaceCard
                   key={ws.id}

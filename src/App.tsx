@@ -94,8 +94,10 @@ import { StreakCelebrationModal } from './components/Dashboard/StreakCelebration
 import WorkspaceSelector from './components/Dashboard/WorkspaceSelector';
 import WorkspaceContainer from './components/Dashboard/WorkspaceContainer';
 import WorkspaceChat from './components/Dashboard/WorkspaceChat';
+import QuizCenterView from './components/Dashboard/QuizCenterView';
 import CameraNoteScannerModal from './components/Dashboard/CameraNoteScannerModal';
 import ToastContainer from './components/ToastContainer';
+import { PendingQuizIntent } from './utils/quizHistoryStorage';
 
 const StudyPlannerView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.StudyPlannerView })));
 const SubjectsView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.SubjectsView })));
@@ -174,12 +176,30 @@ export default function App() {
 
   const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState<boolean>(true);
   const [hasVisitedAITutor, setHasVisitedAITutor] = useState<boolean>(() => activeTab === 'ai-tutor');
+  const [hasVisitedQuizzes, setHasVisitedQuizzes] = useState<boolean>(() => activeTab === 'quiz-center');
+  const [pendingQuizIntent, setPendingQuizIntent] = useState<PendingQuizIntent | null>(null);
 
   useEffect(() => {
     if (activeTab === 'ai-tutor') {
       setHasVisitedAITutor(true);
+    } else if (activeTab === 'quiz-center') {
+      setHasVisitedQuizzes(true);
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    const handleOpenQuizzesIntent = (e: Event) => {
+      const customEvent = e as CustomEvent<PendingQuizIntent>;
+      if (customEvent.detail) {
+        setPendingQuizIntent(customEvent.detail);
+      }
+      setActiveTab('quiz-center');
+    };
+    window.addEventListener('studyweb-open-quizzes-intent', handleOpenQuizzesIntent);
+    return () => {
+      window.removeEventListener('studyweb-open-quizzes-intent', handleOpenQuizzesIntent);
+    };
+  }, [setActiveTab]);
 
   // Workspace context handles persistance, but we still need to manage workspaces array locally.
   const handleUpdateWorkspace = (updated: Workspace) => {
@@ -721,7 +741,7 @@ export default function App() {
   // Helper to render active workspace tabs
   const renderDashboardContent = () => {
     const isAITutorTab = activeTab === 'ai-tutor';
-    const isOtherWorkspaceTab = ['workspaces', 'notes', 'flashcards', 'quiz-center'].includes(activeTab);
+    const isOtherWorkspaceTab = ['workspaces', 'notes', 'flashcards'].includes(activeTab);
     const allUserFiles = workspaces.flatMap(w => w.files || []);
     const allUserNotes = workspaces.flatMap(w => w.notes || []);
     const fallbackGeneralWorkspace: Workspace = {
@@ -759,10 +779,10 @@ export default function App() {
         : null);
 
     return (
-      <div className={`w-full ${isAITutorTab ? 'h-full flex-1 flex flex-col min-h-0' : 'h-full'} relative`}>
+      <div className={`w-full min-w-0 ${isAITutorTab ? 'h-full flex-1 flex flex-col min-h-0' : ''} relative`}>
         {/* Dedicated Persistent AI Tutor Viewport: mounted on demand and kept alive in background */}
         {(isAITutorTab || hasVisitedAITutor) && (
-          <div className={`w-full ${isAITutorTab ? 'h-full flex-1 flex flex-col min-h-0' : 'hidden'}`}>
+          <div className={`w-full min-w-0 ${isAITutorTab ? 'h-full flex-1 flex flex-col min-h-0' : 'hidden'}`}>
             <WorkspaceContainer 
               workspace={tutorWorkspace} 
               workspaces={workspaces}
@@ -777,7 +797,7 @@ export default function App() {
 
         {/* Other Workspace Tabs (Overview, Notes, Flashcards, Quiz Center, Workspace Selector) */}
         {isOtherWorkspaceTab && (
-          <div className="block">
+          <div className="w-full min-w-0">
             {targetWorkspace ? (
               <WorkspaceContainer 
                 workspace={targetWorkspace} 
@@ -792,8 +812,7 @@ export default function App() {
                 initialTab={
                   activeTab === 'workspaces' ? (tourWorkspaceSubTab || 'overview') : 
                   activeTab === 'notes' ? 'notes' : 
-                  activeTab === 'flashcards' ? 'flashcards' : 
-                  activeTab === 'quiz-center' ? 'quiz' : 'overview'
+                  activeTab === 'flashcards' ? 'flashcards' : 'overview'
                 }
               />
             ) : (
@@ -823,6 +842,18 @@ export default function App() {
             activeWorkspace={activeWorkspace} 
             isLoading={isLoadingWorkspaces}
           />
+        )}
+        {(activeTab === 'quiz-center' || hasVisitedQuizzes) && (
+          <div className={activeTab === 'quiz-center' ? 'w-full min-w-0' : 'hidden'}>
+            <QuizCenterView
+              workspaces={workspaces}
+              activeWorkspace={activeWorkspace}
+              onSelectWorkspace={handleSelectWorkspace}
+              onUpdateWorkspace={handleUpdateWorkspace}
+              pendingQuizIntent={pendingQuizIntent}
+              onClearPendingQuizIntent={() => setPendingQuizIntent(null)}
+            />
+          </div>
         )}
         {activeTab === 'profile' && <ProfileSettingsHub />}
 
@@ -881,8 +912,8 @@ export default function App() {
           />
 
           {/* Active Workspace Viewport */}
-          <main id="workspace-main-content" className={`flex-1 min-w-0 w-full h-[calc(100dvh-3.5rem)] ${activeTab === 'ai-tutor' ? 'overflow-hidden p-0 md:p-6 pb-[calc(4rem+env(safe-area-inset-bottom,0px))] md:pb-6 flex flex-col' : 'overflow-y-auto overflow-x-hidden p-3 sm:p-5 md:p-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-6'}`}>
-            <div className={`${activeTab === 'ai-tutor' ? 'h-full flex-1 flex flex-col min-h-0' : ''} w-full ${isFocusMode ? 'max-w-none' : 'max-w-7xl mx-auto'}`}>
+          <main id="workspace-main-content" className={`flex-1 min-w-0 min-h-0 w-full ${activeTab === 'ai-tutor' ? 'overflow-hidden p-0 md:p-6 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-6 flex flex-col' : 'overflow-y-auto overflow-x-hidden px-3 pt-3 sm:p-5 md:p-6 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] md:pb-6'}`}>
+            <div className={`${activeTab === 'ai-tutor' ? 'h-full flex-1 flex flex-col min-h-0' : ''} w-full min-w-0 ${isFocusMode ? 'max-w-none' : 'max-w-7xl mx-auto'}`}>
               {renderDashboardContent()}
             </div>
           </main>
@@ -1131,7 +1162,7 @@ export default function App() {
             workspaces={workspaces}
             userId={currentUserId}
             onCreateWorkspaceByName={handleCreateWorkspaceByName}
-            onScanComplete={(targetWs, scannedFile, draftPayload) => {
+            onScanComplete={(targetWs, scannedFile, draftPayload, options) => {
               const updatedWs: Workspace = {
                 ...targetWs,
                 files: [
@@ -1142,8 +1173,6 @@ export default function App() {
               };
               handleUpdateWorkspace(updatedWs);
               setActiveWorkspace(updatedWs);
-              setHasVisitedAITutor(true);
-              setShowQuickScan(false);
 
               const pendingPayload = {
                 workspaceId: updatedWs.id,
@@ -1151,19 +1180,25 @@ export default function App() {
                 draft: draftPayload
               };
               (window as any).__studywebPendingScannedNote = pendingPayload;
-              setActiveTab('ai-tutor');
-
               setTimeout(() => {
                 window.dispatchEvent(
                   new CustomEvent('studyweb-scanned-note-ready', { detail: pendingPayload })
                 );
               }, 80);
 
+              if (options?.openInAiTutor) {
+                setHasVisitedAITutor(true);
+                setShowQuickScan(false);
+                setActiveTab('ai-tutor');
+              } else if (options?.closeAfterSave) {
+                setShowQuickScan(false);
+              }
+
               (window as any).showToast?.(
-                `"${scannedFile.name}" has been scanned, uploaded to "${updatedWs.name}", and attached in AI Tutor!`,
+                `"${scannedFile.name}" has been added to "${updatedWs.name}"!`,
                 'success',
-                4200,
-                'Note Scanned & Ready'
+                4000,
+                'Added to Workspace'
               );
             }}
           />

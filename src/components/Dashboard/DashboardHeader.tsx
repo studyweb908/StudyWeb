@@ -41,7 +41,7 @@ const tabLabels: Record<string, string> = {
   'subjects': 'Subjects',
   'notes': 'Your AI Study Notes',
   'flashcards': 'Flashcards',
-  'quiz-center': 'Create Practice Quizzes in Seconds',
+  'quiz-center': 'Quizzes',
   'resources': 'Resources',
   'analytics': 'Analytics',
   'leaderboard': 'Leaderboard',

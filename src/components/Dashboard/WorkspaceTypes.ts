@@ -30,6 +30,12 @@ export interface FlashcardItem {
   lastStudied?: string;
 }
 
+export interface QuizMatchPair {
+  id: string;
+  left: string;
+  right: string;
+}
+
 export interface QuizQuestionItem {
   id: string;
   question: string;
@@ -37,7 +43,10 @@ export interface QuizQuestionItem {
   correctIndex: number;
   explanation: string;
   difficulty: 'Easy' | 'Medium' | 'Hard';
-  type: 'MCQ' | 'TF' | 'FillBlank' | 'ShortAnswer';
+  type: 'MCQ' | 'TF' | 'FillBlank' | 'MatchFollowing' | 'ShortAnswer';
+  acceptedAnswers?: string[];
+  pairs?: QuizMatchPair[];
+  topic?: string;
 }
 
 export interface WorkspaceNote {
@@ -338,6 +347,12 @@ export const flashcardItemSchema = z.object({
   lastStudied: z.string().optional(),
 });
 
+export const quizMatchPairSchema = z.object({
+  id: z.string(),
+  left: z.string(),
+  right: z.string(),
+});
+
 export const quizQuestionItemSchema = z.object({
   id: z.string(),
   question: z.string(),
@@ -345,7 +360,10 @@ export const quizQuestionItemSchema = z.object({
   correctIndex: z.number(),
   explanation: z.string(),
   difficulty: z.enum(['Easy', 'Medium', 'Hard']),
-  type: z.enum(['MCQ', 'TF', 'FillBlank', 'ShortAnswer']),
+  type: z.enum(['MCQ', 'TF', 'FillBlank', 'MatchFollowing', 'ShortAnswer']),
+  acceptedAnswers: z.array(z.string()).optional(),
+  pairs: z.array(quizMatchPairSchema).optional(),
+  topic: z.string().optional(),
 });
 
 export const workspaceNoteSchema = z.object({

@@ -38,6 +38,110 @@ import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import { toValidUuid } from '../../utils/uuid';
 import AITutorAvatar from './AITutorAvatar';
 import { ShareContentModal, triggerNativeDeviceShare } from './ShareContentModal';
+import {
+  fetchNaturalTtsAudio,
+  prepareTextForNaturalSpeech,
+  selectBestBrowserNaturalVoice
+} from '../../utils/naturalTts';
+import { PendingQuizIntent } from '../../utils/quizHistoryStorage';
+
+function parseQuizNavigationIntent(
+  promptText: string,
+  recentMessages: Array<{ sender: 'user' | 'ai'; text: string; originalQuery?: string; isError?: boolean }>,
+  activeWorkspaceId: string
+): PendingQuizIntent | null {
+  const lower = promptText.toLowerCase();
+  const asksToOpenQuizzes =
+    /\b(quizzes?\s+(section|tab|page|center|hub|area)|go\s+(to|into)\s+(the\s+)?quizzes?|open\s+(the\s+)?quizzes?|take\s+me\s+to\s+(the\s+)?quizzes?)\b/i.test(lower) ||
+    (/\b(create|generate|make|build)\b/i.test(lower) &&
+      /\bquiz(zes)?\b/i.test(lower) &&
+      (/\b(internet|online|web|search|fill\s+in\s+the\s+blanks?|match\s+the\s+following)\b/i.test(lower) ||
+        /\bin\s+(the\s+)?quiz(zes)?\b/i.test(lower)));
+
+  if (!asksToOpenQuizzes) return null;
+
+  let quizType: PendingQuizIntent['quizType'] = 'MCQ';
+  if (/\b(match\s+the\s+following|matching)\b/i.test(lower)) {
+    quizType = 'MatchFollowing';
+  } else if (/\b(fill\s+in\s+the\s+blanks?|fill\s+blanks?|blanks)\b/i.test(lower)) {
+    quizType = 'FillBlank';
+  } else if (/\b(true\s*(?:or|\/)\s*false|t\/f)\b/i.test(lower)) {
+    quizType = 'TF';
+  }
+
+  let difficulty: PendingQuizIntent['difficulty'] = 'Medium';
+  if (/\b(hard|difficult|challenging|advanced)\b/i.test(lower)) {
+    difficulty = 'Hard';
+  } else if (/\b(easy|simple|basic|beginner)\b/i.test(lower)) {
+    difficulty = 'Easy';
+  }
+
+  const countMatch = lower.match(/\b(\d{1,2})\s*(?:questions?|qs|mcqs?|quizzes?|items?)\b/i) ||
+    lower.match(/\b(?:of|with)\s*(\d{1,2})\b/i);
+  const count = countMatch ? Math.min(25, Math.max(1, parseInt(countMatch[1], 10))) : 5;
+
+  const mentionsUploaded = /\b(uploaded|my\s+files?|my\s+notes?|workspace|documents?|pdfs?)\b/i.test(lower);
+  const mentionsInternet = /\b(internet|online|web|search)\b/i.test(lower);
+
+  // Extract explicit topic from prompt
+  let topic = '';
+  const searchMatch = promptText.match(/(?:search(?:\s+for)?|look\s+up|find)\s+["']?([^"']+?)["']?(?:\s+(?:and|then|from|on|in|to)\b|$)/i);
+  const topicPrepMatch = promptText.match(/(?:about|on|regarding|from\s+(?:the\s+)?(?:internet\s+(?:about|on)\s+)?|topic(?:\s+of)?)\s+["']?([a-z0-9][^,.!?;]{2,70})["']?(?:$|[,.!?;])/i);
+
+  if (searchMatch && searchMatch[1]) {
+    topic = searchMatch[1]
+      .replace(/\b(the\s+internet|online|web|resources?|for|me|a|quiz|quizzes|section)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  if ((!topic || topic.length < 2) && topicPrepMatch && topicPrepMatch[1]) {
+    const candidate = topicPrepMatch[1]
+      .replace(/\b(the\s+quizzes?\s+section|quizzes?\s+section|the\s+internet|online|web|my\s+uploaded\s+materials?|uploaded\s+files?|that\s+very\s+topic|this\s+topic|that\s+topic|it|this|that)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (candidate.length >= 2) topic = candidate;
+  }
+
+  // Resolve contextual topic from recent chat turns if user said "that topic" / "what we just searched"
+  const isGenericPronoun = !topic || /^(this|that|it|same|above|previous|topic)$/i.test(topic);
+  if (isGenericPronoun && !mentionsUploaded) {
+    const reversed = [...recentMessages].reverse();
+    for (const m of reversed) {
+      if (m.isError) continue;
+      if (m.sender === 'user' && m.text && m.text.length > 3) {
+        const cleaned = m.text
+          .replace(/^(what\s+is|explain|tell\s+me\s+about|search(?:\s+for)?|research)\s+/i, '')
+          .replace(/[?!.]+$/, '')
+          .trim();
+        if (cleaned && !/quizzes?\s+section/i.test(cleaned)) {
+          topic = cleaned.slice(0, 80);
+          break;
+        }
+      }
+      if (m.originalQuery) {
+        topic = m.originalQuery.slice(0, 80);
+        break;
+      }
+    }
+  }
+
+  const sourceType: 'uploaded' | 'internet' =
+    mentionsUploaded && !mentionsInternet && !topic
+      ? 'uploaded'
+      : mentionsInternet || Boolean(topic)
+      ? 'internet'
+      : 'uploaded';
+
+  return {
+    sourceType,
+    topic: topic || undefined,
+    workspaceId: activeWorkspaceId,
+    quizType,
+    count,
+    difficulty,
+    autoStart: true
+  };
+}
 
 export type TutorPersona = string;
 
@@ -48,7 +152,7 @@ export interface VoiceProfile {
   name: string;
   genderLabel: string;
   gender: 'male' | 'female';
-  geminiVoice: 'Fenrir' | 'Kore';
+  geminiVoice: 'Charon' | 'Zephyr' | 'Fenrir' | 'Kore' | 'Puck';
   description: string;
   icon: string;
   samplePhrase: string;
@@ -60,20 +164,20 @@ export const VOICE_PROFILES: Record<VoiceProfileId, VoiceProfile> = {
     name: 'Male Voice',
     genderLabel: 'Male Voice',
     gender: 'male',
-    geminiVoice: 'Fenrir',
-    description: 'Deep, confident, and authoritative academic mentor',
+    geminiVoice: 'Charon',
+    description: 'Calm, natural, conversational male human mentor',
     icon: '👨‍🏫',
-    samplePhrase: "Greetings. Let's break down this concept step-by-step to master it."
+    samplePhrase: "Hey there. Let's walk through this idea together, nice and easy."
   },
   female: {
     id: 'female',
     name: 'Female Voice',
     genderLabel: 'Female Voice',
     gender: 'female',
-    geminiVoice: 'Kore',
-    description: 'Warm, clear, and articulate academic guide',
+    geminiVoice: 'Zephyr',
+    description: 'Warm, relaxed, natural female study guide',
     icon: '👩‍🏫',
-    samplePhrase: "Hello! I'm your academic tutor. What questions or concepts shall we explore today?"
+    samplePhrase: "Hi! I'm right here with you. What topic would you like to unpack today?"
   }
 };
 
@@ -170,6 +274,7 @@ export default function WorkspaceChat({
 
   // Attached files for the current pending draft message
   const [attachedDrafts, setAttachedDrafts] = useState<AttachedDraftFile[]>([]);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [linkInputUrl, setLinkInputUrl] = useState('');
   const [isAnalyzingLink, setIsAnalyzingLink] = useState(false);
@@ -223,6 +328,8 @@ export default function WorkspaceChat({
   const [targetLoadingId, setTargetLoadingId] = useState<string | null>(null);
   const [isTtsLoading, setIsTtsLoading] = useState(false);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsAbortRef = useRef<AbortController | null>(null);
+  const ttsRequestSeqRef = useRef(0);
 
   // Full-screen circular upload overlay state for Chat uploads
   const [chatUploadOverlay, setChatUploadOverlay] = useState<{
@@ -252,8 +359,15 @@ export default function WorkspaceChat({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [showVoiceSettings]);
 
-  // Stop any active speech (both HTML5 audio and browser speech synthesis)
+  // Stop any active speech (in-flight fetch, HTML5 audio, and browser speech synthesis)
   const stopSpeech = useCallback(() => {
+    ttsRequestSeqRef.current += 1;
+    if (ttsAbortRef.current) {
+      try {
+        ttsAbortRef.current.abort();
+      } catch {}
+      ttsAbortRef.current = null;
+    }
     if (currentAudioRef.current) {
       try {
         currentAudioRef.current.pause();
@@ -279,24 +393,8 @@ export default function WorkspaceChat({
     };
   }, [stopSpeech]);
 
-  // Natural speech text cleaner: strips markdown headers, bullet symbols, citation tags, and code blocks
-  const cleanSpeechText = (raw: string): string => {
-    if (!raw) return '';
-    return raw
-      .replace(/```[\s\S]*?```/g, '') // remove code blocks
-      .replace(/`([^`]+)`/g, '$1')
-      .replace(/\[Source:[^\]]+\]/gi, '') // remove citation source tags
-      .replace(/\[\d+:\d+\]/g, '')
-      .replace(/#{1,6}\s+/g, '') // remove markdown headings
-      .replace(/\*\*(.*?)\*\*/g, '$1') // remove bold
-      .replace(/\*(.*?)\*/g, '$1') // remove italics
-      .replace(/__([^_]+)__/g, '$1')
-      .replace(/_([^_]+)_/g, '$1')
-      .replace(/[-*•]\s+/g, '') // remove bullet points
-      .replace(/\n{2,}/g, '. ')
-      .replace(/\n/g, ' ')
-      .trim();
-  };
+  // Natural speech text cleaner: removes markdown/citations and converts math notation to spoken phrasing
+  const cleanSpeechText = (raw: string): string => prepareTextForNaturalSpeech(raw);
 
   const speakWithBrowserSynthesis = useCallback((textToSpeak: string, msgId: string, voiceIdOverride?: VoiceProfileId, customRate?: number) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
@@ -309,28 +407,13 @@ export default function WorkspaceChat({
     try {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(textToSpeak.slice(0, 1500));
-      
+
       const targetProfile = VOICE_PROFILES[voiceIdOverride || selectedVoiceProfile] || VOICE_PROFILES.male;
-      const targetGender = targetProfile.gender;
-
-      const voices = window.speechSynthesis.getVoices() || [];
-      let matchedVoice: SpeechSynthesisVoice | undefined;
-
-      if (targetGender === 'female') {
-        matchedVoice = voices.find(v => 
-          v.lang.startsWith('en') && (v.name.includes('Samantha') || v.name.includes('Karen') || v.name.includes('Zira') || v.name.includes('Victoria') || (v.name.includes('Google') && v.name.includes('Female')) || v.name.includes('Female'))
-        );
-      } else {
-        matchedVoice = voices.find(v => 
-          v.lang.startsWith('en') && (v.name.includes('Daniel') || v.name.includes('Alex') || v.name.includes('David') || v.name.includes('George') || (v.name.includes('Google') && v.name.includes('Male')) || v.name.includes('Male'))
-        );
-      }
-
-      const naturalVoice = matchedVoice || voices.find(v => v.lang.startsWith('en')) || voices[0];
-      if (naturalVoice) utterance.voice = naturalVoice;
+      const bestVoice = selectBestBrowserNaturalVoice(targetProfile.gender);
+      if (bestVoice) utterance.voice = bestVoice;
 
       utterance.rate = customRate || speechRate || 1.0;
-      utterance.pitch = targetGender === 'female' ? 1.04 : 0.95;
+      utterance.pitch = 1.0;
 
       utterance.onstart = () => {
         setSpeakingMessageId(msgId);
@@ -360,8 +443,8 @@ export default function WorkspaceChat({
   }, [selectedVoiceProfile, speechRate]);
 
   const handleSpeakMessage = useCallback(async (msgId: string, text: string, persona?: TutorPersona, voiceProfileOverride?: VoiceProfileId) => {
-    // If currently speaking this message, clicking again toggles pause/stop
-    if (speakingMessageId === msgId) {
+    // If currently speaking or loading this message, clicking again toggles stop
+    if (speakingMessageId === msgId || targetLoadingId === msgId) {
       stopSpeech();
       return;
     }
@@ -370,61 +453,65 @@ export default function WorkspaceChat({
     const cleanText = cleanSpeechText(text);
     if (!cleanText) return;
 
+    const reqSeq = ++ttsRequestSeqRef.current;
+    const abortController = new AbortController();
+    ttsAbortRef.current = abortController;
+
     setTargetLoadingId(msgId);
     setIsTtsLoading(true);
 
     const activeProfile = VOICE_PROFILES[voiceProfileOverride || selectedVoiceProfile] || VOICE_PROFILES.male;
 
     try {
-      // 1. Try high-fidelity Gemini 3.8 Flash Lite TTS endpoint
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 6500);
-
-      const res = await fetch('/api/ai-tutor-tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: cleanText,
-          voiceName: activeProfile.geminiVoice
-        }),
-        signal: controller.signal
+      const ttsResult = await fetchNaturalTtsAudio({
+        text: cleanText,
+        voiceName: activeProfile.geminiVoice,
+        persona: persona || 'socratic',
+        timeoutMs: 25000,
+        signal: abortController.signal
       });
-      clearTimeout(timer);
 
-      if (res.ok) {
-        const data = await res.json().catch(() => null);
-        if (data && data.success && data.audioBase64) {
-          const audio = new Audio(`data:${data.mimeType || 'audio/wav'};base64,${data.audioBase64}`);
-          audio.playbackRate = speechRate || 1.0;
-          currentAudioRef.current = audio;
-
-          audio.onplay = () => {
-            setSpeakingMessageId(msgId);
-            setIsTtsLoading(false);
-            setTargetLoadingId(null);
-          };
-
-          audio.onended = () => {
-            setSpeakingMessageId(prev => prev === msgId ? null : prev);
-            currentAudioRef.current = null;
-            setIsPlayingPreview(null);
-          };
-
-          audio.onerror = () => {
-            currentAudioRef.current = null;
-            speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
-          };
-
-          await audio.play();
-          return;
-        }
+      if (ttsRequestSeqRef.current !== reqSeq || abortController.signal.aborted) {
+        return;
       }
 
-      speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
+      if (ttsResult?.audioBase64) {
+        const audio = new Audio(`data:${ttsResult.mimeType};base64,${ttsResult.audioBase64}`);
+        audio.playbackRate = speechRate || 1.0;
+        currentAudioRef.current = audio;
+
+        audio.onplay = () => {
+          setSpeakingMessageId(msgId);
+          setIsTtsLoading(false);
+          setTargetLoadingId(null);
+        };
+
+        audio.onended = () => {
+          setSpeakingMessageId(prev => prev === msgId ? null : prev);
+          currentAudioRef.current = null;
+          setIsPlayingPreview(null);
+        };
+
+        audio.onerror = () => {
+          currentAudioRef.current = null;
+          if (ttsRequestSeqRef.current === reqSeq) {
+            speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
+          }
+        };
+
+        await audio.play();
+        return;
+      }
+
+      if (ttsRequestSeqRef.current === reqSeq && !abortController.signal.aborted) {
+        speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
+      }
     } catch {
-      speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
+      if (ttsRequestSeqRef.current === reqSeq && !abortController.signal.aborted) {
+        speakWithBrowserSynthesis(cleanText, msgId, activeProfile.id, speechRate);
+      }
     }
-  }, [speakingMessageId, stopSpeech, selectedVoiceProfile, speechRate, speakWithBrowserSynthesis]);
+  }, [speakingMessageId, targetLoadingId, stopSpeech, selectedVoiceProfile, speechRate, speakWithBrowserSynthesis]);
 
   // Preview a voice profile sample phrase
   const handlePreviewVoice = (vProfile: VoiceProfile) => {
@@ -454,11 +541,10 @@ export default function WorkspaceChat({
     return () => clearInterval(interval);
   }, [isListening]);
 
-  // Aggregate all user workspaces (props + local cache fallback) so the AI Tutor sees every workspace and uploaded item
+  // Aggregate user workspaces strictly for the active user (never merge unrelated guest caches)
   const allUserWorkspaces = useMemo(() => {
     const wsMap = new Map<string, Workspace>();
     const stored = loadStoredWorkspaces(resolvedUserId) || [];
-    const storedGuest = resolvedUserId ? (loadStoredWorkspaces(null) || []) : [];
 
     const mergeIntoMap = (ws: Workspace) => {
       if (!ws || !ws.id) return;
@@ -505,7 +591,6 @@ export default function WorkspaceChat({
       }
     };
 
-    storedGuest.forEach(mergeIntoMap);
     stored.forEach(mergeIntoMap);
     (workspaces || []).forEach(mergeIntoMap);
     if (workspace) mergeIntoMap(workspace);
@@ -622,8 +707,8 @@ export default function WorkspaceChat({
         id: `welcome-${Date.now()}`,
         sender: 'ai',
         text: hasDocs
-          ? `✨ **Fresh Conversation Started!**\n\nI have **${activeFiles.length} study document${activeFiles.length === 1 ? '' : 's'}** ready in your workspace. What would you like to explore or ask about today?`
-          : `✨ **Fresh Conversation Started!**\n\nWhat would you like to learn, solve, or explore right now?`,
+          ? `✨ **Fresh Conversation Started!**\n\nI have **${activeFiles.length} uploaded item${activeFiles.length === 1 ? '' : 's'}** ready to analyze. Ask me anything about your materials or any topic you'd like to explore!`
+          : `✨ **Fresh Conversation Started!**\n\nAsk me anything—or upload notes, PDFs, images, or links and I'll analyze them for you!`,
         time: 'Just now'
       };
     }
@@ -631,8 +716,8 @@ export default function WorkspaceChat({
       id: 'welcome-msg',
       sender: 'ai',
       text: hasDocs
-        ? `👋 **Hi! I'm your AI Study Tutor${workspace.id !== 'general-study' ? ` for ${workspace.name}` : ''}!**\n\nI have your **${activeFiles.length} study document${activeFiles.length === 1 ? '' : 's'}** ready in this workspace. Ask me any question, speak using the **Voice** button, or attach documents with the **Attach** button!`
-        : `👋 **Hi! I'm your AI Study Tutor!**\n\nAsk me any question about your studies, homework, or concepts. You can type, speak using **Voice Input**, or attach study materials using **Attach** to get started!`,
+        ? `👋 **Hi! I'm your AI Tutor${workspace.id !== 'general-study' ? ` for ${workspace.name}` : ''}!**\n\nI can analyze your **${activeFiles.length} uploaded item${activeFiles.length === 1 ? '' : 's'}** or answer any question using web knowledge. Type a question, use **Voice**, or attach more materials anytime!`
+        : `👋 **Hi! How can I help you today?**\n\nAsk me any question just like ChatGPT, Claude, or Gemini—or upload notes, PDFs, images, or links using **Attach** and I'll analyze all of them for you!`,
       time: 'Just now'
     };
   }, [activeFiles.length, workspace.id, workspace.name]);
@@ -666,8 +751,8 @@ export default function WorkspaceChat({
       id: 'welcome-msg',
       sender: 'ai',
       text: hasDocs
-        ? `👋 **Hi! I'm your AI Study Tutor${workspace.id !== 'general-study' ? ` for ${workspace.name}` : ''}!**\n\nI have your **${activeFiles.length} study document${activeFiles.length === 1 ? '' : 's'}** ready in this workspace. Ask me any question, speak using the **Voice** button, or attach documents with the **Attach** button!`
-        : `👋 **Hi! I'm your AI Study Tutor!**\n\nAsk me any question about your studies, homework, or concepts. You can type, speak using **Voice Input**, or attach study materials using **Attach** to get started!`,
+        ? `👋 **Hi! I'm your AI Tutor${workspace.id !== 'general-study' ? ` for ${workspace.name}` : ''}!**\n\nI can analyze your **${activeFiles.length} uploaded item${activeFiles.length === 1 ? '' : 's'}** or answer any question using web knowledge. Type a question, use **Voice**, or attach more materials anytime!`
+        : `👋 **Hi! How can I help you today?**\n\nAsk me any question just like ChatGPT, Claude, or Gemini—or upload notes, PDFs, images, or links using **Attach** and I'll analyze all of them for you!`,
       time: 'Just now'
     }];
   });
@@ -1097,8 +1182,8 @@ export default function WorkspaceChat({
           }
         }
       } catch (err: any) {
-        console.error('[Chat File Read Error] [CHAT_FILE_READ_ERR]', err);
-        (window as any).showToast?.(`[CHAT_FILE_READ_ERR] ${err?.message || 'Could not read file'}`, 'error', 5000, 'File Read Error');
+        console.error('[Chat File Read Error]', err);
+        (window as any).showToast?.('Something went wrong. There is a server error. Please try again.', 'error', 5000, 'Server Error');
       }
 
       // 2. Read text content for common textual formats
@@ -1162,22 +1247,57 @@ export default function WorkspaceChat({
         }
         clearTimeout(tId);
 
+        let uploadErrMsg: string | null = null;
         if (procRes.ok) {
           const procData = await procRes.json();
-          analyzedMaterial = procData.material;
+          if (procData?.material && procData.material.status !== 'failed') {
+            analyzedMaterial = procData.material;
+          } else {
+            uploadErrMsg = procData?.error || `Failed to analyze ${file.name}.`;
+            console.error('[Chat Upload Pipeline Error]', uploadErrMsg, procData);
+          }
         } else {
           const errJson = await procRes.json().catch(() => ({}));
           const errCode = errJson?.errorCode || `HTTP_${procRes.status}`;
-          const errMsg = errJson?.error || `Failed to analyze ${file.name}`;
-          console.error(`[Chat Upload Pipeline Error] [${errCode}] ${errMsg}`, errJson);
-          (window as any).showToast?.(`[${errCode}] ${errMsg}`, 'error', 5500, 'AI Upload Error');
+          uploadErrMsg = errJson?.error || `Failed to analyze ${file.name} (${errCode}).`;
+          console.error(`[Chat Upload Pipeline Error] [${errCode}] ${uploadErrMsg}`, errJson);
+        }
+
+        if (uploadErrMsg && !content) {
+          const genericServerErr = 'Something went wrong. There is a server error. Please try again.';
+          setUploadError(genericServerErr);
+          setMessages(prev => [
+            ...prev,
+            {
+              id: `upload-err-${Date.now()}-${i}`,
+              sender: 'ai',
+              text: genericServerErr,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              isError: true
+            }
+          ]);
+          continue;
         }
       } catch (procErr: any) {
-        const errCode = procErr?.name === 'AbortError' ? 'AI_UPLOAD_TIMEOUT' : 'AI_UPLOAD_ERR';
-        console.error(`[Chat Upload Pipeline Error] [${errCode}]`, procErr);
-        (window as any).showToast?.(`[${errCode}] ${procErr?.message || 'AI analysis error'}`, 'error', 5500, 'AI Upload Error');
+        console.error('[Chat Upload Pipeline Error]', procErr);
+        if (!content) {
+          const genericServerErr = 'Something went wrong. There is a server error. Please try again.';
+          setUploadError(genericServerErr);
+          setMessages(prev => [
+            ...prev,
+            {
+              id: `upload-err-${Date.now()}-${i}`,
+              sender: 'ai',
+              text: genericServerErr,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              isError: true
+            }
+          ]);
+          continue;
+        }
       }
 
+      setUploadError(null);
       const extractedSummary = analyzedMaterial?.summary || (content ? content.slice(0, 1000) : '');
       const extractedTranscript = analyzedMaterial?.transcription || analyzedMaterial?.contentText || content;
       const extractedHighlights = Array.isArray(analyzedMaterial?.highlights) && analyzedMaterial.highlights.length > 0
@@ -1259,15 +1379,15 @@ export default function WorkspaceChat({
       setChatUploadOverlay(prev => ({
         ...prev,
         progress: 100,
-        stepText: 'Analyzed & saved to Supabase!'
+        stepText: 'Analyzed & saved to your workspace!'
       }));
 
       setTimeout(() => {
         setChatUploadOverlay(prev => ({ ...prev, isOpen: false }));
-      }, 240);
+      }, 2200);
 
       (window as any).showToast?.(
-        `"${analyzedWorkspaceFiles.map(f => f.name).join(', ')}" was analyzed with AI and saved to Supabase.`,
+        `"${analyzedWorkspaceFiles.map(f => f.name).join(', ')}" was analyzed and saved to your workspace.`,
         'success',
         3200,
         'Material Analyzed & Saved'
@@ -1336,17 +1456,22 @@ export default function WorkspaceChat({
         })
       });
 
-      if (res.ok) {
-        const data = await res.json().catch(() => null);
-        const mat = data?.material || data?.file || data;
-        if (mat) {
-          if (mat.id) processedMaterialId = mat.id;
-          analyzedTitle = (mat.name || mat.title || '').trim();
-          fullText = (mat.transcription || mat.contentText || mat.content_text || mat.summary || '').trim();
-          summaryText = (mat.summary || '').trim();
-          if (Array.isArray(mat.highlights)) highlightsList = mat.highlights;
-        }
+      if (!res.ok) {
+        const errPayload = await res.json().catch(() => ({}));
+        throw new Error(errPayload?.error || `Failed to analyze link (HTTP ${res.status}).`);
       }
+
+      const data = await res.json().catch(() => null);
+      const mat = data?.material || data?.file || data;
+      if (!mat || mat.status === 'failed') {
+        throw new Error(data?.error || 'Could not extract readable study content from that link.');
+      }
+
+      if (mat.id) processedMaterialId = mat.id;
+      analyzedTitle = (mat.name || mat.title || '').trim();
+      fullText = (mat.transcription || mat.contentText || mat.content_text || mat.summary || '').trim();
+      summaryText = (mat.summary || '').trim();
+      if (Array.isArray(mat.highlights)) highlightsList = mat.highlights;
 
       if (!analyzedTitle || analyzedTitle.startsWith('http')) {
         analyzedTitle = isYt ? 'YouTube Video Study Guide' : 'Web Study Resource';
@@ -1363,6 +1488,7 @@ export default function WorkspaceChat({
         highlights: highlightsList
       };
 
+      setUploadError(null);
       setAttachedDrafts(prev => [...prev, newDraft]);
       setLinkInputUrl('');
       setShowLinkInput(false);
@@ -1410,7 +1536,7 @@ export default function WorkspaceChat({
       }));
       setTimeout(() => {
         setChatUploadOverlay(prev => ({ ...prev, isOpen: false }));
-      }, 260);
+      }, 2200);
 
       (window as any).showToast?.(
         `"${analyzedTitle}" is indexed & ready in your workspace.`,
@@ -1418,10 +1544,22 @@ export default function WorkspaceChat({
         3200,
         'Video / Link Ready'
       );
-    } catch (err) {
+    } catch (err: any) {
       clearInterval(progInterval);
       setChatUploadOverlay(prev => ({ ...prev, isOpen: false }));
-      console.warn('Failed to analyze link:', err);
+      console.error('[Link Analysis Error]', err);
+      const genericServerErr = 'Something went wrong. There is a server error. Please try again.';
+      setUploadError(genericServerErr);
+      setMessages(prev => [
+        ...prev,
+        {
+          id: `link-err-${Date.now()}`,
+          sender: 'ai',
+          text: genericServerErr,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isError: true
+        }
+      ]);
     } finally {
       setIsAnalyzingLink(false);
     }
@@ -1629,6 +1767,34 @@ export default function WorkspaceChat({
     setMessages(prev => [...prev, userMsg]);
     setInputValue('');
     setAttachedDrafts([]); // Clear attachment queue
+
+    // Check if user requested opening the Quizzes section to auto-create a quiz
+    const quizIntent = parseQuizNavigationIntent(userMsgText, messages, workspace.id);
+    if (quizIntent && !sendOptions?.allowOutsideResearch && currentDrafts.length === 0) {
+      const typeDisplay =
+        quizIntent.quizType === 'FillBlank'
+          ? 'Fill in the Blanks'
+          : quizIntent.quizType === 'MatchFollowing'
+          ? 'Match the Following'
+          : quizIntent.quizType === 'TF'
+          ? 'True / False'
+          : 'Multiple Choice';
+      const targetDesc = quizIntent.topic
+        ? `from internet resources on **${quizIntent.topic}**`
+        : `from your uploaded materials in **${workspace.name}**`;
+      const confirmMsg: Message = {
+        id: `msg-ai-quiz-nav-${Date.now()}`,
+        sender: 'ai',
+        text: `Opening the **Quizzes** section now to automatically create a **${quizIntent.count}-question ${quizIntent.difficulty} ${typeDisplay}** quiz ${targetDesc}!`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setMessages(prev => [...prev, confirmMsg]);
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('studyweb-open-quizzes-intent', { detail: quizIntent }));
+      }, 350);
+      return;
+    }
+
     setIsThinking(true);
 
     // Record real-time user activity for asking AI Tutor
@@ -1704,9 +1870,14 @@ export default function WorkspaceChat({
         }
       }
       const isActiveWorkspaceFile = !f.workspaceId || String(f.workspaceId) === String(workspace.id);
-      const needsBinaryInspection = isNewAttachment || (isActiveWorkspaceFile && (f.type === 'image' || candidateMime?.startsWith('image/') || !f.transcription));
+      const isPdfOrImage =
+        f.type === 'image' ||
+        f.type === 'pdf' ||
+        candidateMime?.startsWith('image/') ||
+        candidateMime === 'application/pdf';
+      const needsBinaryInspection = isNewAttachment || (isActiveWorkspaceFile && (isPdfOrImage || !f.transcription));
       let safeBase64: string | undefined = undefined;
-      if (needsBinaryInspection && includedBinaryCount < 3 && typeof candidateB64 === 'string' && candidateB64.length < 6000000) {
+      if (needsBinaryInspection && includedBinaryCount < 4 && typeof candidateB64 === 'string' && candidateB64.length < 6000000) {
         safeBase64 = candidateB64;
         includedBinaryCount++;
       }
@@ -1818,7 +1989,7 @@ export default function WorkspaceChat({
             id: `msg-ai-${Date.now() + 1}`,
             sender: 'ai',
             text: answer,
-            source: 'Gemini AI Tutor (Voice)',
+            source: 'StudyWeb AI Tutor',
             originalQuery: question,
             followUpQuestions: [
               `Ask me a follow-up interview question on "${cleanSubj}"`,
@@ -1959,7 +2130,7 @@ export default function WorkspaceChat({
       <header className="px-2.5 sm:px-6 py-2 sm:py-3 border-b border-slate-200/80 dark:border-slate-800/80 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md flex items-center justify-between gap-1.5 sm:gap-2 shrink-0 z-20">
         
         {/* Left: Workspace Logo & AI Tutor Branding */}
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
           {renderWorkspaceLogo('w-7 h-7 sm:w-8.5 sm:h-8.5', 'text-base sm:text-lg')}
 
           <div className="min-w-0">
@@ -2282,11 +2453,12 @@ export default function WorkspaceChat({
           {/* Clear Chat Button */}
           <button
             onClick={handleResetChat}
-            className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 dark:bg-slate-850 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200/80 dark:border-slate-750/80 hover:border-rose-200 dark:hover:border-rose-900/50 active:scale-95 shadow-2xs"
+            className="px-2 sm:px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 dark:bg-slate-850 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-200 hover:text-rose-600 dark:hover:text-rose-400 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200/80 dark:border-slate-750/80 hover:border-rose-200 dark:hover:border-rose-900/50 active:scale-95 shadow-2xs whitespace-nowrap shrink-0"
             title="Clear current conversation history while keeping workspace open"
           >
-            <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-            <span className="inline">Clear Chat</span>
+            <Trash2 className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+            <span className="hidden sm:inline">Clear Chat</span>
+            <span className="sm:hidden">Clear</span>
           </button>
         </div>
       </header>
@@ -2370,20 +2542,20 @@ export default function WorkspaceChat({
                     : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-sm shadow-xs'
                 }`}>
                   
-                  {/* AI Message Header with Active Context Attribution */}
+                  {/* AI Message Header with Workspace Material Attribution (only shown when uploaded files were analyzed) */}
                   {msg.sender === 'ai' && (
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5 pb-2 border-b border-slate-100 dark:border-slate-800 text-xs">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-bold text-indigo-600 dark:text-indigo-400">
                           AI Tutor
                         </span>
-                        {!msg.isError && msg.id !== 'welcome-msg' && !msg.id.startsWith('welcome-') && (
+                        {!msg.isError && msg.id !== 'welcome-msg' && !msg.id.startsWith('welcome-') && msg.activeContextFiles && msg.activeContextFiles.length > 0 && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-medium border border-slate-200/70 dark:border-slate-700/70">
                             <BookOpen className="w-3 h-3 text-indigo-500 shrink-0" />
                             <span className="truncate max-w-[220px] sm:max-w-[320px]">
-                              {msg.activeContextFiles && msg.activeContextFiles.length > 0
-                                ? `Context: ${msg.activeWorkspaceContext || workspace.name} (${msg.activeContextFiles.slice(0, 2).join(', ')}${msg.activeContextFiles.length > 2 ? ` +${msg.activeContextFiles.length - 2}` : ''})`
-                                : `Context: ${msg.activeWorkspaceContext || workspace.name}`}
+                              {msg.activeWorkspaceContext
+                                ? `${msg.activeWorkspaceContext}: ${msg.activeContextFiles.slice(0, 2).join(', ')}${msg.activeContextFiles.length > 2 ? ` +${msg.activeContextFiles.length - 2}` : ''}`
+                                : `${msg.activeContextFiles.slice(0, 2).join(', ')}${msg.activeContextFiles.length > 2 ? ` +${msg.activeContextFiles.length - 2}` : ''}`}
                             </span>
                           </span>
                         )}
@@ -2391,35 +2563,6 @@ export default function WorkspaceChat({
                       <span className="text-[11px] text-slate-400 tabular-nums">
                         {msg.time}
                       </span>
-                    </div>
-                  )}
-
-                  {/* Out-of-Workspace Topic Notice Banner + Research Outside Workspace Button */}
-                  {msg.sender === 'ai' && msg.workspaceNotice && !msg.isError && (
-                    <div className="mb-3.5 p-3 rounded-2xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-amber-900 dark:text-amber-200">
-                      <div className="flex items-start gap-2 leading-snug">
-                        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                        <div>
-                          <span className="font-bold block sm:inline">Workspace Context Check: </span>
-                          <span>{msg.workspaceNotice}</span>
-                        </div>
-                      </div>
-                      {msg.suggestOutsideResearch && (
-                        <button
-                          type="button"
-                          disabled={isThinking}
-                          onClick={() =>
-                            handleSend(
-                              msg.originalQuery || `Research and explain this topic in detail outside my workspace`,
-                              { allowOutsideResearch: true }
-                            )
-                          }
-                          className="h-8 px-3 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold text-[11px] inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 shadow-2xs transition-all cursor-pointer self-start sm:self-center"
-                        >
-                          <Globe className="w-3.5 h-3.5" />
-                          <span>Research outside workspace</span>
-                        </button>
-                      )}
                     </div>
                   )}
 
@@ -2440,29 +2583,29 @@ export default function WorkspaceChat({
 
                   {/* Body Text or Error Banner */}
                   {msg.isError ? (
-                    <div className="p-3.5 sm:p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 space-y-2.5">
+                    <div className="p-3.5 sm:p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 space-y-3">
                       <div className="flex items-center gap-2 font-bold text-xs sm:text-sm">
                         <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
-                        <span>
-                          {msg.errorCode && msg.errorCode !== 'unknown'
-                            ? `Failed to generate response (${msg.errorCode})`
-                            : 'Failed to generate response'}
+                        <span className="font-bold text-rose-700 dark:text-rose-300 text-xs">
+                          Server Error
                         </span>
                       </div>
                       <p className="text-xs text-rose-700 dark:text-rose-300 font-normal leading-relaxed break-words">
-                        {msg.text || "There was a problem contacting the Gemini API. Please try again."}
+                        Something went wrong. There is a server error. Please try again.
                       </p>
-                      {msg.failedPrompt && (
-                        <button
-                          type="button"
-                          onClick={() => handleSend(msg.failedPrompt)}
-                          disabled={isThinking}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs cursor-pointer transition-colors disabled:opacity-50"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          <span>Retry Question</span>
-                        </button>
-                      )}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {msg.failedPrompt && (
+                          <button
+                            type="button"
+                            onClick={() => handleSend(msg.failedPrompt)}
+                            disabled={isThinking}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs cursor-pointer transition-colors disabled:opacity-50"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Retry Question</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     renderMessageContent(visibleMsgText, isMsgStreaming)
@@ -2513,8 +2656,8 @@ export default function WorkspaceChat({
                     const effectiveFollowUps = (msg.followUpQuestions && msg.followUpQuestions.length > 0)
                       ? msg.followUpQuestions
                       : [
-                          `Ask me a follow-up interview question on ${msg.activeWorkspaceContext || workspace.name || 'this topic'}`,
-                          `Give me a real-world example and 60-second summary of this concept`,
+                          `Explain this concept step by step with an example`,
+                          `Summarize the main takeaways simply`,
                           `Create 3 practice quiz questions to test my understanding`
                         ];
                     return (
@@ -2524,22 +2667,6 @@ export default function WorkspaceChat({
                             <Sparkles className="w-3 h-3 text-indigo-500 shrink-0" />
                             <span>Suggested Follow-Up Questions</span>
                           </span>
-                          {msg.suggestOutsideResearch && (
-                            <button
-                              type="button"
-                              disabled={isThinking}
-                              onClick={() =>
-                                handleSend(
-                                  msg.originalQuery || `Research this topic in depth outside my workspace`,
-                                  { allowOutsideResearch: true }
-                                )
-                              }
-                              className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                            >
-                              <Globe className="w-3 h-3" />
-                              <span>Research outside workspace</span>
-                            </button>
-                          )}
                         </div>
                         <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2">
                           {effectiveFollowUps.slice(0, 3).map((followUpQ, fqIdx) => (
@@ -2685,6 +2812,22 @@ export default function WorkspaceChat({
       {/* ============================================================== */}
       <footer className="p-2 sm:p-4 border-t border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md shrink-0">
         <div data-tour="ai-tutor-input-dock" className="max-w-3xl mx-auto space-y-2.5">
+          {uploadError && (
+            <div className="flex items-start justify-between gap-2.5 p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs">
+              <div className="flex items-start gap-2 min-w-0">
+                <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                <span className="font-medium leading-relaxed break-words">{uploadError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUploadError(null)}
+                className="p-1 rounded-lg text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-900/50 cursor-pointer shrink-0"
+                aria-label="Dismiss error"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
           {/* Quick Prompt Suggestions when chat is fresh */}
           {messages.length <= 1 && (
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
@@ -2738,7 +2881,7 @@ export default function WorkspaceChat({
 
           {/* Inline YouTube / Web Link Analyzer Bar */}
           {showLinkInput && (
-            <div className="flex items-center gap-2 p-2 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/70">
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 p-2 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/70">
               <Link2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400 ml-1 shrink-0" />
               <input
                 type="url"

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
   X, 
@@ -15,10 +15,18 @@ import {
   Check,
   Tag,
   Plus,
-  Play
+  Play,
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
 import { WorkspaceFile } from './WorkspaceTypes';
 import { getNotebookLMDisplayTitle } from '../../utils/notebookTitle';
+import {
+  OCRService,
+  getCachedShortSummary,
+  isPlaceholderScanSummary,
+  setCachedShortSummary
+} from '../../services/OCRService';
 
 interface LogEntry {
   type: 'info' | 'success' | 'warn' | 'debug';
@@ -114,13 +122,80 @@ interface QuickPreviewModalProps {
   onClose: () => void;
   onExplore?: () => void;
   onUpdateTags?: (fileId: string, tags: string[]) => void;
+  onUpdateSummary?: (fileId: string, summary: string) => void;
 }
 
-export default function QuickPreviewModal({ file, onClose, onExplore, onUpdateTags }: QuickPreviewModalProps) {
+export default function QuickPreviewModal({ file, onClose, onExplore, onUpdateTags, onUpdateSummary }: QuickPreviewModalProps) {
   const fileLogs = getPipelineLogs(file);
   const [tags, setTags] = useState<string[]>(file.tags || []);
   const [showAddTag, setShowAddTag] = useState<boolean>(false);
   const [newTagInput, setNewTagInput] = useState<string>('');
+
+  const isScannedNote =
+    file.type === 'image' ||
+    (file.tags || []).some((t) => /scan|ocr|lens/i.test(t)) ||
+    /scan/i.test(file.name || '');
+
+  const getInitialSummary = (): string => {
+    const cached = getCachedShortSummary(file.id);
+    if (cached) return cached;
+    if (file.summary && !isPlaceholderScanSummary(file.summary)) {
+      return file.summary;
+    }
+    return '';
+  };
+
+  const [autoSummary, setAutoSummary] = useState<string>(getInitialSummary);
+  const [isSummarizing, setIsSummarizing] = useState<boolean>(false);
+
+  const runAutoSummary = async (forceRefresh = false) => {
+    if (!isScannedNote && !isPlaceholderScanSummary(file.summary)) return;
+    const cached = !forceRefresh ? getCachedShortSummary(file.id) : null;
+    if (cached) {
+      setAutoSummary(cached);
+      return;
+    }
+
+    setIsSummarizing(true);
+    try {
+      const generated = await OCRService.generateShortSummaryForScannedNote({
+        id: forceRefresh ? undefined : file.id,
+        name: getNotebookLMDisplayTitle(file),
+        fileBase64: file.fileBase64,
+        fileMimeType: file.fileMimeType,
+        imageUrl: file.url,
+        extractedText: file.transcription || file.contentText || ''
+      });
+      if (generated) {
+        setCachedShortSummary(file.id, generated);
+        setAutoSummary(generated);
+        onUpdateSummary?.(file.id, generated);
+      }
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
+
+  useEffect(() => {
+    setTags(file.tags || []);
+    const cached = getCachedShortSummary(file.id);
+    const hasCleanSummary = Boolean(
+      cached || (file.summary && !isPlaceholderScanSummary(file.summary) && file.summary.length <= 420)
+    );
+    if (cached) {
+      setAutoSummary(cached);
+    } else if (file.summary && !isPlaceholderScanSummary(file.summary)) {
+      setAutoSummary(file.summary);
+    } else {
+      setAutoSummary('');
+    }
+
+    // Whenever the user clicks/opens a scanned note without a real short summary (or with an overly long/missing one),
+    // automatically generate a crisp short summary on its own.
+    if (isScannedNote && (!hasCleanSummary || isPlaceholderScanSummary(file.summary))) {
+      runAutoSummary(false);
+    }
+  }, [file.id]);
 
   const handleAddTag = (tagToAdd: string) => {
     const clean = tagToAdd.trim();
@@ -242,6 +317,39 @@ export default function QuickPreviewModal({ file, onClose, onExplore, onUpdateTa
         {/* Scrollable Content */}
         <div className="p-6 space-y-6 overflow-y-auto max-h-[calc(90vh-210px)] scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800">
           
+          {/* AUTO SHORT SUMMARY (Always prominent at top for Scanned Notes or summarized files) */}
+          {(isScannedNote || autoSummary || isSummarizing) && (
+            <div className="space-y-2.5 bg-indigo-50/70 dark:bg-indigo-950/25 border border-indigo-200/80 dark:border-indigo-800/40 rounded-2xl p-4">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Short Summary</span>
+                </div>
+                {isScannedNote && !isSummarizing && (
+                  <button
+                    type="button"
+                    onClick={() => runAutoSummary(true)}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-200 cursor-pointer transition-colors"
+                    title="Refresh short summary"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Refresh</span>
+                  </button>
+                )}
+              </div>
+              {isSummarizing ? (
+                <div className="flex items-center gap-2 text-xs sm:text-sm text-indigo-700 dark:text-indigo-200 font-medium py-1">
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                  <span>Creating a short summary of your scanned note...</span>
+                </div>
+              ) : (
+                <p className="text-xs sm:text-sm text-slate-700 dark:text-slate-200 leading-relaxed font-medium">
+                  {autoSummary || 'Short summary ready.'}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* SOURCING / WHERE IT GOT IT */}
           {file.url && (
             <div className="space-y-2.5 bg-indigo-50/50 dark:bg-indigo-950/10 border border-indigo-100/50 dark:border-indigo-900/30 rounded-2xl p-4">
@@ -433,8 +541,8 @@ export default function QuickPreviewModal({ file, onClose, onExplore, onUpdateTa
             )}
           </div>
 
-          {/* AI-Generated Summary */}
-          {file.summary && (
+          {/* AI-Generated Summary (shown here only if top Short Summary card was not rendered) */}
+          {!isScannedNote && !autoSummary && file.summary && (
             <div className="space-y-2">
               <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500">
                 <Quote className="w-3.5 h-3.5 text-indigo-500" />
