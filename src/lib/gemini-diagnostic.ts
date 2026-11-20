@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
+import { getServerGeminiApiKey } from "../utils/serverEnv.js";
 
 // Ensure environment variables are loaded
 dotenv.config();
@@ -12,7 +13,7 @@ dotenv.config();
  * @returns Promise<boolean> - True if generateContent succeeds with a valid response, false otherwise.
  */
 export async function testGeminiDiagnostic(prompt: string = "Reply with the word OK."): Promise<boolean> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getServerGeminiApiKey();
   console.log("[Gemini Diagnostic] Initializing Gemini diagnostic utility...");
   console.log("[Gemini Diagnostic] GEMINI_API_KEY present in environment:", Boolean(apiKey));
 
@@ -27,10 +28,13 @@ export async function testGeminiDiagnostic(prompt: string = "Reply with the word
 
   try {
     // Initialize the official Google Gen AI SDK
-    const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
+    const ai = new GoogleGenAI({
+      apiKey: apiKey.trim(),
+      httpOptions: { headers: { "User-Agent": "aistudio-build" } }
+    });
 
-    // Supported candidate models per system guidelines, prioritizing gemini-3-flash-preview with fallback for temporary 503 high-demand spikes
-    const candidateModels = ["gemini-3-flash-preview", "gemini-2.5-flash"];
+    // Supported active models per system guidelines
+    const candidateModels = ["gemini-3-flash-preview", "gemini-3.1-flash-lite"];
     let rawResponse: any = null;
     let selectedModel = "";
     let lastError: any = null;

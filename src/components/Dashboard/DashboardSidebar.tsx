@@ -153,8 +153,8 @@ export default function DashboardSidebar({
                   if (item.id === 'workspaces' && setActiveWorkspace) {
                     setActiveWorkspace(null);
                   }
-                  if (item.id === 'ai-tutor' && !activeWorkspace && workspaces && workspaces.length > 0 && setActiveWorkspace) {
-                    setActiveWorkspace(workspaces[0]);
+                  if (item.id === 'ai-tutor' && activeTab !== 'workspaces' && activeTab !== 'ai-tutor' && setActiveWorkspace) {
+                    setActiveWorkspace(null);
                   }
                   setActiveTab(item.id);
                   onClose();

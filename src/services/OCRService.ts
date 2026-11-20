@@ -30,6 +30,8 @@ export interface OCRScanResult {
   hasUnclearText?: boolean;
   deduplicated?: boolean;
   error?: string;
+  errorCode?: string;
+  httpStatus?: number;
 }
 
 export interface LensAskRequest {
@@ -277,7 +279,7 @@ export class OCRService {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const abortCtrl = new AbortController();
-        const timeoutId = setTimeout(() => abortCtrl.abort(), 22000);
+        const timeoutId = setTimeout(() => abortCtrl.abort(), 35000);
 
         const response = await fetch('/api/ocr/scan-note', {
           method: 'POST',
@@ -354,7 +356,9 @@ export class OCRService {
               highlights: [],
               formulas: [],
               tags: ['Scanned Note'],
-              error: lastErrorMessage
+              error: lastErrorMessage,
+              errorCode: typeof data?.code === 'string' ? data.code : undefined,
+              httpStatus: response.status
             };
           }
           continue;
@@ -494,7 +498,7 @@ export class OCRService {
 
     for (let attempt = 1; attempt <= 2; attempt++) {
       const abortCtrl = new AbortController();
-      const timeoutId = setTimeout(() => abortCtrl.abort(), 18000);
+      const timeoutId = setTimeout(() => abortCtrl.abort(), 28000);
 
       try {
         const response = await fetch('/api/ocr/lens-ask', {

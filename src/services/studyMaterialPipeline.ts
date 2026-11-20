@@ -486,7 +486,13 @@ Instructions:
         };
       }
     } catch (err: any) {
-      console.warn(`[URL Grounding] Model ${model} with urlContext+googleSearch notice:`, err?.message || err);
+      const errMsg = String(err?.message || err || '');
+      const isQuota = err?.status === 429 || errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED');
+      console.warn(`[URL Grounding] Model ${model} with urlContext+googleSearch notice:`, errMsg);
+      if (isQuota) {
+        // Google Search grounding quota is exhausted for this key — skip remaining grounded tool retries
+        break;
+      }
       // Fallback: try with googleSearch only if urlContext was unsupported on a fallback model
       try {
         const searchOnlyRes = await ai.models.generateContent({
@@ -511,7 +517,12 @@ Instructions:
             groundedContent: text
           };
         }
-      } catch {}
+      } catch (searchErr: any) {
+        const searchMsg = String(searchErr?.message || searchErr || '');
+        if (searchErr?.status === 429 || searchMsg.includes('429') || searchMsg.includes('RESOURCE_EXHAUSTED')) {
+          break;
+        }
+      }
     }
   }
 

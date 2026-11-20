@@ -742,8 +742,6 @@ export default function App() {
   const renderDashboardContent = () => {
     const isAITutorTab = activeTab === 'ai-tutor';
     const isOtherWorkspaceTab = ['workspaces', 'notes', 'flashcards'].includes(activeTab);
-    const allUserFiles = workspaces.flatMap(w => w.files || []);
-    const allUserNotes = workspaces.flatMap(w => w.notes || []);
     const fallbackGeneralWorkspace: Workspace = {
       id: 'general-study',
       name: 'General Study',
@@ -756,22 +754,24 @@ export default function App() {
       template: 'notes',
       pinned: false,
       favorite: false,
-      files: allUserFiles,
+      files: [],
       nodes: [],
       links: [],
       flashcards: [],
       quizzes: [],
-      notes: allUserNotes,
+      notes: [],
       plannerTasks: [],
       streak: 1,
       studyHours: 0,
       lastOpened: new Date().toISOString()
     };
     
-    // Tutor workspace: retains the selected workspace, or opens in the first available workspace, or General Study
-    const tutorWorkspace = activeWorkspace || (workspaces.length > 0 ? workspaces[0] : fallbackGeneralWorkspace);
+    // Tutor workspace: uses activeWorkspace when inside a Workspace, or General Study Mode when no workspace is selected
+    const tutorWorkspace = activeWorkspace || fallbackGeneralWorkspace;
+    const realActiveWorkspace =
+      activeWorkspace && activeWorkspace.id !== 'general-study' ? activeWorkspace : null;
     const targetWorkspace =
-      activeWorkspace ||
+      realActiveWorkspace ||
       (activeTab !== 'workspaces' || tourWorkspaceSubTab !== null
         ? workspaces.length > 0
           ? workspaces[0]
@@ -969,8 +969,8 @@ export default function App() {
             {/* 4. AI Tutor */}
             <button
               onClick={() => {
-                if (!activeWorkspace && workspaces.length > 0) {
-                  setActiveWorkspace(workspaces[0]);
+                if (activeTab !== 'workspaces' && activeTab !== 'ai-tutor') {
+                  setActiveWorkspace(null);
                 }
                 setActiveTab('ai-tutor');
               }}
@@ -1099,8 +1099,8 @@ export default function App() {
                     <button
                       onClick={() => {
                         setIsBottomSheetOpen(false);
-                        if (!activeWorkspace && workspaces.length > 0) {
-                          setActiveWorkspace(workspaces[0]);
+                        if (activeTab !== 'workspaces' && activeTab !== 'ai-tutor') {
+                          setActiveWorkspace(null);
                         }
                         setActiveTab('ai-tutor');
                       }}

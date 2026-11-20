@@ -8,7 +8,7 @@ import { studyMaterialRouter, extractYouTubeInfo, scrapeWebPage, enrichUrlWithGe
 import { TranscriptProcessor } from "./src/services/TranscriptProcessor.js";
 import { cleanNotebookLMTitle } from "./src/utils/notebookTitle.js";
 import { toValidUuid } from "./src/utils/uuid.js";
-import { getServerGeminiApiKey, diagnoseServerGeminiApiKey } from "./src/utils/serverEnv.js";
+import { getServerGeminiApiKey, getServerGeminiApiKeyCandidates, diagnoseServerGeminiApiKey } from "./src/utils/serverEnv.js";
 import {
   resolveAITutorContext,
   isAuthorizedForUser,
@@ -132,6 +132,23 @@ const workspaceFilesResponseCache = new Map<string, { files: any[]; expiresAt: n
 
 // Track per-model failure / quota cooldowns so overloaded or failing models are bypassed immediately
 const modelQuotaCooldownMap = new Map<string, number>();
+let googleSearchToolCooldownUntil = 0;
+
+export function isGoogleSearchOnCooldown(): boolean {
+  return Date.now() < googleSearchToolCooldownUntil;
+}
+
+export function recordGoogleSearchCooldown(durationMs = 5 * 60 * 1000): void {
+  googleSearchToolCooldownUntil = Date.now() + durationMs;
+}
+
+function unwrapInnerErrors(err: any): any[] {
+  if (!err) return [];
+  if (Array.isArray(err.errors) && err.errors.length > 0) {
+    return [err, ...err.errors.flatMap((e: any) => unwrapInnerErrors(e))];
+  }
+  return [err];
+}
 
 export function isModelOnCooldown(model: string): boolean {
   const until = modelQuotaCooldownMap.get(model);
@@ -144,60 +161,137 @@ export function isModelOnCooldown(model: string): boolean {
 }
 
 export function isQuotaOrRateLimitError(err: any): boolean {
-  const status = err?.status || err?.statusCode || err?.error?.code;
-  const msg = String(err?.message || err?.error?.message || err || "");
-  return (
-    status === 429 ||
-    msg.includes("429") ||
-    msg.includes("RESOURCE_EXHAUSTED") ||
-    msg.toLowerCase().includes("quota") ||
-    msg.toLowerCase().includes("rate limit")
-  );
+  return unwrapInnerErrors(err).some((item: any) => {
+    const status = item?.status || item?.statusCode || item?.error?.code;
+    const msg = String(item?.message || item?.error?.message || item || "");
+    return (
+      status === 429 ||
+      msg.includes("429") ||
+      msg.includes("RESOURCE_EXHAUSTED") ||
+      msg.toLowerCase().includes("quota") ||
+      msg.toLowerCase().includes("rate limit")
+    );
+  });
+}
+
+function isSingleItemKeyAuthError(item: any): boolean {
+  const status = item?.status || item?.statusCode || item?.error?.code;
+  const msg = String(item?.message || item?.error?.message || item || "").toLowerCase();
+  if (
+    status === 401 ||
+    msg.includes("api key not valid") ||
+    msg.includes("api_key_invalid") ||
+    msg.includes("api key expired") ||
+    msg.includes("api_key_expired") ||
+    msg.includes("access_token_type_unsupported") ||
+    msg.includes("unauthenticated") ||
+    msg.includes("api_key_http_referrer_blocked") ||
+    msg.includes("requests from referer") ||
+    msg.includes("api key is not valid")
+  ) {
+    return true;
+  }
+  // Treat 403 as a key-level failure ONLY when it explicitly blames the API key, referrer, or disabled API service
+  if (status === 403 || msg.includes("permission_denied")) {
+    return (
+      msg.includes("api key") ||
+      msg.includes("referer") ||
+      msg.includes("referrer") ||
+      msg.includes("service_disabled") ||
+      msg.includes("generative language api has not been used") ||
+      msg.includes("consumer_suspended") ||
+      msg.includes("api_key_service_blocked")
+    );
+  }
+  return false;
+}
+
+export function isModelPermissionOrAccessError(err: any): boolean {
+  return unwrapInnerErrors(err).some((item: any) => {
+    const status = item?.status || item?.statusCode || item?.error?.code;
+    const msg = String(item?.message || item?.error?.message || item || "").toLowerCase();
+    return (status === 403 || msg.includes("permission_denied")) && !isSingleItemKeyAuthError(item);
+  });
 }
 
 export function isAuthOrInvalidApiKeyError(err: any): boolean {
-  const status = err?.status || err?.statusCode || err?.error?.code;
-  const msg = String(err?.message || err?.error?.message || err || "").toLowerCase();
-  return (
-    status === 401 ||
-    status === 403 ||
-    msg.includes("api key not valid") ||
-    msg.includes("api_key_invalid") ||
-    msg.includes("access_token_type_unsupported") ||
-    msg.includes("unauthenticated") ||
-    msg.includes("permission_denied")
-  );
+  if (!err) return false;
+  // For AggregateError from Promise.any, only treat as a fatal key error when ALL real attempted models failed with key-level auth errors
+  if (Array.isArray(err.errors) && err.errors.length > 0) {
+    const leafErrors = err.errors
+      .flatMap((e: any) => unwrapInnerErrors(e))
+      .filter((e: any) => !Array.isArray(e?.errors))
+      .filter((e: any) => !/already settled by faster model/i.test(String(e?.message || e || "")));
+    return leafErrors.length > 0 && leafErrors.every((item: any) => isSingleItemKeyAuthError(item));
+  }
+  return isSingleItemKeyAuthError(err);
+}
+
+export function classifyAuthFailureReason(err: any): string {
+  const items = unwrapInnerErrors(err);
+  const combined = items
+    .map((item: any) => String(item?.message || item?.error?.message || item || "").toLowerCase())
+    .join(" | ");
+  if (combined.includes("referer") || combined.includes("referrer") || combined.includes("api_key_http_referrer_blocked")) {
+    return "REFERER_BLOCKED";
+  }
+  if (combined.includes("api_key_expired") || combined.includes("api key expired")) {
+    return "API_KEY_EXPIRED";
+  }
+  if (combined.includes("api_key_invalid") || combined.includes("api key not valid") || combined.includes("api key is not valid")) {
+    return "API_KEY_INVALID";
+  }
+  if (combined.includes("service_disabled") || combined.includes("has not been used") || combined.includes("api_key_service_blocked")) {
+    return "SERVICE_DISABLED";
+  }
+  if (combined.includes("access_token_type_unsupported")) {
+    return "OAUTH_TOKEN_UNSUPPORTED";
+  }
+  if (combined.includes("unauthenticated")) {
+    return "UNAUTHENTICATED";
+  }
+  if (combined.includes("permission_denied")) {
+    return "MODEL_ACCESS_DENIED";
+  }
+  return "AUTH_ERROR";
 }
 
 export function isTransientOrUnavailableModelError(err: any): boolean {
   if (isAuthOrInvalidApiKeyError(err)) return false;
-  const status = err?.status || err?.statusCode || err?.error?.code;
-  const msg = String(err?.message || err?.error?.message || err || "").toLowerCase();
-  return (
-    isQuotaOrRateLimitError(err) ||
-    status === 503 ||
-    status === 502 ||
-    status === 504 ||
-    status === 500 ||
-    status === 404 ||
-    msg.includes("503") ||
-    msg.includes("404") ||
-    msg.includes("unavailable") ||
-    msg.includes("overloaded") ||
-    msg.includes("high demand") ||
-    msg.includes("not_found") ||
-    msg.includes("timed out") ||
-    msg.includes("timeout")
-  );
+  return unwrapInnerErrors(err).some((item: any) => {
+    const status = item?.status || item?.statusCode || item?.error?.code;
+    const msg = String(item?.message || item?.error?.message || item || "").toLowerCase();
+    return (
+      isQuotaOrRateLimitError(item) ||
+      isModelPermissionOrAccessError(item) ||
+      status === 503 ||
+      status === 502 ||
+      status === 504 ||
+      status === 500 ||
+      status === 404 ||
+      msg.includes("503") ||
+      msg.includes("404") ||
+      msg.includes("unavailable") ||
+      msg.includes("overloaded") ||
+      msg.includes("high demand") ||
+      msg.includes("not_found") ||
+      msg.includes("timed out") ||
+      msg.includes("timeout")
+    );
+  });
 }
 
 export function recordModelQuotaCooldown(model: string, err?: any): void {
   const status = err?.status || err?.statusCode || err?.error?.code;
   const msg = String(err?.message || err?.error?.message || "");
-  const isNotFound = status === 404 || msg.includes("404") || msg.includes("NOT_FOUND");
+  const isNotFoundOrDenied =
+    status === 404 ||
+    msg.includes("404") ||
+    msg.includes("NOT_FOUND") ||
+    isModelPermissionOrAccessError(err);
   const isDailyQuota = msg.includes("PerDay");
   const baseCooldown = model === "gemini-3-flash-preview" ? 10 * 1000 : 90 * 1000;
-  const cooldownMs = isNotFound ? 30 * 60 * 1000 : isDailyQuota ? 5 * 60 * 1000 : baseCooldown;
+  const cooldownMs = isNotFoundOrDenied ? 30 * 60 * 1000 : isDailyQuota ? 5 * 60 * 1000 : baseCooldown;
   modelQuotaCooldownMap.set(model, Date.now() + cooldownMs);
 }
 
@@ -227,11 +321,12 @@ export function getAvailableCandidateModels(preferredModels: string[]): string[]
 }
 
 export function summarizeModelError(err: any): string {
+  const inner = Array.isArray(err?.errors) && err.errors.length > 0 ? err.errors[0] : err;
   if (isQuotaOrRateLimitError(err)) {
     return "quota_reached_switching_model";
   }
-  const status = err?.status || err?.statusCode || err?.error?.code || "transient";
-  const raw = String(err?.message || err?.error?.message || "model unavailable");
+  const status = inner?.status || inner?.statusCode || inner?.error?.code || "transient";
+  const raw = String(inner?.message || inner?.error?.message || "model unavailable");
   if (raw.includes("timed out")) return "timeout";
   if (raw.startsWith("{")) return `status_${status}`;
   return raw.slice(0, 80).replace(/[\r\n]+/g, " ");
@@ -279,21 +374,54 @@ export async function generateContentWithModelFailover(
           modelConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
         }
 
-        const genPromise = ai.models.generateContent({
-          model: modelName,
-          contents: options.contents,
-          config: modelConfig,
-        });
+        const hasSearchTools =
+          Array.isArray(modelConfig.tools) &&
+          modelConfig.tools.some((t: any) => Boolean(t?.googleSearch || t?.urlContext));
+        if (hasSearchTools && isGoogleSearchOnCooldown()) {
+          delete modelConfig.tools;
+        }
 
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          timeoutHandle = setTimeout(
-            () => reject(new Error(`Model ${modelName} timed out after ${timeoutMs}ms`)),
-            timeoutMs
-          );
-        });
+        const executeCall = async (cfg: Record<string, any>) => {
+          const genPromise = ai.models.generateContent({
+            model: modelName,
+            contents: options.contents,
+            config: cfg,
+          });
 
-        const response: any = await Promise.race([genPromise, timeoutPromise]);
-        if (timeoutHandle) clearTimeout(timeoutHandle);
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutHandle = setTimeout(
+              () => reject(new Error(`Model ${modelName} timed out after ${timeoutMs}ms`)),
+              timeoutMs
+            );
+          });
+
+          const result: any = await Promise.race([genPromise, timeoutPromise]);
+          if (timeoutHandle) {
+            clearTimeout(timeoutHandle);
+            timeoutHandle = null;
+          }
+          return result;
+        };
+
+        let response: any;
+        try {
+          response = await executeCall(modelConfig);
+        } catch (callErr: any) {
+          if (timeoutHandle) {
+            clearTimeout(timeoutHandle);
+            timeoutHandle = null;
+          }
+          const hadTools = Array.isArray(modelConfig.tools) && modelConfig.tools.length > 0;
+          if (hadTools && (isQuotaOrRateLimitError(callErr) || /tool|search|grounding/i.test(String(callErr?.message || "")))) {
+            recordGoogleSearchCooldown();
+            const plainConfig = { ...modelConfig };
+            delete plainConfig.tools;
+            console.warn(`[${label}] Search grounding unavailable on ${modelName}, retrying without search tools.`);
+            response = await executeCall(plainConfig);
+          } else {
+            throw callErr;
+          }
+        }
 
         if (response && response.text && response.text.trim()) {
           return { response, modelUsed: modelName };
@@ -345,7 +473,29 @@ export async function createExpressApp(): Promise<express.Express> {
   // Preserve pre-parsed request bodies injected by serverless platforms (e.g. Vercel)
   app.use((req: any, _res, next) => {
     if (req.body !== undefined && !req._body) {
-      req._body = true;
+      if (typeof req.body === "string") {
+        const trimmed = req.body.trim();
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+          try {
+            req.body = JSON.parse(trimmed);
+          } catch {
+            req.body = {};
+          }
+        }
+        req._body = true;
+      } else if (Buffer.isBuffer(req.body)) {
+        const rawStr = req.body.toString("utf8").trim();
+        if (rawStr.startsWith("{") || rawStr.startsWith("[")) {
+          try {
+            req.body = JSON.parse(rawStr);
+          } catch {
+            req.body = {};
+          }
+        }
+        req._body = true;
+      } else if (typeof req.body === "object" && req.body !== null) {
+        req._body = true;
+      }
     }
     next();
   });
@@ -2298,6 +2448,7 @@ async function generateTutorVisualIfNeeded(
       return res.json({
         status: "ok",
         configured: true,
+        keySource: diagnostic.sourceVar,
         reply: text,
         verified: text.length > 0,
         durationMs
@@ -2305,10 +2456,18 @@ async function generateTutorVisualIfNeeded(
     } catch (err: any) {
       const rawMsg = String(err?.message || err || "Could not verify AI connection.");
       const isInvalidKey = isAuthOrInvalidApiKeyError(err);
-      console.error("[AIHealth] Handshake error:", rawMsg);
+      const authReason = isInvalidKey ? classifyAuthFailureReason(err) : undefined;
+      const diagnostic = diagnoseServerGeminiApiKey();
+      console.error("[AIHealth] Handshake error:", {
+        keySource: diagnostic.sourceVar,
+        authReason,
+        message: rawMsg
+      });
       return res.status(isInvalidKey ? 401 : 500).json({
         status: "error",
         configured: true,
+        keySource: diagnostic.sourceVar,
+        authReason,
         error: "Something went wrong. There is a server error. Please try again.",
         durationMs: Date.now() - startTime
       });
@@ -2584,13 +2743,32 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         }
       };
 
-      const isRealWorkspaceId = Boolean(workspaceId && workspaceId !== 'general-study');
-      const clientHasAnyRealWorkspaces = clientAllWorkspaces.some((w: any) => w && w.id && w.id !== 'general-study');
-      const normalizedActiveWsUuid = workspaceId ? toValidUuid(String(workspaceId)) : '';
+      const requestedTutorMode = String(bodyObj.tutorMode || queryObj.tutorMode || '').toLowerCase().trim();
+      const isExplicitGeneralMode =
+        requestedTutorMode === 'general' ||
+        !workspaceId ||
+        workspaceId === 'general-study' ||
+        workspaceId === 'local-workspace';
+      const isRealWorkspaceId =
+        !isExplicitGeneralMode &&
+        Boolean(workspaceId && workspaceId !== 'general-study' && workspaceId !== 'local-workspace');
+      const resolvedExplicitMode: 'general' | 'workspace' | undefined =
+        requestedTutorMode === 'general'
+          ? 'general'
+          : requestedTutorMode === 'workspace' && isRealWorkspaceId
+          ? 'workspace'
+          : isExplicitGeneralMode
+          ? 'general'
+          : isRealWorkspaceId
+          ? 'workspace'
+          : undefined;
+      const clientHasAnyRealWorkspaces =
+        !isExplicitGeneralMode &&
+        clientAllWorkspaces.some((w: any) => w && w.id && w.id !== 'general-study' && w.id !== 'local-workspace');
+      const normalizedActiveWsUuid = isRealWorkspaceId && workspaceId ? toValidUuid(String(workspaceId)) : '';
       const matchesActiveWorkspaceId = (candidateWsId: any): boolean => {
         if (!isRealWorkspaceId) {
-          // If the user deleted all workspaces (no real workspaces exist client-side), do not pull orphaned Supabase files
-          return clientHasAnyRealWorkspaces && Boolean(candidateWsId);
+          return false;
         }
         if (!candidateWsId) return true;
         const cStr = String(candidateWsId);
@@ -2600,14 +2778,19 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
 
       const authenticatedUserId = extractUserIdFromAuthHeader(effectiveAuthHeader) || (userId ? String(userId).trim() : undefined);
 
-      // Filter client-supplied attachedFiles and allWorkspaces against authenticatedUserId to prevent cross-user leakage
-      effectiveFiles = effectiveFiles.filter((f: any) =>
-        isAuthorizedForUser(f?.userId || f?.user_id, authenticatedUserId)
-      );
+      // In General Study Mode, ONLY keep files explicitly attached to this turn (never bleed workspace files)
+      effectiveFiles = effectiveFiles.filter((f: any) => {
+        if (!isAuthorizedForUser(f?.userId || f?.user_id, authenticatedUserId)) return false;
+        if (isExplicitGeneralMode) {
+          return Boolean(f?.isDirectAttachment || f?.isStandalone);
+        }
+        return true;
+      });
 
-      // Seed allWorkspacesMap from clientAllWorkspaces, but ONLY add files owned by the authenticated user and from the ACTIVE workspace into effectiveFiles!
+      // Seed allWorkspacesMap from clientAllWorkspaces, but ONLY add files from the ACTIVE workspace into effectiveFiles when in Workspace Mode
       clientAllWorkspaces.forEach((cws: any) => {
         if (!cws || !cws.id) return;
+        if (cws.id === 'general-study' || cws.id === 'local-workspace') return;
         if (!isAuthorizedForUser(cws.userId || cws.user_id, authenticatedUserId)) return;
         const wsName = cws.name || 'Workspace';
         const wsFiles: any[] = [];
@@ -2633,7 +2816,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       const validAuthHeader = sanitizeSupabaseAuthHeader(effectiveAuthHeader);
       const supabase = getSupabaseServerClient(validAuthHeader);
 
-      if (supabase && (isRealWorkspaceId || clientHasAnyRealWorkspaces || (userId && effectiveAuthHeader))) {
+      if (supabase && isRealWorkspaceId) {
         try {
           const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Supabase query timeout (1500ms)")), 1500));
           const fetchPromise = (async () => {
@@ -3057,8 +3240,9 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         authenticatedUserId: authenticatedUserId || null,
         activeWorkspaceId: isRealWorkspaceId ? workspaceId : null,
         activeWorkspaceName: isRealWorkspaceId ? workspaceName : null,
+        explicitTutorMode: resolvedExplicitMode,
         attachedFiles: effectiveFiles,
-        allWorkspaces: Array.from(allWorkspacesMap.values()),
+        allWorkspaces: isExplicitGeneralMode ? [] : Array.from(allWorkspacesMap.values()),
         inaccessibleAccountFiles: Array.isArray(bodyObj.inaccessibleAccountFiles)
           ? bodyObj.inaccessibleAccountFiles
           : undefined,
@@ -3087,12 +3271,15 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
       }
 
       // Check initial semantic relevance against active workspace materials
-      const initialRagCheck = (searchableMaterials.length > 0)
+      const initialRagCheck = (searchableMaterials.length > 0 && !isExplicitGeneralMode)
         ? extractRelevantDocumentSegments(
             prompt,
             searchableMaterials,
             12,
-            isExplicitMaterialQuery || hasDirectTurnAttachment || isDeepStudyMaterialAnalysisQuery
+            resolvedTutorContext.selectedMode === 'MODE_B_WORKSPACE_STUDY' ||
+              isExplicitMaterialQuery ||
+              hasDirectTurnAttachment ||
+              isDeepStudyMaterialAnalysisQuery
           )
         : { segments: [], contextString: '', hasHighRelevance: false };
 
@@ -3103,8 +3290,7 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
         (resolvedTutorContext.selectedMode === 'MODE_B_WORKSPACE_STUDY' ||
           resolvedTutorContext.selectedMode === 'MODE_C_STANDALONE_MATERIAL' ||
           hasDirectTurnAttachment ||
-          isExplicitMaterialQuery ||
-          initialRagCheck.hasHighRelevance)
+          (!isExplicitGeneralMode && (isExplicitMaterialQuery || initialRagCheck.hasHighRelevance)))
       );
 
       if (shouldUseWorkspaceFiles && effectiveFiles && effectiveFiles.length > 0) {
@@ -3234,10 +3420,16 @@ Speak naturally and warmly, like a knowledgeable human teacher answering a stude
           prompt,
           searchableMaterials,
           12,
-          isExplicitMaterialQuery || hasDirectTurnAttachment || isDeepStudyMaterialAnalysisQuery
+          resolvedTutorContext.selectedMode === 'MODE_B_WORKSPACE_STUDY' ||
+            resolvedTutorContext.selectedMode === 'MODE_C_STANDALONE_MATERIAL' ||
+            isExplicitMaterialQuery ||
+            hasDirectTurnAttachment ||
+            isDeepStudyMaterialAnalysisQuery
         );
         retrievedSegments = ragResult.segments;
         hasRelevantWorkspaceMaterial = Boolean(
+          resolvedTutorContext.selectedMode === 'MODE_B_WORKSPACE_STUDY' ||
+          resolvedTutorContext.selectedMode === 'MODE_C_STANDALONE_MATERIAL' ||
           hasDirectTurnAttachment ||
           isExplicitMaterialQuery ||
           ragResult.hasHighRelevance
@@ -3568,42 +3760,45 @@ Include a clear, structured comparison (using a markdown table or side-by-side b
      [FOLLOW_UP: Second follow-up question?]
      [FOLLOW_UP: Third follow-up question?]`;
 
-      const coreSystemInstruction = `You are StudyWeb's AI assistant—operating just like ChatGPT, Claude, and Gemini: natural, conversational, intelligent, clear, and directly helpful.
-CRITICAL INSTRUCTION DIRECTIVES:
-1. WORKSPACE MATERIAL ANALYSIS (WHEN RELEVANT MATERIALS ARE UPLOADED):
-   - When the user has uploaded files, notes, scanned images, PDFs, links, or videos in their workspace and asks about them (or asks to analyze/summarize their workspace), carefully read ALL sections of "=== RETRIEVED WORKSPACE DOCUMENT SEGMENTS ===", "=== FULL UPLOADED WORKSPACE MATERIALS & NOTES ===", and all attached inlineData/fileData.
-   - Analyze ALL relevant uploaded items thoroughly, solve exact questions/equations/problems step by step, and cite sources naturally (e.g., [Source: File Name]).
-2. NATURAL CONVERSATIONAL & WEB KNOWLEDGE FALLBACK (WHEN NOT IN WORKSPACE OR GENERAL CHAT):
-   - For greetings ("hi", "hello", "how are you", etc.) or general questions not covered by uploaded workspace files, respond naturally, warmly, and directly just like ChatGPT/Claude/Gemini using general knowledge and web search grounding.
-   - NEVER say "not in your workspace", "was not found in your workspace", or mention empty/deleted workspaces like "General Study".
-   - NEVER give a bare dictionary definition unless the user explicitly asks to define a word or asks for a word's meaning.
-3. MULTIMODAL ANALYSIS:
-   - When analyzing an uploaded image, PDF, document, video, or website, provide a thorough, accurate breakdown of its contents, concepts, formulas, and takeaways.
-4. STRICT AVOIDANCE:
-   - NEVER generate any image, SVG, or picture. If the user asks you to generate, create, draw, or make an image or picture, reply: "I cannot generate image. I can help you with your study tasks."
-   - NEVER mention "Document 1246", "Enjoy the videos", "music you love", or "Mix".
-   - NEVER output canned filler or say you are disconnected.
+      const isWorkspaceStrictMode =
+        resolvedTutorContext.selectedMode === 'MODE_B_WORKSPACE_STUDY' ||
+        resolvedTutorContext.selectedMode === 'MODE_C_STANDALONE_MATERIAL';
+
+      const coreSystemInstruction = isWorkspaceStrictMode
+        ? `ADDITIONAL WORKSPACE TUTOR FORMATTING GUIDELINES:
+- Carefully read ALL sections of "<UNTRUSTED_DOCUMENT_CONTENT>", "=== RETRIEVED WORKSPACE DOCUMENT SEGMENTS ===", "=== FULL UPLOADED WORKSPACE MATERIALS & NOTES ===", and all attached inlineData/fileData.
+- Ground your primary explanation directly in the active workspace's uploaded files and study notes, citing sources naturally (e.g., [Source: File Name]).
+- NEVER generate any image, SVG, or picture. If the user asks you to generate, create, draw, or make an image or picture, reply: "I cannot generate image. I can help you with your study tasks."
+- NEVER output canned filler or say you are disconnected.
 ${followUpDirective}
 ${unifiedTutorStyleInstruction}
 ${researchGuideline}
-${citationGuideline}`;
+${citationGuideline}`
+        : `ADDITIONAL GENERAL STUDY TUTOR GUIDELINES:
+- Respond naturally, warmly, and directly using accurate academic general knowledge (and web context when available).
+- Do NOT claim to have read personal workspace notes or documents unless a standalone file was directly attached in this conversation.
+- NEVER generate any image, SVG, or picture. If the user asks you to generate, create, draw, or make an image or picture, reply: "I cannot generate image. I can help you with your study tasks."
+- NEVER output canned filler or say you are disconnected.
+${followUpDirective}
+${unifiedTutorStyleInstruction}
+${researchGuideline}`;
 
       const systemInstruction = [
         resolvedTutorContext.systemInstruction,
         coreSystemInstruction,
-        outOfWorkspaceInstruction,
-        userDatabaseContext,
+        isWorkspaceStrictMode ? '' : outOfWorkspaceInstruction,
+        isWorkspaceStrictMode ? userDatabaseContext : '',
         specializedFormatInstruction,
-        fileOverviewContext,
+        isWorkspaceStrictMode ? fileOverviewContext : '',
         resolvedTutorContext.sanitizedMaterialContextBlock,
         sanitizeUntrustedDocumentText(groundedSourceContext).cleanText
       ].filter(Boolean).join('\n\n');
 
-      // Verified active Gemini models for fast, reliable responses
+      // Verified active Gemini models prioritized by speed and reliability
       const baseCandidateModels: string[] = [
-        "gemini-4-hydrogen",
+        "gemini-3-flash-preview",
         "gemini-3.1-flash-lite",
-        "gemini-3-flash-preview"
+        "gemini-4-hydrogen"
       ];
       const candidateModels: string[] = getAvailableCandidateModels(baseCandidateModels);
 
@@ -3756,31 +3951,61 @@ ${citationGuideline}`;
 
               const isHydrogen = currentModel === "gemini-4-hydrogen";
               const supportsMinimalThinking = currentModel.startsWith("gemini-3");
-              const shouldUseWebGrounding = !hasRelevantWorkspaceMaterial && !hasMediaOrVideoPart;
+              const shouldUseWebGrounding =
+                !hasRelevantWorkspaceMaterial &&
+                !hasMediaOrVideoPart &&
+                !isCasualGreeting &&
+                !isGoogleSearchOnCooldown();
 
-              const genPromise = ai.models.generateContent({
-                model: currentModel,
-                contents: contentsPayload,
-                config: {
-                  systemInstruction: pass <= 1
-                    ? systemInstruction
-                    : [coreSystemInstruction, outOfWorkspaceInstruction, fileOverviewContext, groundedSourceContext].filter(Boolean).join('\n\n'),
-                  ...(shouldUseWebGrounding ? { tools: [{ googleSearch: {} }] } : {}),
-                  ...(isHydrogen ? {} : { temperature: 0.6 }),
-                  ...(isHydrogen
-                    ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
-                    : supportsMinimalThinking
-                    ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
-                    : {})
+              const buildTutorModelConfig = (useSearch: boolean): Record<string, any> => ({
+                systemInstruction: pass <= 1
+                  ? systemInstruction
+                  : [resolvedTutorContext.systemInstruction, coreSystemInstruction, fileOverviewContext, groundedSourceContext].filter(Boolean).join('\n\n'),
+                ...(useSearch ? { tools: [{ googleSearch: {} }] } : {}),
+                ...(isHydrogen ? {} : { temperature: 0.6 }),
+                ...(isHydrogen
+                  ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+                  : supportsMinimalThinking
+                  ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
+                  : {})
+              });
+
+              const invokeTutorCall = async (useSearch: boolean) => {
+                const genPromise = ai.models.generateContent({
+                  model: currentModel,
+                  contents: contentsPayload,
+                  config: buildTutorModelConfig(useSearch)
+                });
+                const modelTimeout = new Promise<never>((_, reject) => {
+                  timeoutHandle = setTimeout(() => reject(new Error(`Model ${currentModel} timed out after ${timeoutMs}ms`)), timeoutMs);
+                });
+                const resVal = await Promise.race([genPromise, modelTimeout]);
+                if (timeoutHandle) {
+                  clearTimeout(timeoutHandle);
+                  timeoutHandle = null;
                 }
-              });
+                return resVal;
+              };
 
-              const modelTimeout = new Promise<never>((_, reject) => {
-                timeoutHandle = setTimeout(() => reject(new Error(`Model ${currentModel} timed out after ${timeoutMs}ms`)), timeoutMs);
-              });
-
-              response = await Promise.race([genPromise, modelTimeout]);
-              if (timeoutHandle) clearTimeout(timeoutHandle);
+              try {
+                response = await invokeTutorCall(shouldUseWebGrounding);
+              } catch (firstErr: any) {
+                if (timeoutHandle) {
+                  clearTimeout(timeoutHandle);
+                  timeoutHandle = null;
+                }
+                // If Google Search grounding tool quota is exhausted (429), immediately retry without tools on the same model!
+                if (
+                  shouldUseWebGrounding &&
+                  (isQuotaOrRateLimitError(firstErr) || /tool|search|grounding/i.test(String(firstErr?.message || "")))
+                ) {
+                  recordGoogleSearchCooldown();
+                  console.warn(`[AI Tutor][${correlationId}] Google Search grounding unavailable on ${currentModel}; retrying directly without search tool.`);
+                  response = await invokeTutorCall(false);
+                } else {
+                  throw firstErr;
+                }
+              }
             } catch (retryErr: any) {
               if (timeoutHandle) clearTimeout(timeoutHandle);
               if (isQuotaOrRateLimitError(retryErr)) {
@@ -4216,7 +4441,7 @@ ${citationGuideline}`;
     config?: Record<string, any>,
     perModelTimeoutMs = 15000
   ): Promise<string> {
-    const preferred = ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"];
+    const preferred = ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-4-hydrogen"];
     const candidates = getAvailableCandidateModels(preferred);
     let settled = false;
 
@@ -4277,7 +4502,7 @@ ${citationGuideline}`;
           resolve(text);
         } catch (err: any) {
           if (timer) clearTimeout(timer);
-          if (isAuthOrInvalidApiKeyError(err)) {
+          if (isSingleItemKeyAuthError(err)) {
             settled = true;
             // Wake pending tasks immediately so Promise.any resolves/rejects without waiting
             for (let j = idx + 1; j < candidates.length; j++) {
@@ -4286,7 +4511,7 @@ ${citationGuideline}`;
             reject(err);
             return;
           }
-          if (isTransientOrUnavailableModelError(err)) {
+          if (isTransientOrUnavailableModelError(err) || isModelPermissionOrAccessError(err)) {
             recordModelQuotaCooldown(modelName, err);
           }
           // Immediately wake the next backup model with zero delay
@@ -4405,9 +4630,9 @@ ${citationGuideline}`;
         return;
       }
 
-      const apiKey = getGeminiApiKey();
+      const keyCandidates = getServerGeminiApiKeyCandidates();
 
-      if (!apiKey) {
+      if (keyCandidates.length === 0) {
         console.error("[OCR Endpoint] API key is not configured.");
         res.status(503).json({
           error: "Document scanning is temporarily unavailable because the AI service is not configured.",
@@ -4416,16 +4641,6 @@ ${citationGuideline}`;
         });
         return;
       }
-
-      const ai = new GoogleGenAI({
-        apiKey,
-        apiVersion: "v1beta",
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build"
-          }
-        }
-      });
 
       const isMultiPage = normalizedPages.length > 1;
       const fastOcrPrompt = `You are StudyWeb's Scan Notes AI Assistant.
@@ -4459,47 +4674,99 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
 
       let rawMarkdown = "";
       let lastVisionError: any = null;
-      try {
-        rawMarkdown = await runFastLensVisionRace(
-          ai,
-          { parts: visionParts },
-          {},
-          15000
-        );
-      } catch (raceErr: any) {
-        lastVisionError = raceErr;
-        if (isAuthOrInvalidApiKeyError(raceErr)) {
-          console.error("[OCR Endpoint] API key invalid or unauthorized:", summarizeModelError(raceErr));
-          res.status(401).json({
-            error: "Document scanning authentication failed. Please check the server Gemini API key configuration.",
-            code: "AI_AUTH_ERROR",
-            retryable: false
-          });
-          return;
-        }
-        console.warn("[OCR Endpoint] Fast race notice, attempting failover:", summarizeModelError(raceErr));
+      let lastKeySource = keyCandidates[0].sourceVar;
+      let hadAuthFailure = false;
+
+      for (let keyIdx = 0; keyIdx < keyCandidates.length; keyIdx++) {
+        const candidate = keyCandidates[keyIdx];
+        lastKeySource = candidate.sourceVar;
+        hadAuthFailure = false;
+        const ai = new GoogleGenAI({
+          apiKey: candidate.key,
+          apiVersion: "v1beta",
+          httpOptions: {
+            headers: {
+              "User-Agent": "aistudio-build"
+            }
+          }
+        });
+
         try {
-          const failover = await generateContentWithModelFailover(ai, {
-            contents: { parts: visionParts },
-            preferredModels: ["gemini-3.1-flash-lite", "gemini-3-flash-preview", "gemini-4-hydrogen"],
-            timeoutMs: 14000,
-            maxPasses: 1,
-            label: "ScanNoteFailover"
-          });
-          rawMarkdown = String(failover?.response?.text || "").trim();
-        } catch (fallbackErr: any) {
-          lastVisionError = fallbackErr;
-          if (isAuthOrInvalidApiKeyError(fallbackErr)) {
-            console.error("[OCR Endpoint] Failover auth error:", summarizeModelError(fallbackErr));
+          rawMarkdown = await runFastLensVisionRace(
+            ai,
+            { parts: visionParts },
+            {},
+            11000
+          );
+          if (rawMarkdown) break;
+        } catch (raceErr: any) {
+          lastVisionError = raceErr;
+          if (isAuthOrInvalidApiKeyError(raceErr)) {
+            hadAuthFailure = true;
+            const authReason = classifyAuthFailureReason(raceErr);
+            console.error("[OCR Endpoint] API key invalid or unauthorized:", {
+              keySource: candidate.sourceVar,
+              authReason,
+              detail: summarizeModelError(raceErr)
+            });
+            if (keyIdx + 1 < keyCandidates.length) {
+              console.warn(`[OCR Endpoint] Retrying scan with next configured key candidate (${keyCandidates[keyIdx + 1].sourceVar}).`);
+              continue;
+            }
             res.status(401).json({
-              error: "Document scanning authentication failed. Please check the server Gemini API key configuration.",
+              error:
+                authReason === "REFERER_BLOCKED"
+                  ? "Document scanning authentication failed because the server Gemini API key has HTTP referrer restrictions. Remove website/referrer restrictions on the server API key."
+                  : "Document scanning authentication failed. Please check the server Gemini API key configuration.",
               code: "AI_AUTH_ERROR",
+              authReason,
+              keySource: candidate.sourceVar,
               retryable: false
             });
             return;
           }
-          console.warn("[OCR Endpoint] Failover extraction notice:", summarizeModelError(fallbackErr));
+          console.warn("[OCR Endpoint] Fast race notice, attempting failover:", summarizeModelError(raceErr));
+          try {
+            const failover = await generateContentWithModelFailover(ai, {
+              contents: { parts: visionParts },
+              preferredModels: ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-4-hydrogen"],
+              timeoutMs: 10000,
+              maxPasses: 1,
+              label: "ScanNoteFailover"
+            });
+            rawMarkdown = String(failover?.response?.text || "").trim();
+            if (rawMarkdown) break;
+          } catch (fallbackErr: any) {
+            lastVisionError = fallbackErr;
+            if (isAuthOrInvalidApiKeyError(fallbackErr)) {
+              hadAuthFailure = true;
+              const authReason = classifyAuthFailureReason(fallbackErr);
+              console.error("[OCR Endpoint] Failover auth error:", {
+                keySource: candidate.sourceVar,
+                authReason,
+                detail: summarizeModelError(fallbackErr)
+              });
+              if (keyIdx + 1 < keyCandidates.length) {
+                console.warn(`[OCR Endpoint] Retrying scan with next configured key candidate (${keyCandidates[keyIdx + 1].sourceVar}).`);
+                continue;
+              }
+              res.status(401).json({
+                error:
+                  authReason === "REFERER_BLOCKED"
+                    ? "Document scanning authentication failed because the server Gemini API key has HTTP referrer restrictions. Remove website/referrer restrictions on the server API key."
+                    : "Document scanning authentication failed. Please check the server Gemini API key configuration.",
+                code: "AI_AUTH_ERROR",
+                authReason,
+                keySource: candidate.sourceVar,
+                retryable: false
+              });
+              return;
+            }
+            console.warn("[OCR Endpoint] Failover extraction notice:", summarizeModelError(fallbackErr));
+          }
         }
+        // Only try secondary key candidates on authentication failures
+        if (!hadAuthFailure) break;
       }
 
       if (rawMarkdown) {
@@ -4609,9 +4876,16 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
     } catch (error: any) {
       console.error("[OCR Endpoint Error] /api/ocr/scan-note error:", summarizeModelError(error));
       if (isAuthOrInvalidApiKeyError(error)) {
+        const authReason = classifyAuthFailureReason(error);
+        const diagnostic = diagnoseServerGeminiApiKey();
         res.status(401).json({
-          error: "Document scanning authentication failed. Please check the server Gemini API key configuration.",
+          error:
+            authReason === "REFERER_BLOCKED"
+              ? "Document scanning authentication failed because the server Gemini API key has HTTP referrer restrictions. Remove website/referrer restrictions on the server API key."
+              : "Document scanning authentication failed. Please check the server Gemini API key configuration.",
           code: "AI_AUTH_ERROR",
+          authReason,
+          keySource: diagnostic.sourceVar,
           retryable: false
         });
         return;
@@ -4728,16 +5002,6 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
         conversationHistory: Array.isArray(history) ? history : []
       });
 
-      const ai = new GoogleGenAI({
-        apiKey,
-        apiVersion: "v1beta",
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build"
-          }
-        }
-      });
-
       const contentParts: any[] = [{ text: fullPrompt }];
       const hasRealOcrText =
         trimmedText.length > 45 &&
@@ -4757,28 +5021,51 @@ Summary: <Crisp 2 to 3 sentence factual summary of the main topics, definitions,
         });
       }
 
+      const keyCandidates = getServerGeminiApiKeyCandidates();
       let answerText = "";
-      try {
-        answerText = await runFastLensVisionRace(ai, contentParts, {}, 12000);
-      } catch (raceErr: any) {
-        if (isAuthOrInvalidApiKeyError(raceErr)) {
-          throw raceErr;
-        }
-        try {
-          const fallback = await generateContentWithModelFailover(ai, {
-            contents: contentParts,
-            preferredModels: ["gemini-3.1-flash-lite", "gemini-3-flash-preview", "gemini-4-hydrogen"],
-            timeoutMs: 12000,
-            maxPasses: 1,
-            label: "LensAskFallback"
-          });
-          answerText = String(fallback?.response?.text || "").trim();
-        } catch (fallbackErr: any) {
-          if (isAuthOrInvalidApiKeyError(fallbackErr)) {
-            throw fallbackErr;
+      let lastLensAuthErr: any = null;
+
+      for (let keyIdx = 0; keyIdx < keyCandidates.length; keyIdx++) {
+        const candidate = keyCandidates[keyIdx];
+        const lensAi = new GoogleGenAI({
+          apiKey: candidate.key,
+          apiVersion: "v1beta",
+          httpOptions: {
+            headers: {
+              "User-Agent": "aistudio-build"
+            }
           }
-          console.warn("[Lens Ask Endpoint] Failover notice:", summarizeModelError(fallbackErr));
+        });
+        lastLensAuthErr = null;
+        try {
+          answerText = await runFastLensVisionRace(lensAi, contentParts, {}, 10000);
+          if (answerText) break;
+        } catch (raceErr: any) {
+          if (isAuthOrInvalidApiKeyError(raceErr)) {
+            lastLensAuthErr = raceErr;
+            if (keyIdx + 1 < keyCandidates.length) continue;
+            throw raceErr;
+          }
+          try {
+            const fallback = await generateContentWithModelFailover(lensAi, {
+              contents: contentParts,
+              preferredModels: ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-4-hydrogen"],
+              timeoutMs: 10000,
+              maxPasses: 1,
+              label: "LensAskFallback"
+            });
+            answerText = String(fallback?.response?.text || "").trim();
+            if (answerText) break;
+          } catch (fallbackErr: any) {
+            if (isAuthOrInvalidApiKeyError(fallbackErr)) {
+              lastLensAuthErr = fallbackErr;
+              if (keyIdx + 1 < keyCandidates.length) continue;
+              throw fallbackErr;
+            }
+            console.warn("[Lens Ask Endpoint] Failover notice:", summarizeModelError(fallbackErr));
+          }
         }
+        if (!lastLensAuthErr) break;
       }
 
       if (answerText) {
@@ -5744,7 +6031,10 @@ Return ONLY valid JSON matching the requested schema.`;
         }
       }
 
-      const useSearchTool = hasInternet && (!internetSourcesContext || internetSourcesContext.length < 150);
+      const useSearchTool =
+        hasInternet &&
+        (!internetSourcesContext || internetSourcesContext.length < 150) &&
+        !isGoogleSearchOnCooldown();
       const quizConfig: Record<string, any> = {
         systemInstruction,
         temperature: 0.4,
@@ -5792,9 +6082,9 @@ Return ONLY valid JSON matching the requested schema.`;
 
       const { response, modelUsed } = await generateContentWithModelFailover(ai, {
         contents: quizParts,
-        preferredModels: ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"],
+        preferredModels: ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-4-hydrogen"],
         config: quizConfig,
-        timeoutMs: 22000,
+        timeoutMs: 20000,
         maxPasses: 2,
         label: "GenerateQuiz"
       });
@@ -6702,14 +6992,31 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
         for (const model of candidateModels) {
           try {
             const isHydrogen = model === "gemini-4-hydrogen";
-            const response = await ai.models.generateContent({
-              model,
-              contents: prompt,
-              config: {
-                ...(isHydrogen ? {} : { temperature: 0.65 }),
-                tools: [{ googleSearch: {} }],
+            let response: any;
+            try {
+              response = await ai.models.generateContent({
+                model,
+                contents: prompt,
+                config: {
+                  ...(isHydrogen ? {} : { temperature: 0.65 }),
+                  ...(!isGoogleSearchOnCooldown() ? { tools: [{ googleSearch: {} }] } : { responseMimeType: "application/json" }),
+                }
+              });
+            } catch (searchErr: any) {
+              if (!isGoogleSearchOnCooldown() && isQuotaOrRateLimitError(searchErr)) {
+                recordGoogleSearchCooldown();
+                response = await ai.models.generateContent({
+                  model,
+                  contents: prompt,
+                  config: {
+                    ...(isHydrogen ? {} : { temperature: 0.65 }),
+                    responseMimeType: "application/json"
+                  }
+                });
+              } else {
+                throw searchErr;
               }
-            });
+            }
 
             const rawText = (response.text || "").trim();
             const jsonMatch = rawText.match(/\{[\s\S]*\}/);

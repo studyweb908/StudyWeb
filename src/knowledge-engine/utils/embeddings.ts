@@ -17,7 +17,7 @@ export async function generateEmbedding(text: string, apiKey: string): Promise<n
       httpOptions: { headers: { "User-Agent": "aistudio-build" } }
     });
     const res = await ai.models.embedContent({
-      model: "text-embedding-004",
+      model: "gemini-embedding-2",
       contents: text
     }) as any;
     if (res && res.embeddings && res.embeddings[0] && res.embeddings[0].values) {

@@ -224,7 +224,7 @@ function parseTextWithHighlights(
 
 export default function AITutorWorkspace() {
   const { activeWorkspace } = useTaskContext();
-  const targetWsId = activeWorkspace?.id || 'local-workspace';
+  const targetWsId = activeWorkspace?.id || 'general-study';
 
   const renderWorkspaceLogo = (sizeClass = 'w-7 h-7 sm:w-9 sm:h-9', _textClass = 'text-base sm:text-lg') => {
     return (
@@ -716,10 +716,15 @@ export default function AITutorWorkspace() {
       }
       const allWorkspacesList = Array.from(wsMap.values());
 
-      // Strictly scope workspaceFilesPayload to the ACTIVE workspace so files from other workspaces never bleed in
-      const currentWs = (activeWorkspace && wsMap.get(activeWorkspace.id)) || activeWorkspace;
+      const isGeneralMode = !activeWorkspace || targetWsId === 'general-study' || targetWsId === 'local-workspace';
+
+      // Strictly scope workspaceFilesPayload to the ACTIVE workspace so files never bleed into General Study Mode
+      const currentWs = !isGeneralMode ? ((activeWorkspace && wsMap.get(activeWorkspace.id)) || activeWorkspace) : null;
       const seenNames = new Set<string>();
       const workspaceFilesPayload: any[] = [];
+      let totalB64Chars = 0;
+      const MAX_B64_CHARS = 2_800_000;
+
       if (currentWs && Array.isArray(currentWs.files)) {
         currentWs.files.forEach((wf: any) => {
           const key = String(wf.name || wf.id || '').trim().toLowerCase();
@@ -734,6 +739,11 @@ export default function AITutorWorkspace() {
               extractedMime = extractedMime || header.replace('data:', '');
             }
           }
+          if (typeof extractedBase64 === 'string' && totalB64Chars + extractedBase64.length <= MAX_B64_CHARS) {
+            totalB64Chars += extractedBase64.length;
+          } else {
+            extractedBase64 = undefined;
+          }
           workspaceFilesPayload.push({
             id: wf.id,
             name: wf.name,
@@ -747,46 +757,59 @@ export default function AITutorWorkspace() {
             contentText: wf.contentText || wf.transcription || wf.summary,
             highlights: wf.highlights,
             fileBase64: extractedBase64,
-            fileMimeType: extractedMime,
+            fileMimeType: extractedBase64 ? extractedMime : undefined,
             isDirectAttachment: false
           });
         });
       }
 
-      const directAttachedPayload = attachedFiles.map(f => ({
-        ...f,
-        workspaceId: targetWsId,
-        workspaceName: activeWorkspace?.name || 'Workspace',
-        isDirectAttachment: true
-      }));
+      const directAttachedPayload = attachedFiles.map(f => {
+        let safeB64 = typeof f.fileBase64 === 'string' ? f.fileBase64 : undefined;
+        if (safeB64 && totalB64Chars + safeB64.length <= MAX_B64_CHARS) {
+          totalB64Chars += safeB64.length;
+        } else {
+          safeB64 = undefined;
+        }
+        return {
+          ...f,
+          url: (typeof f.url === 'string' && !f.url.startsWith('data:')) ? f.url : undefined,
+          fileBase64: safeB64,
+          fileMimeType: safeB64 ? f.fileMimeType : undefined,
+          workspaceId: targetWsId,
+          workspaceName: isGeneralMode ? 'General Study' : (activeWorkspace?.name || 'Workspace'),
+          isDirectAttachment: true
+        };
+      });
 
       const combinedFiles = [
         ...directAttachedPayload,
         ...workspaceFilesPayload.filter(wf => !directAttachedPayload.some(df => df.name === wf.name))
       ];
 
-      const compactAllWorkspaces = allWorkspacesList.map(ws => ({
-        id: ws.id,
-        name: ws.name || 'Workspace',
-        subject: ws.subject || 'General',
-        files: (ws.files || []).map((f: any) => ({
-          id: f.id,
-          name: f.name,
-          type: f.type || 'doc',
-          size: f.size,
-          pages: f.pages,
-          url: (typeof f.url === 'string' && !f.url.startsWith('data:')) ? f.url.slice(0, 500) : undefined,
-          summary: typeof f.summary === 'string' ? f.summary.slice(0, 1200) : undefined,
-          transcription: typeof (f.transcription || f.contentText) === 'string' ? String(f.transcription || f.contentText).slice(0, 6000) : undefined
-        })),
-        notes: (ws.notes || []).map((n: any) => ({
-          id: n.id,
-          title: n.title || 'Study Note',
-          content: typeof n.content === 'string' ? n.content.replace(/<[^>]+>/g, ' ').slice(0, 2500) : ''
-        })),
-        flashcardsCount: (ws.flashcards || []).length,
-        quizzesCount: (ws.quizzes || []).length
-      }));
+      const compactAllWorkspaces = isGeneralMode
+        ? []
+        : allWorkspacesList.map(ws => ({
+            id: ws.id,
+            name: ws.name || 'Workspace',
+            subject: ws.subject || 'General',
+            files: (ws.files || []).map((f: any) => ({
+              id: f.id,
+              name: f.name,
+              type: f.type || 'doc',
+              size: f.size,
+              pages: f.pages,
+              url: (typeof f.url === 'string' && !f.url.startsWith('data:')) ? f.url.slice(0, 500) : undefined,
+              summary: typeof f.summary === 'string' ? f.summary.slice(0, 1200) : undefined,
+              transcription: typeof (f.transcription || f.contentText) === 'string' ? String(f.transcription || f.contentText).slice(0, 6000) : undefined
+            })),
+            notes: (ws.notes || []).map((n: any) => ({
+              id: n.id,
+              title: n.title || 'Study Note',
+              content: typeof n.content === 'string' ? n.content.replace(/<[^>]+>/g, ' ').slice(0, 2500) : ''
+            })),
+            flashcardsCount: (ws.flashcards || []).length,
+            quizzesCount: (ws.quizzes || []).length
+          }));
 
       const response = await fetch("/api/ai-tutor", {
         method: "POST",
@@ -801,7 +824,8 @@ export default function AITutorWorkspace() {
           deepResearch,
           citationMode,
           workspaceId: targetWsId,
-          workspaceName: activeWorkspace?.name || 'Workspace',
+          workspaceName: isGeneralMode ? 'General Study' : (activeWorkspace?.name || 'Workspace'),
+          tutorMode: isGeneralMode ? 'general' : 'workspace',
           userId: activeUserId || undefined,
           attachedFiles: combinedFiles,
           allWorkspaces: compactAllWorkspaces,
@@ -948,9 +972,9 @@ export default function AITutorWorkspace() {
           fileType: typeLabel,
           size: formatFileSize(file.size),
           fileSize: formatFileSize(file.size),
-          url: isImg ? dataUrl : undefined,
-          fileUrl: isImg ? dataUrl : undefined,
-          fileBase64: fileBase64 && fileBase64.length < 4000000 ? fileBase64 : undefined,
+          url: undefined,
+          fileUrl: undefined,
+          fileBase64: fileBase64 && fileBase64.length <= 2_800_000 ? fileBase64 : undefined,
           fileMimeType: mimeType,
           content: transcription || '',
           rawText: transcription || ''

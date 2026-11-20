@@ -44,6 +44,7 @@ export interface TutorMessage {
 export interface SendTutorRequestOptions {
   workspaceId: string;
   workspaceName?: string;
+  tutorMode?: 'general' | 'workspace';
   userId?: string | null;
   prompt: string;
   persona?: string;
@@ -198,7 +199,9 @@ class AITutorBackgroundManager {
    * performs network requests, and persists the resulting AI message to storage.
    */
   public async sendTutorMessage(options: SendTutorRequestOptions): Promise<TutorMessage> {
-    const { workspaceId, userId, prompt, history, compactAttachedFiles = [], allWorkspaces = [], accessToken, allowOutsideResearch = false, userMsg, workspaceName } = options;
+    const { workspaceId, userId, prompt, history, compactAttachedFiles = [], allWorkspaces = [], accessToken, allowOutsideResearch = false, userMsg, workspaceName, tutorMode } = options;
+    const resolvedTutorMode: 'general' | 'workspace' =
+      tutorMode || (workspaceId && workspaceId !== 'general-study' && workspaceId !== 'local-workspace' ? 'workspace' : 'general');
     const chatKey = getChatHistoryKey(userId, workspaceId);
     const requestGen = this.resetGeneration.get(workspaceId) || 0;
 
@@ -271,6 +274,7 @@ class AITutorBackgroundManager {
               modelMode: 'auto',
               workspaceId,
               workspaceName,
+              tutorMode: resolvedTutorMode,
               userId,
               supabaseToken: freshAccessToken,
               attachedFiles: compactAttachedFiles,
@@ -321,7 +325,8 @@ class AITutorBackgroundManager {
         try {
           const params = new URLSearchParams({
             prompt: userMsg.text.slice(0, 1200),
-            workspaceId: workspaceId || 'general-study'
+            workspaceId: workspaceId || 'general-study',
+            tutorMode: resolvedTutorMode
           });
           if (userId) params.set('userId', userId);
 

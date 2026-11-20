@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { generateEmbedding } from '../utils/embeddings.js';
+import { getServerGeminiApiKey } from '../../utils/serverEnv.js';
 
 function sanitizeBearerHeader(authHeader?: string): string | undefined {
   if (!authHeader || typeof authHeader !== 'string' || authHeader.length >= 4000) return undefined;
@@ -32,9 +33,7 @@ function getSupabaseClient(authHeader?: string) {
 }
 
 function getGeminiApiKey(): string | null {
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY || process.env.VITE_GEMINI_API_KEY;
-  if (!key || key === "MY_GEMINI_API_KEY" || key.trim() === "") return null;
-  return key.trim();
+  return getServerGeminiApiKey();
 }
 
 export async function retrieveKnowledge(workspaceId: string, userId: string, query: string, topK: number = 8, ai: any = null, filesFallback: any[] = [], notesFallback: any[] = [], authHeader?: string): Promise<string> {

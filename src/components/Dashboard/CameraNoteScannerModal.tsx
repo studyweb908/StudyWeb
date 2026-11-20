@@ -850,17 +850,19 @@ export default function CameraNoteScannerModal({
   // Automatically crop to detected paper boundaries and normalize image to JPEG DataURL + Base64
   const normalizeAndCompressImage = (
     rawDataUrl: string,
-    preDetectedBounds?: NormalizedDocBounds | null
+    preDetectedBounds?: NormalizedDocBounds | null,
+    options?: { skipAutoCrop?: boolean; maxDataUrlLength?: number }
   ): Promise<{ dataUrl: string; base64: string; mimeType: string; sizeFormatted: string; wasCropped: boolean }> => {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
-        const srcW = img.width || 1200;
-        const srcH = img.height || 900;
+        const srcW = img.naturalWidth || img.width || 1200;
+        const srcH = img.naturalHeight || img.height || 900;
+        const shouldAutoCrop = autoCropEnabled && !options?.skipAutoCrop;
 
-        let cropBounds: NormalizedDocBounds | null = preDetectedBounds || null;
+        let cropBounds: NormalizedDocBounds | null = shouldAutoCrop ? (preDetectedBounds || null) : null;
 
-        if (autoCropEnabled && !cropBounds) {
+        if (shouldAutoCrop && !cropBounds) {
           try {
             const detectW = 240;
             const detectH = Math.max(140, Math.round((srcH / srcW) * detectW));
@@ -876,20 +878,37 @@ export default function CameraNoteScannerModal({
           } catch {}
         }
 
-        const sx = autoCropEnabled && cropBounds ? Math.round(cropBounds.x * srcW) : 0;
-        const sy = autoCropEnabled && cropBounds ? Math.round(cropBounds.y * srcH) : 0;
-        const sw = autoCropEnabled && cropBounds ? Math.round(cropBounds.width * srcW) : srcW;
-        const sh = autoCropEnabled && cropBounds ? Math.round(cropBounds.height * srcH) : srcH;
+        let sx = 0;
+        let sy = 0;
+        let sw = srcW;
+        let sh = srcH;
+        let appliedCrop = false;
+
+        if (shouldAutoCrop && cropBounds) {
+          const rawSx = Math.max(0, Math.min(srcW - 1, Math.round(cropBounds.x * srcW)));
+          const rawSy = Math.max(0, Math.min(srcH - 1, Math.round(cropBounds.y * srcH)));
+          const rawSw = Math.max(1, Math.min(srcW - rawSx, Math.round(cropBounds.width * srcW)));
+          const rawSh = Math.max(1, Math.min(srcH - rawSy, Math.round(cropBounds.height * srcH)));
+
+          // Only apply auto-crop when the detected region is large enough to hold readable notes
+          if (rawSw >= 160 && rawSh >= 160 && rawSw >= srcW * 0.22 && rawSh >= srcH * 0.22) {
+            sx = rawSx;
+            sy = rawSy;
+            sw = rawSw;
+            sh = rawSh;
+            appliedCrop = !(sx === 0 && sy === 0 && sw === srcW && sh === srcH);
+          }
+        }
 
         const maxDim = 1280;
         let outW = sw;
         let outH = sh;
         if (outW > maxDim || outH > maxDim) {
           if (outW >= outH) {
-            outH = Math.round((outH * maxDim) / outW);
+            outH = Math.max(1, Math.round((outH * maxDim) / outW));
             outW = maxDim;
           } else {
-            outW = Math.round((outW * maxDim) / outH);
+            outW = Math.max(1, Math.round((outW * maxDim) / outH));
             outH = maxDim;
           }
         }
@@ -915,9 +934,13 @@ export default function CameraNoteScannerModal({
         ctx.fillRect(0, 0, outW, outH);
         ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
 
+        const targetMaxLen = options?.maxDataUrlLength || 350_000;
         let outUrl = canvas.toDataURL('image/jpeg', 0.82);
-        if (outUrl.length > 350_000) {
+        if (outUrl.length > targetMaxLen) {
           outUrl = canvas.toDataURL('image/jpeg', 0.70);
+        }
+        if (outUrl.length > targetMaxLen) {
+          outUrl = canvas.toDataURL('image/jpeg', 0.56);
         }
         const b64 = outUrl.split(';base64,')[1] || '';
         const kb = Math.max(1, Math.round((b64.length * 0.75) / 1024));
@@ -926,7 +949,7 @@ export default function CameraNoteScannerModal({
           base64: b64,
           mimeType: 'image/jpeg',
           sizeFormatted: `${kb} KB`,
-          wasCropped: Boolean(autoCropEnabled && cropBounds)
+          wasCropped: appliedCrop
         });
       };
       img.onerror = () => {
@@ -1085,10 +1108,14 @@ export default function CameraNoteScannerModal({
     setSavePromptIntent(null);
 
     try {
-      const { dataUrl, base64, mimeType, sizeFormatted } = await normalizeAndCompressImage(
+      const normalizedInitial = await normalizeAndCompressImage(
         rawDataUrl,
-        lockedBounds
+        lockedBounds,
+        extraPages && extraPages.length > 0
+          ? { maxDataUrlLength: Math.max(180_000, Math.floor(2_800_000 / (extraPages.length + 1))) }
+          : undefined
       );
+      let { dataUrl, base64, mimeType, sizeFormatted, wasCropped } = normalizedInitial;
       if (activeScanSeqRef.current !== scanSeq) return;
 
       const timestampLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1122,7 +1149,7 @@ export default function CameraNoteScannerModal({
           : undefined;
 
       // Extract verbatim OCR text, title, short summary & formulas in the background (~1s)
-      const ocrResult = await OCRService.extractTextFromNoteImage({
+      let ocrResult = await OCRService.extractTextFromNoteImage({
         fileBase64: base64,
         fileMimeType: mimeType,
         pagesBase64: pagesPayload,
@@ -1131,6 +1158,37 @@ export default function CameraNoteScannerModal({
       });
 
       if (activeScanSeqRef.current !== scanSeq) return;
+
+      // If auto-crop clipped the text/page too tightly on a live camera scan, automatically retry once with the full uncropped frame
+      if (
+        ocrResult.error &&
+        wasCropped &&
+        !extraPages?.length &&
+        (ocrResult.httpStatus === 422 || /no readable text|blurry|unclear|unreadable/i.test(ocrResult.error))
+      ) {
+        const uncropped = await normalizeAndCompressImage(rawDataUrl, null, { skipAutoCrop: true });
+        if (activeScanSeqRef.current !== scanSeq) return;
+        const retryResult = await OCRService.extractTextFromNoteImage({
+          fileBase64: uncropped.base64,
+          fileMimeType: uncropped.mimeType,
+          defaultName: defaultScanName,
+          sizeFormatted: uncropped.sizeFormatted
+        });
+        if (activeScanSeqRef.current !== scanSeq) return;
+        if (!retryResult.error) {
+          ocrResult = retryResult;
+          dataUrl = uncropped.dataUrl;
+          base64 = uncropped.base64;
+          mimeType = uncropped.mimeType;
+          sizeFormatted = uncropped.sizeFormatted;
+          setCapturedDataUrl(dataUrl);
+          setScanResult((prev) =>
+            prev
+              ? { ...prev, dataUrl, base64, mimeType, sizeFormatted }
+              : prev
+          );
+        }
+      }
 
       if (ocrResult.error) {
         console.error('[Scan Notes OCR Error]', ocrResult.error);
@@ -1435,10 +1493,17 @@ export default function CameraNoteScannerModal({
   };
 
   const handleCaptureFromVideo = () => {
-    if (!videoRef.current) return;
     const video = videoRef.current;
-    const w = video.videoWidth || 1280;
-    const h = video.videoHeight || 720;
+    if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+      (window as any).showToast?.(
+        'Camera is still focusing. Please wait a moment and tap capture again.',
+        'info',
+        2500
+      );
+      return;
+    }
+    const w = video.videoWidth;
+    const h = video.videoHeight;
     const canvas = document.createElement('canvas');
     canvas.width = w;
     canvas.height = h;
@@ -1482,10 +1547,13 @@ export default function CameraNoteScannerModal({
       if (files.length === 1) {
         await processScannedImage(firstDataUrl, files[0].name, null);
       } else {
+        const perPageMaxLen = Math.max(180_000, Math.floor(2_800_000 / files.length));
         const extraPages: OCRScanPageInput[] = [];
         for (let i = 1; i < files.length; i++) {
           const pageDataUrl = await readDataUrl(files[i]);
-          const compressed = await normalizeAndCompressImage(pageDataUrl, null);
+          const compressed = await normalizeAndCompressImage(pageDataUrl, null, {
+            maxDataUrlLength: perPageMaxLen
+          });
           extraPages.push({
             fileBase64: compressed.base64,
             fileMimeType: compressed.mimeType,

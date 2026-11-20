@@ -69,6 +69,7 @@ export interface ContextDetectionInput {
   authenticatedUserId?: string | null;
   activeWorkspaceId?: string | null;
   activeWorkspaceName?: string | null;
+  explicitTutorMode?: 'general' | 'workspace';
   attachedFiles?: any[];
   allWorkspaces?: any[];
   inaccessibleAccountFiles?: Array<{ id?: string; name: string; workspaceId?: string; workspaceName?: string }>;
@@ -185,6 +186,7 @@ export function isRealUserWorkspaceId(workspaceId?: string | null): boolean {
   return (
     trimmed.length > 0 &&
     trimmed !== 'general-study' &&
+    trimmed !== 'local-workspace' &&
     trimmed !== 'none' &&
     trimmed !== 'null' &&
     trimmed !== 'undefined'
@@ -199,8 +201,10 @@ export function isAuthorizedForUser(
   authenticatedUserId: string | undefined | null
 ): boolean {
   if (!itemUserId) return true;
+  const normItem = String(itemUserId).trim();
+  if (!normItem || normItem === 'guest' || normItem === 'local-user') return true;
   if (!authenticatedUserId) return false;
-  return String(itemUserId).trim() === String(authenticatedUserId).trim();
+  return normItem === String(authenticatedUserId).trim();
 }
 
 /**
@@ -641,7 +645,11 @@ export function resolveAITutorContext(input: ContextDetectionInput): ResolvedTut
   const prompt = String(input.prompt || '').trim();
   const qLower = prompt.toLowerCase();
   const authenticatedUserId = input.authenticatedUserId ? String(input.authenticatedUserId).trim() : null;
-  const rawActiveWsId = input.activeWorkspaceId ? String(input.activeWorkspaceId).trim() : null;
+  const explicitTutorMode = input.explicitTutorMode;
+  const rawActiveWsId =
+    explicitTutorMode === 'general'
+      ? null
+      : (input.activeWorkspaceId ? String(input.activeWorkspaceId).trim() : null);
   const hasActiveWorkspace = isRealUserWorkspaceId(rawActiveWsId);
   const activeWorkspaceId = hasActiveWorkspace ? rawActiveWsId : null;
 
@@ -947,8 +955,19 @@ export function resolveAITutorContext(input: ContextDetectionInput): ResolvedTut
     prompt
   );
 
+  const isBroadWorkspaceStudyPrompt =
+    /\b(summarize|summarise|summary|revise|revision|quiz|test\s+me|flashcards?|key\s+(points?|concepts?|takeaways?|formulas?|topics?)|explain\s+(this|it|everything|all|the\s+main|these|topic)|what\s+(is|are)\s+(this|it|these)\s+about|help\s+me\s+(study|prepare|understand|learn)|practice\s+questions?|important\s+(points?|questions?|topics?)|study\s+guide|solve|overview|breakdown|notes?)\b/i.test(
+      qLower
+    );
+
+  const isExplicitWorkspaceMode = explicitTutorMode === 'workspace' && hasActiveWorkspace;
+
   const workspaceRetrieval = retrieveRelevantPassages(prompt, accessibleWorkspaceMaterials, {
-    forceIncludeTopMaterials: refInfo.mentionsWorkspaceExplicitly || Boolean(explicitlyMatchedMaterial && !explicitlyMatchedMaterial.isStandalone),
+    forceIncludeTopMaterials:
+      isExplicitWorkspaceMode ||
+      isBroadWorkspaceStudyPrompt ||
+      refInfo.mentionsWorkspaceExplicitly ||
+      Boolean(explicitlyMatchedMaterial && !explicitlyMatchedMaterial.isStandalone),
     referencedChapterOrPage: refInfo.referencedChapterOrPage
   });
 
@@ -967,7 +986,9 @@ export function resolveAITutorContext(input: ContextDetectionInput): ResolvedTut
 
   if (isGreeting) {
     intentCategory = 'greeting_or_smalltalk';
-    selectedMode = hasActiveWorkspace ? 'MODE_D_GENERAL_WITH_WORKSPACE' : 'MODE_A_GENERAL_STUDY';
+    selectedMode = hasActiveWorkspace
+      ? (isExplicitWorkspaceMode && activeWorkspaceHasMaterials ? 'MODE_B_WORKSPACE_STUDY' : 'MODE_D_GENERAL_WITH_WORKSPACE')
+      : 'MODE_A_GENERAL_STUDY';
   } else if (referencedDocumentStatus === 'processing') {
     intentCategory = 'processing_document_reference';
   } else if (referencedDocumentStatus === 'corrupted_or_failed') {
@@ -1009,22 +1030,25 @@ export function resolveAITutorContext(input: ContextDetectionInput): ResolvedTut
     hasActiveWorkspace &&
     activeWorkspaceHasMaterials &&
     !input.allowOutsideResearch &&
-    (refInfo.mentionsWorkspaceExplicitly ||
+    (isExplicitWorkspaceMode ||
+      isBroadWorkspaceStudyPrompt ||
+      refInfo.mentionsWorkspaceExplicitly ||
       Boolean(refInfo.referencedChapterOrPage) ||
       workspaceRetrieval.hasStrongMatch)
   ) {
-    // Priority 2: Active workspace and its relevant accessible materials
+    // Priority 2: Active workspace and its accessible materials
     selectedMode = 'MODE_B_WORKSPACE_STUDY';
-    intentCategory = refInfo.mentionsWorkspaceExplicitly
-      ? 'workspace_inventory_or_analysis'
-      : 'workspace_topic_match';
+    intentCategory =
+      refInfo.mentionsWorkspaceExplicitly || isBroadWorkspaceStudyPrompt
+        ? 'workspace_inventory_or_analysis'
+        : 'workspace_topic_match';
     prioritizedMaterialsForPrompt = accessibleWorkspaceMaterials;
     retrievedPassages = workspaceRetrieval.passages;
 
-    // If the user explicitly asked about their workspace or a chapter in their workspace,
-    // but the specific topic/chapter isn't found in the workspace materials, add a clear source notice
+    // If the user explicitly asked about a specific chapter/section in their workspace,
+    // and that section isn't found in the workspace materials, add a clear source notice
     if (
-      (refInfo.mentionsWorkspaceExplicitly || Boolean(refInfo.referencedChapterOrPage)) &&
+      Boolean(refInfo.referencedChapterOrPage) &&
       !workspaceRetrieval.hasStrongMatch &&
       extractQueryKeywords(prompt).length > 0
     ) {
@@ -1032,10 +1056,15 @@ export function resolveAITutorContext(input: ContextDetectionInput): ResolvedTut
     }
   } else if (hasActiveWorkspace) {
     // Priority 5 with existing workspace: MODE D — General question with an existing workspace
-    selectedMode = 'MODE_D_GENERAL_WITH_WORKSPACE';
+    selectedMode = isExplicitWorkspaceMode && !activeWorkspaceHasMaterials
+      ? 'MODE_B_WORKSPACE_STUDY'
+      : 'MODE_D_GENERAL_WITH_WORKSPACE';
     intentCategory = 'general_educational_question';
     prioritizedMaterialsForPrompt = [];
     retrievedPassages = [];
+    if (isExplicitWorkspaceMode && !activeWorkspaceHasMaterials) {
+      edgeCaseNotice = `Workspace "${activeWorkspaceName || 'Active Workspace'}" currently has no uploaded files or notes yet. Answer the student's question accurately using general educational knowledge while noting that they can upload files or notes to this workspace anytime for workspace-grounded answers.`;
+    }
   } else {
     // Priority 5 without workspace: MODE A — General Study Mode
     selectedMode = 'MODE_A_GENERAL_STUDY';
@@ -1046,7 +1075,8 @@ export function resolveAITutorContext(input: ContextDetectionInput): ResolvedTut
 
   const isInformationAvailableInMaterials =
     (selectedMode === 'MODE_B_WORKSPACE_STUDY' &&
-      (workspaceRetrieval.hasStrongMatch || refInfo.mentionsWorkspaceExplicitly)) ||
+      activeWorkspaceHasMaterials &&
+      (isExplicitWorkspaceMode || isBroadWorkspaceStudyPrompt || workspaceRetrieval.hasStrongMatch || refInfo.mentionsWorkspaceExplicitly)) ||
     (selectedMode === 'MODE_C_STANDALONE_MATERIAL' &&
       (standaloneRetrieval.hasStrongMatch || hasConversationAttachedFiles || refInfo.mentionsUploadedPdfOrDoc));
 

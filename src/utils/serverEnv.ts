@@ -20,12 +20,17 @@ export interface GeminiKeyDiagnostic {
 
 export function cleanRawKey(raw: unknown): string {
   if (!raw || typeof raw !== "string") return "";
-  return raw.trim().replace(/^["']|["']$/g, "").trim();
+  return raw
+    .replace(/[\r\n]+/g, "")
+    .trim()
+    .replace(/^["']+|["']+$/g, "")
+    .trim();
 }
 
 export function isValidGeminiApiKeyCandidate(raw: unknown): raw is string {
   const trimmed = cleanRawKey(raw);
   if (trimmed.length < 20) return false;
+  if (/\s/.test(trimmed)) return false;
   if (
     trimmed === "MY_GEMINI_API_KEY" ||
     trimmed === "YOUR_GEMINI_API_KEY" ||
@@ -35,6 +40,15 @@ export function isValidGeminiApiKeyCandidate(raw: unknown): raw is string {
   }
   // Reject OAuth access tokens (ya29.*) that cause ACCESS_TOKEN_TYPE_UNSUPPORTED
   if (trimmed.startsWith("ya29.")) return false;
+  // Reject non-Gemini tokens accidentally pasted into API_KEY / GEMINI_API_KEY
+  if (
+    trimmed.startsWith("eyJ") ||
+    trimmed.startsWith("sb_secret_") ||
+    trimmed.startsWith("sb_publishable_") ||
+    trimmed.startsWith("GOCSPX-")
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -99,7 +113,7 @@ export function diagnoseServerGeminiApiKey(): GeminiKeyDiagnostic {
         configured: false,
         sourceVar: entry.name,
         message:
-          "The server environment currently holds the placeholder value 'MY_GEMINI_API_KEY' instead of a real Gemini API key. Open Settings > Secrets in AI Studio and add a valid GEMINI_API_KEY."
+          "The server environment currently holds a placeholder value instead of a real Gemini API key. Configure a valid GEMINI_API_KEY in your deployment environment variables."
       };
     }
     if (cleaned.startsWith("ya29.")) {
@@ -108,7 +122,7 @@ export function diagnoseServerGeminiApiKey(): GeminiKeyDiagnostic {
         configured: false,
         sourceVar: entry.name,
         message:
-          "The server received an OAuth access token (ya29.*) instead of a Gemini API key, which Google rejects with ACCESS_TOKEN_TYPE_UNSUPPORTED. Set a valid GEMINI_API_KEY in Settings > Secrets."
+          "The server received an OAuth access token (ya29.*) instead of a Gemini API key, which Google rejects with ACCESS_TOKEN_TYPE_UNSUPPORTED. Set a valid GEMINI_API_KEY in your server environment variables."
       };
     }
     if (cleaned.length < 20) {
@@ -125,26 +139,38 @@ export function diagnoseServerGeminiApiKey(): GeminiKeyDiagnostic {
     state: "missing",
     configured: false,
     message:
-      "No GEMINI_API_KEY environment variable was found on the server. Add GEMINI_API_KEY in Settings > Secrets."
+      "No GEMINI_API_KEY environment variable was found on the server. Add GEMINI_API_KEY to your server environment variables."
   };
 }
 
+export interface GeminiKeyCandidate {
+  key: string;
+  sourceVar: string;
+}
+
 /**
- * Resolves the server-side Gemini API key from process.env, the container's
- * ephemeral /tmp runtime environment cache, or the configured fallback key.
+ * Returns all valid configured Gemini API key candidates in strict priority order
+ * (process.env first, then runtime cache / fallback) without duplicating keys.
  */
-export function getServerGeminiApiKey(): string | null {
-  const candidates = [
-    process.env.GEMINI_API_KEY,
-    process.env.GOOGLE_API_KEY,
-    process.env.API_KEY,
-    process.env.VITE_GEMINI_API_KEY,
-    process.env.NEXT_PUBLIC_GEMINI_API_KEY
+export function getServerGeminiApiKeyCandidates(): GeminiKeyCandidate[] {
+  const rawEntries: Array<{ sourceVar: string; value: unknown }> = [
+    { sourceVar: "GEMINI_API_KEY", value: process.env.GEMINI_API_KEY },
+    { sourceVar: "GOOGLE_API_KEY", value: process.env.GOOGLE_API_KEY },
+    { sourceVar: "API_KEY", value: process.env.API_KEY },
+    { sourceVar: "VITE_GEMINI_API_KEY", value: process.env.VITE_GEMINI_API_KEY },
+    { sourceVar: "NEXT_PUBLIC_GEMINI_API_KEY", value: process.env.NEXT_PUBLIC_GEMINI_API_KEY }
   ];
 
-  for (const raw of candidates) {
-    if (isValidGeminiApiKeyCandidate(raw)) {
-      return cleanRawKey(raw);
+  const seen = new Set<string>();
+  const result: GeminiKeyCandidate[] = [];
+
+  for (const entry of rawEntries) {
+    if (isValidGeminiApiKeyCandidate(entry.value)) {
+      const cleaned = cleanRawKey(entry.value);
+      if (!seen.has(cleaned)) {
+        seen.add(cleaned);
+        result.push({ key: cleaned, sourceVar: entry.sourceVar });
+      }
     }
   }
 
@@ -154,9 +180,11 @@ export function getServerGeminiApiKey(): string | null {
       const parsed = JSON.parse(rawJson);
       const cachedKey = parsed?.GEMINI_API_KEY;
       if (isValidGeminiApiKeyCandidate(cachedKey)) {
-        const clean = cleanRawKey(cachedKey);
-        process.env.GEMINI_API_KEY = clean;
-        return clean;
+        const cleaned = cleanRawKey(cachedKey);
+        if (!seen.has(cleaned)) {
+          seen.add(cleaned);
+          result.push({ key: cleaned, sourceVar: "RUNTIME_ENV_CACHE" });
+        }
       }
     }
   } catch {
@@ -164,19 +192,22 @@ export function getServerGeminiApiKey(): string | null {
   }
 
   if (isValidGeminiApiKeyCandidate(CONFIGURED_FALLBACK_GEMINI_KEY)) {
-    const clean = cleanRawKey(CONFIGURED_FALLBACK_GEMINI_KEY);
-    process.env.GEMINI_API_KEY = clean;
-    try {
-      fs.writeFileSync(
-        RUNTIME_ENV_CACHE_PATH,
-        JSON.stringify({ GEMINI_API_KEY: clean }, null, 2),
-        "utf8"
-      );
-    } catch {
-      // ignore fs write errors
+    const cleaned = cleanRawKey(CONFIGURED_FALLBACK_GEMINI_KEY);
+    if (!seen.has(cleaned)) {
+      seen.add(cleaned);
+      result.push({ key: cleaned, sourceVar: "CONFIGURED_GEMINI_KEY" });
     }
-    return clean;
   }
 
-  return null;
+  return result;
+}
+
+/**
+ * Resolves the server-side Gemini API key with strict priority for process.env
+ * (including Vercel production env vars), falling back to the container runtime
+ * cache or configured fallback key without polluting process.env.
+ */
+export function getServerGeminiApiKey(): string | null {
+  const candidates = getServerGeminiApiKeyCandidates();
+  return candidates.length > 0 ? candidates[0].key : null;
 }

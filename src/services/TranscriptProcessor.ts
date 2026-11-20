@@ -1358,15 +1358,8 @@ export class TranscriptProcessor {
     knownTitle = ''
   ): Promise<TranscriptSegment[]> {
     try {
-      const rawEnvKey =
-        process.env.GEMINI_API_KEY ||
-        process.env.GOOGLE_API_KEY ||
-        process.env.API_KEY ||
-        process.env.VITE_GEMINI_API_KEY;
-      const apiKey =
-        rawEnvKey && rawEnvKey.trim() !== '' && rawEnvKey.trim() !== 'MY_GEMINI_API_KEY'
-          ? rawEnvKey.trim()
-          : 'AQ.Ab8RN6LiwYGVz4cg96MDtWO57-OIcTpkoiROHUqPfZGyzvdC3g';
+      const { getServerGeminiApiKey } = await import('../utils/serverEnv.js');
+      const apiKey = getServerGeminiApiKey();
       if (!apiKey) return [];
 
       const { GoogleGenAI } = await import('@google/genai');
@@ -1722,12 +1715,8 @@ Include all specific examples, names, numbers, stories, facts, definitions, form
 
     // Proceed to initiate AI summary with verified real transcript content
     try {
-      const rawCandidates = [
-        process.env.GEMINI_API_KEY,
-        process.env.GOOGLE_API_KEY,
-        process.env.API_KEY
-      ];
-      const apiKey = rawCandidates.find(k => k && k.trim() !== '' && k.trim() !== 'MY_GEMINI_API_KEY') || '';
+      const { getServerGeminiApiKey } = await import('../utils/serverEnv.js');
+      const apiKey = getServerGeminiApiKey() || '';
 
       if (!apiKey) {
         return {
@@ -1747,10 +1736,8 @@ Include all specific examples, names, numbers, stories, facts, definitions, form
 
       const candidateModels = [
         'gemini-3-flash-preview',
-        'gemini-3.1-flash-lite-preview',
         'gemini-3.1-flash-lite',
-        'gemini-flash-latest',
-        'gemini-3.8-flash'
+        'gemini-4-hydrogen'
       ];
 
       let text = '';

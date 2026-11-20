@@ -598,8 +598,13 @@ export default function WorkspaceChat({
     return Array.from(wsMap.values());
   }, [workspace, workspaces, resolvedUserId]);
 
-  // Clean files list strictly scoped to the ACTIVE workspace so other workspaces (e.g. biology/cell) never bleed in
+  // Clean files list strictly scoped to the ACTIVE workspace so other workspaces never bleed in,
+  // and completely empty in General Study Mode
   const activeFiles = useMemo(() => {
+    if (!workspace || workspace.id === 'general-study') {
+      return [];
+    }
+
     const seenKeys = new Set<string>();
     const rawFiles: Array<WorkspaceFile & { workspaceId?: string; workspaceName?: string }> = [];
 
@@ -618,12 +623,10 @@ export default function WorkspaceChat({
     };
 
     // Only include files belonging to the current active workspace
-    if (workspace) {
-      pushFilesFromWorkspace(workspace);
-      const matchingSyncedWs = allUserWorkspaces.find(ws => ws.id === workspace.id);
-      if (matchingSyncedWs) {
-        pushFilesFromWorkspace(matchingSyncedWs);
-      }
+    pushFilesFromWorkspace(workspace);
+    const matchingSyncedWs = allUserWorkspaces.find(ws => ws.id === workspace.id);
+    if (matchingSyncedWs) {
+      pushFilesFromWorkspace(matchingSyncedWs);
     }
 
     const isDummyStr = (s?: string) => {
@@ -843,22 +846,15 @@ export default function WorkspaceChat({
     };
   }, []);
 
-  // When switching workspaces to open a new chat, delete older chat history and start fresh
-  // (Ignore initial hydration transition from fallback 'general-study' so startup never flashes or wipes)
+  // When switching between General Study Mode and Workspaces (or between Workspaces),
+  // clear transient streaming/drafts and load that mode/workspace's isolated conversation history
   useEffect(() => {
     if (prevWorkspaceIdRef.current !== workspace.id) {
-      const wasInitialFallback = prevWorkspaceIdRef.current === 'general-study';
       prevWorkspaceIdRef.current = workspace.id;
-      if (!wasInitialFallback) {
-        stopStreamingAnimation();
-        const freshWelcome = [buildWelcomeMessage(false)];
-        AITutorBackgroundService.resetWorkspaceChat(workspace.id, resolvedUserId, freshWelcome as any);
-        setMessages(freshWelcome);
-        setInputValue('');
-        setAttachedDrafts([]);
-        setIsThinking(false);
-        return;
-      }
+      stopStreamingAnimation();
+      setInputValue('');
+      setAttachedDrafts([]);
+      setIsThinking(AITutorBackgroundService.isWorkspaceThinking(workspace.id));
     }
 
     try {
@@ -1855,8 +1851,12 @@ export default function WorkspaceChat({
     ];
     const newFileIds = new Set(newlyConvertedFiles.map(f => f.id));
 
-    // Create a compact, proxy-safe payload for attachedFiles in the ACTIVE workspace (including image base64 for all active workspace images)
+    const isGeneralStudyMode = !workspace?.id || workspace.id === 'general-study';
+
+    // Create a compact, Vercel-safe (<4.5MB total JSON) payload for attachedFiles
     let includedBinaryCount = 0;
+    let totalInlineBase64Chars = 0;
+    const MAX_TOTAL_INLINE_BASE64_CHARS = 2_800_000;
     const compactAttachedFiles = effectiveFiles.slice(0, 30).map((f: any) => {
       const isNewAttachment = newFileIds.has(f.id);
       const safeUrl = (typeof f.url === 'string' && !f.url.startsWith('data:')) ? f.url.slice(0, 1000) : undefined;
@@ -1869,7 +1869,7 @@ export default function WorkspaceChat({
           candidateB64 = m[2];
         }
       }
-      const isActiveWorkspaceFile = !f.workspaceId || String(f.workspaceId) === String(workspace.id);
+      const isActiveWorkspaceFile = !isGeneralStudyMode && (!f.workspaceId || String(f.workspaceId) === String(workspace.id));
       const isPdfOrImage =
         f.type === 'image' ||
         f.type === 'pdf' ||
@@ -1877,9 +1877,17 @@ export default function WorkspaceChat({
         candidateMime === 'application/pdf';
       const needsBinaryInspection = isNewAttachment || (isActiveWorkspaceFile && (isPdfOrImage || !f.transcription));
       let safeBase64: string | undefined = undefined;
-      if (needsBinaryInspection && includedBinaryCount < 4 && typeof candidateB64 === 'string' && candidateB64.length < 6000000) {
+      if (
+        needsBinaryInspection &&
+        includedBinaryCount < 4 &&
+        typeof candidateB64 === 'string' &&
+        candidateB64.length > 0 &&
+        candidateB64.length <= 2_400_000 &&
+        totalInlineBase64Chars + candidateB64.length <= MAX_TOTAL_INLINE_BASE64_CHARS
+      ) {
         safeBase64 = candidateB64;
         includedBinaryCount++;
+        totalInlineBase64Chars += candidateB64.length;
       }
 
       const fullTranscript = f.transcription || f.contentText;
@@ -1904,33 +1912,35 @@ export default function WorkspaceChat({
       };
     });
 
-    // Build compact overview of all workspaces and their files/notes/flashcards/quizzes so inventory queries show 100% of items
-    const compactAllWorkspaces = allUserWorkspaces.map(ws => ({
-      id: ws.id,
-      name: ws.name || 'Workspace',
-      subject: ws.subject || 'General',
-      files: (ws.id === workspace.id && trulyNewFiles.length > 0 ? [...trulyNewFiles, ...(ws.files || [])] : (ws.files || [])).map(f => ({
-        id: f.id,
-        name: f.name,
-        type: f.type || 'doc',
-        size: f.size,
-        pages: f.pages,
-        url: (typeof f.url === 'string' && !f.url.startsWith('data:')) ? f.url.slice(0, 500) : undefined,
-        summary: typeof f.summary === 'string' ? f.summary.slice(0, 1200) : undefined,
-        transcription: typeof (f.transcription || f.contentText) === 'string' ? String(f.transcription || f.contentText).slice(0, 6000) : undefined,
-        highlights: Array.isArray(f.highlights) ? f.highlights.slice(0, 6) : undefined
-      })),
-      notes: (ws.notes || []).map(n => ({
-        id: n.id,
-        title: n.title || 'Study Note',
-        content: typeof n.content === 'string' ? n.content.replace(/<[^>]+>/g, ' ').slice(0, 2500) : '',
-        tags: n.tags
-      })),
-      flashcardsCount: (ws.flashcards || []).length,
-      flashcardTopics: (ws.flashcards || []).slice(0, 10).map((fc: any) => fc.front || fc.question || '').filter(Boolean),
-      quizzesCount: (ws.quizzes || []).length,
-      quizTitles: (ws.quizzes || []).slice(0, 10).map((qz: any) => qz.title || qz.question || '').filter(Boolean)
-    }));
+    // Build compact overview of workspaces ONLY in Workspace Mode (strictly empty in General Study Mode so workspaces never bleed in)
+    const compactAllWorkspaces = isGeneralStudyMode
+      ? []
+      : allUserWorkspaces.map(ws => ({
+          id: ws.id,
+          name: ws.name || 'Workspace',
+          subject: ws.subject || 'General',
+          files: (ws.id === workspace.id && trulyNewFiles.length > 0 ? [...trulyNewFiles, ...(ws.files || [])] : (ws.files || [])).map(f => ({
+            id: f.id,
+            name: f.name,
+            type: f.type || 'doc',
+            size: f.size,
+            pages: f.pages,
+            url: (typeof f.url === 'string' && !f.url.startsWith('data:')) ? f.url.slice(0, 500) : undefined,
+            summary: typeof f.summary === 'string' ? f.summary.slice(0, 1200) : undefined,
+            transcription: typeof (f.transcription || f.contentText) === 'string' ? String(f.transcription || f.contentText).slice(0, 6000) : undefined,
+            highlights: Array.isArray(f.highlights) ? f.highlights.slice(0, 6) : undefined
+          })),
+          notes: (ws.notes || []).map(n => ({
+            id: n.id,
+            title: n.title || 'Study Note',
+            content: typeof n.content === 'string' ? n.content.replace(/<[^>]+>/g, ' ').slice(0, 2500) : '',
+            tags: n.tags
+          })),
+          flashcardsCount: (ws.flashcards || []).length,
+          flashcardTopics: (ws.flashcards || []).slice(0, 10).map((fc: any) => fc.front || fc.question || '').filter(Boolean),
+          quizzesCount: (ws.quizzes || []).length,
+          quizTitles: (ws.quizzes || []).slice(0, 10).map((qz: any) => qz.title || qz.question || '').filter(Boolean)
+        }));
 
     // Exclude welcome greetings, file-ready badges, and error banners so history sent to Gemini is 100% clean conversation turns
     const history = messages
@@ -1945,6 +1955,7 @@ export default function WorkspaceChat({
       const aiMsg = await AITutorBackgroundService.sendTutorMessage({
         workspaceId: workspace.id,
         workspaceName: workspace.name,
+        tutorMode: isGeneralStudyMode ? 'general' : 'workspace',
         userId: resolvedUserId,
         prompt: userMsg.text,
         history,
@@ -2144,7 +2155,7 @@ export default function WorkspaceChat({
 
             <div className="flex items-center gap-1.5 mt-0.5">
               {/* Workspace Switcher or Name */}
-              {workspaces && workspaces.length > 1 && onSelectWorkspace ? (
+              {workspaces && workspaces.length >= 1 && onSelectWorkspace ? (
                 <div className="relative">
                   <button
                     onClick={() => setShowWorkspaceMenu(prev => !prev)}

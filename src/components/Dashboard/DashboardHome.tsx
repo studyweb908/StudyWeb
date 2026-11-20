@@ -190,9 +190,7 @@ export default function DashboardHome({
       detail: query || 'Started AI Tutor study consultation',
       iconType: 'tutor'
     }, currentUserId);
-    if (!activeWorkspace && workspaces.length > 0) {
-      setActiveWorkspace(workspaces[0]);
-    }
+    setActiveWorkspace(null);
     setActiveTab('ai-tutor');
   };
 
@@ -337,9 +335,7 @@ export default function DashboardHome({
               <button
                 data-tour="home-ai-tutor-btn"
                 onClick={() => {
-                  if (!activeWorkspace && workspaces.length > 0) {
-                    setActiveWorkspace(workspaces[0]);
-                  }
+                  setActiveWorkspace(null);
                   setActiveTab('ai-tutor');
                 }}
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm shadow-xs transition-all duration-200 cursor-pointer active:scale-95 text-center whitespace-nowrap"
@@ -662,9 +658,7 @@ export default function DashboardHome({
           {/* Pillar 3: AI Tutor */}
           <button
             onClick={() => {
-              if (!activeWorkspace && workspaces.length > 0) {
-                setActiveWorkspace(workspaces[0]);
-              }
+              setActiveWorkspace(null);
               setActiveTab('ai-tutor');
             }}
             className="flex items-center gap-2.5 sm:gap-3 p-3 sm:p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 shadow-xs hover:border-violet-300 dark:hover:border-violet-700/60 hover:shadow-md transition-all group text-left cursor-pointer active:scale-98"
