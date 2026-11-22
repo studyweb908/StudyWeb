@@ -1,22 +1,28 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import {
   CheckCircle,
   XCircle,
   ChevronRight,
   RotateCcw,
-  Trophy,
   Sparkles,
   Check,
   HelpCircle,
   Loader2,
   ArrowLeft,
   AlertTriangle,
-  TrendingUp
+  TrendingUp,
+  Share2,
+  Clock
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QuizQuestionItem, QuizMatchPair } from './WorkspaceTypes';
 import { QuizRunnerProgress, QuizTopicResult } from '../../utils/quizHistoryStorage';
+import {
+  triggerNativeDeviceShare,
+  resolveShareDisplayName,
+  STUDYWEB_SHARE_URL
+} from './ShareContentModal';
 
 interface InteractiveQuizRunnerProps {
   sessionId?: string;
@@ -67,6 +73,27 @@ function getPerformanceTier(pct: number): { label: string; colorClass: string } 
   return { label: 'Needs Practice', colorClass: 'text-rose-600 dark:text-rose-400' };
 }
 
+function formatQuizDuration(totalSeconds: number): string {
+  const safeSeconds = Math.max(1, Math.round(totalSeconds));
+  const mins = Math.floor(safeSeconds / 60);
+  const secs = safeSeconds % 60;
+  if (mins === 0) return `${secs}s`;
+  return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+}
+
+function formatCompletionTimestamp(date: Date): string {
+  const datePart = date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+  const timePart = date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+  return `${datePart} · ${timePart}`;
+}
+
 export default function InteractiveQuizRunner({
   sessionId,
   title,
@@ -99,6 +126,16 @@ export default function InteractiveQuizRunner({
   );
   const [aiReviewList, setAiReviewList] = useState<Array<{ question: string; explanation: string }>>([]);
   const [isLoadingReview, setIsLoadingReview] = useState(false);
+  const [completionMeta, setCompletionMeta] = useState<{
+    durationSeconds: number;
+    completedAt: Date;
+  } | null>(() =>
+    canRestore && initialProgress!.quizFinished
+      ? { durationSeconds: 0, completedAt: new Date() }
+      : null
+  );
+  const startedAtRef = useRef<number>(Date.now());
+  const shouldReduceMotion = useReducedMotion();
 
   const activeQuestion = questions[currentIdx] || null;
 
@@ -155,6 +192,8 @@ export default function InteractiveQuizRunner({
     setMissedQuestions([]);
     setTopicResults({});
     setAiReviewList([]);
+    setCompletionMeta(null);
+    startedAtRef.current = Date.now();
     resetQuestionInputs();
   };
 
@@ -291,14 +330,39 @@ export default function InteractiveQuizRunner({
       setCurrentIdx((prev) => prev + 1);
       resetQuestionInputs();
     } else {
+      const completedAt = new Date();
+      const durationSeconds = Math.max(1, Math.round((completedAt.getTime() - startedAtRef.current) / 1000));
+      setCompletionMeta({ durationSeconds, completedAt });
       setQuizFinished(true);
       const pct = questions.length > 0 ? Math.round((score / questions.length) * 100) : 0;
-      if (pct >= 70) {
+      if (pct >= 70 && !shouldReduceMotion) {
         confetti({
           particleCount: 110,
-          spread: 75,
-          origin: { y: 0.6 }
+          spread: 80,
+          origin: { y: 0.58 }
         });
+        window.setTimeout(() => {
+          confetti({
+            particleCount: 65,
+            angle: 60,
+            spread: 60,
+            origin: { x: 0.08, y: 0.65 }
+          });
+          confetti({
+            particleCount: 65,
+            angle: 120,
+            spread: 60,
+            origin: { x: 0.92, y: 0.65 }
+          });
+        }, 200);
+        window.setTimeout(() => {
+          confetti({
+            particleCount: 80,
+            spread: 100,
+            startVelocity: 38,
+            origin: { y: 0.5 }
+          });
+        }, 440);
       }
       if (onComplete) {
         onComplete(score, questions.length, topicBreakdown);
@@ -393,22 +457,201 @@ export default function InteractiveQuizRunner({
         const finalPct = questions.length > 0 ? Math.round((score / questions.length) * 100) : 0;
         const missedCount = Math.max(0, questions.length - score);
         const tier = getPerformanceTier(finalPct);
+        const isPassed = finalPct >= 70;
         const lackingTopics = topicBreakdown.filter((t) => t.total > 0 && Math.round((t.correct / t.total) * 100) < 70);
         const strongTopics = topicBreakdown.filter((t) => t.total > 0 && Math.round((t.correct / t.total) * 100) >= 70);
+        const durationLabel =
+          completionMeta && completionMeta.durationSeconds > 0
+            ? formatQuizDuration(completionMeta.durationSeconds)
+            : undefined;
+        const completedAtLabel = formatCompletionTimestamp(completionMeta?.completedAt ?? new Date());
+        const learnerName = resolveShareDisplayName();
+
+        const handleSharePerformance = () => {
+          triggerNativeDeviceShare({
+            type: 'quiz-result',
+            quizTitle: title,
+            quizScore: score,
+            quizTotal: questions.length,
+            quizPercentage: finalPct,
+            quizTier: tier.label,
+            quizDurationLabel: durationLabel,
+            quizCompletedAt: completedAtLabel,
+            userName: learnerName
+          });
+        };
 
         return (
         <div className="max-w-2xl mx-auto py-6 sm:py-8 space-y-6">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 space-y-5">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 space-y-5 overflow-hidden">
+            {/* Animated Performance Reaction Header */}
             <div className="text-center space-y-3">
-              <div className="w-16 h-16 bg-amber-50 dark:bg-amber-950/50 rounded-full flex items-center justify-center mx-auto text-amber-500">
-                <Trophy className="w-8 h-8" />
-              </div>
-              <h3 className="text-xl font-extrabold text-slate-900 dark:text-white">Quiz Completed</h3>
+              {isPassed ? (
+                <>
+                  <motion.div
+                    initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.6, y: -14 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    transition={{ type: 'spring', stiffness: 380, damping: 16 }}
+                    className="inline-flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider text-emerald-700 dark:text-emerald-300"
+                  >
+                    <span aria-hidden="true">🎉</span>
+                    <span>{finalPct >= 90 ? 'Yahoo! Quiz Mastered!' : 'Yahoo! You Passed!'}</span>
+                    <span aria-hidden="true">🎉</span>
+                  </motion.div>
+
+                  <div className="relative w-28 h-28 mx-auto flex items-center justify-center">
+                    {!shouldReduceMotion && (
+                      <>
+                        {/* High-energy expanding celebration pulse ring */}
+                        <motion.span
+                          aria-hidden="true"
+                          initial={{ scale: 0.75, opacity: 0.85 }}
+                          animate={{ scale: [0.85, 1.48], opacity: [0.7, 0] }}
+                          transition={{ duration: 1.35, repeat: Infinity, repeatDelay: 0.55, ease: 'easeOut' }}
+                          className="absolute w-20 h-20 rounded-full border-2 border-emerald-400/70 dark:border-emerald-400/50 pointer-events-none"
+                        />
+                        {/* Celebratory confetti pop bursts */}
+                        <motion.span
+                          aria-hidden="true"
+                          initial={{ opacity: 0, scale: 0, x: 0, y: 0, rotate: 0 }}
+                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.35, 1.1, 0.7], x: -54, y: -36, rotate: -25 }}
+                          transition={{ duration: 1.35, repeat: Infinity, repeatDelay: 0.75 }}
+                          className="absolute text-xl select-none pointer-events-none"
+                        >
+                          🎉
+                        </motion.span>
+                        <motion.span
+                          aria-hidden="true"
+                          initial={{ opacity: 0, scale: 0, x: 0, y: 0, rotate: 0 }}
+                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.3, 1.05, 0.7], x: 56, y: -32, rotate: 22 }}
+                          transition={{ duration: 1.35, delay: 0.18, repeat: Infinity, repeatDelay: 0.75 }}
+                          className="absolute text-xl select-none pointer-events-none"
+                        >
+                          🎊
+                        </motion.span>
+                        <motion.span
+                          aria-hidden="true"
+                          initial={{ opacity: 0, scale: 0, x: 0, y: 0 }}
+                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.25, 0.9, 0.6], x: 46, y: 36 }}
+                          transition={{ duration: 1.4, delay: 0.34, repeat: Infinity, repeatDelay: 0.8 }}
+                          className="absolute text-lg select-none pointer-events-none"
+                        >
+                          ✨
+                        </motion.span>
+                        <motion.span
+                          aria-hidden="true"
+                          initial={{ opacity: 0, scale: 0, x: 0, y: 0 }}
+                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.25, 0.9, 0.6], x: -48, y: 34 }}
+                          transition={{ duration: 1.4, delay: 0.48, repeat: Infinity, repeatDelay: 0.8 }}
+                          className="absolute text-lg select-none pointer-events-none"
+                        >
+                          ⭐
+                        </motion.span>
+                        <motion.span
+                          aria-hidden="true"
+                          initial={{ opacity: 0, scale: 0, x: 0, y: 0 }}
+                          animate={{ opacity: [0, 1, 0], scale: [0.5, 1.2, 0.7], x: 0, y: -56 }}
+                          transition={{ duration: 1.3, delay: 0.28, repeat: Infinity, repeatDelay: 0.9 }}
+                          className="absolute text-lg select-none pointer-events-none"
+                        >
+                          ✨
+                        </motion.span>
+                      </>
+                    )}
+                    <motion.div
+                      initial={shouldReduceMotion ? false : { scale: 0.35, rotate: -18 }}
+                      animate={
+                        shouldReduceMotion
+                          ? { scale: 1 }
+                          : { scale: [0.35, 1.2, 0.95, 1.05, 1], rotate: [-18, 12, -6, 3, 0], y: [0, -10, 0] }
+                      }
+                      transition={{ duration: 0.85, ease: 'easeOut' }}
+                      className="relative z-10 w-20 h-20 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border-2 border-emerald-300 dark:border-emerald-700/80 flex items-center justify-center shadow-sm"
+                    >
+                      <motion.span
+                        role="img"
+                        aria-label="Happy smiling celebrating face"
+                        animate={
+                          shouldReduceMotion
+                            ? undefined
+                            : { scale: [1, 1.16, 0.96, 1.08, 1], y: [0, -5, 0], rotate: [0, 8, -8, 4, 0] }
+                        }
+                        transition={{ duration: 1.7, repeat: Infinity, repeatDelay: 0.6 }}
+                        className="text-5xl leading-none select-none"
+                      >
+                        😄
+                      </motion.span>
+                    </motion.div>
+                  </div>
+
+                  <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                    Quiz Passed — Great Work!
+                  </h3>
+                </>
+              ) : (
+                <>
+                  <motion.div
+                    initial={shouldReduceMotion ? false : { opacity: 0, y: -8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.35 }}
+                    className="inline-flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider text-rose-600 dark:text-rose-400"
+                  >
+                    <span>Keep Practicing</span>
+                  </motion.div>
+
+                  <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
+                    <motion.div
+                      initial={shouldReduceMotion ? false : { scale: 0.75, opacity: 0 }}
+                      animate={
+                        shouldReduceMotion
+                          ? { scale: 1, opacity: 1 }
+                          : { scale: 1, opacity: 1, y: [0, 4, 0], rotate: [0, -4, 4, -2, 0] }
+                      }
+                      transition={{ duration: 1.4, ease: 'easeInOut' }}
+                      className="w-20 h-20 rounded-full bg-rose-50 dark:bg-rose-950/50 border-2 border-rose-200 dark:border-rose-800/70 flex items-center justify-center shadow-sm"
+                    >
+                      <motion.span
+                        role="img"
+                        aria-label="Sad face"
+                        animate={shouldReduceMotion ? undefined : { y: [0, 3, 0] }}
+                        transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+                        className="text-5xl leading-none select-none"
+                      >
+                        😢
+                      </motion.span>
+                    </motion.div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                      Not Quite There Yet
+                    </h3>
+                    <p className="text-xs sm:text-sm text-rose-600 dark:text-rose-400 font-semibold max-w-md mx-auto">
+                      Don&apos;t give up! Let&apos;s try again to sharpen your skills.
+                    </p>
+                  </div>
+                </>
+              )}
+
               <p className="text-sm text-slate-600 dark:text-slate-300 tabular-nums">
                 You scored <span className="font-extrabold text-slate-900 dark:text-white">{score}</span> out of{' '}
                 <span className="font-extrabold text-slate-900 dark:text-white">{questions.length}</span>{' '}
                 (<span className={`font-bold ${tier.colorClass}`}>{finalPct}% · {tier.label}</span>)
               </p>
+
+              {/* Unboxed Completion Time Metadata */}
+              <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+                {durationLabel && (
+                  <>
+                    <span className="inline-flex items-center gap-1 font-semibold text-slate-600 dark:text-slate-300">
+                      <Clock className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Time: {durationLabel}</span>
+                    </span>
+                    <span aria-hidden="true">·</span>
+                  </>
+                )}
+                <span>{completedAtLabel}</span>
+              </div>
             </div>
 
             {/* Full-Width Performance Progress Bar */}
@@ -496,16 +739,16 @@ export default function InteractiveQuizRunner({
             <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
               <button
                 onClick={handleRestart}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#5145F5] hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-colors cursor-pointer"
+                className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[40px] rounded-xl bg-[#5145F5] hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-colors cursor-pointer whitespace-nowrap"
               >
                 <RotateCcw className="w-4 h-4" />
-                <span>Retry Quiz</span>
+                <span>{isPassed ? 'Retry Quiz' : 'Restart Quiz'}</span>
               </button>
               {missedQuestions.length > 0 && aiReviewList.length === 0 && (
                 <button
                   onClick={handleRequestAiReview}
                   disabled={isLoadingReview}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/60 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 font-bold text-xs hover:bg-indigo-100/70 transition-colors cursor-pointer disabled:opacity-60"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[40px] rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/60 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 font-bold text-xs hover:bg-indigo-100/70 transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
                 >
                   {isLoadingReview ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                   <span>Review {missedQuestions.length} Missed with AI</span>
@@ -514,11 +757,50 @@ export default function InteractiveQuizRunner({
               {onExit && (
                 <button
                   onClick={onExit}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[40px] rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer whitespace-nowrap"
                 >
                   <span>{exitLabel}</span>
                 </button>
               )}
+            </div>
+
+            {/* Share Quiz Performance Section */}
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/40 p-4 sm:p-5 space-y-3.5 text-left">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <img
+                      src="/logo-inner.png"
+                      alt="StudyWeb"
+                      className="w-9 h-9 rounded-lg object-contain shrink-0 bg-white dark:bg-slate-900 p-1 border border-slate-200 dark:border-slate-700"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+                        Share Your Quiz Performance
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate tabular-nums">
+                        {learnerName} · {finalPct}% ({score}/{questions.length})
+                        {durationLabel ? ` · ${durationLabel}` : ''} · {completedAtLabel}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSharePerformance}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[40px] rounded-xl bg-slate-900 dark:bg-indigo-600 hover:bg-slate-800 dark:hover:bg-indigo-500 text-white font-bold text-xs shadow-sm transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>Share Performance</span>
+                  </button>
+                </div>
+
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Challenge friends with your personalized StudyWeb score card — you can also take quizzes and improve your learning skills on StudyWeb:{' '}
+                  <span className="font-semibold text-indigo-600 dark:text-indigo-400 break-all">
+                    {STUDYWEB_SHARE_URL}
+                  </span>
+                </p>
+              </div>
             </div>
           </div>
 

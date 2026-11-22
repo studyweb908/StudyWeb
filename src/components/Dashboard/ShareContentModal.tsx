@@ -4,7 +4,7 @@ import { readSyncProfileSnapshot } from '../../utils/profileStorage';
 export const STUDYWEB_SHARE_URL = 'https://studywebai.vercel.app';
 
 export interface ShareContentOptions {
-  type: 'ai-answer' | 'streak';
+  type: 'ai-answer' | 'streak' | 'quiz-result';
   /** AI Tutor answer content when type === 'ai-answer' */
   aiAnswerText?: string;
   /** Optional workspace or subject name for AI answer */
@@ -17,6 +17,15 @@ export interface ShareContentOptions {
   imageCaption?: string;
   /** Current streak count when type === 'streak' */
   streakCount?: number;
+  /** Quiz performance fields when type === 'quiz-result' */
+  quizTitle?: string;
+  quizScore?: number;
+  quizTotal?: number;
+  quizPercentage?: number;
+  quizTier?: string;
+  quizDurationLabel?: string;
+  quizCompletedAt?: string;
+  userName?: string;
 }
 
 export interface ShareContentModalProps extends ShareContentOptions {
@@ -58,7 +67,23 @@ if (typeof window !== 'undefined') {
   ensureLogoLoaded();
 }
 
-function resolveStreakUserHandle(): string {
+export function resolveShareDisplayName(overrideName?: string): string {
+  try {
+    if (overrideName && overrideName.trim()) {
+      return overrideName.trim();
+    }
+    const profile = readSyncProfileSnapshot();
+    const storedName =
+      typeof window !== 'undefined' ? localStorage.getItem('studyweb_profile_name') || '' : '';
+    const emailPrefix =
+      profile.email && profile.email.includes('@') ? profile.email.split('@')[0].trim() : '';
+    return (profile.fullName || storedName || emailPrefix || 'StudyWeb Learner').trim();
+  } catch {
+    return 'StudyWeb Learner';
+  }
+}
+
+function resolveStreakUserHandle(overrideName?: string): string {
   try {
     const profile = readSyncProfileSnapshot();
     const storedName =
@@ -66,7 +91,7 @@ function resolveStreakUserHandle(): string {
     const emailPrefix = profile.email && profile.email.includes('@')
       ? profile.email.split('@')[0].trim()
       : '';
-    const candidateName = (profile.fullName || storedName || emailPrefix || 'StudyWebUser').trim();
+    const candidateName = (overrideName || profile.fullName || storedName || emailPrefix || 'StudyWebUser').trim();
     // Create a clean @handle without spaces (e.g. "Mohammad Rayan" -> "@MohammadRayan")
     const compactHandle = candidateName
       .replace(/^@+/, '')
@@ -84,6 +109,52 @@ function formatStreakCardDate(date: Date = new Date()): string {
     day: 'numeric',
     year: 'numeric',
   });
+}
+
+function formatQuizCardDateTime(date: Date = new Date()): string {
+  const datePart = date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+  const timePart = date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  return `${datePart} · ${timePart}`;
+}
+
+function wrapCanvasText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  maxLines: number = 2
+): string[] {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
+  const lines: string[] = [];
+  let currentLine = words[0];
+
+  for (let i = 1; i < words.length; i++) {
+    const candidate = `${currentLine} ${words[i]}`;
+    if (ctx.measureText(candidate).width <= maxWidth) {
+      currentLine = candidate;
+    } else {
+      lines.push(currentLine);
+      currentLine = words[i];
+      if (lines.length === maxLines - 1) {
+        const remaining = words.slice(i).join(' ');
+        let truncated = remaining;
+        while (truncated.length > 3 && ctx.measureText(`${truncated}...`).width > maxWidth) {
+          truncated = truncated.slice(0, -1).trimEnd();
+        }
+        lines.push(ctx.measureText(remaining).width <= maxWidth ? remaining : `${truncated}...`);
+        return lines;
+      }
+    }
+  }
+  lines.push(currentLine);
+  return lines.slice(0, maxLines);
 }
 
 /**
@@ -280,6 +351,258 @@ export function generateStreakShareCardDataUrl(
 }
 
 /**
+ * Generates a high-resolution 9:16 vertical quiz performance share image (PNG data URL)
+ * matching StudyWeb's Study Streak share card layout:
+ * - StudyWeb Logo + "Study Web" header at the top
+ * - Performance celebration/encouragement emblem + Quiz Title
+ * - Oversized bold percentage score, correct/total count, performance tier & time taken
+ * - Learner's name, @handle, completion date/time, and studywebai.vercel.app footer
+ */
+export function generateQuizShareCardDataUrl(
+  options: ShareContentOptions,
+  logoImg?: HTMLImageElement | null
+): string {
+  if (typeof document === 'undefined') return '';
+
+  const safeTotal = Math.max(1, Math.floor(Number(options.quizTotal) || 1));
+  const safeScore = Math.max(0, Math.min(safeTotal, Math.floor(Number(options.quizScore) || 0)));
+  const safePct =
+    typeof options.quizPercentage === 'number' && Number.isFinite(options.quizPercentage)
+      ? Math.max(0, Math.min(100, Math.round(options.quizPercentage)))
+      : Math.round((safeScore / safeTotal) * 100);
+  const isGoodPerformance = safePct >= 70;
+  const quizTitle = (options.quizTitle || 'StudyWeb Quiz').trim();
+  const tierLabel =
+    options.quizTier ||
+    (safePct >= 90 ? 'Mastery' : safePct >= 70 ? 'Proficient' : safePct >= 50 ? 'Developing' : 'Needs Practice');
+  const displayName = resolveShareDisplayName(options.userName);
+  const userHandle = resolveStreakUserHandle(options.userName);
+  const completedAtText = options.quizCompletedAt || formatQuizCardDateTime();
+  const durationLabel = options.quizDurationLabel?.trim();
+
+  const accentPrimary = safePct >= 80 ? '#059669' : isGoodPerformance ? '#4F46E5' : '#E11D48';
+  const accentSoftBg = safePct >= 80 ? '#ECFDF5' : isGoodPerformance ? '#EEF2FF' : '#FFF1F2';
+  const accentRing = safePct >= 80 ? '#A7F3D0' : isGoodPerformance ? '#C7D2FE' : '#FECDD3';
+
+  const canvas = document.createElement('canvas');
+  const width = 900;
+  const height = 1600;
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+
+  const cx = width / 2;
+
+  // 1. Crisp white card background with subtle top accent stripe
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, width, height);
+
+  const topBarGrad = ctx.createLinearGradient(0, 0, width, 0);
+  if (isGoodPerformance) {
+    topBarGrad.addColorStop(0, '#5145F5');
+    topBarGrad.addColorStop(1, '#10B981');
+  } else {
+    topBarGrad.addColorStop(0, '#F43F5E');
+    topBarGrad.addColorStop(1, '#FB923C');
+  }
+  ctx.fillStyle = topBarGrad;
+  ctx.fillRect(0, 0, width, 18);
+
+  // 2. Top Brand Header: StudyWeb Logo + "Study Web"
+  const activeLogo =
+    logoImg ??
+    cachedLogoImg ??
+    (typeof document !== 'undefined'
+      ? (document.querySelector('img[src="/logo-inner.png"]') as HTMLImageElement | null)
+      : null);
+
+  ctx.save();
+  ctx.font = '900 54px "Plus Jakarta Sans", "Nunito", "Inter", system-ui, -apple-system, sans-serif';
+  ctx.textBaseline = 'middle';
+
+  const brandText = 'Study Web';
+  const textWidth = ctx.measureText(brandText).width;
+  const headerY = 175;
+  const logoSize = 68;
+  const gap = 18;
+  const totalHeaderWidth = logoSize + gap + textWidth;
+  const startX = (width - totalHeaderWidth) / 2;
+
+  let drewRasterLogo = false;
+  if (activeLogo && activeLogo.complete && activeLogo.naturalWidth > 0) {
+    try {
+      ctx.drawImage(activeLogo, startX, headerY - logoSize / 2, logoSize, logoSize);
+      drewRasterLogo = true;
+    } catch {
+      drewRasterLogo = false;
+    }
+  }
+
+  if (!drewRasterLogo) {
+    const emblemX = startX;
+    const emblemY = headerY - logoSize / 2;
+    const grad = ctx.createLinearGradient(emblemX, emblemY, emblemX + logoSize, emblemY + logoSize);
+    grad.addColorStop(0, '#4F46E5');
+    grad.addColorStop(1, '#311B92');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(emblemX, emblemY, logoSize, logoSize, 16);
+    ctx.fill();
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 38px "Plus Jakarta Sans", "Inter", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('S', emblemX + logoSize / 2, headerY + 2);
+  }
+
+  ctx.font = '900 54px "Plus Jakarta Sans", "Nunito", "Inter", system-ui, -apple-system, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#311B92';
+  ctx.fillText(brandText, startX + logoSize + gap, headerY + 2);
+  ctx.restore();
+
+  // 3. Center Performance Emblem (Celebration Smile / Encouraging Face)
+  const emblemCenterY = 435;
+  ctx.save();
+  // Outer soft glow circle
+  ctx.beginPath();
+  ctx.arc(cx, emblemCenterY, 150, 0, Math.PI * 2);
+  ctx.fillStyle = accentSoftBg;
+  ctx.fill();
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = accentRing;
+  ctx.stroke();
+
+  // Inner circle
+  ctx.beginPath();
+  ctx.arc(cx, emblemCenterY, 108, 0, Math.PI * 2);
+  ctx.fillStyle = accentPrimary;
+  ctx.fill();
+
+  // Expressive face drawn with crisp vector geometry so it renders identically on every OS
+  ctx.fillStyle = '#FFFFFF';
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  if (isGoodPerformance) {
+    // Happy curved eyes
+    ctx.lineWidth = 10;
+    ctx.beginPath();
+    ctx.arc(cx - 36, emblemCenterY - 14, 14, Math.PI * 1.1, Math.PI * 1.9);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx + 36, emblemCenterY - 14, 14, Math.PI * 1.1, Math.PI * 1.9);
+    ctx.stroke();
+
+    // Big joyous smile
+    ctx.beginPath();
+    ctx.arc(cx, emblemCenterY + 6, 46, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.stroke();
+
+    // Celebration confetti accents around the emblem
+    const confettiDots = [
+      { x: cx - 185, y: emblemCenterY - 95, r: 12, color: '#F59E0B' },
+      { x: cx + 190, y: emblemCenterY - 82, r: 14, color: '#10B981' },
+      { x: cx - 195, y: emblemCenterY + 55, r: 10, color: '#6366F1' },
+      { x: cx + 185, y: emblemCenterY + 70, r: 11, color: '#EC4899' },
+      { x: cx - 130, y: emblemCenterY - 155, r: 9, color: '#3B82F6' },
+      { x: cx + 132, y: emblemCenterY - 150, r: 10, color: '#F59E0B' },
+    ];
+    confettiDots.forEach((dot) => {
+      ctx.beginPath();
+      ctx.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2);
+      ctx.fillStyle = dot.color;
+      ctx.fill();
+    });
+  } else {
+    // Soft sad eyes
+    ctx.beginPath();
+    ctx.arc(cx - 34, emblemCenterY - 18, 10, 0, Math.PI * 2);
+    ctx.arc(cx + 34, emblemCenterY - 18, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Gentle frown arc
+    ctx.lineWidth = 10;
+    ctx.beginPath();
+    ctx.arc(cx, emblemCenterY + 56, 38, Math.PI * 1.18, Math.PI * 1.82);
+    ctx.stroke();
+
+    // Small teardrop accent
+    ctx.fillStyle = '#E0F2FE';
+    ctx.beginPath();
+    ctx.moveTo(cx + 52, emblemCenterY - 2);
+    ctx.quadraticCurveTo(cx + 62, emblemCenterY + 14, cx + 52, emblemCenterY + 22);
+    ctx.quadraticCurveTo(cx + 42, emblemCenterY + 14, cx + 52, emblemCenterY - 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // 4. Quiz Performance Kicker + Quiz Title
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+
+  ctx.font = '800 28px "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = '#64748B';
+  ctx.fillText(
+    isGoodPerformance ? 'QUIZ PERFORMANCE · YAHOO!' : 'QUIZ PERFORMANCE · KEEP GOING!',
+    cx,
+    655
+  );
+
+  ctx.font = '800 40px "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = '#0F172A';
+  const titleLines = wrapCanvasText(ctx, quizTitle, 740, 2);
+  titleLines.forEach((line, index) => {
+    ctx.fillText(line, cx, 718 + index * 50);
+  });
+
+  const scoreBaselineY = titleLines.length > 1 ? 975 : 945;
+
+  // 5. Oversized Bold Score Percentage
+  ctx.font = '900 215px "Nunito", "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = accentPrimary;
+  ctx.fillText(`${safePct}%`, cx, scoreBaselineY);
+
+  // 6. Score Count & Tier Summary
+  ctx.font = '800 46px "Nunito", "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = '#1E293B';
+  ctx.fillText(`${safeScore} / ${safeTotal} Correct  ·  ${tierLabel}`, cx, scoreBaselineY + 86);
+
+  // 7. Time & Completion Metadata Card
+  const metaY = scoreBaselineY + 150;
+  ctx.fillStyle = '#F8FAFC';
+  ctx.strokeStyle = '#E2E8F0';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.roundRect(110, metaY, width - 220, 110, 24);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.font = '700 30px "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = '#334155';
+  const timeSummaryText = durationLabel
+    ? `Time: ${durationLabel}   ·   ${completedAtText}`
+    : `Completed: ${completedAtText}`;
+  ctx.fillText(timeSummaryText, cx, metaY + 66);
+
+  // 8. Bottom Footer: Personalized User Name, Handle & Website Link
+  ctx.font = '800 38px "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = '#0F172A';
+  ctx.fillText(`${displayName}  (${userHandle})`, cx, 1435);
+
+  ctx.font = '700 30px "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = '#4F46E5';
+  ctx.fillText('Take quizzes & level up at studywebai.vercel.app', cx, 1498);
+  ctx.restore();
+
+  return canvas.toDataURL('image/png');
+}
+
+/**
  * Synchronously converts a base64 raster data URL (`data:image/png;base64,...`) into a native File
  * so `navigator.share` can be called immediately inside a click handler without losing transient user activation.
  */
@@ -388,18 +711,31 @@ async function convertImageToShareableFile(rawImageUrl?: string, fileName = 'stu
   return null;
 }
 
-export function buildStudyWebSharePayload({
-  type,
-  aiAnswerText = '',
-  questionText,
-  imageUrl,
-  streakCount = 1,
-}: ShareContentOptions): { title: string; text: string; url: string; resolvedImageUrl?: string } {
+export function buildStudyWebSharePayload(
+  options: ShareContentOptions
+): { title: string; text: string; url: string; resolvedImageUrl?: string } {
+  const {
+    type,
+    aiAnswerText = '',
+    questionText,
+    imageUrl,
+    streakCount = 1,
+    quizTitle,
+    quizScore = 0,
+    quizTotal = 0,
+    quizPercentage,
+    quizDurationLabel,
+    quizCompletedAt,
+    userName,
+  } = options;
+
   // Extract inline markdown image URL if present inside aiAnswerText
   const mdImageMatch = aiAnswerText.match(/!\[[^\]]*\]\(([^)]+)\)/);
   const resolvedImageUrl =
     type === 'streak'
       ? imageUrl || generateStreakShareCardDataUrl(streakCount)
+      : type === 'quiz-result'
+      ? imageUrl || generateQuizShareCardDataUrl(options)
       : imageUrl || (mdImageMatch ? mdImageMatch[1].trim() : undefined);
 
   const cleanAnswerText = aiAnswerText
@@ -411,14 +747,34 @@ export function buildStudyWebSharePayload({
     .replace(new RegExp(STUDYWEB_SHARE_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '')
     .trim();
 
-  const text =
-    type === 'ai-answer'
-      ? `${questionText ? `Q: ${questionText}\n\n` : ''}${cleanAnswerText}\n\n✨ This has been generated by StudyWeb. You can check this out: ${STUDYWEB_SHARE_URL}`
-      : `Study and master any subject with me for free!\nStudy Web is smart, fun, and proven to work.\nHere is my invite link:\n${STUDYWEB_SHARE_URL}`;
+  let text = '';
+  if (type === 'ai-answer') {
+    text = `${questionText ? `Q: ${questionText}\n\n` : ''}${cleanAnswerText}\n\n✨ This has been generated by StudyWeb. You can check this out: ${STUDYWEB_SHARE_URL}`;
+  } else if (type === 'quiz-result') {
+    const safeTotal = Math.max(1, Math.floor(Number(quizTotal) || 1));
+    const safeScore = Math.max(0, Math.min(safeTotal, Math.floor(Number(quizScore) || 0)));
+    const safePct =
+      typeof quizPercentage === 'number' && Number.isFinite(quizPercentage)
+        ? Math.max(0, Math.min(100, Math.round(quizPercentage)))
+        : Math.round((safeScore / safeTotal) * 100);
+    const safeTitle = (quizTitle || 'my latest quiz').trim();
+    const displayName = resolveShareDisplayName(userName);
+    const timeDetail = quizDurationLabel ? ` in ${quizDurationLabel}` : '';
+    const dateDetail = quizCompletedAt ? ` (${quizCompletedAt})` : '';
+
+    text =
+      safePct >= 70
+        ? `🎉 ${displayName} just scored ${safePct}% (${safeScore}/${safeTotal}) on "${safeTitle}"${timeDetail}${dateDetail} on StudyWeb!\nYou can also take interactive quizzes and improve your learning skills for free on StudyWeb.\nTry it now:\n${STUDYWEB_SHARE_URL}`
+        : `📚 ${displayName} just completed "${safeTitle}" (${safePct}% · ${safeScore}/${safeTotal})${timeDetail}${dateDetail} on StudyWeb and is leveling up every day!\nYou can also take interactive quizzes and improve your learning skills for free on StudyWeb.\nTry it now:\n${STUDYWEB_SHARE_URL}`;
+  } else {
+    text = `Study and master any subject with me for free!\nStudy Web is smart, fun, and proven to work.\nHere is my invite link:\n${STUDYWEB_SHARE_URL}`;
+  }
 
   const title =
     type === 'ai-answer'
       ? 'StudyWeb AI Tutor'
+      : type === 'quiz-result'
+      ? 'StudyWeb Quiz Performance'
       : 'Study Web';
 
   return {
@@ -432,7 +788,7 @@ export function buildStudyWebSharePayload({
 /**
  * Triggers the native OS/device share sheet (mobile, tablet, or desktop/laptop)
  * directly from a user click gesture without showing any custom StudyWeb share screen.
- * First attaches the streak PNG image (with the StudyWeb logo, flame, and streak count),
+ * First attaches the generated PNG image (with the StudyWeb logo and stats),
  * and with the image attaches the integrated default text + clickable invite link.
  */
 export async function triggerNativeDeviceShare(options: ShareContentOptions): Promise<void> {
@@ -449,6 +805,8 @@ export async function triggerNativeDeviceShare(options: ShareContentOptions): Pr
     const fileName =
       options.type === 'streak'
         ? `studyweb-${options.streakCount || 1}-day-streak.png`
+        : options.type === 'quiz-result'
+        ? `studyweb-quiz-${Math.round(options.quizPercentage ?? 0)}pct.png`
         : 'studyweb-visual.png';
 
     // 1. Synchronous fast-path for PNG/JPEG data URLs (keeps transient user gesture 100% intact for navigator.share)
@@ -557,6 +915,14 @@ export const ShareContentModal: React.FC<ShareContentModalProps> = ({
   imageUrl,
   imageCaption,
   streakCount = 1,
+  quizTitle,
+  quizScore,
+  quizTotal,
+  quizPercentage,
+  quizTier,
+  quizDurationLabel,
+  quizCompletedAt,
+  userName,
 }) => {
   useEffect(() => {
     if (isOpen) {
@@ -568,11 +934,37 @@ export const ShareContentModal: React.FC<ShareContentModalProps> = ({
         imageUrl,
         imageCaption,
         streakCount,
+        quizTitle,
+        quizScore,
+        quizTotal,
+        quizPercentage,
+        quizTier,
+        quizDurationLabel,
+        quizCompletedAt,
+        userName,
       }).finally(() => {
         onClose();
       });
     }
-  }, [isOpen, type, aiAnswerText, workspaceName, questionText, imageUrl, imageCaption, streakCount, onClose]);
+  }, [
+    isOpen,
+    type,
+    aiAnswerText,
+    workspaceName,
+    questionText,
+    imageUrl,
+    imageCaption,
+    streakCount,
+    quizTitle,
+    quizScore,
+    quizTotal,
+    quizPercentage,
+    quizTier,
+    quizDurationLabel,
+    quizCompletedAt,
+    userName,
+    onClose,
+  ]);
 
   return null;
 };
