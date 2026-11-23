@@ -218,10 +218,12 @@ export default function DashboardHome({
       });
     };
     window.addEventListener('studyweb-activity-updated', handleActUpdate);
+    window.addEventListener('studyweb-quiz-history-updated', handleActUpdate);
     window.addEventListener('studyweb-study-stats-updated', handleActUpdate);
     window.addEventListener('studyweb-daily-routine-completed', handleActUpdate);
     return () => {
       window.removeEventListener('studyweb-activity-updated', handleActUpdate);
+      window.removeEventListener('studyweb-quiz-history-updated', handleActUpdate);
       window.removeEventListener('studyweb-study-stats-updated', handleActUpdate);
       window.removeEventListener('studyweb-daily-routine-completed', handleActUpdate);
     };

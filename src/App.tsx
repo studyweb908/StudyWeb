@@ -83,7 +83,7 @@ import { ProductTourService } from './services/ProductTourService';
 const GuidedProductTour = lazyWithRetry(() => import('./components/Dashboard/GuidedProductTour'));
 const GlobalVoiceListener = lazyWithRetry(() => import('./components/GlobalVoiceListener'));
 import { loadStoredWorkspaces, saveStoredWorkspaces, clearGuestWorkspaces } from './utils/workspaceStorage';
-import { recordUserActivity } from './utils/userActivity';
+import { recordUserActivity, hydrateUserActivitiesFromCloud } from './utils/userActivity';
 import {
   readSyncProfileSnapshot,
   fetchAndReconcileSupabaseProfile,
@@ -97,7 +97,7 @@ import WorkspaceChat from './components/Dashboard/WorkspaceChat';
 import QuizCenterView from './components/Dashboard/QuizCenterView';
 import CameraNoteScannerModal from './components/Dashboard/CameraNoteScannerModal';
 import ToastContainer from './components/ToastContainer';
-import { PendingQuizIntent } from './utils/quizHistoryStorage';
+import { PendingQuizIntent, hydrateQuizHistoryFromCloud } from './utils/quizHistoryStorage';
 
 const StudyPlannerView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.StudyPlannerView })));
 const SubjectsView = lazyWithRetry(() => import('./components/Dashboard/AuxiliaryViews').then(m => ({ default: m.SubjectsView })));
@@ -378,10 +378,12 @@ export default function App() {
           // Clear any leftover guest workspaces so stale local guest data is never pushed to the user's account
           clearGuestWorkspaces();
 
-          // Fetch user's profile and workspaces in parallel strictly from the Supabase backend (forceRefresh = true)
+          // Fetch user's profile, workspaces, quiz history, and recent activities in parallel from Supabase
           const [remoteWorkspaces, reconciledProfileRes] = await Promise.all([
             WorkspaceSyncService.fetchWorkspaces(userId, true),
-            fetchAndReconcileSupabaseProfile(true)
+            fetchAndReconcileSupabaseProfile(true),
+            hydrateQuizHistoryFromCloud(userId),
+            hydrateUserActivitiesFromCloud(userId)
           ]);
 
           const reconciledProfile = reconciledProfileRes?.profile;

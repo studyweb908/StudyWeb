@@ -13,15 +13,15 @@ import {
   AlertTriangle,
   TrendingUp,
   Share2,
-  Clock
+  Clock,
+  X
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { QuizQuestionItem, QuizMatchPair } from './WorkspaceTypes';
 import { QuizRunnerProgress, QuizTopicResult } from '../../utils/quizHistoryStorage';
 import {
   triggerNativeDeviceShare,
-  resolveShareDisplayName,
-  STUDYWEB_SHARE_URL
+  resolveShareDisplayName
 } from './ShareContentModal';
 
 interface InteractiveQuizRunnerProps {
@@ -31,18 +31,42 @@ interface InteractiveQuizRunnerProps {
   questions: QuizQuestionItem[];
   initialProgress?: QuizRunnerProgress | null;
   onProgressChange?: (progress: QuizRunnerProgress | null) => void;
-  onComplete?: (score: number, total: number, topicBreakdown?: QuizTopicResult[]) => void;
+  onComplete?: (
+    score: number,
+    total: number,
+    topicBreakdown?: QuizTopicResult[],
+    meta?: { durationSeconds?: number; missedQuestions?: MissedQuestionPayload[] }
+  ) => void;
   onExit?: () => void;
   exitLabel?: string;
 }
 
-interface MissedQuestionPayload {
+export interface MissedQuestionPayload {
   question: string;
   options: string[];
   userAns: string;
   correctAns: string;
   explanation: string;
 }
+
+const MATCH_PAIR_STYLES = [
+  {
+    badge: 'bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-200 border-indigo-200 dark:border-indigo-700',
+    border: 'border-indigo-300 dark:border-indigo-700 bg-indigo-50/40 dark:bg-indigo-950/30'
+  },
+  {
+    badge: 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-700',
+    border: 'border-emerald-300 dark:border-emerald-700 bg-emerald-50/40 dark:bg-emerald-950/30'
+  },
+  {
+    badge: 'bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 border-amber-200 dark:border-amber-700',
+    border: 'border-amber-300 dark:border-amber-700 bg-amber-50/40 dark:bg-amber-950/30'
+  },
+  {
+    badge: 'bg-violet-100 dark:bg-violet-900/60 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-700',
+    border: 'border-violet-300 dark:border-violet-700 bg-violet-50/40 dark:bg-violet-950/30'
+  }
+];
 
 function normalizeAnswerText(val: string): string {
   return String(val || '')
@@ -113,6 +137,7 @@ export default function InteractiveQuizRunner({
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [blankInput, setBlankInput] = useState('');
   const [activeLeftId, setActiveLeftId] = useState<string | null>(null);
+  const [activeRightId, setActiveRightId] = useState<string | null>(null);
   const [matchSelections, setMatchSelections] = useState<Record<string, string>>({});
   const [isAnswered, setIsAnswered] = useState(false);
   const [isCurrentCorrect, setIsCurrentCorrect] = useState(false);
@@ -176,10 +201,27 @@ export default function InteractiveQuizRunner({
     return shuffled;
   }, [activeQuestion, currentIdx]);
 
+  useEffect(() => {
+    if (
+      activeQuestion?.type === 'MatchFollowing' &&
+      Array.isArray(activeQuestion.pairs) &&
+      activeQuestion.pairs.length > 0 &&
+      !isAnswered
+    ) {
+      setActiveLeftId((prev) =>
+        prev && activeQuestion.pairs!.some((p) => p.id === prev)
+          ? prev
+          : activeQuestion.pairs![0].id
+      );
+      setActiveRightId(null);
+    }
+  }, [activeQuestion, currentIdx, isAnswered]);
+
   const resetQuestionInputs = () => {
     setSelectedOption(null);
     setBlankInput('');
     setActiveLeftId(null);
+    setActiveRightId(null);
     setMatchSelections({});
     setIsAnswered(false);
     setIsCurrentCorrect(false);
@@ -257,27 +299,66 @@ export default function InteractiveQuizRunner({
     }
   };
 
+  const handlePairLeftClick = (leftPairId: string) => {
+    if (isAnswered || !activeQuestion?.pairs) return;
+    if (activeRightId) {
+      const next = { ...matchSelections };
+      Object.keys(next).forEach((k) => {
+        if (next[k] === activeRightId) delete next[k];
+      });
+      next[leftPairId] = activeRightId;
+      setMatchSelections(next);
+      setActiveRightId(null);
+      const nextUnpaired = activeQuestion.pairs.find((p) => !next[p.id]);
+      setActiveLeftId(nextUnpaired ? nextUnpaired.id : null);
+      return;
+    }
+    setActiveLeftId(leftPairId);
+  };
+
+  const handleUnmatchLeft = (leftPairId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isAnswered) return;
+    const next = { ...matchSelections };
+    delete next[leftPairId];
+    setMatchSelections(next);
+    setActiveLeftId(leftPairId);
+    setActiveRightId(null);
+  };
+
   const handlePairRightClick = (rightPairId: string) => {
     if (isAnswered || !activeQuestion?.pairs) return;
-    const leftIdToAssign =
-      activeLeftId ||
-      activeQuestion.pairs.find((p) => !matchSelections[p.id])?.id ||
-      activeQuestion.pairs[0].id;
 
-    setMatchSelections((prev) => {
-      const next = { ...prev };
-      // If rightPairId was already mapped to another leftId, unassign previous
-      Object.keys(next).forEach((k) => {
-        if (next[k] === rightPairId) delete next[k];
-      });
-      next[leftIdToAssign] = rightPairId;
-      return next;
+    const existingLeftEntry = Object.entries(matchSelections).find(([, val]) => val === rightPairId);
+    const firstUnpairedLeft = activeQuestion.pairs.find((p) => !matchSelections[p.id]);
+
+    let leftIdToAssign: string | null = activeLeftId;
+    if (!leftIdToAssign) {
+      if (firstUnpairedLeft) {
+        leftIdToAssign = firstUnpairedLeft.id;
+      } else if (existingLeftEntry) {
+        // All left items are already matched: tapping a matched right item frees it for quick reassignment
+        const next = { ...matchSelections };
+        delete next[existingLeftEntry[0]];
+        setMatchSelections(next);
+        setActiveLeftId(existingLeftEntry[0]);
+        setActiveRightId(null);
+        return;
+      } else {
+        setActiveRightId(rightPairId);
+        return;
+      }
+    }
+
+    const next = { ...matchSelections };
+    Object.keys(next).forEach((k) => {
+      if (next[k] === rightPairId) delete next[k];
     });
+    next[leftIdToAssign] = rightPairId;
+    setMatchSelections(next);
+    setActiveRightId(null);
 
-    // Advance activeLeftId to next unpaired left item
-    const nextUnpaired = activeQuestion.pairs.find(
-      (p) => p.id !== leftIdToAssign && !matchSelections[p.id]
-    );
+    const nextUnpaired = activeQuestion.pairs.find((p) => !next[p.id]);
     setActiveLeftId(nextUnpaired ? nextUnpaired.id : null);
   };
 
@@ -365,7 +446,10 @@ export default function InteractiveQuizRunner({
         }, 440);
       }
       if (onComplete) {
-        onComplete(score, questions.length, topicBreakdown);
+        onComplete(score, questions.length, topicBreakdown, {
+          durationSeconds,
+          missedQuestions
+        });
       }
     }
   };
@@ -481,28 +565,58 @@ export default function InteractiveQuizRunner({
           });
         };
 
-        return (
-        <div className="max-w-2xl mx-auto py-6 sm:py-8 space-y-6">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 space-y-5 overflow-hidden">
-            {/* Animated Performance Reaction Header */}
-            <div className="text-center space-y-3">
-              {isPassed ? (
-                <>
-                  <motion.div
-                    initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.6, y: -14 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    transition={{ type: 'spring', stiffness: 380, damping: 16 }}
-                    className="inline-flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider text-emerald-700 dark:text-emerald-300"
-                  >
-                    <span aria-hidden="true">🎉</span>
-                    <span>{finalPct >= 90 ? 'Yahoo! Quiz Mastered!' : 'Yahoo! You Passed!'}</span>
-                    <span aria-hidden="true">🎉</span>
-                  </motion.div>
+        const ringRadius = 42;
+        const ringCircumference = 2 * Math.PI * ringRadius;
+        const ringStrokeDashoffset = ringCircumference - (finalPct / 100) * ringCircumference;
 
-                  <div className="relative w-28 h-28 mx-auto flex items-center justify-center">
+        return (
+        <div className="max-w-2xl mx-auto py-3 sm:py-6 space-y-5">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl sm:rounded-3xl shadow-sm overflow-hidden">
+            {/* Top Status Accent Bar */}
+            <div
+              className={`h-1.5 w-full ${
+                isPassed
+                  ? 'bg-gradient-to-r from-emerald-500 via-[#5145F5] to-indigo-500'
+                  : 'bg-gradient-to-r from-rose-500 via-amber-500 to-rose-400'
+              }`}
+            />
+
+            {/* Hero Celebration / Encouragement Banner */}
+            <div
+              className={`px-4 sm:px-8 pt-6 pb-5 text-center space-y-4 ${
+                isPassed
+                  ? 'bg-gradient-to-b from-emerald-50/75 via-indigo-50/25 to-white dark:from-emerald-950/25 dark:via-indigo-950/10 dark:to-slate-900'
+                  : 'bg-gradient-to-b from-rose-50/75 via-amber-50/20 to-white dark:from-rose-950/25 dark:via-slate-900 dark:to-slate-900'
+              }`}
+            >
+              {isPassed ? (
+                <motion.div
+                  initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.6, y: -12 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  transition={{ type: 'spring', stiffness: 380, damping: 16 }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100/80 dark:bg-emerald-950/70 border border-emerald-200/80 dark:border-emerald-800/60 text-[11px] font-extrabold uppercase tracking-wider text-emerald-700 dark:text-emerald-300"
+                >
+                  <span aria-hidden="true">🎉</span>
+                  <span>{finalPct >= 90 ? 'Yahoo! Quiz Mastered!' : 'Yahoo! You Passed!'}</span>
+                  <span aria-hidden="true">🎉</span>
+                </motion.div>
+              ) : (
+                <motion.div
+                  initial={shouldReduceMotion ? false : { opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.35 }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-100/80 dark:bg-rose-950/70 border border-rose-200/80 dark:border-rose-800/60 text-[11px] font-extrabold uppercase tracking-wider text-rose-700 dark:text-rose-300"
+                >
+                  <span>Keep Practicing</span>
+                </motion.div>
+              )}
+
+              {/* Visual Showcase: Animated Character + Animated Accuracy Ring */}
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-7 py-1">
+                {isPassed ? (
+                  <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
                     {!shouldReduceMotion && (
                       <>
-                        {/* High-energy expanding celebration pulse ring */}
                         <motion.span
                           aria-hidden="true"
                           initial={{ scale: 0.75, opacity: 0.85 }}
@@ -510,11 +624,10 @@ export default function InteractiveQuizRunner({
                           transition={{ duration: 1.35, repeat: Infinity, repeatDelay: 0.55, ease: 'easeOut' }}
                           className="absolute w-20 h-20 rounded-full border-2 border-emerald-400/70 dark:border-emerald-400/50 pointer-events-none"
                         />
-                        {/* Celebratory confetti pop bursts */}
                         <motion.span
                           aria-hidden="true"
                           initial={{ opacity: 0, scale: 0, x: 0, y: 0, rotate: 0 }}
-                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.35, 1.1, 0.7], x: -54, y: -36, rotate: -25 }}
+                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.35, 1.1, 0.7], x: -50, y: -34, rotate: -25 }}
                           transition={{ duration: 1.35, repeat: Infinity, repeatDelay: 0.75 }}
                           className="absolute text-xl select-none pointer-events-none"
                         >
@@ -523,7 +636,7 @@ export default function InteractiveQuizRunner({
                         <motion.span
                           aria-hidden="true"
                           initial={{ opacity: 0, scale: 0, x: 0, y: 0, rotate: 0 }}
-                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.3, 1.05, 0.7], x: 56, y: -32, rotate: 22 }}
+                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.3, 1.05, 0.7], x: 52, y: -30, rotate: 22 }}
                           transition={{ duration: 1.35, delay: 0.18, repeat: Infinity, repeatDelay: 0.75 }}
                           className="absolute text-xl select-none pointer-events-none"
                         >
@@ -532,7 +645,7 @@ export default function InteractiveQuizRunner({
                         <motion.span
                           aria-hidden="true"
                           initial={{ opacity: 0, scale: 0, x: 0, y: 0 }}
-                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.25, 0.9, 0.6], x: 46, y: 36 }}
+                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.25, 0.9, 0.6], x: 44, y: 34 }}
                           transition={{ duration: 1.4, delay: 0.34, repeat: Infinity, repeatDelay: 0.8 }}
                           className="absolute text-lg select-none pointer-events-none"
                         >
@@ -541,7 +654,7 @@ export default function InteractiveQuizRunner({
                         <motion.span
                           aria-hidden="true"
                           initial={{ opacity: 0, scale: 0, x: 0, y: 0 }}
-                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.25, 0.9, 0.6], x: -48, y: 34 }}
+                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.25, 0.9, 0.6], x: -46, y: 32 }}
                           transition={{ duration: 1.4, delay: 0.48, repeat: Infinity, repeatDelay: 0.8 }}
                           className="absolute text-lg select-none pointer-events-none"
                         >
@@ -550,7 +663,7 @@ export default function InteractiveQuizRunner({
                         <motion.span
                           aria-hidden="true"
                           initial={{ opacity: 0, scale: 0, x: 0, y: 0 }}
-                          animate={{ opacity: [0, 1, 0], scale: [0.5, 1.2, 0.7], x: 0, y: -56 }}
+                          animate={{ opacity: [0, 1, 0], scale: [0.5, 1.2, 0.7], x: 0, y: -52 }}
                           transition={{ duration: 1.3, delay: 0.28, repeat: Infinity, repeatDelay: 0.9 }}
                           className="absolute text-lg select-none pointer-events-none"
                         >
@@ -566,7 +679,7 @@ export default function InteractiveQuizRunner({
                           : { scale: [0.35, 1.2, 0.95, 1.05, 1], rotate: [-18, 12, -6, 3, 0], y: [0, -10, 0] }
                       }
                       transition={{ duration: 0.85, ease: 'easeOut' }}
-                      className="relative z-10 w-20 h-20 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border-2 border-emerald-300 dark:border-emerald-700/80 flex items-center justify-center shadow-sm"
+                      className="relative z-10 w-20 h-20 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border-2 border-emerald-300 dark:border-emerald-700/80 flex items-center justify-center shadow-sm"
                     >
                       <motion.span
                         role="img"
@@ -583,23 +696,8 @@ export default function InteractiveQuizRunner({
                       </motion.span>
                     </motion.div>
                   </div>
-
-                  <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-                    Quiz Passed — Great Work!
-                  </h3>
-                </>
-              ) : (
-                <>
-                  <motion.div
-                    initial={shouldReduceMotion ? false : { opacity: 0, y: -8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.35 }}
-                    className="inline-flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider text-rose-600 dark:text-rose-400"
-                  >
-                    <span>Keep Practicing</span>
-                  </motion.div>
-
-                  <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
+                ) : (
+                  <div className="relative w-24 h-24 flex items-center justify-center shrink-0">
                     <motion.div
                       initial={shouldReduceMotion ? false : { scale: 0.75, opacity: 0 }}
                       animate={
@@ -608,7 +706,7 @@ export default function InteractiveQuizRunner({
                           : { scale: 1, opacity: 1, y: [0, 4, 0], rotate: [0, -4, 4, -2, 0] }
                       }
                       transition={{ duration: 1.4, ease: 'easeInOut' }}
-                      className="w-20 h-20 rounded-full bg-rose-50 dark:bg-rose-950/50 border-2 border-rose-200 dark:border-rose-800/70 flex items-center justify-center shadow-sm"
+                      className="w-20 h-20 rounded-full bg-rose-50 dark:bg-rose-950/60 border-2 border-rose-200 dark:border-rose-800/70 flex items-center justify-center shadow-sm"
                     >
                       <motion.span
                         role="img"
@@ -621,185 +719,221 @@ export default function InteractiveQuizRunner({
                       </motion.span>
                     </motion.div>
                   </div>
+                )}
 
-                  <div className="space-y-1">
-                    <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-                      Not Quite There Yet
-                    </h3>
-                    <p className="text-xs sm:text-sm text-rose-600 dark:text-rose-400 font-semibold max-w-md mx-auto">
-                      Don&apos;t give up! Let&apos;s try again to sharpen your skills.
-                    </p>
+                {/* Animated Circular Score Gauge */}
+                <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
+                  <svg className="w-28 h-28 -rotate-90" viewBox="0 0 100 100" aria-hidden="true">
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r={ringRadius}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="8"
+                      className="text-slate-100 dark:text-slate-800"
+                    />
+                    <motion.circle
+                      cx="50"
+                      cy="50"
+                      r={ringRadius}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="8"
+                      strokeLinecap="round"
+                      strokeDasharray={ringCircumference}
+                      initial={shouldReduceMotion ? { strokeDashoffset: ringStrokeDashoffset } : { strokeDashoffset: ringCircumference }}
+                      animate={{ strokeDashoffset: ringStrokeDashoffset }}
+                      transition={{ duration: 0.9, ease: 'easeOut' }}
+                      className={
+                        finalPct >= 90
+                          ? 'text-emerald-500'
+                          : finalPct >= 70
+                          ? 'text-[#5145F5] dark:text-indigo-400'
+                          : finalPct >= 50
+                          ? 'text-amber-500'
+                          : 'text-rose-500'
+                      }
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center tabular-nums">
+                    <span className="text-2xl font-black text-slate-900 dark:text-white leading-none">
+                      {finalPct}%
+                    </span>
+                    <span className={`text-[10px] font-bold uppercase tracking-wide mt-1 ${tier.colorClass}`}>
+                      {tier.label}
+                    </span>
                   </div>
-                </>
-              )}
+                </div>
+              </div>
 
-              <p className="text-sm text-slate-600 dark:text-slate-300 tabular-nums">
-                You scored <span className="font-extrabold text-slate-900 dark:text-white">{score}</span> out of{' '}
-                <span className="font-extrabold text-slate-900 dark:text-white">{questions.length}</span>{' '}
-                (<span className={`font-bold ${tier.colorClass}`}>{finalPct}% · {tier.label}</span>)
-              </p>
-
-              {/* Unboxed Completion Time Metadata */}
-              <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-                {durationLabel && (
-                  <>
-                    <span className="inline-flex items-center gap-1 font-semibold text-slate-600 dark:text-slate-300">
-                      <Clock className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Time: {durationLabel}</span>
-                    </span>
-                    <span aria-hidden="true">·</span>
-                  </>
+              {/* Heading + Encouraging Message */}
+              <div className="space-y-1">
+                <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                  {isPassed ? 'Quiz Passed — Great Work!' : 'Not Quite There Yet'}
+                </h3>
+                {!isPassed && (
+                  <p className="text-xs sm:text-sm text-rose-600 dark:text-rose-400 font-semibold max-w-md mx-auto">
+                    Don&apos;t give up! Let&apos;s try again to sharpen your skills.
+                  </p>
                 )}
-                <span>{completedAtLabel}</span>
+              </div>
+
+              {/* 3-Column Mobile-Friendly KPI Strip */}
+              <div className="grid grid-cols-3 gap-2 sm:gap-3 pt-1 max-w-lg mx-auto">
+                <div className="rounded-xl bg-white/90 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80 px-2.5 py-2.5 text-center">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Score</div>
+                  <div className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white mt-0.5 tabular-nums">
+                    {score}/{questions.length}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-white/90 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80 px-2.5 py-2.5 text-center">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Accuracy</div>
+                  <div className={`text-sm sm:text-base font-extrabold mt-0.5 tabular-nums ${tier.colorClass}`}>
+                    {finalPct}%
+                  </div>
+                </div>
+                <div className="rounded-xl bg-white/90 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80 px-2.5 py-2.5 text-center">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Time</div>
+                  <div className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white mt-0.5 tabular-nums inline-flex items-center justify-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-slate-400 hidden sm:inline" />
+                    <span>{durationLabel || 'Done'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="text-[11px] font-medium text-slate-400 dark:text-slate-500 tabular-nums">
+                Completed {completedAtLabel}
               </div>
             </div>
 
-            {/* Full-Width Performance Progress Bar */}
-            <div className="space-y-2.5 pt-2 text-left">
-              <div className="flex items-center justify-between text-xs font-semibold tabular-nums">
-                <span className="text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
-                  <TrendingUp className="w-3.5 h-3.5 text-[#5145F5] dark:text-indigo-400" />
-                  <span>Overall Quiz Performance</span>
-                </span>
-                <span className={tier.colorClass}>
-                  {score} Correct · {missedCount} Missed ({finalPct}%)
-                </span>
-              </div>
-              <div className="w-full h-3.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
-                {score > 0 && (
-                  <div
-                    className="h-full bg-emerald-500 transition-all duration-500"
-                    style={{ width: `${(score / questions.length) * 100}%` }}
-                  />
-                )}
-                {missedCount > 0 && (
-                  <div
-                    className="h-full bg-rose-400 dark:bg-rose-500/80 transition-all duration-500"
-                    style={{ width: `${(missedCount / questions.length) * 100}%` }}
-                  />
-                )}
-              </div>
-            </div>
-
-            {/* Topic Progress & Where You Are Lacking */}
-            {topicBreakdown.length > 0 && (
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3 text-left">
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <span className="font-bold text-slate-800 dark:text-slate-100">
-                    Topic Progress &amp; Focus Areas
+            {/* Body Analytics + Actions */}
+            <div className="px-4 sm:px-8 pb-6 sm:pb-8 pt-2 space-y-5">
+              {/* Full-Width Performance Progress Bar */}
+              <div className="space-y-2 text-left">
+                <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs font-semibold tabular-nums">
+                  <span className="text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5 text-[#5145F5] dark:text-indigo-400 shrink-0" />
+                    <span>Overall Quiz Performance</span>
                   </span>
-                  {lackingTopics.length > 0 ? (
-                    <span className="text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-1">
-                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                      <span>Lacking in: {lackingTopics.map((t) => t.topic).join(', ')}</span>
-                    </span>
-                  ) : (
-                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
-                      <CheckCircle className="w-3.5 h-3.5 shrink-0" />
-                      <span>Strong performance across all topics ({strongTopics.length})</span>
-                    </span>
+                  <span className={tier.colorClass}>
+                    {score} Correct · {missedCount} Missed ({finalPct}%)
+                  </span>
+                </div>
+                <div className="w-full h-3 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+                  {score > 0 && (
+                    <div
+                      className="h-full bg-emerald-500 transition-all duration-500"
+                      style={{ width: `${(score / questions.length) * 100}%` }}
+                    />
+                  )}
+                  {missedCount > 0 && (
+                    <div
+                      className="h-full bg-rose-400 dark:bg-rose-500/80 transition-all duration-500"
+                      style={{ width: `${(missedCount / questions.length) * 100}%` }}
+                    />
                   )}
                 </div>
-
-                <div className="space-y-2.5">
-                  {topicBreakdown.map((item) => {
-                    const topicPct = item.total > 0 ? Math.round((item.correct / item.total) * 100) : 0;
-                    const isLacking = topicPct < 70;
-                    return (
-                      <div key={item.topic} className="space-y-1">
-                        <div className="flex items-center justify-between text-xs tabular-nums">
-                          <span className="font-medium text-slate-700 dark:text-slate-200 truncate pr-2">
-                            {item.topic}
-                          </span>
-                          <span
-                            className={`font-semibold shrink-0 ${
-                              isLacking
-                                ? 'text-rose-600 dark:text-rose-400'
-                                : 'text-emerald-600 dark:text-emerald-400'
-                            }`}
-                          >
-                            {item.correct}/{item.total} ({topicPct}%{isLacking ? ' · Needs review' : ''})
-                          </span>
-                        </div>
-                        <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all duration-500 ${
-                              isLacking ? 'bg-rose-500' : 'bg-emerald-500'
-                            }`}
-                            style={{ width: `${Math.max(4, topicPct)}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
               </div>
-            )}
 
-            <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-              <button
-                onClick={handleRestart}
-                className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[40px] rounded-xl bg-[#5145F5] hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-colors cursor-pointer whitespace-nowrap"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>{isPassed ? 'Retry Quiz' : 'Restart Quiz'}</span>
-              </button>
-              {missedQuestions.length > 0 && aiReviewList.length === 0 && (
-                <button
-                  onClick={handleRequestAiReview}
-                  disabled={isLoadingReview}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[40px] rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/60 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 font-bold text-xs hover:bg-indigo-100/70 transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
-                >
-                  {isLoadingReview ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                  <span>Review {missedQuestions.length} Missed with AI</span>
-                </button>
-              )}
-              {onExit && (
-                <button
-                  onClick={onExit}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[40px] rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer whitespace-nowrap"
-                >
-                  <span>{exitLabel}</span>
-                </button>
-              )}
-            </div>
-
-            {/* Share Quiz Performance Section */}
-            <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/40 p-4 sm:p-5 space-y-3.5 text-left">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <img
-                      src="/logo-inner.png"
-                      alt="StudyWeb"
-                      className="w-9 h-9 rounded-lg object-contain shrink-0 bg-white dark:bg-slate-900 p-1 border border-slate-200 dark:border-slate-700"
-                    />
-                    <div className="min-w-0">
-                      <p className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
-                        Share Your Quiz Performance
-                      </p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate tabular-nums">
-                        {learnerName} · {finalPct}% ({score}/{questions.length})
-                        {durationLabel ? ` · ${durationLabel}` : ''} · {completedAtLabel}
-                      </p>
-                    </div>
+              {/* Topic Progress & Where You Are Lacking */}
+              {topicBreakdown.length > 0 && (
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3 text-left">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs">
+                    <span className="font-bold text-slate-800 dark:text-slate-100">
+                      Topic Progress &amp; Focus Areas
+                    </span>
+                    {lackingTopics.length > 0 ? (
+                      <span className="text-rose-600 dark:text-rose-400 font-semibold flex items-start sm:items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 sm:mt-0" />
+                        <span>Lacking in: {lackingTopics.map((t) => t.topic).join(', ')}</span>
+                      </span>
+                    ) : (
+                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                        <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                        <span>Strong performance across all topics ({strongTopics.length})</span>
+                      </span>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleSharePerformance}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[40px] rounded-xl bg-slate-900 dark:bg-indigo-600 hover:bg-slate-800 dark:hover:bg-indigo-500 text-white font-bold text-xs shadow-sm transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                  >
-                    <Share2 className="w-3.5 h-3.5" />
-                    <span>Share Performance</span>
-                  </button>
-                </div>
 
-                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                  Challenge friends with your personalized StudyWeb score card — you can also take quizzes and improve your learning skills on StudyWeb:{' '}
-                  <span className="font-semibold text-indigo-600 dark:text-indigo-400 break-all">
-                    {STUDYWEB_SHARE_URL}
-                  </span>
-                </p>
+                  <div className="space-y-2.5">
+                    {topicBreakdown.map((item) => {
+                      const topicPct = item.total > 0 ? Math.round((item.correct / item.total) * 100) : 0;
+                      const isLacking = topicPct < 70;
+                      return (
+                        <div key={item.topic} className="space-y-1">
+                          <div className="flex items-center justify-between gap-2 text-xs tabular-nums">
+                            <span className="font-medium text-slate-700 dark:text-slate-200 truncate">
+                              {item.topic}
+                            </span>
+                            <span
+                              className={`font-semibold shrink-0 ${
+                                isLacking
+                                  ? 'text-rose-600 dark:text-rose-400'
+                                  : 'text-emerald-600 dark:text-emerald-400'
+                              }`}
+                            >
+                              {item.correct}/{item.total} ({topicPct}%{isLacking ? ' · Needs review' : ''})
+                            </span>
+                          </div>
+                          <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                isLacking ? 'bg-rose-500' : 'bg-emerald-500'
+                              }`}
+                              style={{ width: `${Math.max(4, topicPct)}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Mobile-Responsive Action Buttons */}
+              <div className="grid grid-cols-1 sm:flex sm:flex-wrap sm:items-center sm:justify-center gap-2.5 pt-1">
+                <button
+                  onClick={handleRestart}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 min-h-[44px] rounded-xl bg-[#5145F5] hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>{isPassed ? 'Retry Quiz' : 'Restart Quiz'}</span>
+                </button>
+                {missedQuestions.length > 0 && aiReviewList.length === 0 && (
+                  <button
+                    onClick={handleRequestAiReview}
+                    disabled={isLoadingReview}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 min-h-[44px] rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/60 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 font-bold text-xs hover:bg-indigo-100/70 transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
+                  >
+                    {isLoadingReview ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    <span>Review {missedQuestions.length} Missed with AI</span>
+                  </button>
+                )}
+                {onExit && (
+                  <button
+                    onClick={onExit}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 min-h-[44px] rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <span>{exitLabel}</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Share Performance Section (Minimal: Score + Share Button Only) */}
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="text-sm font-bold text-slate-900 dark:text-white tabular-nums">
+                  Score: <span>{score}/{questions.length}</span>{' '}
+                  <span className={tier.colorClass}>({finalPct}%)</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSharePerformance}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 min-h-[44px] rounded-xl bg-slate-900 dark:bg-indigo-600 hover:bg-slate-800 dark:hover:bg-indigo-500 text-white font-bold text-xs shadow-sm transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>Share Your Performance</span>
+                </button>
               </div>
             </div>
           </div>
@@ -953,98 +1087,192 @@ export default function InteractiveQuizRunner({
             )}
 
             {/* 3. Match the Following Renderer */}
-            {activeQuestion.type === 'MatchFollowing' && activeQuestion.pairs && (
-              <div className="space-y-4">
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {isAnswered
-                    ? 'Review your matches below:'
-                    : 'Select an item on the left, then click its matching description on the right.'}
-                </p>
+            {activeQuestion.type === 'MatchFollowing' && activeQuestion.pairs && (() => {
+              const totalPairs = activeQuestion.pairs.length;
+              const matchedCount = Object.keys(matchSelections).length;
+              const activeLeftIdx = activeLeftId
+                ? activeQuestion.pairs.findIndex((p) => p.id === activeLeftId)
+                : -1;
+              const activeRightIdx = activeRightId
+                ? shuffledRightPairs.findIndex((r) => r.id === activeRightId)
+                : -1;
+              const correctMatchCount = activeQuestion.pairs.filter(
+                (p) => matchSelections[p.id] === p.id
+              ).length;
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+              return (
+              <div className="space-y-4">
+                {/* Active Step Guidance Banner */}
+                <div
+                  className={`px-3.5 py-2.5 rounded-xl border text-xs font-medium flex flex-wrap items-center justify-between gap-2 ${
+                    isAnswered
+                      ? isCurrentCorrect
+                        ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                        : 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                      : 'bg-indigo-50/70 dark:bg-indigo-950/30 border-indigo-200/80 dark:border-indigo-900/60 text-indigo-800 dark:text-indigo-200'
+                  }`}
+                >
+                  <span>
+                    {isAnswered
+                      ? `${correctMatchCount} of ${totalPairs} pairs matched correctly.`
+                      : activeLeftIdx >= 0
+                      ? `Step: Tap a match in Column B for #${activeLeftIdx + 1}`
+                      : activeRightIdx >= 0
+                      ? `Step: Tap a term in Column A for ${String.fromCharCode(65 + activeRightIdx)}`
+                      : matchedCount === totalPairs
+                      ? 'All pairs linked! Tap any item to change a match, or check your matches below.'
+                      : 'Tap a term in Column A, then tap its matching item in Column B.'}
+                  </span>
+                  <span className="font-bold tabular-nums shrink-0">
+                    {matchedCount}/{totalPairs} paired
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Left Column (Premises) */}
                   <div className="space-y-2.5">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 px-1">
+                      Column A · Terms
+                    </div>
                     {activeQuestion.pairs.map((pair, idx) => {
                       const assignedRightId = matchSelections[pair.id];
                       const assignedRightIndex = shuffledRightPairs.findIndex((r) => r.id === assignedRightId);
                       const assignedLetter = assignedRightIndex >= 0 ? String.fromCharCode(65 + assignedRightIndex) : null;
                       const isActive = activeLeftId === pair.id;
                       const isCorrectMatch = assignedRightId === pair.id;
+                      const palette = MATCH_PAIR_STYLES[idx % MATCH_PAIR_STYLES.length];
 
                       let cls =
-                        'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-800 dark:text-slate-200';
+                        'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-800 dark:text-slate-200 hover:border-indigo-300 dark:hover:border-indigo-700';
                       if (isAnswered) {
                         cls = isCorrectMatch
                           ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-200'
                           : 'border-rose-400 bg-rose-50 dark:bg-rose-950/30 text-rose-900 dark:text-rose-200';
                       } else if (isActive) {
                         cls =
-                          'border-[#5145F5] bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-100 ring-2 ring-[#5145F5]/20';
+                          'border-[#5145F5] bg-indigo-50/80 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-100 ring-2 ring-[#5145F5]/25';
                       } else if (assignedLetter) {
-                        cls =
-                          'border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white';
+                        cls = `${palette.border} text-slate-900 dark:text-white`;
                       }
 
                       return (
-                        <button
+                        <div
                           key={pair.id}
-                          disabled={isAnswered}
-                          onClick={() => setActiveLeftId(pair.id)}
-                          className={`w-full text-left p-3.5 rounded-xl border transition-colors flex items-center justify-between gap-2 text-xs sm:text-sm cursor-pointer disabled:cursor-default ${cls}`}
+                          role="button"
+                          tabIndex={isAnswered ? -1 : 0}
+                          aria-disabled={isAnswered}
+                          onClick={() => handlePairLeftClick(pair.id)}
+                          onKeyDown={(e) => {
+                            if (!isAnswered && (e.key === 'Enter' || e.key === ' ')) {
+                              e.preventDefault();
+                              handlePairLeftClick(pair.id);
+                            }
+                          }}
+                          className={`w-full text-left p-3.5 rounded-xl border transition-all flex items-center justify-between gap-2 text-xs sm:text-sm min-h-[48px] ${
+                            isAnswered ? 'cursor-default' : 'cursor-pointer'
+                          } ${cls}`}
                         >
                           <div className="flex items-start gap-2.5 min-w-0">
-                            <span className="font-bold text-slate-400 shrink-0 tabular-nums">{idx + 1}.</span>
-                            <span className="font-semibold break-words">{pair.left}</span>
-                          </div>
-                          {assignedLetter && (
-                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-200 shrink-0">
-                              -&gt; {assignedLetter}
+                            <span
+                              className={`w-6 h-6 rounded-md border flex items-center justify-center text-[11px] font-bold shrink-0 tabular-nums ${
+                                assignedLetter || isActive
+                                  ? palette.badge
+                                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400'
+                              }`}
+                            >
+                              {idx + 1}
                             </span>
-                          )}
-                        </button>
+                            <span className="font-semibold break-words leading-snug">{pair.left}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {assignedLetter && (
+                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border tabular-nums ${palette.badge}`}>
+                                -&gt; {assignedLetter}
+                              </span>
+                            )}
+                            {!isAnswered && assignedLetter && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleUnmatchLeft(pair.id, e)}
+                                aria-label={`Unmatch item ${idx + 1}`}
+                                title="Remove this match"
+                                className="w-6 h-6 rounded-md flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {isAnswered && (
+                              isCorrectMatch ? (
+                                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                              ) : (
+                                <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                              )
+                            )}
+                          </div>
+                        </div>
                       );
                     })}
                   </div>
 
                   {/* Right Column (Shuffled Matches) */}
                   <div className="space-y-2.5">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 px-1">
+                      Column B · Matches
+                    </div>
                     {shuffledRightPairs.map((rightPair, rIdx) => {
                       const letter = String.fromCharCode(65 + rIdx);
                       const mappedLeftEntry = Object.entries(matchSelections).find(([, val]) => val === rightPair.id);
                       const mappedLeftIdx = mappedLeftEntry
                         ? activeQuestion.pairs!.findIndex((p) => p.id === mappedLeftEntry[0])
                         : -1;
+                      const isRightSelected = activeRightId === rightPair.id;
+                      const palette =
+                        mappedLeftIdx >= 0
+                          ? MATCH_PAIR_STYLES[mappedLeftIdx % MATCH_PAIR_STYLES.length]
+                          : null;
+                      const wasCorrectlyPaired = matchSelections[rightPair.id] === rightPair.id;
 
                       let rCls =
-                        'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/40 text-slate-700 dark:text-slate-200 hover:border-indigo-300';
+                        'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/40 text-slate-700 dark:text-slate-200 hover:border-indigo-300 dark:hover:border-indigo-700';
                       if (isAnswered) {
-                        const wasCorrectlyPaired = matchSelections[rightPair.id] === rightPair.id;
                         rCls = wasCorrectlyPaired
                           ? 'border-emerald-400 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-200'
-                          : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 text-slate-600 dark:text-slate-300';
-                      } else if (mappedLeftIdx >= 0) {
+                          : 'border-rose-300 dark:border-rose-800 bg-rose-50/50 dark:bg-rose-950/20 text-rose-900 dark:text-rose-200';
+                      } else if (isRightSelected) {
                         rCls =
-                          'border-indigo-300 dark:border-indigo-700 bg-indigo-50/40 dark:bg-indigo-950/30 text-slate-900 dark:text-white';
+                          'border-[#5145F5] bg-indigo-50/80 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-100 ring-2 ring-[#5145F5]/25';
+                      } else if (palette) {
+                        rCls = `${palette.border} text-slate-900 dark:text-white`;
                       }
 
                       return (
                         <button
                           key={rightPair.id}
+                          type="button"
                           disabled={isAnswered}
                           onClick={() => handlePairRightClick(rightPair.id)}
-                          className={`w-full text-left p-3.5 rounded-xl border transition-colors flex items-start justify-between gap-2 text-xs sm:text-sm cursor-pointer disabled:cursor-default ${rCls}`}
+                          className={`w-full text-left p-3.5 rounded-xl border transition-all flex items-start justify-between gap-2 text-xs sm:text-sm min-h-[48px] cursor-pointer disabled:cursor-default ${rCls}`}
                         >
                           <div className="flex items-start gap-2.5 min-w-0">
-                            <span className="font-bold text-indigo-600 dark:text-indigo-400 shrink-0">
-                              {letter}.
+                            <span className="w-6 h-6 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-[11px] font-bold text-indigo-600 dark:text-indigo-400 shrink-0">
+                              {letter}
                             </span>
-                            <span className="break-words">{rightPair.right}</span>
+                            <span className="break-words leading-snug">{rightPair.right}</span>
                           </div>
-                          {mappedLeftIdx >= 0 && (
-                            <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 shrink-0 tabular-nums">
-                              #{mappedLeftIdx + 1}
-                            </span>
-                          )}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {mappedLeftIdx >= 0 && palette && (
+                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border tabular-nums ${palette.badge}`}>
+                                #{mappedLeftIdx + 1}
+                              </span>
+                            )}
+                            {isAnswered && (
+                              wasCorrectlyPaired ? (
+                                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                              ) : (
+                                <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                              )
+                            )}
+                          </div>
                         </button>
                       );
                     })}
@@ -1052,22 +1280,25 @@ export default function InteractiveQuizRunner({
                 </div>
 
                 {!isAnswered && (
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1">
                     <button
+                      type="button"
                       onClick={() => {
                         setMatchSelections({});
+                        setActiveRightId(null);
                         setActiveLeftId(activeQuestion.pairs?.[0]?.id || null);
                       }}
-                      className="text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
+                      className="text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer min-h-[36px] px-2"
                     >
                       Clear Matches
                     </button>
                     <button
+                      type="button"
                       onClick={handleCheckMatches}
-                      disabled={Object.keys(matchSelections).length < activeQuestion.pairs.length}
-                      className="px-5 py-2.5 rounded-xl bg-[#5145F5] hover:bg-indigo-700 text-white font-bold text-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={matchedCount < totalPairs}
+                      className="px-5 py-2.5 min-h-[44px] rounded-xl bg-[#5145F5] hover:bg-indigo-700 text-white font-bold text-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Check Matches ({Object.keys(matchSelections).length}/{activeQuestion.pairs.length})
+                      Check Matches ({matchedCount}/{totalPairs})
                     </button>
                   </div>
                 )}
@@ -1081,7 +1312,9 @@ export default function InteractiveQuizRunner({
                     }`}
                   >
                     <p className="font-bold">
-                      {isCurrentCorrect ? 'All pairs matched correctly!' : 'Correct Pairings:'}
+                      {isCurrentCorrect
+                        ? 'All pairs matched correctly!'
+                        : `Correct Pairings (${correctMatchCount}/${totalPairs} matched):`}
                     </p>
                     {!isCurrentCorrect && (
                       <ul className="space-y-1 text-slate-700 dark:text-slate-200">
@@ -1095,7 +1328,8 @@ export default function InteractiveQuizRunner({
                   </div>
                 )}
               </div>
-            )}
+              );
+            })()}
 
             {/* Instant Explanation */}
             <AnimatePresence>

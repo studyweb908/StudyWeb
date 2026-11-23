@@ -1,9 +1,28 @@
 import { QuizQuestionItem } from '../components/Dashboard/WorkspaceTypes';
+import { supabase } from '../lib/supabase';
 
 export interface QuizTopicResult {
   topic: string;
   correct: number;
   total: number;
+}
+
+export interface QuizAttemptMissedItem {
+  question: string;
+  userAns: string;
+  correctAns: string;
+  explanation?: string;
+}
+
+export interface QuizAttemptRecord {
+  id: string;
+  score: number;
+  total: number;
+  percentage: number;
+  durationSeconds?: number;
+  completedAt: string;
+  topicBreakdown?: QuizTopicResult[];
+  missedQuestions?: QuizAttemptMissedItem[];
 }
 
 export interface SavedQuizSession {
@@ -22,6 +41,7 @@ export interface SavedQuizSession {
   lastAttemptedAt?: string;
   attemptCount?: number;
   topicBreakdown?: QuizTopicResult[];
+  attempts?: QuizAttemptRecord[];
   createdAt: string;
 }
 
@@ -352,6 +372,200 @@ export async function getServiceWorkerQuizCacheStats(): Promise<ServiceWorkerQui
   };
 }
 
+function mergeQuizSessionLists(
+  primary: SavedQuizSession[],
+  secondary: SavedQuizSession[]
+): SavedQuizSession[] {
+  const mergedMap = new Map<string, SavedQuizSession>();
+  for (const raw of [...secondary, ...primary]) {
+    if (!raw || !raw.id || !Array.isArray(raw.questions)) continue;
+    const prev = mergedMap.get(raw.id);
+    if (!prev) {
+      mergedMap.set(raw.id, raw);
+    } else {
+      const prevAttemptsList = Array.isArray(prev.attempts) ? prev.attempts : [];
+      const currAttemptsList = Array.isArray(raw.attempts) ? raw.attempts : [];
+      const attemptByKey = new Map<string, QuizAttemptRecord>();
+      for (const att of [...prevAttemptsList, ...currAttemptsList]) {
+        if (!att) continue;
+        const key = att.id || `${att.completedAt}_${att.score}_${att.total}`;
+        attemptByKey.set(key, att);
+      }
+      const mergedAttempts = Array.from(attemptByKey.values())
+        .sort((a, b) => new Date(b.completedAt || 0).getTime() - new Date(a.completedAt || 0).getTime())
+        .slice(0, 25);
+
+      const prevTime = new Date(prev.lastAttemptedAt || prev.createdAt || 0).getTime();
+      const currTime = new Date(raw.lastAttemptedAt || raw.createdAt || 0).getTime();
+      const newest = currTime >= prevTime ? raw : prev;
+      const latestAttempt = mergedAttempts[0];
+
+      mergedMap.set(raw.id, {
+        ...prev,
+        ...newest,
+        questions:
+          Array.isArray(newest.questions) && newest.questions.length > 0
+            ? newest.questions
+            : prev.questions,
+        attempts: mergedAttempts.length > 0 ? mergedAttempts : undefined,
+        attemptCount: Math.max(prev.attemptCount || 0, raw.attemptCount || 0, mergedAttempts.length),
+        lastScore: latestAttempt ? latestAttempt.score : newest.lastScore ?? prev.lastScore,
+        lastPercentage: latestAttempt ? latestAttempt.percentage : newest.lastPercentage ?? prev.lastPercentage,
+        lastAttemptedAt: latestAttempt ? latestAttempt.completedAt : newest.lastAttemptedAt ?? prev.lastAttemptedAt,
+        topicBreakdown:
+          (latestAttempt?.topicBreakdown && latestAttempt.topicBreakdown.length > 0
+            ? latestAttempt.topicBreakdown
+            : newest.topicBreakdown) || prev.topicBreakdown
+      });
+    }
+  }
+
+  return Array.from(mergedMap.values())
+    .sort((a, b) => {
+      const timeA = new Date(a.lastAttemptedAt || a.createdAt || 0).getTime();
+      const timeB = new Date(b.lastAttemptedAt || b.createdAt || 0).getTime();
+      return timeB - timeA;
+    })
+    .slice(0, 40);
+}
+
+let cloudQuizSyncTimer: ReturnType<typeof setTimeout> | null = null;
+
+function compactSessionsForCloud(sessions: SavedQuizSession[]): SavedQuizSession[] {
+  return sessions.slice(0, 15).map((s) => ({
+    ...s,
+    sourceLabels: Array.isArray(s.sourceLabels) ? s.sourceLabels.slice(0, 3) : [],
+    questions: (Array.isArray(s.questions) ? s.questions : []).slice(0, 20).map((q) => ({
+      ...q,
+      question: String(q.question || '').slice(0, 260),
+      options: Array.isArray(q.options) ? q.options.slice(0, 4).map((o) => String(o).slice(0, 140)) : [],
+      explanation: String(q.explanation || '').slice(0, 220),
+      pairs: Array.isArray(q.pairs)
+        ? q.pairs.slice(0, 5).map((p) => ({
+            id: String(p.id),
+            left: String(p.left || '').slice(0, 100),
+            right: String(p.right || '').slice(0, 140)
+          }))
+        : undefined
+    })),
+    attempts: Array.isArray(s.attempts)
+      ? s.attempts.slice(0, 8).map((a) => ({
+          id: a.id,
+          score: a.score,
+          total: a.total,
+          percentage: a.percentage,
+          durationSeconds: a.durationSeconds,
+          completedAt: a.completedAt,
+          topicBreakdown: Array.isArray(a.topicBreakdown) ? a.topicBreakdown.slice(0, 8) : undefined,
+          missedQuestions: Array.isArray(a.missedQuestions)
+            ? a.missedQuestions.slice(0, 6).map((m) => ({
+                question: String(m.question || '').slice(0, 160),
+                userAns: String(m.userAns || '').slice(0, 90),
+                correctAns: String(m.correctAns || '').slice(0, 90)
+              }))
+            : undefined
+        }))
+      : undefined
+  }));
+}
+
+/**
+ * Persists the user's quiz history and past performance attempts to Supabase Auth user_metadata
+ * so logging in from any other device immediately restores their recent quizzes & old scores.
+ */
+export function syncQuizHistoryToCloud(sessions: SavedQuizSession[], immediate = false): void {
+  if (typeof window === 'undefined' || !supabase) return;
+
+  const performSync = async () => {
+    if (!supabase) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) return;
+      const compact = compactSessionsForCloud(sessions);
+      const serialized = JSON.stringify(compact);
+      // Guardrail to stay well within Supabase auth user_metadata limits
+      const safePayload = serialized.length > 48_000 ? compact.slice(0, 8) : compact;
+      await supabase.auth.updateUser({
+        data: {
+          quiz_history_v1: safePayload,
+          quiz_history_updated_at: new Date().toISOString()
+        }
+      });
+    } catch (err) {
+      console.debug('[QuizHistoryStorage] Cloud sync notice:', err);
+    }
+  };
+
+  if (cloudQuizSyncTimer) {
+    clearTimeout(cloudQuizSyncTimer);
+    cloudQuizSyncTimer = null;
+  }
+
+  if (immediate) {
+    void performSync();
+  } else {
+    cloudQuizSyncTimer = setTimeout(() => {
+      cloudQuizSyncTimer = null;
+      void performSync();
+    }, 600);
+  }
+}
+
+/**
+ * Hydrates saved quizzes & attempt performance history from the signed-in user's Supabase cloud profile,
+ * merges them cleanly with local storage + Service Worker cache, and notifies listeners.
+ */
+export async function hydrateQuizHistoryFromCloud(explicitUserId?: string | null): Promise<SavedQuizSession[]> {
+  if (typeof window === 'undefined') return [];
+  if (explicitUserId) {
+    try {
+      localStorage.setItem('studyweb_active_user_id', explicitUserId);
+    } catch {}
+  }
+
+  const localSessions = loadQuizHistory();
+  if (!supabase) return localSessions;
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
+    if (!user) return localSessions;
+
+    if (user.id) {
+      try {
+        localStorage.setItem('studyweb_active_user_id', user.id);
+      } catch {}
+    }
+
+    const remoteRaw = user.user_metadata?.quiz_history_v1;
+    const remoteSessions: SavedQuizSession[] = Array.isArray(remoteRaw) ? remoteRaw : [];
+    const currentLocal = loadQuizHistory();
+
+    if (remoteSessions.length === 0) {
+      if (currentLocal.length > 0) {
+        syncQuizHistoryToCloud(currentLocal, true);
+      }
+      return currentLocal;
+    }
+
+    const merged = mergeQuizSessionLists(currentLocal, remoteSessions);
+    try {
+      localStorage.setItem(getQuizHistoryKey(), JSON.stringify(merged));
+    } catch {}
+    void syncQuizHistoryToServiceWorkerCache(merged);
+
+    if (merged.length > remoteSessions.length) {
+      syncQuizHistoryToCloud(merged);
+    }
+
+    window.dispatchEvent(new CustomEvent('studyweb-quiz-history-updated', { detail: merged }));
+    return merged;
+  } catch (err) {
+    console.debug('[QuizHistoryStorage] Cloud hydrate notice:', err);
+    return localSessions;
+  }
+}
+
 export function loadQuizHistory(): SavedQuizSession[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -379,6 +593,8 @@ export function saveQuizSession(session: SavedQuizSession): SavedQuizSession[] {
     }
   }
   void syncQuizHistoryToServiceWorkerCache(updated);
+  syncQuizHistoryToCloud(updated);
+  window.dispatchEvent(new CustomEvent('studyweb-quiz-history-updated', { detail: updated }));
   return updated;
 }
 
@@ -386,22 +602,49 @@ export function updateQuizSessionScore(
   sessionId: string,
   score: number,
   total: number,
-  topicBreakdown?: QuizTopicResult[]
+  topicBreakdown?: QuizTopicResult[],
+  meta?: {
+    durationSeconds?: number;
+    missedQuestions?: QuizAttemptMissedItem[];
+  }
 ): SavedQuizSession[] {
   const existing = loadQuizHistory();
   const percentage = total > 0 ? Math.round((score / total) * 100) : 0;
-  const updated = existing.map((item) =>
-    item.id === sessionId
-      ? {
-          ...item,
-          lastScore: score,
-          lastPercentage: percentage,
-          lastAttemptedAt: new Date().toISOString(),
-          attemptCount: (item.attemptCount || 0) + 1,
-          topicBreakdown: topicBreakdown && topicBreakdown.length > 0 ? topicBreakdown : item.topicBreakdown
-        }
-      : item
-  );
+  const completedAt = new Date().toISOString();
+  const newAttempt: QuizAttemptRecord = {
+    id: `attempt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    score,
+    total,
+    percentage,
+    durationSeconds: meta?.durationSeconds,
+    completedAt,
+    topicBreakdown: topicBreakdown && topicBreakdown.length > 0 ? topicBreakdown : undefined,
+    missedQuestions:
+      Array.isArray(meta?.missedQuestions) && meta!.missedQuestions.length > 0
+        ? meta!.missedQuestions.map((m) => ({
+            question: m.question,
+            userAns: m.userAns,
+            correctAns: m.correctAns,
+            explanation: m.explanation
+          }))
+        : undefined
+  };
+
+  const updated = existing.map((item) => {
+    if (item.id !== sessionId) return item;
+    const prevAttempts = Array.isArray(item.attempts) ? item.attempts : [];
+    const nextAttempts = [newAttempt, ...prevAttempts].slice(0, 25);
+    return {
+      ...item,
+      lastScore: score,
+      lastPercentage: percentage,
+      lastAttemptedAt: completedAt,
+      attemptCount: Math.max((item.attemptCount || 0) + 1, nextAttempts.length),
+      topicBreakdown: topicBreakdown && topicBreakdown.length > 0 ? topicBreakdown : item.topicBreakdown,
+      attempts: nextAttempts
+    };
+  });
+
   if (typeof window !== 'undefined') {
     try {
       localStorage.setItem(getQuizHistoryKey(), JSON.stringify(updated));
@@ -409,6 +652,8 @@ export function updateQuizSessionScore(
       // ignore
     }
     void syncQuizHistoryToServiceWorkerCache(updated);
+    syncQuizHistoryToCloud(updated, true);
+    window.dispatchEvent(new CustomEvent('studyweb-quiz-history-updated', { detail: updated }));
   }
   return updated;
 }
@@ -447,6 +692,8 @@ export function deleteQuizSession(sessionId: string): SavedQuizSession[] {
       } catch {}
     }
     void syncQuizHistoryToServiceWorkerCache(updated);
+    syncQuizHistoryToCloud(updated, true);
+    window.dispatchEvent(new CustomEvent('studyweb-quiz-history-updated', { detail: updated }));
   }
   return updated;
 }

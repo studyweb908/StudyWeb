@@ -19,13 +19,27 @@ import {
   ListChecks,
   PenLine,
   GitCompareArrows,
-  ToggleLeft
+  ToggleLeft,
+  BarChart3,
+  X,
+  Clock,
+  Trophy,
+  AlertTriangle,
+  CheckCircle,
+  RotateCcw,
+  Share2
 } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 import { Workspace, WorkspaceFile, WorkspaceNote, QuizQuestionItem } from './WorkspaceTypes';
 import InteractiveQuizRunner from './InteractiveQuizRunner';
+import {
+  triggerNativeDeviceShare,
+  resolveShareDisplayName
+} from './ShareContentModal';
 import { recordUserActivity } from '../../utils/userActivity';
 import {
   SavedQuizSession,
+  QuizAttemptRecord,
   PendingQuizIntent,
   QuizDraftState,
   QuizRunnerProgress,
@@ -36,6 +50,7 @@ import {
   deleteQuizSession,
   loadQuizDraftState,
   saveQuizDraftState,
+  hydrateQuizHistoryFromCloud,
   hydrateQuizHistoryFromServiceWorkerCache,
   hydrateQuizDraftFromServiceWorkerCache,
   getServiceWorkerQuizCacheStats
@@ -118,6 +133,77 @@ function getQuizTypeLabel(t: string): string {
   }
 }
 
+async function getSupabaseAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const {
+      data: { session }
+    } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      headers.Authorization = `Bearer ${session.access_token}`;
+    }
+  } catch {}
+  return headers;
+}
+
+function formatAttemptTimestamp(iso?: string): string {
+  if (!iso) return 'Previously completed';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'Previously completed';
+  return `${d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  })} · ${d.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit'
+  })}`;
+}
+
+function formatAttemptDuration(seconds?: number): string | null {
+  if (!seconds || seconds <= 0) return null;
+  const safe = Math.max(1, Math.round(seconds));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  if (mins === 0) return `${secs}s`;
+  return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+}
+
+function getQuizTierLabel(pct: number): string {
+  if (pct >= 90) return 'Mastery';
+  if (pct >= 70) return 'Proficient';
+  if (pct >= 50) return 'Developing';
+  return 'Needs Practice';
+}
+
+function getSessionAttempts(session: SavedQuizSession): QuizAttemptRecord[] {
+  if (Array.isArray(session.attempts) && session.attempts.length > 0) {
+    return session.attempts;
+  }
+  if (typeof session.lastPercentage === 'number' || typeof session.lastScore === 'number') {
+    const total = Math.max(1, session.questionCount || session.questions?.length || 1);
+    const score =
+      typeof session.lastScore === 'number'
+        ? session.lastScore
+        : Math.round(((session.lastPercentage || 0) / 100) * total);
+    const percentage =
+      typeof session.lastPercentage === 'number'
+        ? session.lastPercentage
+        : Math.round((score / total) * 100);
+    return [
+      {
+        id: `legacy-${session.id}`,
+        score,
+        total,
+        percentage,
+        completedAt: session.lastAttemptedAt || session.createdAt,
+        topicBreakdown: session.topicBreakdown
+      }
+    ];
+  }
+  return [];
+}
+
 export default function QuizCenterView({
   workspaces,
   activeWorkspace,
@@ -197,22 +283,32 @@ export default function QuizCenterView({
   const [runnerProgress, setRunnerProgress] = useState<QuizRunnerProgress | null>(
     () => initialDraftRef.current?.runnerProgress || null
   );
+  const [viewingHistorySession, setViewingHistorySession] = useState<SavedQuizSession | null>(null);
+  const [selectedAttemptIdx, setSelectedAttemptIdx] = useState<number>(0);
 
-  // Hydrate generated quizzes & active review progress from Service Worker CacheStorage on mount and connectivity changes
+  // Hydrate generated quizzes & active review progress from Service Worker CacheStorage + Cloud on mount and connectivity changes
   useEffect(() => {
     let isMounted = true;
 
-    const syncAndHydrateFromSw = async () => {
-      const [hydratedHistory, hydratedDraft] = await Promise.all([
+    const syncAndHydrate = async () => {
+      const [hydratedSwHistory, hydratedDraft, hydratedCloudHistory] = await Promise.all([
         hydrateQuizHistoryFromServiceWorkerCache(),
-        hydrateQuizDraftFromServiceWorkerCache()
+        hydrateQuizDraftFromServiceWorkerCache(),
+        hydrateQuizHistoryFromCloud()
       ]);
       if (!isMounted) return;
-      if (hydratedHistory.length > 0) {
-        setQuizHistory(hydratedHistory);
+      const latestHistory =
+        hydratedCloudHistory.length > 0
+          ? hydratedCloudHistory
+          : hydratedSwHistory.length > 0
+          ? hydratedSwHistory
+          : loadQuizHistory();
+
+      if (latestHistory.length > 0) {
+        setQuizHistory(latestHistory);
       }
       if (hydratedDraft && hydratedDraft.activeSessionId && !activeSession) {
-        const matchedSession = hydratedHistory.find((s) => s.id === hydratedDraft.activeSessionId);
+        const matchedSession = latestHistory.find((s) => s.id === hydratedDraft.activeSessionId);
         if (matchedSession) {
           setActiveSession(matchedSession);
           if (hydratedDraft.runnerProgress) {
@@ -226,23 +322,33 @@ export default function QuizCenterView({
       }
     };
 
-    syncAndHydrateFromSw();
+    syncAndHydrate();
 
     const handleOnline = () => {
       setIsOnline(true);
-      syncAndHydrateFromSw();
+      syncAndHydrate();
     };
     const handleOffline = () => {
       setIsOnline(false);
-      syncAndHydrateFromSw();
+      syncAndHydrate();
+    };
+    const handleQuizHistoryUpdated = () => {
+      if (!isMounted) return;
+      const fresh = loadQuizHistory();
+      setQuizHistory(fresh);
+      setViewingHistorySession((prev) =>
+        prev ? fresh.find((s) => s.id === prev.id) || prev : null
+      );
     };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    window.addEventListener('studyweb-quiz-history-updated', handleQuizHistoryUpdated);
     return () => {
       isMounted = false;
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('studyweb-quiz-history-updated', handleQuizHistoryUpdated);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -283,8 +389,8 @@ export default function QuizCenterView({
       const raw = localStorage.getItem(SEEN_WEB_SOURCES_STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : {};
       const prev = parsed?.[topicKey] || { urls: [], titles: [], attempts: 0 };
-      const mergedUrls = Array.from(new Set([...(Array.isArray(prev.urls) ? prev.urls : []), ...newUrls])).slice(-36);
-      const mergedTitles = Array.from(new Set([...(Array.isArray(prev.titles) ? prev.titles : []), ...newTitles])).slice(-36);
+      const mergedUrls = Array.from(new Set([...(Array.isArray(prev.urls) ? prev.urls : []), ...newUrls])).slice(-60);
+      const mergedTitles = Array.from(new Set([...(Array.isArray(prev.titles) ? prev.titles : []), ...newTitles])).slice(-60);
       parsed[topicKey] = {
         urls: mergedUrls,
         titles: mergedTitles,
@@ -489,9 +595,10 @@ export default function QuizCenterView({
     setIsAnalyzing(true);
     setStatusNotice(null);
     try {
+      const headers = await getSupabaseAuthHeaders();
       const res = await fetch('/api/analyze-quiz-materials', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           workspaceId: workspaceFilterId !== 'all' ? workspaceFilterId : activeWorkspace?.id,
           files: mode === 'uploaded' ? filesToAnalyze.slice(0, 8).map(compactFilePayload) : [],
@@ -553,7 +660,8 @@ export default function QuizCenterView({
           subject: activeWorkspace?.subject || '',
           excludeUrls,
           excludeTitles,
-          attemptIndex
+          attemptIndex,
+          searchSeed: Date.now()
         })
       });
       const data = await res.json().catch(() => null);
@@ -647,9 +755,10 @@ export default function QuizCenterView({
         workspaces[0] ||
         null;
 
+      const headers = await getSupabaseAuthHeaders();
       const res = await fetch('/api/generate-quiz', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           workspaceId: targetWs?.id,
           files: mode === 'uploaded' ? filesToUse.slice(0, 6).map(compactFilePayload) : [],
@@ -864,8 +973,14 @@ export default function QuizCenterView({
             setActiveSession(null);
             setRunnerProgress(null);
           }}
-          onComplete={(score, total, topicBreakdown) => {
-            const updated = updateQuizSessionScore(activeSession.id, score, total, topicBreakdown);
+          onComplete={(score, total, topicBreakdown, meta) => {
+            const updated = updateQuizSessionScore(
+              activeSession.id,
+              score,
+              total,
+              topicBreakdown,
+              meta
+            );
             setQuizHistory(updated);
             recordUserActivity({
               title: 'Completed Quiz',
@@ -1525,57 +1640,420 @@ export default function QuizCenterView({
           </p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {quizHistory.map((item) => (
-              <div
-                key={item.id}
-                className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 flex items-center justify-between gap-3"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
-                    {item.title}
+            {quizHistory.map((item) => {
+              const attempts = getSessionAttempts(item);
+              const hasPerformance = attempts.length > 0;
+              const latestAttempt = attempts[0];
+              return (
+                <div
+                  key={item.id}
+                  className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
+                      {item.title}
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate tabular-nums">
+                      {item.sourceType === 'internet' ? 'Internet' : 'Uploaded'} ·{' '}
+                      {getQuizTypeLabel(item.quizType)} · {item.difficulty} · {item.questionCount} Qs
+                    </div>
+                    {hasPerformance && latestAttempt && (
+                      <div className="text-[11px] font-semibold mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums">
+                        <span
+                          className={
+                            latestAttempt.percentage >= 70
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : 'text-rose-600 dark:text-rose-400'
+                          }
+                        >
+                          Last: {latestAttempt.score}/{latestAttempt.total} ({latestAttempt.percentage}%)
+                        </span>
+                        <span className="text-slate-300 dark:text-slate-600" aria-hidden="true">·</span>
+                        <span className="text-slate-500 dark:text-slate-400">
+                          {attempts.length} {attempts.length === 1 ? 'attempt' : 'attempts'}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate tabular-nums">
-                    {item.sourceType === 'internet' ? 'Internet' : 'Uploaded'} ·{' '}
-                    {getQuizTypeLabel(item.quizType)} · {item.difficulty} · {item.questionCount} Qs
-                    {typeof item.lastPercentage === 'number'
-                      ? ` · Last Score: ${item.lastPercentage}%`
-                      : ''}
-                  </div>
-                </div>
 
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRunnerProgress(null);
-                      setActiveSession(item);
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-[#5145F5] hover:bg-indigo-700 text-white text-xs font-bold inline-flex items-center gap-1 transition-colors cursor-pointer min-h-[36px]"
-                  >
-                    <Play className="w-3 h-3 fill-current" />
-                    <span>Retake</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const updated = deleteQuizSession(item.id);
-                      setQuizHistory(updated);
-                      if (activeSession?.id === item.id) {
-                        setActiveSession(null);
+                  <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 shrink-0">
+                    {hasPerformance && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedAttemptIdx(0);
+                          setViewingHistorySession(item);
+                        }}
+                        className="flex-1 sm:flex-initial px-3 py-1.5 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/40 hover:bg-indigo-100/80 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer min-h-[38px] whitespace-nowrap"
+                      >
+                        <BarChart3 className="w-3.5 h-3.5 shrink-0" />
+                        <span>Old Performance</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
                         setRunnerProgress(null);
-                      }
-                    }}
-                    aria-label="Delete saved quiz"
-                    className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                        setActiveSession(item);
+                      }}
+                      className="flex-1 sm:flex-initial px-3 py-1.5 rounded-lg bg-[#5145F5] hover:bg-indigo-700 text-white text-xs font-bold inline-flex items-center justify-center gap-1 transition-colors cursor-pointer min-h-[38px] whitespace-nowrap"
+                    >
+                      <Play className="w-3 h-3 fill-current shrink-0" />
+                      <span>Retake</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const updated = deleteQuizSession(item.id);
+                        setQuizHistory(updated);
+                        if (activeSession?.id === item.id) {
+                          setActiveSession(null);
+                          setRunnerProgress(null);
+                        }
+                        if (viewingHistorySession?.id === item.id) {
+                          setViewingHistorySession(null);
+                        }
+                      }}
+                      aria-label="Delete saved quiz"
+                      className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer min-h-[38px] min-w-[38px] flex items-center justify-center"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
+
+      {/* OLD PERFORMANCE MODAL (MOBILE-RESPONSIVE) */}
+      {viewingHistorySession && (() => {
+        const attempts = getSessionAttempts(viewingHistorySession);
+        const safeIdx = Math.min(Math.max(0, selectedAttemptIdx), Math.max(0, attempts.length - 1));
+        const selectedAttempt = attempts[safeIdx] || null;
+        const bestPct =
+          attempts.length > 0 ? Math.max(...attempts.map((a) => a.percentage)) : 0;
+        const latestPct = attempts[0]?.percentage ?? 0;
+        const selectedMissed = selectedAttempt
+          ? Math.max(0, selectedAttempt.total - selectedAttempt.score)
+          : 0;
+        const selectedDuration = formatAttemptDuration(selectedAttempt?.durationSeconds);
+        const selectedTopics = Array.isArray(selectedAttempt?.topicBreakdown)
+          ? selectedAttempt!.topicBreakdown!
+          : [];
+        const lackingTopics = selectedTopics.filter(
+          (t) => t.total > 0 && Math.round((t.correct / t.total) * 100) < 70
+        );
+
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+            onClick={() => setViewingHistorySession(null)}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="old-performance-modal-title"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full sm:max-w-2xl bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="px-4 sm:px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-start justify-between gap-3 shrink-0">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-[#5145F5] dark:text-indigo-400 text-[11px] font-bold uppercase tracking-wider">
+                    <BarChart3 className="w-3.5 h-3.5 shrink-0" />
+                    <span>Old Performance History</span>
+                  </div>
+                  <h3
+                    id="old-performance-modal-title"
+                    className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white truncate mt-0.5"
+                  >
+                    {viewingHistorySession.title}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5 tabular-nums">
+                    {getQuizTypeLabel(viewingHistorySession.quizType)} · {viewingHistorySession.difficulty} ·{' '}
+                    {viewingHistorySession.questionCount} Questions
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setViewingHistorySession(null)}
+                  aria-label="Close old performance viewer"
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer min-h-[38px] min-w-[38px] flex items-center justify-center shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Modal Scrollable Content */}
+              <div className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1">
+                {/* Summary KPI Strip */}
+                <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                  <div className="p-3 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/50 text-center">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 flex items-center justify-center gap-1">
+                      <Trophy className="w-3 h-3 shrink-0 hidden sm:inline" />
+                      <span>Best Score</span>
+                    </div>
+                    <div className="text-base sm:text-xl font-black text-emerald-700 dark:text-emerald-300 mt-0.5 tabular-nums">
+                      {bestPct}%
+                    </div>
+                  </div>
+                  <div className="p-3 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200/70 dark:border-indigo-800/50 text-center">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                      Latest Score
+                    </div>
+                    <div className="text-base sm:text-xl font-black text-indigo-700 dark:text-indigo-300 mt-0.5 tabular-nums">
+                      {latestPct}%
+                    </div>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-center">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Attempts
+                    </div>
+                    <div className="text-base sm:text-xl font-black text-slate-900 dark:text-white mt-0.5 tabular-nums">
+                      {attempts.length}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Attempt History Selector */}
+                <div className="space-y-2">
+                  <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                    Past Attempts (newest first)
+                  </div>
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                    {attempts.map((attempt, idx) => {
+                      const isSelected = idx === safeIdx;
+                      const isPass = attempt.percentage >= 70;
+                      const dur = formatAttemptDuration(attempt.durationSeconds);
+                      return (
+                        <button
+                          key={attempt.id}
+                          type="button"
+                          onClick={() => setSelectedAttemptIdx(idx)}
+                          className={`w-full text-left p-3 rounded-xl border transition-colors flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 cursor-pointer ${
+                            isSelected
+                              ? 'border-[#5145F5] bg-indigo-50/60 dark:bg-indigo-950/40'
+                              : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                              <span>Attempt #{attempts.length - idx}</span>
+                              <span
+                                className={`text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
+                                  isPass
+                                    ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300'
+                                    : 'bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300'
+                                }`}
+                              >
+                                {isPass ? 'Passed' : 'Practice'}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 tabular-nums flex flex-wrap items-center gap-x-2">
+                              <span>{formatAttemptTimestamp(attempt.completedAt)}</span>
+                              {dur && (
+                                <span className="inline-flex items-center gap-0.5">
+                                  <Clock className="w-3 h-3" />
+                                  <span>{dur}</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0 tabular-nums">
+                            <div
+                              className={`text-sm font-extrabold ${
+                                isPass
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : 'text-rose-600 dark:text-rose-400'
+                              }`}
+                            >
+                              {attempt.percentage}%
+                            </div>
+                            <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                              {attempt.score}/{attempt.total}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Selected Attempt Breakdown */}
+                {selectedAttempt && (
+                  <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold tabular-nums">
+                      <span className="text-slate-800 dark:text-slate-100 font-bold">
+                        Attempt #{attempts.length - safeIdx} Breakdown
+                        {selectedDuration ? ` · ${selectedDuration}` : ''}
+                      </span>
+                      <span
+                        className={
+                          selectedAttempt.percentage >= 70
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-rose-600 dark:text-rose-400'
+                        }
+                      >
+                        {selectedAttempt.score} Correct · {selectedMissed} Missed ({selectedAttempt.percentage}%)
+                      </span>
+                    </div>
+
+                    <div className="w-full h-3 rounded-full bg-slate-200/80 dark:bg-slate-700 overflow-hidden flex">
+                      {selectedAttempt.score > 0 && (
+                        <div
+                          className="h-full bg-emerald-500"
+                          style={{
+                            width: `${(selectedAttempt.score / Math.max(1, selectedAttempt.total)) * 100}%`
+                          }}
+                        />
+                      )}
+                      {selectedMissed > 0 && (
+                        <div
+                          className="h-full bg-rose-400 dark:bg-rose-500/80"
+                          style={{
+                            width: `${(selectedMissed / Math.max(1, selectedAttempt.total)) * 100}%`
+                          }}
+                        />
+                      )}
+                    </div>
+
+                    {selectedTopics.length > 0 && (
+                      <div className="space-y-2 pt-2 border-t border-slate-200/70 dark:border-slate-700/70">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs">
+                          <span className="font-bold text-slate-800 dark:text-slate-100">
+                            Topic Breakdown
+                          </span>
+                          {lackingTopics.length > 0 ? (
+                            <span className="text-rose-600 dark:text-rose-400 font-semibold inline-flex items-center gap-1">
+                              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                              <span>Review: {lackingTopics.map((t) => t.topic).join(', ')}</span>
+                            </span>
+                          ) : (
+                            <span className="text-emerald-600 dark:text-emerald-400 font-semibold inline-flex items-center gap-1">
+                              <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                              <span>Strong across all topics</span>
+                            </span>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          {selectedTopics.map((t) => {
+                            const pct = t.total > 0 ? Math.round((t.correct / t.total) * 100) : 0;
+                            const isWeak = pct < 70;
+                            return (
+                              <div key={t.topic} className="space-y-1">
+                                <div className="flex items-center justify-between gap-2 text-xs tabular-nums">
+                                  <span className="text-slate-700 dark:text-slate-200 font-medium truncate">
+                                    {t.topic}
+                                  </span>
+                                  <span
+                                    className={`font-semibold shrink-0 ${
+                                      isWeak
+                                        ? 'text-rose-600 dark:text-rose-400'
+                                        : 'text-emerald-600 dark:text-emerald-400'
+                                    }`}
+                                  >
+                                    {t.correct}/{t.total} ({pct}%)
+                                  </span>
+                                </div>
+                                <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full ${isWeak ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                                    style={{ width: `${Math.max(4, pct)}%` }}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {Array.isArray(selectedAttempt.missedQuestions) &&
+                      selectedAttempt.missedQuestions.length > 0 && (
+                        <div className="space-y-2 pt-2 border-t border-slate-200/70 dark:border-slate-700/70">
+                          <div className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                            Missed Questions ({selectedAttempt.missedQuestions.length})
+                          </div>
+                          <div className="space-y-2">
+                            {selectedAttempt.missedQuestions.map((mq, mqIdx) => (
+                              <div
+                                key={mqIdx}
+                                className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs space-y-1"
+                              >
+                                <p className="font-bold text-slate-900 dark:text-white leading-snug">
+                                  {mq.question}
+                                </p>
+                                <p className="text-rose-600 dark:text-rose-400">
+                                  Your answer: <span className="font-semibold">{mq.userAns}</span>
+                                </p>
+                                <p className="text-emerald-700 dark:text-emerald-400">
+                                  Correct answer: <span className="font-semibold">{mq.correctAns}</span>
+                                </p>
+                                {mq.explanation && (
+                                  <p className="text-slate-600 dark:text-slate-300 leading-relaxed pt-0.5">
+                                    {mq.explanation}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="px-4 sm:px-6 py-3.5 border-t border-slate-100 dark:border-slate-800 flex flex-col-reverse sm:flex-row sm:flex-wrap items-center justify-end gap-2 shrink-0 bg-slate-50/70 dark:bg-slate-900/80">
+                <button
+                  type="button"
+                  onClick={() => setViewingHistorySession(null)}
+                  className="w-full sm:w-auto px-4 py-2.5 min-h-[42px] rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+                {selectedAttempt && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerNativeDeviceShare({
+                        type: 'quiz-result',
+                        quizTitle: viewingHistorySession.title,
+                        quizScore: selectedAttempt.score,
+                        quizTotal: selectedAttempt.total,
+                        quizPercentage: selectedAttempt.percentage,
+                        quizTier: getQuizTierLabel(selectedAttempt.percentage),
+                        quizDurationLabel: selectedDuration || undefined,
+                        quizCompletedAt: formatAttemptTimestamp(selectedAttempt.completedAt),
+                        userName: resolveShareDisplayName()
+                      });
+                    }}
+                    className="w-full sm:w-auto px-4 py-2.5 min-h-[42px] rounded-xl bg-slate-900 dark:bg-indigo-600 hover:bg-slate-800 dark:hover:bg-indigo-500 text-white font-bold text-xs inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Share2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>Share Your Old Performance</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sessionToRetake = viewingHistorySession;
+                    setViewingHistorySession(null);
+                    setRunnerProgress(null);
+                    setActiveSession(sessionToRetake);
+                  }}
+                  className="w-full sm:w-auto px-5 py-2.5 min-h-[42px] rounded-xl bg-[#5145F5] hover:bg-indigo-700 text-white font-bold text-xs inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                  <span>Retake Quiz</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

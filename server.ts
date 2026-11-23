@@ -5718,13 +5718,42 @@ Return a valid JSON object matching the requested schema.`
         });
       } else if (qType === "MatchFollowing") {
         const pairSlice: Array<{ id: string; left: string; right: string }> = [];
-        for (let p = 0; p < 4; p++) {
+        const usedLefts = new Set<string>();
+        const usedRights = new Set<string>();
+        for (let p = 0; p < facts.length && pairSlice.length < 4; p++) {
           const item = facts[(i + p) % facts.length];
-          pairSlice.push({
-            id: `pair-${i}-${p}`,
-            left: item.term,
-            right: item.detail.slice(0, 110)
-          });
+          const cleanLeft = String(item.term || "").trim();
+          const cleanRight = String(item.detail || "").slice(0, 110).trim();
+          const leftKey = cleanLeft.toLowerCase();
+          const rightKey = cleanRight.toLowerCase();
+          if (cleanLeft && cleanRight && !usedLefts.has(leftKey) && !usedRights.has(rightKey)) {
+            usedLefts.add(leftKey);
+            usedRights.add(rightKey);
+            pairSlice.push({
+              id: `pair-${i}-${pairSlice.length}`,
+              left: cleanLeft,
+              right: cleanRight
+            });
+          }
+        }
+        const topicLabel = fact.topic || internetTopic || "Core Study Concept";
+        const supplementalPairs = [
+          { left: `${topicLabel} — Core Definition`, right: `Primary meaning and foundational rule of ${topicLabel}` },
+          { left: `${topicLabel} — Mechanism`, right: `How key steps and variables interact in ${topicLabel}` },
+          { left: `${topicLabel} — Key Application`, right: `Real-world or exam problem where ${topicLabel} is applied` },
+          { left: `${topicLabel} — Verification`, right: `Checking assumptions, units, and edge cases in ${topicLabel}` }
+        ];
+        for (const sup of supplementalPairs) {
+          if (pairSlice.length >= 4) break;
+          if (!usedLefts.has(sup.left.toLowerCase()) && !usedRights.has(sup.right.toLowerCase())) {
+            usedLefts.add(sup.left.toLowerCase());
+            usedRights.add(sup.right.toLowerCase());
+            pairSlice.push({
+              id: `pair-${i}-${pairSlice.length}`,
+              left: sup.left,
+              right: sup.right
+            });
+          }
         }
         questions.push({
           id: `ai-quiz-${Date.now()}-${i}`,
@@ -5809,10 +5838,28 @@ Return a valid JSON object matching the requested schema.`
         .map((s: any, idx: number) => `Web Source #${idx + 1} ("${s.name || s.title || "Source"}", ${s.url || ""}):\n${String(s.transcription || s.summary || "").slice(0, 4000)}`)
         .join("\n\n");
 
+      let workspaceRagContext = "";
+      if (workspaceId && (Array.isArray(files) && files.length > 0 || Array.isArray(notes) && notes.length > 0)) {
+        try {
+          workspaceRagContext = await performAdvancedRAG(
+            ai,
+            "Summarize all major chapters, key concepts, definitions, formulas, and examinable facts from this workspace's uploaded materials.",
+            files,
+            notes,
+            14,
+            workspaceId,
+            req.headers.authorization
+          );
+        } catch {
+          workspaceRagContext = "";
+        }
+      }
+
       const prompt = `Analyze the following study content carefully so the student knows exactly what topics and concepts will be tested before generating a quiz.${internetTopic ? `\nTarget Internet Topic: "${internetTopic}"` : ""}
 
 ${fileContext ? `=== UPLOADED FILES ===\n${fileContext}\n` : ""}
 ${noteContext ? `=== STUDY NOTES ===\n${noteContext}\n` : ""}
+${workspaceRagContext ? `=== INDEXED WORKSPACE CONTENT ===\n${workspaceRagContext.slice(0, 12000)}\n` : ""}
 ${webContext ? `=== INTERNET SOURCES ===\n${webContext}\n` : ""}
 
 Return ONLY JSON matching this schema:
@@ -5922,10 +5969,10 @@ Return ONLY JSON matching this schema:
           "The quiz MUST consist ONLY of Fill in the Blank questions. Each question text MUST contain '_______' representing the single missing key term/value/phrase. Put the primary exact answer in options[0] (array of 1 string), set correctIndex to 0, and provide 1-3 valid accepted phrasing/spelling variants in acceptedAnswers (array of strings).";
       } else if (qType === "MatchFollowing") {
         typeInstruction =
-          "The quiz MUST consist ONLY of Match the Following questions. Each question MUST include a concise prompt (e.g., 'Match each concept with its correct definition/formula') AND a 'pairs' array of EXACTLY 4 objects, each with { id: 'p1'|'p2'|'p3'|'p4', left: 'concise term/premise', right: 'concise matching definition/answer' }. Set options to [] and correctIndex to 0.";
+          "The quiz MUST consist ONLY of Match the Following questions. Each question MUST include a clear prompt (e.g., 'Match each concept from the study material with its correct definition/role') AND a 'pairs' array of EXACTLY 4 objects, each with { id: 'p1'|'p2'|'p3'|'p4', left: 'concise unique term/concept (2-8 words)', right: 'concise unique matching definition/outcome (4-18 words)' }. CRITICAL: Every 'left' value MUST be completely distinct, every 'right' value MUST be completely distinct, and each pair MUST have an unambiguous 1-to-1 correspondence grounded in the provided material. Set options to [] and correctIndex to 0.";
       } else {
         typeInstruction =
-          "The quiz MUST consist ONLY of standard Multiple-Choice Questions (MCQ) with EXACTLY 4 distinct options and a valid correctIndex (0, 1, 2, or 3).";
+          "The quiz MUST consist ONLY of standard Multiple-Choice Questions (MCQ) with EXACTLY 4 distinct, plausible options and a valid correctIndex (0, 1, 2, or 3). NEVER use generic filler choices like 'All of the above', 'None of the above', or 'Option 3'.";
       }
 
       const focusInstruction =
@@ -5934,15 +5981,20 @@ Return ONLY JSON matching this schema:
           : "";
 
       const systemInstruction = `You are an expert educator and academic assessment designer.
-Generate EXACTLY ${questionCount} high-quality practice questions at "${diffLevel}" difficulty grounded strictly in the provided study materials and/or selected internet research sources.
-YOU MUST RETURN EXACTLY ${questionCount} QUESTIONS.
+Generate EXACTLY ${questionCount} high-quality, exam-grade practice questions at "${diffLevel}" difficulty grounded STRICTLY in the provided uploaded workspace materials, study notes, and/or selected internet research sources.
+YOU MUST RETURN EXACTLY ${questionCount} UNIQUE QUESTIONS covering different facts/concepts from the material (never repeat the same question twice).
 
 ${typeInstruction}
 ${focusInstruction}
 
+Strict Content Quality Rules:
+- Test concrete facts, definitions, formulas, mechanisms, cause-and-effect relationships, and worked scenarios directly from the provided content.
+- Write self-contained, clear questions without vague meta-references like "According to file #1" when the actual subject concept can be named directly.
+- Vary the correctIndex across MCQ questions so the answer is not always index 0.
+
 Difficulty calibration for "${diffLevel}":
-- Easy: Direct recall of core definitions, facts, and main ideas.
-- Medium: Conceptual understanding, comparisons, and applied examples.
+- Easy: Direct recall of core definitions, facts, and main ideas from the material.
+- Medium: Conceptual understanding, comparisons, mechanisms, and applied examples.
 - Hard: Multi-step reasoning, subtle distinctions, edge cases, and deep synthesis.
 
 Each question MUST include:
@@ -5950,7 +6002,7 @@ Each question MUST include:
 2. "options": Array of choices (4 for MCQ, 2 ['True','False'] for TF, 1 exact answer string for FillBlank, [] for MatchFollowing).
 3. "correctIndex": Valid integer index into options (0 for FillBlank/MatchFollowing).
 4. "acceptedAnswers": (Required for FillBlank) Array of valid short answer variants.
-5. "pairs": (Required for MatchFollowing) Array of 4 { id, left, right } objects.
+5. "pairs": (Required for MatchFollowing) Array of 4 unique { id, left, right } objects with unambiguous 1-to-1 matches.
 6. "explanation": Detailed, encouraging educational explanation of why the answer is right and how concepts connect.
 7. "difficulty": "${diffLevel}"
 8. "type": "${qType}"
@@ -5975,8 +6027,9 @@ Return ONLY valid JSON matching the requested schema.`;
 
       let contextText = "";
       if (hasFiles || hasNotes) {
-        const ragQuery = `Generate a ${diffLevel} difficulty ${qType} quiz with ${questionCount} questions covering key concepts, definitions, formulas, and examples.`;
-        contextText = await performAdvancedRAG(ai, ragQuery, files, notes, 15, workspaceId, req.headers.authorization);
+        const focusTerm = Array.isArray(focusTopics) && focusTopics.length > 0 ? focusTopics.join(", ") : "all core concepts, definitions, formulas, mechanisms, and examples";
+        const ragQuery = `Extract detailed study material for a ${diffLevel} difficulty ${qType} quiz with ${questionCount} questions covering ${focusTerm}.`;
+        contextText = await performAdvancedRAG(ai, ragQuery, files, notes, 20, workspaceId, req.headers.authorization);
       }
 
       const directFilesContext = (Array.isArray(files) ? files : [])
@@ -6082,9 +6135,9 @@ Return ONLY valid JSON matching the requested schema.`;
 
       const { response, modelUsed } = await generateContentWithModelFailover(ai, {
         contents: quizParts,
-        preferredModels: ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-4-hydrogen"],
+        preferredModels: ["gemini-4-hydrogen", "gemini-3.1-flash-lite", "gemini-3-flash-preview"],
         config: quizConfig,
-        timeoutMs: 20000,
+        timeoutMs: 32000,
         maxPasses: 2,
         label: "GenerateQuiz"
       });
@@ -6102,15 +6155,31 @@ Return ONLY valid JSON matching the requested schema.`;
           const quizWithIds = quizQuestions.map((q: any, i: number) => {
             let safeOptions = Array.isArray(q.options) ? q.options.map((o: any) => String(o)) : [];
             let safeCorrectIndex = Number.isInteger(q.correctIndex) ? q.correctIndex : 0;
-            let safePairs = Array.isArray(q.pairs)
-              ? q.pairs
-                  .filter((p: any) => p && p.left && p.right)
-                  .map((p: any, pIdx: number) => ({
-                    id: String(p.id || `p-${i}-${pIdx}`),
-                    left: String(p.left).trim(),
-                    right: String(p.right).trim()
-                  }))
-              : undefined;
+            let safePairs: Array<{ id: string; left: string; right: string }> | undefined = undefined;
+            if (Array.isArray(q.pairs)) {
+              const seenLeft = new Set<string>();
+              const seenRight = new Set<string>();
+              const deduped: Array<{ id: string; left: string; right: string }> = [];
+              for (let pIdx = 0; pIdx < q.pairs.length; pIdx++) {
+                const p = q.pairs[pIdx];
+                const left = String(p?.left || "").trim();
+                const right = String(p?.right || "").trim();
+                if (!left || !right) continue;
+                const lKey = left.toLowerCase();
+                const rKey = right.toLowerCase();
+                if (seenLeft.has(lKey) || seenRight.has(rKey)) continue;
+                seenLeft.add(lKey);
+                seenRight.add(rKey);
+                deduped.push({
+                  id: `pair-${i}-${deduped.length}`,
+                  left,
+                  right
+                });
+              }
+              if (deduped.length > 0) {
+                safePairs = deduped.slice(0, 5);
+              }
+            }
 
             if (qType === "TF") {
               safeOptions = ["True", "False"];
@@ -6463,33 +6532,73 @@ Analyze the student's incorrect quiz answers and provide a clear, encouraging ex
       const rotationAngles = [
         {
           label: 'Foundational Principles & Core Theory',
-          ytSuffix: 'lecture explanation tutorial',
+          ytSuffix: 'lecture explanation tutorial fundamentals',
           wikiQuerySuffix: '',
+          paperSuffix: 'introduction overview principles',
           focusPrompt: 'foundational principles, core definitions, and primary mechanisms'
         },
         {
           label: 'Real-World Phenomena, Experiments & Applications',
           ytSuffix: 'experiments demonstrations real world applications',
           wikiQuerySuffix: 'applications phenomena experiments',
-          focusPrompt: 'real-world applications, experimental demonstrations, optical/physical phenomena, and practical case studies'
+          paperSuffix: 'applications experimental study',
+          focusPrompt: 'real-world applications, experimental demonstrations, and practical case studies'
         },
         {
           label: 'Mathematical Models, Formulas & Problem Solving',
           ytSuffix: 'problem solving worked examples equations',
-          wikiQuerySuffix: 'equations theory models',
+          wikiQuerySuffix: 'equations theory models formula',
+          paperSuffix: 'mathematical model equations derivation',
           focusPrompt: 'mathematical formulations, quantitative laws, derivations, and worked problem-solving examples'
         },
         {
           label: 'Advanced Mechanisms, Modern Research & Deep Dive',
           ytSuffix: 'university lecture advanced concepts deep dive',
-          wikiQuerySuffix: 'quantum modern physics mechanisms',
+          wikiQuerySuffix: 'mechanisms research theory analysis',
+          paperSuffix: 'recent advances review mechanism',
           focusPrompt: 'advanced theoretical mechanisms, university-level analysis, and modern scientific developments'
         },
         {
           label: 'Historical Discoveries, Classical vs Modern Models & Exam Prep',
           ytSuffix: 'history discovery crash course revision',
           wikiQuerySuffix: 'history discovery timeline',
+          paperSuffix: 'historical development evolution perspective',
           focusPrompt: 'historical milestones, key scientific discoveries, comparative models, and high-yield exam takeaways'
+        },
+        {
+          label: 'Visual Walkthroughs, Diagrams & Intuitive Analogies',
+          ytSuffix: 'animated visual explanation intuitive guide',
+          wikiQuerySuffix: 'structure diagram classification',
+          paperSuffix: 'framework taxonomy structure visualization',
+          focusPrompt: 'visual mental models, structural diagrams, classifications, and intuitive analogies'
+        },
+        {
+          label: 'Comparative Studies, Trade-offs & Debates',
+          ytSuffix: 'comparison differences versus explained',
+          wikiQuerySuffix: 'comparison types variants',
+          paperSuffix: 'comparative evaluation benchmark analysis',
+          focusPrompt: 'comparisons across subtypes, competing theories, trade-offs, and key distinctions'
+        },
+        {
+          label: 'Industry Case Studies & Engineering Practice',
+          ytSuffix: 'engineering case study practical implementation',
+          wikiQuerySuffix: 'technology engineering uses',
+          paperSuffix: 'case study industrial practice implementation',
+          focusPrompt: 'applied engineering uses, real-world systems, and practical implementation lessons'
+        },
+        {
+          label: 'Laboratory Methods, Measurement & Data Analysis',
+          ytSuffix: 'lab experiment measurement data analysis',
+          wikiQuerySuffix: 'measurement method technique',
+          paperSuffix: 'methodology measurement empirical analysis',
+          focusPrompt: 'experimental techniques, measurement methods, instrumentation, and data interpretation'
+        },
+        {
+          label: 'Common Misconceptions, Edge Cases & Mastery Review',
+          ytSuffix: 'common mistakes misconceptions exam review',
+          wikiQuerySuffix: 'paradox limits properties',
+          paperSuffix: 'limitations challenges critical review',
+          focusPrompt: 'common student misconceptions, boundary conditions, edge cases, and mastery checkpoints'
         }
       ];
 
@@ -6678,7 +6787,8 @@ Analyze the student's incorrect quiz answers and provide a clear, encouraging ex
             numericAttempt > 0 && activeAngle.wikiQuerySuffix
               ? `${searchQuery} ${activeAngle.wikiQuerySuffix}`
               : searchQuery;
-          const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(wikiSearchTerm)}&utf8=1&format=json&srlimit=12`;
+          const wikiOffset = numericAttempt > 0 ? (numericAttempt * 5) % 50 : 0;
+          const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(wikiSearchTerm)}&utf8=1&format=json&srlimit=16&sroffset=${wikiOffset}`;
           const searchRes = await fetch(searchUrl, {
             signal: controller.signal,
             headers: { 'User-Agent': 'StudyWeb-Academic-Notebook/1.0' }
@@ -6689,7 +6799,7 @@ Analyze the student's incorrect quiz answers and provide a clear, encouraging ex
           const rawHits: any[] = searchData?.query?.search || [];
           if (rawHits.length === 0) return { wikiArticles: [], wikiPdfs: [] };
 
-          // Filter out previously seen Wikipedia articles first; if all 12 were seen, rotate by offset
+          // Filter out previously seen Wikipedia articles strictly so repeated searches return new articles
           const unseenHits = rawHits.filter((hit: any) => {
             const slug = encodeURIComponent(String(hit.title || '').replace(/\s+/g, '_'));
             const candidateUrl = `https://en.wikipedia.org/wiki/${slug}`;
@@ -6703,7 +6813,7 @@ Analyze the student's incorrect quiz answers and provide a clear, encouraging ex
           const chosenHits =
             unseenHits.length > 0
               ? unseenHits.slice(0, 4)
-              : rawHits.slice((numericAttempt * 2) % Math.max(1, rawHits.length)).concat(rawHits).slice(0, 4);
+              : rawHits.slice((numericAttempt * 3) % Math.max(1, rawHits.length)).concat(rawHits).slice(0, 4);
 
           const detailedHits = await Promise.all(
             chosenHits.map(async (hit: any, idx: number) => {
@@ -6794,8 +6904,9 @@ Analyze the student's incorrect quiz answers and provide a clear, encouraging ex
           try {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), 3800);
-            const oaPage = (numericAttempt % 4) + 1;
-            const oaUrl = `https://api.openalex.org/works?search=${encodeURIComponent(searchQuery)}&filter=is_oa:true&per-page=10&page=${oaPage}`;
+            const oaPage = Math.min(20, numericAttempt + 1);
+            const oaQuery = numericAttempt > 0 ? `${searchQuery} ${activeAngle.paperSuffix}` : searchQuery;
+            const oaUrl = `https://api.openalex.org/works?search=${encodeURIComponent(oaQuery)}&filter=is_oa:true&per-page=15&page=${oaPage}`;
             const oaRes = await fetch(oaUrl, {
               signal: controller.signal,
               headers: { 'User-Agent': 'StudyWeb-Academic-Notebook/1.0 (mailto:research@studyweb.edu)' }
@@ -6866,8 +6977,9 @@ Analyze the student's incorrect quiz answers and provide a clear, encouraging ex
           try {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), 3500);
-            const startOffset = (numericAttempt * 3) % 15;
-            const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(searchQuery)}&start=${startOffset}&max_results=8`;
+            const startOffset = Math.min(100, numericAttempt * 6);
+            const arxivQuery = numericAttempt > 0 ? `${searchQuery} ${activeAngle.paperSuffix.split(' ')[0]}` : searchQuery;
+            const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(arxivQuery)}&start=${startOffset}&max_results=12`;
             const arxivRes = await fetch(arxivUrl, { signal: controller.signal });
             clearTimeout(timer);
             if (!arxivRes.ok) return [];
@@ -6933,11 +7045,11 @@ Analyze the student's incorrect quiz answers and provide a clear, encouraging ex
 
         const exclusionDirective =
           excludedUrlSet.size > 0 || excludedTitleSet.size > 0
-            ? `\nCRITICAL FRESHNESS REQUIREMENT: The student has already seen the following resources in previous searches. DO NOT repeat any of these URLs or titles—find completely DIFFERENT, fresh web sources and cover a new perspective (${activeAngle.label}):\n- Excluded URLs: ${Array.from(excludedUrlSet).slice(0, 12).join(', ')}\n- Excluded Titles: ${Array.from(excludedTitleSet).slice(0, 12).join(', ')}\n`
-            : `\nFocus Perspective: ${activeAngle.label} (${activeAngle.focusPrompt}).\n`;
+            ? `\nCRITICAL FRESHNESS REQUIREMENT (Search Iteration #${numericAttempt + 1}): The student has already seen the following resources in previous searches. DO NOT repeat any of these URLs, domains with the same page, or similar titles—discover COMPLETELY NEW, different web sources and cover a fresh perspective (${activeAngle.label}):\n- Excluded URLs: ${Array.from(excludedUrlSet).slice(-40).join(', ')}\n- Excluded Titles: ${Array.from(excludedTitleSet).slice(-40).join(', ')}\n`
+            : `\nFocus Perspective (Search Iteration #${numericAttempt + 1}): ${activeAngle.label} (${activeAngle.focusPrompt}).\n`;
 
         const prompt = `You are a Gemini Notebook (NotebookLM) Research Engine helping a student research "${searchQuery}"${subject ? ` for their workspace in "${subject}"` : ''}.
-Use Google Search to synthesize a fresh, comprehensive academic Research Brief focused on **${activeAngle.label}** (${activeAngle.focusPrompt}) and identify 3 authoritative educational articles/study guides (e.g. Khan Academy, MIT OpenCourseWare, Britannica, LibreTexts, HyperPhysics, Physics Classroom, Nature, Stanford Encyclopedia, National Geographic, NASA, OpenStax).
+Use Google Search to synthesize a fresh, comprehensive academic Research Brief focused on **${activeAngle.label}** (${activeAngle.focusPrompt}) and identify 3 authoritative educational articles/study guides (e.g. Khan Academy, MIT OpenCourseWare, Britannica, LibreTexts, HyperPhysics, Physics Classroom, Nature, Stanford Encyclopedia, National Geographic, NASA, OpenStax, Coursera, GeeksforGeeks, Brilliant, university .edu notes).
 ${exclusionDirective}
 IMPORTANT: Never output generic search URLs like youtube.com/results or google.com/search. Only include real, direct article URLs from your Google Search grounding.
 
@@ -6983,9 +7095,9 @@ Return ONLY valid JSON (no markdown fences) matching this exact structure:
 }`;
 
         const candidateModels = getAvailableCandidateModels([
-          "gemini-3-flash-preview",
+          "gemini-4-hydrogen",
           "gemini-3.1-flash-lite",
-          "gemini-4-hydrogen"
+          "gemini-3-flash-preview"
         ]);
 
         let lastErr: any = null;

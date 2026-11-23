@@ -375,8 +375,8 @@ export function generateQuizShareCardDataUrl(
   const tierLabel =
     options.quizTier ||
     (safePct >= 90 ? 'Mastery' : safePct >= 70 ? 'Proficient' : safePct >= 50 ? 'Developing' : 'Needs Practice');
-  const displayName = resolveShareDisplayName(options.userName);
-  const userHandle = resolveStreakUserHandle(options.userName);
+  const displayName =
+    resolveShareDisplayName(options.userName).replace(/^@+/, '').trim() || 'StudyWeb Learner';
   const completedAtText = options.quizCompletedAt || formatQuizCardDateTime();
   const durationLabel = options.quizDurationLabel?.trim();
 
@@ -589,14 +589,10 @@ export function generateQuizShareCardDataUrl(
     : `Completed: ${completedAtText}`;
   ctx.fillText(timeSummaryText, cx, metaY + 66);
 
-  // 8. Bottom Footer: Personalized User Name, Handle & Website Link
-  ctx.font = '800 38px "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif';
+  // 8. Bottom Footer: Personalized User Name only
+  ctx.font = '800 40px "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif';
   ctx.fillStyle = '#0F172A';
-  ctx.fillText(`${displayName}  (${userHandle})`, cx, 1435);
-
-  ctx.font = '700 30px "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif';
-  ctx.fillStyle = '#4F46E5';
-  ctx.fillText('Take quizzes & level up at studywebai.vercel.app', cx, 1498);
+  ctx.fillText(displayName, cx, 1460);
   ctx.restore();
 
   return canvas.toDataURL('image/png');
@@ -758,7 +754,8 @@ export function buildStudyWebSharePayload(
         ? Math.max(0, Math.min(100, Math.round(quizPercentage)))
         : Math.round((safeScore / safeTotal) * 100);
     const safeTitle = (quizTitle || 'my latest quiz').trim();
-    const displayName = resolveShareDisplayName(userName);
+    const displayName =
+      resolveShareDisplayName(userName).replace(/^@+/, '').trim() || 'StudyWeb Learner';
     const timeDetail = quizDurationLabel ? ` in ${quizDurationLabel}` : '';
     const dateDetail = quizCompletedAt ? ` (${quizCompletedAt})` : '';
 
