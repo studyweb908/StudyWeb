@@ -285,6 +285,19 @@ export default function QuizCenterView({
   );
   const [viewingHistorySession, setViewingHistorySession] = useState<SavedQuizSession | null>(null);
   const [selectedAttemptIdx, setSelectedAttemptIdx] = useState<number>(0);
+  const [quizToDelete, setQuizToDelete] = useState<SavedQuizSession | null>(null);
+
+  // Close delete confirmation modal on Escape key
+  useEffect(() => {
+    if (!quizToDelete) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setQuizToDelete(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [quizToDelete]);
 
   // Hydrate generated quizzes & active review progress from Service Worker CacheStorage + Cloud on mount and connectivity changes
   useEffect(() => {
@@ -304,9 +317,7 @@ export default function QuizCenterView({
           ? hydratedSwHistory
           : loadQuizHistory();
 
-      if (latestHistory.length > 0) {
-        setQuizHistory(latestHistory);
-      }
+      setQuizHistory(latestHistory);
       if (hydratedDraft && hydratedDraft.activeSessionId && !activeSession) {
         const matchedSession = latestHistory.find((s) => s.id === hydratedDraft.activeSessionId);
         if (matchedSession) {
@@ -1647,7 +1658,7 @@ export default function QuizCenterView({
               return (
                 <div
                   key={item.id}
-                  className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  className="p-3 sm:p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 flex items-center justify-between gap-2.5 sm:gap-3"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
@@ -1676,7 +1687,7 @@ export default function QuizCenterView({
                     )}
                   </div>
 
-                  <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0 flex-nowrap">
                     {hasPerformance && (
                       <button
                         type="button"
@@ -1684,10 +1695,12 @@ export default function QuizCenterView({
                           setSelectedAttemptIdx(0);
                           setViewingHistorySession(item);
                         }}
-                        className="flex-1 sm:flex-initial px-3 py-1.5 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/40 hover:bg-indigo-100/80 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer min-h-[38px] whitespace-nowrap"
+                        title="Old Performance"
+                        aria-label="Old Performance"
+                        className="p-2 sm:px-3 sm:py-1.5 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/40 hover:bg-indigo-100/80 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer min-h-[36px] sm:min-h-[38px] shrink-0"
                       >
                         <BarChart3 className="w-3.5 h-3.5 shrink-0" />
-                        <span>Old Performance</span>
+                        <span className="hidden sm:inline">Old Performance</span>
                       </button>
                     )}
                     <button
@@ -1696,26 +1709,21 @@ export default function QuizCenterView({
                         setRunnerProgress(null);
                         setActiveSession(item);
                       }}
-                      className="flex-1 sm:flex-initial px-3 py-1.5 rounded-lg bg-[#5145F5] hover:bg-indigo-700 text-white text-xs font-bold inline-flex items-center justify-center gap-1 transition-colors cursor-pointer min-h-[38px] whitespace-nowrap"
+                      title="Retake quiz"
+                      aria-label="Retake quiz"
+                      className="p-2 sm:px-3 sm:py-1.5 rounded-lg bg-[#5145F5] hover:bg-indigo-700 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer min-h-[36px] sm:min-h-[38px] shrink-0"
                     >
                       <Play className="w-3 h-3 fill-current shrink-0" />
-                      <span>Retake</span>
+                      <span className="hidden sm:inline">Retake</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => {
-                        const updated = deleteQuizSession(item.id);
-                        setQuizHistory(updated);
-                        if (activeSession?.id === item.id) {
-                          setActiveSession(null);
-                          setRunnerProgress(null);
-                        }
-                        if (viewingHistorySession?.id === item.id) {
-                          setViewingHistorySession(null);
-                        }
+                        setQuizToDelete(item);
                       }}
+                      title="Delete saved quiz"
                       aria-label="Delete saved quiz"
-                      className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer min-h-[38px] min-w-[38px] flex items-center justify-center"
+                      className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer min-h-[36px] min-w-[36px] sm:min-h-[38px] sm:min-w-[38px] flex items-center justify-center shrink-0"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -2054,6 +2062,77 @@ export default function QuizCenterView({
           </div>
         );
       })()}
+
+      {/* DELETE RECENT QUIZ CONFIRMATION MODAL */}
+      {quizToDelete && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setQuizToDelete(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-quiz-dialog-title"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm sm:max-w-md bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5 sm:p-6 flex flex-col gap-4 animate-in zoom-in-95 duration-150"
+          >
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900/60 flex items-center justify-center text-rose-600 dark:text-rose-400 shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3
+                  id="delete-quiz-dialog-title"
+                  className="text-base sm:text-lg font-bold text-slate-900 dark:text-white"
+                >
+                  Delete Recent Quiz?
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                  Do you want to delete this recent quiz? It will be deleted permanently and will not appear again.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 text-xs">
+              <div className="font-semibold text-slate-900 dark:text-white truncate">
+                {quizToDelete.title}
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 tabular-nums">
+                {getQuizTypeLabel(quizToDelete.quizType)} · {quizToDelete.difficulty} · {quizToDelete.questionCount} Questions
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setQuizToDelete(null)}
+                className="flex-1 sm:flex-initial px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs sm:text-sm font-semibold transition-colors cursor-pointer min-h-[38px]"
+              >
+                No
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const updated = deleteQuizSession(quizToDelete.id);
+                  setQuizHistory(updated);
+                  if (activeSession?.id === quizToDelete.id) {
+                    setActiveSession(null);
+                    setRunnerProgress(null);
+                  }
+                  if (viewingHistorySession?.id === quizToDelete.id) {
+                    setViewingHistorySession(null);
+                  }
+                  setQuizToDelete(null);
+                }}
+                className="flex-1 sm:flex-initial px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs sm:text-sm font-semibold transition-colors cursor-pointer min-h-[38px] shadow-sm shadow-rose-600/20 inline-flex items-center justify-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                <span>Yes</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

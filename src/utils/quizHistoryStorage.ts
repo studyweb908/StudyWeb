@@ -97,6 +97,7 @@ export interface QuizDraftState {
 
 const QUIZ_HISTORY_PREFIX = 'studyweb_quiz_history_v1';
 const QUIZ_DRAFT_PREFIX = 'studyweb_quiz_draft_v1';
+const QUIZ_DELETED_IDS_PREFIX = 'studyweb_deleted_quiz_ids_v1';
 export const QUIZ_SW_CACHE_NAME = 'studyweb-quiz-data-cache-v1';
 
 export interface ServiceWorkerQuizCacheStats {
@@ -118,6 +119,32 @@ function getQuizHistoryKey(): string {
 
 function getQuizDraftKey(): string {
   return `${QUIZ_DRAFT_PREFIX}_${getActiveUid()}`;
+}
+
+function getQuizDeletedIdsKey(): string {
+  return `${QUIZ_DELETED_IDS_PREFIX}_${getActiveUid()}`;
+}
+
+export function getDeletedQuizIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(getQuizDeletedIdsKey());
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function markQuizSessionDeleted(sessionId: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const set = getDeletedQuizIds();
+    set.add(sessionId);
+    const arr = Array.from(set).slice(-200);
+    localStorage.setItem(getQuizDeletedIdsKey(), JSON.stringify(arr));
+  } catch {}
 }
 
 function getSwHistoryCacheUrl(uid = getActiveUid()): string {
@@ -238,9 +265,10 @@ export async function hydrateQuizHistoryFromServiceWorkerCache(): Promise<SavedQ
   }
 
   // Merge local and Service Worker cached sessions by id (preferring whichever has the latest attempt count / score)
+  const deletedIds = getDeletedQuizIds();
   const mergedMap = new Map<string, SavedQuizSession>();
   for (const s of [...swSessions, ...localSessions]) {
-    if (!s || !s.id || !Array.isArray(s.questions)) continue;
+    if (!s || !s.id || deletedIds.has(s.id) || !Array.isArray(s.questions)) continue;
     const prev = mergedMap.get(s.id);
     if (!prev) {
       mergedMap.set(s.id, s);
@@ -376,9 +404,10 @@ function mergeQuizSessionLists(
   primary: SavedQuizSession[],
   secondary: SavedQuizSession[]
 ): SavedQuizSession[] {
+  const deletedIds = getDeletedQuizIds();
   const mergedMap = new Map<string, SavedQuizSession>();
   for (const raw of [...secondary, ...primary]) {
-    if (!raw || !raw.id || !Array.isArray(raw.questions)) continue;
+    if (!raw || !raw.id || deletedIds.has(raw.id) || !Array.isArray(raw.questions)) continue;
     const prev = mergedMap.get(raw.id);
     if (!prev) {
       mergedMap.set(raw.id, raw);
@@ -538,12 +567,16 @@ export async function hydrateQuizHistoryFromCloud(explicitUserId?: string | null
     }
 
     const remoteRaw = user.user_metadata?.quiz_history_v1;
-    const remoteSessions: SavedQuizSession[] = Array.isArray(remoteRaw) ? remoteRaw : [];
-    const currentLocal = loadQuizHistory();
+    const rawRemoteSessions: SavedQuizSession[] = Array.isArray(remoteRaw) ? remoteRaw : [];
+    const deletedIds = getDeletedQuizIds();
+    const remoteSessions = rawRemoteSessions.filter((s) => s && s.id && !deletedIds.has(s.id));
+    const currentLocal = loadQuizHistory().filter((s) => s && s.id && !deletedIds.has(s.id));
 
     if (remoteSessions.length === 0) {
       if (currentLocal.length > 0) {
         syncQuizHistoryToCloud(currentLocal, true);
+      } else if (rawRemoteSessions.length > 0) {
+        syncQuizHistoryToCloud([], true);
       }
       return currentLocal;
     }
@@ -554,7 +587,9 @@ export async function hydrateQuizHistoryFromCloud(explicitUserId?: string | null
     } catch {}
     void syncQuizHistoryToServiceWorkerCache(merged);
 
-    if (merged.length > remoteSessions.length) {
+    if (rawRemoteSessions.some((s) => s && deletedIds.has(s.id)) || merged.length !== rawRemoteSessions.length) {
+      syncQuizHistoryToCloud(merged, true);
+    } else if (merged.length > remoteSessions.length) {
       syncQuizHistoryToCloud(merged);
     }
 
@@ -572,7 +607,15 @@ export function loadQuizHistory(): SavedQuizSession[] {
     const raw = localStorage.getItem(getQuizHistoryKey());
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    const deletedIds = getDeletedQuizIds();
+    return (parsed as SavedQuizSession[])
+      .filter((item) => item && item.id && !deletedIds.has(item.id))
+      .sort((a, b) => {
+        const timeA = new Date(a.lastAttemptedAt || a.createdAt || 0).getTime();
+        const timeB = new Date(b.lastAttemptedAt || b.createdAt || 0).getTime();
+        return timeB - timeA;
+      });
   } catch {
     return [];
   }
@@ -580,6 +623,13 @@ export function loadQuizHistory(): SavedQuizSession[] {
 
 export function saveQuizSession(session: SavedQuizSession): SavedQuizSession[] {
   if (typeof window === 'undefined') return [session];
+  const deleted = getDeletedQuizIds();
+  if (deleted.has(session.id)) {
+    deleted.delete(session.id);
+    try {
+      localStorage.setItem(getQuizDeletedIdsKey(), JSON.stringify(Array.from(deleted)));
+    } catch {}
+  }
   const existing = loadQuizHistory().filter((s) => s.id !== session.id);
   const updated = [session, ...existing].slice(0, 40);
   try {
@@ -659,6 +709,7 @@ export function updateQuizSessionScore(
 }
 
 export function deleteQuizSession(sessionId: string): SavedQuizSession[] {
+  markQuizSessionDeleted(sessionId);
   const updated = loadQuizHistory().filter((item) => item.id !== sessionId);
   if (typeof window !== 'undefined') {
     try {
