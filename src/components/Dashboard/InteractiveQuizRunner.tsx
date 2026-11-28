@@ -565,251 +565,282 @@ export default function InteractiveQuizRunner({
           });
         };
 
-        const ringRadius = 42;
+        const ringRadius = 44;
         const ringCircumference = 2 * Math.PI * ringRadius;
         const ringStrokeDashoffset = ringCircumference - (finalPct / 100) * ringCircumference;
 
         return (
-        <div className="max-w-2xl mx-auto py-3 sm:py-6 space-y-5">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl sm:rounded-3xl shadow-sm overflow-hidden">
-            {/* Top Status Accent Bar */}
+        <div className="relative max-w-3xl mx-auto py-3 sm:py-6 space-y-5">
+          {/* Ambient Luminous Glows Behind Frosted Glass Card */}
+          <div className="pointer-events-none absolute -inset-4 overflow-hidden rounded-[2.5rem]" aria-hidden="true">
+            {isPassed ? (
+              <>
+                <div className="absolute -top-10 -left-8 w-64 h-64 rounded-full bg-emerald-400/20 dark:bg-emerald-500/15 blur-3xl" />
+                <div className="absolute top-12 -right-8 w-72 h-72 rounded-full bg-indigo-500/20 dark:bg-indigo-500/18 blur-3xl" />
+                <div className="absolute -bottom-10 left-1/3 w-64 h-64 rounded-full bg-sky-400/15 dark:bg-cyan-500/12 blur-3xl" />
+              </>
+            ) : (
+              <>
+                <div className="absolute -top-10 -left-8 w-64 h-64 rounded-full bg-rose-400/20 dark:bg-rose-500/15 blur-3xl" />
+                <div className="absolute top-12 -right-8 w-72 h-72 rounded-full bg-amber-400/18 dark:bg-amber-500/12 blur-3xl" />
+              </>
+            )}
+          </div>
+
+          {/* Primary Frosted Glassmorphism Result Showcase */}
+          <motion.div
+            initial={shouldReduceMotion ? false : { opacity: 0, y: 14, scale: 0.985 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="relative overflow-hidden rounded-3xl border border-white/80 dark:border-white/15 bg-white/75 dark:bg-slate-900/70 backdrop-blur-2xl shadow-[0_24px_64px_-16px_rgba(15,23,42,0.14)] dark:shadow-[0_24px_64px_-16px_rgba(0,0,0,0.6)]"
+          >
+            {/* Top Specular Glass Rim */}
             <div
-              className={`h-1.5 w-full ${
-                isPassed
-                  ? 'bg-gradient-to-r from-emerald-500 via-[#5145F5] to-indigo-500'
-                  : 'bg-gradient-to-r from-rose-500 via-amber-500 to-rose-400'
-              }`}
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white dark:via-white/30 to-transparent"
             />
 
-            {/* Hero Celebration / Encouragement Banner */}
-            <div
-              className={`px-4 sm:px-8 pt-6 pb-5 text-center space-y-4 ${
-                isPassed
-                  ? 'bg-gradient-to-b from-emerald-50/75 via-indigo-50/25 to-white dark:from-emerald-950/25 dark:via-indigo-950/10 dark:to-slate-900'
-                  : 'bg-gradient-to-b from-rose-50/75 via-amber-50/20 to-white dark:from-rose-950/25 dark:via-slate-900 dark:to-slate-900'
-              }`}
-            >
-              {isPassed ? (
-                <motion.div
-                  initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.6, y: -12 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  transition={{ type: 'spring', stiffness: 380, damping: 16 }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100/80 dark:bg-emerald-950/70 border border-emerald-200/80 dark:border-emerald-800/60 text-[11px] font-extrabold uppercase tracking-wider text-emerald-700 dark:text-emerald-300"
-                >
-                  <span aria-hidden="true">🎉</span>
-                  <span>{finalPct >= 90 ? 'Yahoo! Quiz Mastered!' : 'Yahoo! You Passed!'}</span>
-                  <span aria-hidden="true">🎉</span>
-                </motion.div>
-              ) : (
-                <motion.div
-                  initial={shouldReduceMotion ? false : { opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.35 }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-100/80 dark:bg-rose-950/70 border border-rose-200/80 dark:border-rose-800/60 text-[11px] font-extrabold uppercase tracking-wider text-rose-700 dark:text-rose-300"
-                >
-                  <span>Keep Practicing</span>
-                </motion.div>
-              )}
-
-              {/* Visual Showcase: Animated Character + Animated Accuracy Ring */}
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-7 py-1">
+            {/* Hero Zone */}
+            <div className="relative px-5 sm:px-9 pt-7 sm:pt-9 pb-6 text-center space-y-5">
+              {/* Quiet Unboxed Status Kicker & Headline */}
+              <div className="space-y-1.5">
                 {isPassed ? (
-                  <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
-                    {!shouldReduceMotion && (
-                      <>
-                        <motion.span
-                          aria-hidden="true"
-                          initial={{ scale: 0.75, opacity: 0.85 }}
-                          animate={{ scale: [0.85, 1.48], opacity: [0.7, 0] }}
-                          transition={{ duration: 1.35, repeat: Infinity, repeatDelay: 0.55, ease: 'easeOut' }}
-                          className="absolute w-20 h-20 rounded-full border-2 border-emerald-400/70 dark:border-emerald-400/50 pointer-events-none"
-                        />
-                        <motion.span
-                          aria-hidden="true"
-                          initial={{ opacity: 0, scale: 0, x: 0, y: 0, rotate: 0 }}
-                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.35, 1.1, 0.7], x: -50, y: -34, rotate: -25 }}
-                          transition={{ duration: 1.35, repeat: Infinity, repeatDelay: 0.75 }}
-                          className="absolute text-xl select-none pointer-events-none"
-                        >
-                          🎉
-                        </motion.span>
-                        <motion.span
-                          aria-hidden="true"
-                          initial={{ opacity: 0, scale: 0, x: 0, y: 0, rotate: 0 }}
-                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.3, 1.05, 0.7], x: 52, y: -30, rotate: 22 }}
-                          transition={{ duration: 1.35, delay: 0.18, repeat: Infinity, repeatDelay: 0.75 }}
-                          className="absolute text-xl select-none pointer-events-none"
-                        >
-                          🎊
-                        </motion.span>
-                        <motion.span
-                          aria-hidden="true"
-                          initial={{ opacity: 0, scale: 0, x: 0, y: 0 }}
-                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.25, 0.9, 0.6], x: 44, y: 34 }}
-                          transition={{ duration: 1.4, delay: 0.34, repeat: Infinity, repeatDelay: 0.8 }}
-                          className="absolute text-lg select-none pointer-events-none"
-                        >
-                          ✨
-                        </motion.span>
-                        <motion.span
-                          aria-hidden="true"
-                          initial={{ opacity: 0, scale: 0, x: 0, y: 0 }}
-                          animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.25, 0.9, 0.6], x: -46, y: 32 }}
-                          transition={{ duration: 1.4, delay: 0.48, repeat: Infinity, repeatDelay: 0.8 }}
-                          className="absolute text-lg select-none pointer-events-none"
-                        >
-                          ⭐
-                        </motion.span>
-                        <motion.span
-                          aria-hidden="true"
-                          initial={{ opacity: 0, scale: 0, x: 0, y: 0 }}
-                          animate={{ opacity: [0, 1, 0], scale: [0.5, 1.2, 0.7], x: 0, y: -52 }}
-                          transition={{ duration: 1.3, delay: 0.28, repeat: Infinity, repeatDelay: 0.9 }}
-                          className="absolute text-lg select-none pointer-events-none"
-                        >
-                          ✨
-                        </motion.span>
-                      </>
-                    )}
-                    <motion.div
-                      initial={shouldReduceMotion ? false : { scale: 0.35, rotate: -18 }}
-                      animate={
-                        shouldReduceMotion
-                          ? { scale: 1 }
-                          : { scale: [0.35, 1.2, 0.95, 1.05, 1], rotate: [-18, 12, -6, 3, 0], y: [0, -10, 0] }
-                      }
-                      transition={{ duration: 0.85, ease: 'easeOut' }}
-                      className="relative z-10 w-20 h-20 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border-2 border-emerald-300 dark:border-emerald-700/80 flex items-center justify-center shadow-sm"
-                    >
-                      <motion.span
-                        role="img"
-                        aria-label="Happy smiling celebrating face"
-                        animate={
-                          shouldReduceMotion
-                            ? undefined
-                            : { scale: [1, 1.16, 0.96, 1.08, 1], y: [0, -5, 0], rotate: [0, 8, -8, 4, 0] }
-                        }
-                        transition={{ duration: 1.7, repeat: Infinity, repeatDelay: 0.6 }}
-                        className="text-5xl leading-none select-none"
-                      >
-                        😄
-                      </motion.span>
-                    </motion.div>
-                  </div>
+                  <motion.p
+                    initial={shouldReduceMotion ? false : { opacity: 0, y: -8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ type: 'spring', stiffness: 360, damping: 18 }}
+                    className="text-xs sm:text-sm font-bold tracking-wide text-emerald-700 dark:text-emerald-300"
+                  >
+                    <span aria-hidden="true">🎉 </span>
+                    <span>{finalPct >= 90 ? 'Yahoo! Quiz Mastered!' : 'Yahoo! You Passed!'}</span>
+                    <span aria-hidden="true"> 🎉</span>
+                  </motion.p>
                 ) : (
-                  <div className="relative w-24 h-24 flex items-center justify-center shrink-0">
-                    <motion.div
-                      initial={shouldReduceMotion ? false : { scale: 0.75, opacity: 0 }}
-                      animate={
-                        shouldReduceMotion
-                          ? { scale: 1, opacity: 1 }
-                          : { scale: 1, opacity: 1, y: [0, 4, 0], rotate: [0, -4, 4, -2, 0] }
-                      }
-                      transition={{ duration: 1.4, ease: 'easeInOut' }}
-                      className="w-20 h-20 rounded-full bg-rose-50 dark:bg-rose-950/60 border-2 border-rose-200 dark:border-rose-800/70 flex items-center justify-center shadow-sm"
-                    >
-                      <motion.span
-                        role="img"
-                        aria-label="Sad face"
-                        animate={shouldReduceMotion ? undefined : { y: [0, 3, 0] }}
-                        transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-                        className="text-5xl leading-none select-none"
-                      >
-                        😢
-                      </motion.span>
-                    </motion.div>
-                  </div>
+                  <motion.p
+                    initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="text-xs sm:text-sm font-bold tracking-wide text-rose-600 dark:text-rose-400"
+                  >
+                    Keep Practicing
+                  </motion.p>
                 )}
 
-                {/* Animated Circular Score Gauge */}
-                <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
-                  <svg className="w-28 h-28 -rotate-90" viewBox="0 0 100 100" aria-hidden="true">
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r={ringRadius}
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="8"
-                      className="text-slate-100 dark:text-slate-800"
-                    />
-                    <motion.circle
-                      cx="50"
-                      cy="50"
-                      r={ringRadius}
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="8"
-                      strokeLinecap="round"
-                      strokeDasharray={ringCircumference}
-                      initial={shouldReduceMotion ? { strokeDashoffset: ringStrokeDashoffset } : { strokeDashoffset: ringCircumference }}
-                      animate={{ strokeDashoffset: ringStrokeDashoffset }}
-                      transition={{ duration: 0.9, ease: 'easeOut' }}
-                      className={
-                        finalPct >= 90
-                          ? 'text-emerald-500'
-                          : finalPct >= 70
-                          ? 'text-[#5145F5] dark:text-indigo-400'
-                          : finalPct >= 50
-                          ? 'text-amber-500'
-                          : 'text-rose-500'
-                      }
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center tabular-nums">
-                    <span className="text-2xl font-black text-slate-900 dark:text-white leading-none">
-                      {finalPct}%
-                    </span>
-                    <span className={`text-[10px] font-bold uppercase tracking-wide mt-1 ${tier.colorClass}`}>
-                      {tier.label}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Heading + Encouraging Message */}
-              <div className="space-y-1">
-                <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight text-balance">
                   {isPassed ? 'Quiz Passed — Great Work!' : 'Not Quite There Yet'}
                 </h3>
-                {!isPassed && (
+
+                {!isPassed ? (
                   <p className="text-xs sm:text-sm text-rose-600 dark:text-rose-400 font-semibold max-w-md mx-auto">
                     Don&apos;t give up! Let&apos;s try again to sharpen your skills.
+                  </p>
+                ) : (
+                  <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 font-medium max-w-md mx-auto">
+                    Completed {completedAtLabel}
                   </p>
                 )}
               </div>
 
-              {/* 3-Column Mobile-Friendly KPI Strip */}
-              <div className="grid grid-cols-3 gap-2 sm:gap-3 pt-1 max-w-lg mx-auto">
-                <div className="rounded-xl bg-white/90 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80 px-2.5 py-2.5 text-center">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Score</div>
-                  <div className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white mt-0.5 tabular-nums">
-                    {score}/{questions.length}
+              {/* Frosted Glass Centerpiece Stage: Reaction + Score Ring + Clean Metrics */}
+              <div className="rounded-2xl border border-white/75 dark:border-white/10 bg-white/55 dark:bg-white/[0.04] backdrop-blur-xl px-4 py-5 sm:px-7 sm:py-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+                <div className="flex flex-col sm:flex-row items-center justify-around gap-5 sm:gap-6">
+                  {/* Animated Reaction Medallion */}
+                  {isPassed ? (
+                    <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
+                      {!shouldReduceMotion && (
+                        <>
+                          <motion.span
+                            aria-hidden="true"
+                            initial={{ scale: 0.75, opacity: 0.85 }}
+                            animate={{ scale: [0.85, 1.48], opacity: [0.7, 0] }}
+                            transition={{ duration: 1.35, repeat: Infinity, repeatDelay: 0.55, ease: 'easeOut' }}
+                            className="absolute w-20 h-20 rounded-full border-2 border-emerald-400/70 dark:border-emerald-400/50 pointer-events-none"
+                          />
+                          <motion.span
+                            aria-hidden="true"
+                            initial={{ opacity: 0, scale: 0, x: 0, y: 0, rotate: 0 }}
+                            animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.35, 1.1, 0.7], x: -48, y: -34, rotate: -25 }}
+                            transition={{ duration: 1.35, repeat: Infinity, repeatDelay: 0.75 }}
+                            className="absolute text-xl select-none pointer-events-none"
+                          >
+                            🎉
+                          </motion.span>
+                          <motion.span
+                            aria-hidden="true"
+                            initial={{ opacity: 0, scale: 0, x: 0, y: 0, rotate: 0 }}
+                            animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.3, 1.05, 0.7], x: 50, y: -30, rotate: 22 }}
+                            transition={{ duration: 1.35, delay: 0.18, repeat: Infinity, repeatDelay: 0.75 }}
+                            className="absolute text-xl select-none pointer-events-none"
+                          >
+                            🎊
+                          </motion.span>
+                          <motion.span
+                            aria-hidden="true"
+                            initial={{ opacity: 0, scale: 0, x: 0, y: 0 }}
+                            animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.25, 0.9, 0.6], x: 42, y: 34 }}
+                            transition={{ duration: 1.4, delay: 0.34, repeat: Infinity, repeatDelay: 0.8 }}
+                            className="absolute text-lg select-none pointer-events-none"
+                          >
+                            ✨
+                          </motion.span>
+                          <motion.span
+                            aria-hidden="true"
+                            initial={{ opacity: 0, scale: 0, x: 0, y: 0 }}
+                            animate={{ opacity: [0, 1, 1, 0], scale: [0.4, 1.25, 0.9, 0.6], x: -44, y: 32 }}
+                            transition={{ duration: 1.4, delay: 0.48, repeat: Infinity, repeatDelay: 0.8 }}
+                            className="absolute text-lg select-none pointer-events-none"
+                          >
+                            ⭐
+                          </motion.span>
+                          <motion.span
+                            aria-hidden="true"
+                            initial={{ opacity: 0, scale: 0, x: 0, y: 0 }}
+                            animate={{ opacity: [0, 1, 0], scale: [0.5, 1.2, 0.7], x: 0, y: -50 }}
+                            transition={{ duration: 1.3, delay: 0.28, repeat: Infinity, repeatDelay: 0.9 }}
+                            className="absolute text-lg select-none pointer-events-none"
+                          >
+                            ✨
+                          </motion.span>
+                        </>
+                      )}
+                      <motion.div
+                        initial={shouldReduceMotion ? false : { scale: 0.35, rotate: -18 }}
+                        animate={
+                          shouldReduceMotion
+                            ? { scale: 1 }
+                            : { scale: [0.35, 1.2, 0.95, 1.05, 1], rotate: [-18, 12, -6, 3, 0], y: [0, -10, 0] }
+                        }
+                        transition={{ duration: 0.85, ease: 'easeOut' }}
+                        className="relative z-10 w-20 h-20 rounded-full bg-emerald-50/90 dark:bg-emerald-950/60 border-2 border-emerald-300/90 dark:border-emerald-600/70 backdrop-blur-md flex items-center justify-center shadow-md shadow-emerald-500/15"
+                      >
+                        <motion.span
+                          role="img"
+                          aria-label="Happy smiling celebrating face"
+                          animate={
+                            shouldReduceMotion
+                              ? undefined
+                              : { scale: [1, 1.16, 0.96, 1.08, 1], y: [0, -5, 0], rotate: [0, 8, -8, 4, 0] }
+                          }
+                          transition={{ duration: 1.7, repeat: Infinity, repeatDelay: 0.6 }}
+                          className="text-5xl leading-none select-none"
+                        >
+                          😄
+                        </motion.span>
+                      </motion.div>
+                    </div>
+                  ) : (
+                    <div className="relative w-24 h-24 flex items-center justify-center shrink-0">
+                      <motion.div
+                        initial={shouldReduceMotion ? false : { scale: 0.75, opacity: 0 }}
+                        animate={
+                          shouldReduceMotion
+                            ? { scale: 1, opacity: 1 }
+                            : { scale: 1, opacity: 1, y: [0, 4, 0], rotate: [0, -4, 4, -2, 0] }
+                        }
+                        transition={{ duration: 1.4, ease: 'easeInOut' }}
+                        className="w-20 h-20 rounded-full bg-rose-50/90 dark:bg-rose-950/60 border-2 border-rose-200/90 dark:border-rose-700/70 backdrop-blur-md flex items-center justify-center shadow-md shadow-rose-500/10"
+                      >
+                        <motion.span
+                          role="img"
+                          aria-label="Sad face"
+                          animate={shouldReduceMotion ? undefined : { y: [0, 3, 0] }}
+                          transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+                          className="text-5xl leading-none select-none"
+                        >
+                          😢
+                        </motion.span>
+                      </motion.div>
+                    </div>
+                  )}
+
+                  {/* Animated Circular Accuracy Ring */}
+                  <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
+                    <svg className="w-28 h-28 -rotate-90" viewBox="0 0 100 100" aria-hidden="true">
+                      <circle
+                        cx="50"
+                        cy="50"
+                        r={ringRadius}
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="8"
+                        className="text-slate-200/80 dark:text-slate-800/90"
+                      />
+                      <motion.circle
+                        cx="50"
+                        cy="50"
+                        r={ringRadius}
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="8"
+                        strokeLinecap="round"
+                        strokeDasharray={ringCircumference}
+                        initial={
+                          shouldReduceMotion
+                            ? { strokeDashoffset: ringStrokeDashoffset }
+                            : { strokeDashoffset: ringCircumference }
+                        }
+                        animate={{ strokeDashoffset: ringStrokeDashoffset }}
+                        transition={{ duration: 0.9, ease: 'easeOut' }}
+                        className={
+                          finalPct >= 90
+                            ? 'text-emerald-500'
+                            : finalPct >= 70
+                            ? 'text-[#5145F5] dark:text-indigo-400'
+                            : finalPct >= 50
+                            ? 'text-amber-500'
+                            : 'text-rose-500'
+                        }
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center tabular-nums">
+                      <span className="text-2xl font-black text-slate-900 dark:text-white leading-none">
+                        {finalPct}%
+                      </span>
+                      <span className={`text-[11px] font-bold mt-1 ${tier.colorClass}`}>
+                        {tier.label}
+                      </span>
+                    </div>
                   </div>
-                </div>
-                <div className="rounded-xl bg-white/90 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80 px-2.5 py-2.5 text-center">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Accuracy</div>
-                  <div className={`text-sm sm:text-base font-extrabold mt-0.5 tabular-nums ${tier.colorClass}`}>
-                    {finalPct}%
-                  </div>
-                </div>
-                <div className="rounded-xl bg-white/90 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80 px-2.5 py-2.5 text-center">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Time</div>
-                  <div className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white mt-0.5 tabular-nums inline-flex items-center justify-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-slate-400 hidden sm:inline" />
-                    <span>{durationLabel || 'Done'}</span>
+
+                  {/* Clean Unboxed Stats Column */}
+                  <div className="w-full sm:w-auto grid grid-cols-3 sm:grid-cols-1 gap-3 sm:gap-2.5 text-center sm:text-left sm:pl-4 sm:border-l border-slate-200/70 dark:border-white/10">
+                    <div>
+                      <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Score</div>
+                      <div className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white tabular-nums">
+                        {score}/{questions.length}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Time</div>
+                      <div className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white tabular-nums inline-flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-slate-400 hidden sm:inline" />
+                        <span>{durationLabel || 'Done'}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Result</div>
+                      <div
+                        className={`text-sm sm:text-base font-extrabold ${
+                          isPassed ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                        }`}
+                      >
+                        {isPassed ? 'Passed' : 'Practice'}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="text-[11px] font-medium text-slate-400 dark:text-slate-500 tabular-nums">
-                Completed {completedAtLabel}
-              </div>
+              {!isPassed && (
+                <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 tabular-nums">
+                  Completed {completedAtLabel}
+                </p>
+              )}
             </div>
 
-            {/* Body Analytics + Actions */}
-            <div className="px-4 sm:px-8 pb-6 sm:pb-8 pt-2 space-y-5">
-              {/* Full-Width Performance Progress Bar */}
+            {/* Performance Breakdown Zone */}
+            <div className="px-5 sm:px-9 pb-6 space-y-5">
+              {/* Overall Performance Bar */}
               <div className="space-y-2 text-left">
                 <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs font-semibold tabular-nums">
                   <span className="text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
@@ -820,10 +851,10 @@ export default function InteractiveQuizRunner({
                     {score} Correct · {missedCount} Missed ({finalPct}%)
                   </span>
                 </div>
-                <div className="w-full h-3 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+                <div className="w-full h-3 rounded-full bg-slate-200/70 dark:bg-slate-800/90 overflow-hidden flex">
                   {score > 0 && (
                     <div
-                      className="h-full bg-emerald-500 transition-all duration-500"
+                      className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500"
                       style={{ width: `${(score / questions.length) * 100}%` }}
                     />
                   )}
@@ -836,9 +867,9 @@ export default function InteractiveQuizRunner({
                 </div>
               </div>
 
-              {/* Topic Progress & Where You Are Lacking */}
+              {/* Topic Progress & Focus Areas */}
               {topicBreakdown.length > 0 && (
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3 text-left">
+                <div className="pt-4 border-t border-slate-200/70 dark:border-white/10 space-y-3 text-left">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs">
                     <span className="font-bold text-slate-800 dark:text-slate-100">
                       Topic Progress &amp; Focus Areas
@@ -876,7 +907,7 @@ export default function InteractiveQuizRunner({
                               {item.correct}/{item.total} ({topicPct}%{isLacking ? ' · Needs review' : ''})
                             </span>
                           </div>
-                          <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                          <div className="w-full h-2 rounded-full bg-slate-200/70 dark:bg-slate-800/90 overflow-hidden">
                             <div
                               className={`h-full rounded-full transition-all duration-500 ${
                                 isLacking ? 'bg-rose-500' : 'bg-emerald-500'
@@ -891,62 +922,71 @@ export default function InteractiveQuizRunner({
                 </div>
               )}
 
-              {/* Mobile-Responsive Action Buttons */}
-              <div className="grid grid-cols-1 sm:flex sm:flex-wrap sm:items-center sm:justify-center gap-2.5 pt-1">
-                <button
-                  onClick={handleRestart}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 min-h-[44px] rounded-xl bg-[#5145F5] hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-colors cursor-pointer whitespace-nowrap"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  <span>{isPassed ? 'Retry Quiz' : 'Restart Quiz'}</span>
-                </button>
-                {missedQuestions.length > 0 && aiReviewList.length === 0 && (
+              {/* Optional AI Review Trigger for Missed Questions */}
+              {missedQuestions.length > 0 && aiReviewList.length === 0 && (
+                <div className="pt-1 flex justify-center sm:justify-start">
                   <button
+                    type="button"
                     onClick={handleRequestAiReview}
                     disabled={isLoadingReview}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 min-h-[44px] rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/60 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 font-bold text-xs hover:bg-indigo-100/70 transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[42px] rounded-xl border border-indigo-200/80 dark:border-indigo-700/60 bg-indigo-50/70 dark:bg-indigo-950/40 backdrop-blur-md text-indigo-700 dark:text-indigo-300 font-bold text-xs hover:bg-indigo-100/80 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap shrink-0"
                   >
                     {isLoadingReview ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                     <span>Review {missedQuestions.length} Missed with AI</span>
                   </button>
-                )}
+                </div>
+              )}
+            </div>
+
+            {/* Unified Glass Action Bar: Score + Retry + Back + Share Together */}
+            <div className="px-5 sm:px-9 py-4 sm:py-5 border-t border-white/70 dark:border-white/10 bg-white/55 dark:bg-white/[0.03] backdrop-blur-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3.5">
+              <div className="text-sm font-bold text-slate-900 dark:text-white tabular-nums text-center sm:text-left">
+                Score: <span>{score}/{questions.length}</span>{' '}
+                <span className={tier.colorClass}>({finalPct}%)</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center justify-end gap-2.5 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={handleRestart}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl border border-slate-200/90 dark:border-white/15 bg-white/80 dark:bg-white/10 hover:bg-white dark:hover:bg-white/15 text-slate-800 dark:text-white font-bold text-xs backdrop-blur-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>{isPassed ? 'Retry Quiz' : 'Restart Quiz'}</span>
+                </button>
+
                 {onExit && (
                   <button
+                    type="button"
                     onClick={onExit}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 min-h-[44px] rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer whitespace-nowrap"
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl border border-slate-200/80 dark:border-white/10 bg-white/40 dark:bg-white/[0.04] hover:bg-white/80 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 font-semibold text-xs backdrop-blur-md transition-colors cursor-pointer whitespace-nowrap shrink-0"
                   >
+                    <ArrowLeft className="w-3.5 h-3.5" />
                     <span>{exitLabel}</span>
                   </button>
                 )}
-              </div>
 
-              {/* Share Performance Section (Minimal: Score + Share Button Only) */}
-              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
-                <div className="text-sm font-bold text-slate-900 dark:text-white tabular-nums">
-                  Score: <span>{score}/{questions.length}</span>{' '}
-                  <span className={tier.colorClass}>({finalPct}%)</span>
-                </div>
                 <button
                   type="button"
                   onClick={handleSharePerformance}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 min-h-[44px] rounded-xl bg-slate-900 dark:bg-indigo-600 hover:bg-slate-800 dark:hover:bg-indigo-500 text-white font-bold text-xs shadow-sm transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 min-h-[44px] rounded-xl bg-gradient-to-r from-[#5145F5] via-indigo-600 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-bold text-xs shadow-lg shadow-indigo-500/25 transition-all active:scale-[0.98] cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <Share2 className="w-3.5 h-3.5" />
                   <span>Share Your Performance</span>
                 </button>
               </div>
             </div>
-          </div>
+          </motion.div>
 
           {aiReviewList.length > 0 && (
-            <div className="space-y-3">
+            <div className="relative space-y-3">
               <h4 className="text-sm font-bold text-slate-900 dark:text-white">
                 AI Concept Breakdown for Missed Questions
               </h4>
               {aiReviewList.map((item, idx) => (
                 <div
                   key={idx}
-                  className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1.5"
+                  className="p-4 sm:p-5 rounded-2xl border border-white/75 dark:border-white/10 bg-white/75 dark:bg-slate-900/70 backdrop-blur-xl shadow-sm space-y-1.5"
                 >
                   <p className="text-xs font-bold text-slate-800 dark:text-slate-100">{item.question}</p>
                   <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-line">
