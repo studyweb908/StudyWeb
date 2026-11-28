@@ -17,6 +17,7 @@ import { supabase } from './lib/supabase';
 
 // Authenticated Dashboard Core Components (Critical Path)
 import DashboardSidebar from './components/Dashboard/DashboardSidebar';
+import { NavIcon } from './components/Dashboard/NavIcons';
 import DashboardHeader from './components/Dashboard/DashboardHeader';
 import DashboardHome from './components/Dashboard/DashboardHome';
 import OfflineNotice from './components/OfflineNotice';
@@ -971,11 +972,11 @@ export default function App() {
           </main>
 
 
-          {/* Mobile Bottom Navigation Bar */}
+          {/* Mobile Bottom Navigation Bar (Instagram-style: clean outline -> solid filled icon on active) */}
           <nav 
             aria-label="Mobile Bottom Navigation"
             data-tour="mobile-bottom-nav"
-            className="md:hidden fixed bottom-0 left-0 right-0 h-[calc(4rem+env(safe-area-inset-bottom,0px))] bg-white/90 dark:bg-slate-900/90 border-t border-slate-200/80 dark:border-slate-800/80 backdrop-blur-xl grid grid-cols-5 items-center justify-items-center px-1.5 pb-[env(safe-area-inset-bottom,0px)] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.4)]"
+            className="md:hidden fixed bottom-0 left-0 right-0 h-[calc(4rem+env(safe-area-inset-bottom,0px))] bg-white/95 dark:bg-slate-900/95 border-t border-slate-200/80 dark:border-slate-800/80 backdrop-blur-xl grid grid-cols-5 items-center justify-items-center px-1.5 pb-[env(safe-area-inset-bottom,0px)] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.4)]"
           >
             {/* 1. Home / Dashboard */}
             <button
@@ -983,21 +984,20 @@ export default function App() {
                 setActiveWorkspace(null);
                 setActiveTab('dashboard');
               }}
-              className={`relative w-full min-h-[44px] h-12 my-auto flex flex-col items-center justify-center gap-0.5 rounded-2xl cursor-pointer transition-colors active:scale-95 ${
+              className={`w-full min-h-[44px] h-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors active:scale-90 ${
                 activeTab === 'dashboard' && activeWorkspace === null
-                  ? 'text-indigo-600 dark:text-indigo-300 font-bold'
-                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                  ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
-              {activeTab === 'dashboard' && activeWorkspace === null && (
-                <motion.div
-                  layoutId="mobile-bottom-nav-pill"
-                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                  className="absolute inset-x-1 inset-y-0.5 rounded-2xl bg-indigo-50/90 dark:bg-indigo-500/20 border border-indigo-200/60 dark:border-indigo-400/25"
-                />
-              )}
-              <LayoutDashboard className="relative z-10 w-5 h-5" />
-              <span className="relative z-10 text-[10px] font-bold">Home</span>
+              <motion.span
+                animate={{ scale: activeTab === 'dashboard' && activeWorkspace === null ? 1.12 : 1 }}
+                transition={{ type: 'spring', stiffness: 450, damping: 24 }}
+                className="inline-flex items-center justify-center"
+              >
+                <NavIcon id="dashboard" filled={activeTab === 'dashboard' && activeWorkspace === null} className="w-[22px] h-[22px]" />
+              </motion.span>
+              <span className="text-[10px] font-semibold">Home</span>
             </button>
 
             {/* 2. Workspaces */}
@@ -1006,21 +1006,20 @@ export default function App() {
                 setActiveWorkspace(null);
                 setActiveTab('workspaces');
               }}
-              className={`relative w-full min-h-[44px] h-12 my-auto flex flex-col items-center justify-center gap-0.5 rounded-2xl cursor-pointer transition-colors active:scale-95 ${
+              className={`w-full min-h-[44px] h-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors active:scale-90 ${
                 activeTab === 'workspaces' && activeWorkspace === null
-                  ? 'text-indigo-600 dark:text-indigo-300 font-bold'
-                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                  ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
-              {activeTab === 'workspaces' && activeWorkspace === null && (
-                <motion.div
-                  layoutId="mobile-bottom-nav-pill"
-                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                  className="absolute inset-x-1 inset-y-0.5 rounded-2xl bg-indigo-50/90 dark:bg-indigo-500/20 border border-indigo-200/60 dark:border-indigo-400/25"
-                />
-              )}
-              <Folder className="relative z-10 w-5 h-5" />
-              <span className="relative z-10 text-[10px] font-bold">Spaces</span>
+              <motion.span
+                animate={{ scale: activeTab === 'workspaces' && activeWorkspace === null ? 1.12 : 1 }}
+                transition={{ type: 'spring', stiffness: 450, damping: 24 }}
+                className="inline-flex items-center justify-center"
+              >
+                <NavIcon id="workspaces" filled={activeTab === 'workspaces' && activeWorkspace === null} className="w-[22px] h-[22px]" />
+              </motion.span>
+              <span className="text-[10px] font-semibold">Spaces</span>
             </button>
 
             {/* 3. Center Camera Scan Action Button */}
@@ -1029,7 +1028,7 @@ export default function App() {
               aria-label="Scan notes with camera"
               className="w-12 h-12 rounded-full bg-indigo-600 dark:bg-indigo-500 text-white flex items-center justify-center shadow-lg shadow-indigo-600/30 -mt-5 hover:scale-110 active:scale-95 transition-all cursor-pointer border-4 border-slate-50 dark:border-slate-950 z-45 shrink-0"
             >
-              <Camera className="w-6 h-6 stroke-[2.5]" />
+              <Camera className="w-6 h-6 stroke-[2.2]" />
             </button>
 
             {/* 4. AI Tutor */}
@@ -1040,21 +1039,20 @@ export default function App() {
                 }
                 setActiveTab('ai-tutor');
               }}
-              className={`relative w-full min-h-[44px] h-12 my-auto flex flex-col items-center justify-center gap-0.5 rounded-2xl cursor-pointer transition-colors active:scale-95 ${
+              className={`w-full min-h-[44px] h-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors active:scale-90 ${
                 activeTab === 'ai-tutor'
-                  ? 'text-indigo-600 dark:text-indigo-300 font-bold'
-                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                  ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
-              {activeTab === 'ai-tutor' && (
-                <motion.div
-                  layoutId="mobile-bottom-nav-pill"
-                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                  className="absolute inset-x-1 inset-y-0.5 rounded-2xl bg-indigo-50/90 dark:bg-indigo-500/20 border border-indigo-200/60 dark:border-indigo-400/25"
-                />
-              )}
-              <Sparkles className="relative z-10 w-5 h-5" />
-              <span className="relative z-10 text-[10px] font-bold">AI Tutor</span>
+              <motion.span
+                animate={{ scale: activeTab === 'ai-tutor' ? 1.12 : 1 }}
+                transition={{ type: 'spring', stiffness: 450, damping: 24 }}
+                className="inline-flex items-center justify-center"
+              >
+                <NavIcon id="ai-tutor" filled={activeTab === 'ai-tutor'} className="w-[22px] h-[22px]" />
+              </motion.span>
+              <span className="text-[10px] font-semibold">AI Tutor</span>
             </button>
 
             {/* 5. Profile */}
@@ -1063,21 +1061,20 @@ export default function App() {
                 setActiveTab('profile');
                 setActiveWorkspace(null);
               }}
-              className={`relative w-full min-h-[44px] h-12 my-auto flex flex-col items-center justify-center gap-0.5 rounded-2xl cursor-pointer transition-colors active:scale-95 ${
+              className={`w-full min-h-[44px] h-full flex flex-col items-center justify-center gap-0.5 cursor-pointer transition-colors active:scale-90 ${
                 activeTab === 'profile'
-                  ? 'text-indigo-600 dark:text-indigo-300 font-bold'
-                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                  ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
-              {activeTab === 'profile' && (
-                <motion.div
-                  layoutId="mobile-bottom-nav-pill"
-                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                  className="absolute inset-x-1 inset-y-0.5 rounded-2xl bg-indigo-50/90 dark:bg-indigo-500/20 border border-indigo-200/60 dark:border-indigo-400/25"
-                />
-              )}
-              <User className="relative z-10 w-5 h-5" />
-              <span className="relative z-10 text-[10px] font-bold">Profile</span>
+              <motion.span
+                animate={{ scale: activeTab === 'profile' ? 1.12 : 1 }}
+                transition={{ type: 'spring', stiffness: 450, damping: 24 }}
+                className="inline-flex items-center justify-center"
+              >
+                <NavIcon id="profile" filled={activeTab === 'profile'} className="w-[22px] h-[22px]" />
+              </motion.span>
+              <span className="text-[10px] font-semibold">Profile</span>
             </button>
           </nav>
 

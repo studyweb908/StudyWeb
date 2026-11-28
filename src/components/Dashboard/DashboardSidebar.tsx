@@ -27,6 +27,7 @@ import {
   Camera,
 } from 'lucide-react';
 import { Workspace } from './WorkspaceTypes';
+import { NavIcon } from './NavIcons';
 
 interface SidebarProps {
   activeTab: string;
@@ -56,6 +57,7 @@ export default function DashboardSidebar({
   onOpenScanner
 }: SidebarProps) {
   const [isDesktopHovered, setIsDesktopHovered] = React.useState(false);
+  const [hoveredItemId, setHoveredItemId] = React.useState<string | null>(null);
 
   const menuItems = [
     { id: 'dashboard', label: 'Home', icon: <LayoutDashboard className="w-4 h-4" />, colorClass: 'text-blue-600 dark:text-blue-400', bgClass: 'bg-blue-50 dark:bg-blue-950' },
@@ -125,10 +127,13 @@ export default function DashboardSidebar({
         >
           {menuItems.filter(i => !i.comingSoon).map((item) => {
             const isActive = activeTab === item.id;
+            const isFilled = isActive || hoveredItemId === item.id;
             return (
               <button
                 key={item.id}
                 data-tour={`nav-${item.id}`}
+                onMouseEnter={() => setHoveredItemId(item.id)}
+                onMouseLeave={() => setHoveredItemId(null)}
                 onClick={() => {
                   if (item.id === 'scan-notes') {
                     onClose();
@@ -148,12 +153,12 @@ export default function DashboardSidebar({
                   setActiveTab(item.id);
                   onClose();
                 }}
-                className={`w-full h-10 flex items-center ${
-                  isCollapsedState ? 'justify-center px-0' : 'justify-start px-2.5'
-                } rounded-xl text-sm font-semibold relative group cursor-pointer overflow-hidden whitespace-nowrap transition-colors duration-200 ${
-                  isActive 
-                    ? 'text-white' 
-                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/70'
+                className={`w-full h-11 flex items-center ${
+                  isCollapsedState ? 'justify-center px-0' : 'justify-start px-3'
+                } rounded-xl text-sm font-medium relative group cursor-pointer overflow-hidden whitespace-nowrap transition-colors duration-200 ${
+                  isActive
+                    ? 'text-indigo-600 dark:text-indigo-400 font-semibold'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-white/5'
                 }`}
                 title={isCollapsedState ? item.label : undefined}
               >
@@ -161,32 +166,38 @@ export default function DashboardSidebar({
                   <motion.div
                     layoutId={`${layoutIdPrefix}-sidebar-active-pill`}
                     transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                    className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#5145F5] to-indigo-500 shadow-md shadow-[#5145F5]/25"
+                    className="absolute inset-0 rounded-xl bg-indigo-50/95 dark:bg-indigo-500/15 border border-indigo-200/70 dark:border-indigo-400/20"
                   />
                 )}
-                <span className={`relative z-10 flex items-center justify-center w-8 h-8 rounded-lg shrink-0 transition-colors duration-200 ${
-                  isActive 
-                    ? 'bg-white/20 text-white' 
-                    : 'bg-slate-100/90 dark:bg-slate-800/90 text-slate-500 dark:text-slate-400 group-hover:text-[#5145F5] dark:group-hover:text-white group-hover:bg-indigo-50 dark:group-hover:bg-slate-700'
-                }`}>
-                  {item.icon}
-                </span>
+                <motion.span
+                  animate={{ scale: isFilled ? 1.08 : 1 }}
+                  transition={{ type: 'spring', stiffness: 450, damping: 24 }}
+                  className={`relative z-10 flex items-center justify-center w-6 h-6 shrink-0 transition-colors duration-200 ${
+                    isActive
+                      ? 'text-indigo-600 dark:text-indigo-400'
+                      : hoveredItemId === item.id
+                      ? 'text-indigo-600 dark:text-indigo-400'
+                      : 'text-slate-500 dark:text-slate-400'
+                  }`}
+                >
+                  <NavIcon id={item.id} filled={isFilled} className="w-[22px] h-[22px]" />
+                </motion.span>
 
                 <div
                   className={`relative z-10 flex items-center justify-between min-w-0 overflow-hidden transform-gpu will-change-transform transition-[opacity,transform,max-width,margin] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
                     isCollapsedState
                       ? '-translate-x-2 opacity-0 max-w-0 ml-0 pointer-events-none'
-                      : 'translate-x-0 opacity-100 flex-1 max-w-full ml-2.5'
+                      : 'translate-x-0 opacity-100 flex-1 max-w-full ml-3'
                   }`}
                 >
-                  <span className={`tracking-tight text-[13px] truncate ${isActive ? 'font-bold text-white' : ''}`}>
+                  <span className={`tracking-tight text-[13.5px] truncate ${isActive ? 'font-bold text-indigo-700 dark:text-indigo-300' : ''}`}>
                     {item.label}
                   </span>
 
                   {item.highlight && (
                     <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ml-1.5 ${
-                      isActive 
-                        ? 'bg-white/25 text-white border border-white/30' 
+                      isActive
+                        ? 'bg-indigo-600 text-white'
                         : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/80 dark:border-indigo-800'
                     }`}>
                       AI
@@ -246,16 +257,18 @@ export default function DashboardSidebar({
         {/* Footer / Settings & Logout */}
         <div className="p-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom,0px))] md:pb-2.5 border-t border-slate-200/70 dark:border-slate-800/80 space-y-1 bg-slate-50/70 dark:bg-[#0B1020]/70 backdrop-blur-xl flex flex-col shrink-0 overflow-hidden">
           <button
+            onMouseEnter={() => setHoveredItemId('settings')}
+            onMouseLeave={() => setHoveredItemId(null)}
             onClick={() => {
               setActiveTab('profile');
               onClose();
             }}
-            className={`w-full h-10 flex items-center ${
-              isCollapsedState ? 'justify-center px-0' : 'justify-start px-2.5'
+            className={`w-full h-11 flex items-center ${
+              isCollapsedState ? 'justify-center px-0' : 'justify-start px-3'
             } rounded-xl text-sm font-medium cursor-pointer relative group overflow-hidden whitespace-nowrap transition-colors duration-200 ${
-              activeTab === 'profile' 
-                ? 'text-white font-bold' 
-                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/80 dark:hover:bg-slate-800/80 border border-transparent hover:border-slate-200/80 dark:hover:border-slate-700/80'
+              activeTab === 'profile'
+                ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-white/5'
             }`}
             title="Settings"
           >
@@ -263,21 +276,25 @@ export default function DashboardSidebar({
               <motion.div
                 layoutId={`${layoutIdPrefix}-sidebar-active-pill`}
                 transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#5145F5] to-indigo-500 shadow-md shadow-[#5145F5]/25"
+                className="absolute inset-0 rounded-xl bg-indigo-50/95 dark:bg-indigo-500/15 border border-indigo-200/70 dark:border-indigo-400/20"
               />
             )}
-            <span className={`relative z-10 flex items-center justify-center w-8 h-8 rounded-lg shrink-0 transition-colors duration-200 ${
-              activeTab === 'profile'
-                ? 'bg-white/20 text-white'
-                : 'bg-slate-100/90 dark:bg-slate-800/90 text-slate-500 dark:text-slate-400 group-hover:text-[#5145F5] dark:group-hover:text-white'
-            }`}>
-              <Settings className="w-4 h-4" />
-            </span>
+            <motion.span
+              animate={{ scale: activeTab === 'profile' || hoveredItemId === 'settings' ? 1.08 : 1 }}
+              transition={{ type: 'spring', stiffness: 450, damping: 24 }}
+              className={`relative z-10 flex items-center justify-center w-6 h-6 shrink-0 transition-colors duration-200 ${
+                activeTab === 'profile' || hoveredItemId === 'settings'
+                  ? 'text-indigo-600 dark:text-indigo-400'
+                  : 'text-slate-500 dark:text-slate-400'
+              }`}
+            >
+              <NavIcon id="settings" filled={activeTab === 'profile' || hoveredItemId === 'settings'} className="w-[22px] h-[22px]" />
+            </motion.span>
             <span
-              className={`relative z-10 tracking-tight text-[13px] truncate transform-gpu will-change-transform transition-[opacity,transform,max-width,margin] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+              className={`relative z-10 tracking-tight text-[13.5px] truncate transform-gpu will-change-transform transition-[opacity,transform,max-width,margin] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
                 isCollapsedState
                   ? '-translate-x-2 opacity-0 max-w-0 ml-0 pointer-events-none'
-                  : 'translate-x-0 opacity-100 max-w-full ml-2.5'
+                  : 'translate-x-0 opacity-100 max-w-full ml-3'
               }`}
             >
               Settings
@@ -286,19 +303,19 @@ export default function DashboardSidebar({
 
           <button
             onClick={onLogout}
-            className={`w-full h-10 flex items-center ${
-              isCollapsedState ? 'justify-center px-0' : 'justify-start px-2.5'
-            } rounded-xl text-sm font-medium text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-colors duration-200 cursor-pointer group overflow-hidden whitespace-nowrap`}
+            className={`w-full h-11 flex items-center ${
+              isCollapsedState ? 'justify-center px-0' : 'justify-start px-3'
+            } rounded-xl text-sm font-medium text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 hover:bg-rose-50/80 dark:hover:bg-rose-950/25 transition-colors duration-200 cursor-pointer group overflow-hidden whitespace-nowrap`}
             title="Logout"
           >
-            <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-950/30 text-rose-500 dark:text-rose-400 shrink-0 group-hover:bg-rose-100 dark:group-hover:bg-rose-900/40 transition-colors duration-200">
-              <LogOut className="w-4 h-4" />
+            <span className="flex items-center justify-center w-6 h-6 text-rose-500 dark:text-rose-400 shrink-0 transition-transform duration-200 group-hover:scale-105">
+              <LogOut className="w-[20px] h-[20px]" />
             </span>
             <span
-              className={`tracking-tight text-[13px] truncate transform-gpu will-change-transform transition-[opacity,transform,max-width,margin] duration-200 ease-out ${
+              className={`tracking-tight text-[13.5px] truncate transform-gpu will-change-transform transition-[opacity,transform,max-width,margin] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
                 isCollapsedState
                   ? '-translate-x-2 opacity-0 max-w-0 ml-0 pointer-events-none'
-                  : 'translate-x-0 opacity-100 max-w-full ml-2.5'
+                  : 'translate-x-0 opacity-100 max-w-full ml-3'
               }`}
             >
               Logout
