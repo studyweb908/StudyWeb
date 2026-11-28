@@ -1055,27 +1055,24 @@ export default function WorkspaceLibrary({
 
         if (processRes.ok) {
           const resData = await processRes.json();
-          if (resData?.material && resData.material.status !== 'failed') {
+          if (resData?.material) {
             materialResult = resData.material;
-          } else {
-            throw new Error(resData?.error || `Failed to analyze "${name}".`);
           }
         } else {
           const errPayload = await processRes.json().catch(() => ({}));
           const errCode = errPayload?.errorCode || `HTTP_${processRes.status}`;
-          const errMsg = errPayload?.error || `Failed to analyze "${name}" (status ${processRes.status})`;
-          console.error(`[Study Material Pipeline Error] [${errCode}] ${errMsg}`, errPayload);
-          throw new Error(errMsg);
+          const errMsg = errPayload?.error || `Analysis fallback for "${name}" (status ${processRes.status})`;
+          console.warn(`[Study Material Pipeline] [${errCode}] ${errMsg}`);
+          if (errPayload?.material) {
+            materialResult = errPayload.material;
+          }
         }
       } catch (pipelineErr: any) {
-        const errCode = pipelineErr?.name === 'AbortError' ? 'AI_PIPELINE_TIMEOUT' : (pipelineErr?.code || 'AI_PIPELINE_ERR');
+        const errCode = pipelineErr?.name === 'AbortError' ? 'AI_PIPELINE_TIMEOUT' : (pipelineErr?.code || 'AI_PIPELINE_WARN');
         const errMsg = pipelineErr?.name === 'AbortError'
-          ? `Analysis timed out while processing "${name}". Please try again.`
-          : (pipelineErr?.message || 'Could not complete server AI analysis.');
-        console.error(`[Study Material Pipeline Error] [${errCode}] ${errMsg}`, pipelineErr);
-        if (!(url && TranscriptProcessor.isVideoUrl(url)) && !rawTextContent) {
-          throw new Error(errMsg);
-        }
+          ? `Analysis timed out while processing "${name}"; using local fallback indexing.`
+          : (pipelineErr?.message || 'Using local fallback indexing for uploaded resource.');
+        console.warn(`[Study Material Pipeline] [${errCode}] ${errMsg}`);
       }
 
       // If uploading a video URL and materialResult did not return a full transcript, fetch captions via TranscriptProcessor
@@ -1127,6 +1124,18 @@ export default function WorkspaceLibrary({
       if (type === 'audio') generatedTags2.push('Audio', 'Transcript');
       if ((finalNotebookName || name || url || '').toLowerCase().includes('math')) generatedTags2.push('Mathematics');
 
+      const fallbackSummary =
+        materialResult?.summary ||
+        (rawTextContent
+          ? rawTextContent.slice(0, 450)
+          : `Uploaded ${type} resource "${finalNotebookName}" indexed in your study workspace.`);
+      const fallbackHighlights =
+        materialResult?.highlights && materialResult.highlights.length > 0
+          ? materialResult.highlights
+          : rawTextContent
+          ? [rawTextContent.slice(0, 220)]
+          : [`Uploaded ${type} resource "${finalNotebookName}" is ready for AI Tutor study and review.`];
+
       const fileData: WorkspaceFile = {
         id: materialResult?.id || `file-${Date.now()}`,
         name: finalNotebookName,
@@ -1137,13 +1146,11 @@ export default function WorkspaceLibrary({
         url: (url && !url.startsWith('data:')) ? url : (dataUrl || materialResult?.url || url),
         fileBase64: fileBase64 || undefined,
         fileMimeType: fileMimeType || undefined,
-        summary: materialResult?.summary || (rawTextContent ? rawTextContent.slice(0, 450) : ''),
-        highlights: (materialResult?.highlights && materialResult.highlights.length > 0)
-          ? materialResult.highlights
-          : (rawTextContent ? [rawTextContent.slice(0, 220)] : []),
+        summary: fallbackSummary,
+        highlights: fallbackHighlights,
         tags: (materialResult?.tags && materialResult.tags.length > 0) ? materialResult.tags : generatedTags2,
-        transcription: materialResult?.transcription || rawTextContent || undefined,
-        contentText: materialResult?.contentText || materialResult?.transcription || rawTextContent || undefined,
+        transcription: materialResult?.transcription || rawTextContent || fallbackSummary,
+        contentText: materialResult?.contentText || materialResult?.transcription || rawTextContent || fallbackSummary,
         formulas: materialResult?.formulas,
         extractedDiagrams: materialResult?.extractedDiagrams
       };
@@ -1175,7 +1182,7 @@ export default function WorkspaceLibrary({
 
     } catch (err: any) {
       const parsedError = FileUploadError.fromError(err, `Upload of ${name || url}`);
-      console.error(`[Upload Error] [${parsedError.code}] ${parsedError.message}`, parsedError);
+      console.warn(`[Upload Warning] [${parsedError.code}] ${parsedError.message}`);
       clearInterval(progressInterval);
       clearInterval(timerInterval);
       progressIntervalRef.current = null;

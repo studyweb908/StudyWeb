@@ -190,7 +190,7 @@ export class OCRService {
           ? data.error.trim()
           : 'Unable to reach the document scanning service right now. Please try again shortly.';
       if (data?.error) {
-        console.error('[OCRService] Connection health check error:', data.error);
+        console.warn('[OCRService] Connection health check notice:', data.error);
       }
       return {
         ok: false,
@@ -200,7 +200,7 @@ export class OCRService {
       };
     } catch (err: any) {
       clearTimeout(timeoutId);
-      console.error('[OCRService] Connection health check exception:', err);
+      console.warn('[OCRService] Connection health check exception:', err);
       const isAbort = err?.name === 'AbortError';
       return {
         ok: false,
@@ -306,7 +306,7 @@ export class OCRService {
         if (!response.ok) {
           const backendError =
             typeof data?.error === 'string' && data.error.trim() ? data.error.trim() : '';
-          console.error('[OCRService] /api/ocr/scan-note error:', {
+          console.warn('[OCRService] /api/ocr/scan-note notice:', {
             status: response.status,
             code: data?.code,
             error: backendError || response.statusText
@@ -411,7 +411,7 @@ export class OCRService {
           lastErrorMessage = String(data.error).trim();
         }
       } catch (ocrErr: any) {
-        console.error(`[OCRService] /api/ocr/scan-note attempt ${attempt} error:`, ocrErr?.message || ocrErr);
+        console.warn(`[OCRService] /api/ocr/scan-note attempt ${attempt} notice:`, ocrErr?.message || ocrErr);
         const isAbort = ocrErr?.name === 'AbortError';
         lastErrorMessage = isAbort
           ? 'Scanning timed out. Please check your connection and try again.'
@@ -521,7 +521,7 @@ export class OCRService {
         if (!response.ok) {
           const backendErr =
             typeof data?.error === 'string' && data.error.trim() ? data.error.trim() : '';
-          console.error('[OCRService] /api/ocr/lens-ask error:', {
+          console.warn('[OCRService] /api/ocr/lens-ask notice:', {
             status: response.status,
             code: data?.code,
             error: backendErr || response.statusText
@@ -543,7 +543,7 @@ export class OCRService {
         }
       } catch (err: any) {
         clearTimeout(timeoutId);
-        console.error(`[OCRService] /api/ocr/lens-ask attempt ${attempt} error:`, err?.message || err);
+        console.warn(`[OCRService] /api/ocr/lens-ask attempt ${attempt} notice:`, err?.message || err);
         lastError =
           err?.name === 'AbortError'
             ? 'The scan request timed out. Please try again.'

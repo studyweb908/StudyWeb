@@ -1,8 +1,6 @@
 import fs from "fs";
 
 const RUNTIME_ENV_CACHE_PATH = "/tmp/.aistudio_runtime_env.json";
-const CONFIGURED_FALLBACK_GEMINI_KEY =
-  "AQ.Ab8RN6LiwYGVz4cg96MDtWO57-OIcTpkoiROHUqPfZGyzvdC3g";
 
 export type GeminiKeyDiagnosticState =
   | "valid_format"
@@ -38,8 +36,8 @@ export function isValidGeminiApiKeyCandidate(raw: unknown): raw is string {
   ) {
     return false;
   }
-  // Reject OAuth access tokens (ya29.*) that cause ACCESS_TOKEN_TYPE_UNSUPPORTED
-  if (trimmed.startsWith("ya29.")) return false;
+  // Reject OAuth / bound access tokens (ya29.*, AQ.*) that cause 401 ACCESS_TOKEN_TYPE_UNSUPPORTED
+  if (trimmed.startsWith("ya29.") || trimmed.startsWith("AQ.")) return false;
   // Reject non-Gemini tokens accidentally pasted into API_KEY / GEMINI_API_KEY
   if (
     trimmed.startsWith("eyJ") ||
@@ -90,15 +88,6 @@ export function diagnoseServerGeminiApiKey(): GeminiKeyDiagnostic {
     // ignore fs read errors
   }
 
-  if (isValidGeminiApiKeyCandidate(CONFIGURED_FALLBACK_GEMINI_KEY)) {
-    return {
-      state: "valid_format",
-      configured: true,
-      sourceVar: "CONFIGURED_GEMINI_KEY",
-      message: "Found configured Gemini API key."
-    };
-  }
-
   // Check why the present env var was rejected so we can report the exact reason
   for (const entry of envEntries) {
     const cleaned = cleanRawKey(entry.value);
@@ -116,13 +105,13 @@ export function diagnoseServerGeminiApiKey(): GeminiKeyDiagnostic {
           "The server environment currently holds a placeholder value instead of a real Gemini API key. Configure a valid GEMINI_API_KEY in your deployment environment variables."
       };
     }
-    if (cleaned.startsWith("ya29.")) {
+    if (cleaned.startsWith("ya29.") || cleaned.startsWith("AQ.")) {
       return {
         state: "oauth_token_unsupported",
         configured: false,
         sourceVar: entry.name,
         message:
-          "The server received an OAuth access token (ya29.*) instead of a Gemini API key, which Google rejects with ACCESS_TOKEN_TYPE_UNSUPPORTED. Set a valid GEMINI_API_KEY in your server environment variables."
+          "The server received an unsupported access token (ya29.* / AQ.*) instead of a Gemini API key (AIza*), which Google rejects with ACCESS_TOKEN_TYPE_UNSUPPORTED. Set a valid GEMINI_API_KEY in your server environment variables."
       };
     }
     if (cleaned.length < 20) {
@@ -189,14 +178,6 @@ export function getServerGeminiApiKeyCandidates(): GeminiKeyCandidate[] {
     }
   } catch {
     // ignore fs read errors
-  }
-
-  if (isValidGeminiApiKeyCandidate(CONFIGURED_FALLBACK_GEMINI_KEY)) {
-    const cleaned = cleanRawKey(CONFIGURED_FALLBACK_GEMINI_KEY);
-    if (!seen.has(cleaned)) {
-      seen.add(cleaned);
-      result.push({ key: cleaned, sourceVar: "CONFIGURED_GEMINI_KEY" });
-    }
   }
 
   return result;

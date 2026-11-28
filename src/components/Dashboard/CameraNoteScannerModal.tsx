@@ -994,7 +994,7 @@ export default function CameraNoteScannerModal({
       setCachedShortSummary(params.id, generated);
       return { summary: generated };
     } catch (err: any) {
-      console.error('[Scan Notes Summary Error]', err);
+      console.warn('[Scan Notes Summary Notice]', err);
       return {
         summary: '',
         error: err?.message || 'Could not generate a short summary right now. Tap Retry Summary to try again.'
@@ -1023,7 +1023,7 @@ export default function CameraNoteScannerModal({
         });
 
         if (ocrResult.error) {
-          console.error('[Scan Notes OCR Error]', ocrResult.error);
+          console.warn('[Scan Notes OCR Notice]', ocrResult.error);
           setSummaryError(ocrResult.error);
           setSummaryFailureCount((prev) => prev + 1);
           return;
@@ -1061,7 +1061,7 @@ export default function CameraNoteScannerModal({
       }
 
       if (!resolvedSummary || isPlaceholderScanSummary(resolvedSummary)) {
-        console.error('[Scan Notes Summary Error] Retry failed to produce summary');
+        console.warn('[Scan Notes Summary Notice] Retry did not produce a summary');
         setSummaryError('Could not generate a short summary right now. Please try again in a moment.');
         setSummaryFailureCount((prev) => prev + 1);
         return;
@@ -1072,7 +1072,7 @@ export default function CameraNoteScannerModal({
       setSummaryError(null);
       setScanResult((prev) => (prev ? { ...prev, summary: resolvedSummary } : prev));
     } catch (err: any) {
-      console.error('[Scan Notes Summary Error]', err);
+      console.warn('[Scan Notes Summary Notice]', err);
       setSummaryError(err?.message || 'Could not generate a short summary right now. Please try again.');
       setSummaryFailureCount((prev) => prev + 1);
     } finally {
@@ -1191,7 +1191,7 @@ export default function CameraNoteScannerModal({
       }
 
       if (ocrResult.error) {
-        console.error('[Scan Notes OCR Error]', ocrResult.error);
+        console.warn('[Scan Notes OCR Notice]', ocrResult.error);
         setScanError(ocrResult.error);
         setIsExtractingOcr(false);
         return;
