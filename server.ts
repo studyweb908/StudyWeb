@@ -2171,7 +2171,34 @@ async function generateTutorVisualIfNeeded(
     }
 
     // 2. Wikipedia Encyclopedic Extract & Summary (try top search hits, skipping disambiguation pages)
-    const wikiSearchHits: any[] = Array.isArray(wikiSearchData?.query?.search) ? wikiSearchData.query.search : [];
+    let wikiSearchHits: any[] = Array.isArray(wikiSearchData?.query?.search) ? wikiSearchData.query.search : [];
+    // If full conversational query returned no hits, retry with core keywords
+    if (wikiSearchHits.length === 0 && queryTerm.split(/\s+/).length > 2) {
+      const stopWords = new Set([
+        "what", "how", "why", "when", "where", "who", "which", "whom", "whose",
+        "is", "are", "was", "were", "be", "been", "being", "am",
+        "do", "does", "did", "can", "could", "will", "would", "shall", "should", "may", "might", "must",
+        "explain", "describe", "tell", "me", "about", "define", "give", "please", "help", "understand",
+        "the", "a", "an", "in", "on", "at", "of", "for", "to", "from", "by", "with", "and", "or", "as", "into"
+      ]);
+      const keywordQuery = queryTerm
+        .split(/\s+/)
+        .map((w) => w.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, ""))
+        .filter((w) => w.length > 1 && !stopWords.has(w.toLowerCase()))
+        .slice(0, 5)
+        .join(" ");
+      if (keywordQuery && keywordQuery.toLowerCase() !== queryTerm.toLowerCase()) {
+        const retryWiki = await fetch(
+          `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(keywordQuery)}&utf8=1&format=json&srlimit=4`,
+          { signal: AbortSignal.timeout(3500) }
+        )
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null);
+        if (Array.isArray(retryWiki?.query?.search)) {
+          wikiSearchHits = retryWiki.query.search;
+        }
+      }
+    }
     let primaryWikiText = "";
     for (const hit of wikiSearchHits.slice(0, 3)) {
       const candidateTitle = String(hit?.title || "").trim();
@@ -2383,6 +2410,10 @@ async function generateTutorVisualIfNeeded(
       return `### ${cleanTopic}\n\n${webKnowledge.summaryMarkdown}`;
     }
 
+    if (webKnowledge && webKnowledge.contextText && webKnowledge.contextText.trim().length > 20) {
+      return `### ${cleanTopic}\n\n${webKnowledge.contextText.trim()}`;
+    }
+
     if (groundedSourceContext && groundedSourceContext.trim().length > 40 && !groundedSourceContext.includes("Inspect the attached image")) {
       return groundedSourceContext.slice(0, 2400).trim();
     }
@@ -2403,7 +2434,7 @@ async function generateTutorVisualIfNeeded(
       }
     }
 
-    return `I searched for reliable web info on **"${cleanTopic}"**, but didn't find a strong direct match offline. Try rephrasing with a few more details, or upload related notes/files and I'll analyze them for you right away.`;
+    return `I'm temporarily unable to reach the AI service to answer **"${cleanTopic}"** right now. Please try again in a moment, or upload your notes/materials so I can analyze them directly for you.`;
   }
 
   // Diagnostic Route: Verify real AI connectivity independently
@@ -3947,9 +3978,8 @@ ${researchGuideline}`;
               const activeParts = pass <= 1 ? currentTurnParts : [{ text: prompt }];
               const contentsPayload = pass <= 1 ? buildContentsPayload(activeParts, 6) : prompt;
               const hasMediaOrVideoPart = activeParts.some((p: any) => Boolean(p?.fileData || p?.inlineData));
-              const timeoutMs = hasMediaOrVideoPart ? 22000 : 12000;
-
               const isHydrogen = currentModel === "gemini-4-hydrogen";
+              const timeoutMs = hasMediaOrVideoPart ? 26000 : isHydrogen ? 22000 : 15000;
               const supportsMinimalThinking = currentModel.startsWith("gemini-3");
               const shouldUseWebGrounding =
                 !hasRelevantWorkspaceMaterial &&
@@ -5647,7 +5677,7 @@ Return a valid JSON object matching the requested schema.`
     };
   }
 
-  // Helper: Local resilient fallback quiz generator so users never receive a hard failure
+  // Helper: Local resilient fallback quiz generator grounded strictly in extracted educational content
   function buildFallbackQuizQuestions(
     files: any[] = [],
     notes: any[] = [],
@@ -5658,27 +5688,52 @@ Return a valid JSON object matching the requested schema.`
     qType: string = "MCQ"
   ) {
     const facts: Array<{ term: string; detail: string; topic: string }> = [];
+    const seenDetails = new Set<string>();
 
-    const extractFromText = (text: string, topicName: string) => {
-      const cleaned = String(text || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-      if (!cleaned) return;
-      const sentences = cleaned.split(/(?<=[.!?])\s+/).filter((s) => s.length > 25 && s.length < 220);
-      for (const s of sentences.slice(0, 8)) {
-        const defMatch = s.match(/^([A-Z][A-Za-z0-9\s-]{2,40}?)\s+(?:is|are|refers to|means|represents|describes)\s+(.+)$/);
+    const cleanTopicLabel = (raw: string) =>
+      String(raw || "Study Material")
+        .replace(/\.[^/.]+$/, "")
+        .replace(/[_|]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const extractFromText = (text: string, rawTopicName: string) => {
+      const topicName = cleanTopicLabel(rawTopicName);
+      const cleaned = String(text || "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\[?\b\d{1,2}:\d{2}(?::\d{2})?\b\]?/g, " ")
+        .replace(/[#*`]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!cleaned || isDummyMetadataLine(cleaned)) return;
+
+      const sentences = cleaned
+        .split(/(?<=[.!?])\s+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 30 && s.length < 240 && !isDummyMetadataLine(s));
+
+      for (const s of sentences.slice(0, 14)) {
+        // Skip sentences that merely repeat the document/video title or channel boilerplate
+        if (topicName.length > 12 && s.toLowerCase().includes(topicName.toLowerCase())) continue;
+        if (/^(?:subscribe|like and share|watch the full|in this video|welcome to|click the link)/i.test(s)) continue;
+
+        const defMatch = s.match(
+          /^([A-Z][A-Za-z0-9\s\-()]{2,45}?)\s+(?:is defined as|is|are|refers to|means|represents|describes|states that|occurs when)\s+(.+)$/
+        );
         if (defMatch) {
-          facts.push({ term: defMatch[1].trim(), detail: defMatch[2].trim(), topic: topicName });
-        } else {
-          const words = s.split(" ").filter((w) => w.length > 4);
-          const candidateTerm = (words[0] || topicName).replace(/[^A-Za-z0-9-]/g, "");
-          if (candidateTerm) {
-            facts.push({ term: candidateTerm, detail: s, topic: topicName });
+          const term = defMatch[1].trim();
+          const detail = defMatch[2].replace(/[.]+$/, "").trim();
+          const key = `${term.toLowerCase()}::${detail.toLowerCase().slice(0, 50)}`;
+          if (term.length >= 3 && detail.length >= 15 && !seenDetails.has(key)) {
+            seenDetails.add(key);
+            facts.push({ term, detail, topic: topicName });
           }
         }
       }
     };
 
     files.forEach((f: any) => {
-      const tName = String(f?.name || "Study Material").replace(/\.[^/.]+$/, "");
+      const tName = String(f?.name || "Study Material");
       if (f?.summary) extractFromText(f.summary, tName);
       if (f?.transcription || f?.contentText) extractFromText(f.transcription || f.contentText, tName);
       if (Array.isArray(f?.highlights)) {
@@ -5691,39 +5746,38 @@ Return a valid JSON object matching the requested schema.`
       extractFromText(s?.transcription || "", s?.name || internetTopic || "Web Resource");
     });
 
+    // Never fabricate fake meta-questions from a file/video title when no real facts were extracted
     if (facts.length === 0) {
-      const baseTopic = internetTopic || files[0]?.name || notes[0]?.title || "Study Concepts";
-      facts.push(
-        { term: baseTopic, detail: `Core principles and real-world applications of ${baseTopic}`, topic: baseTopic },
-        { term: "Active Recall", detail: "Testing memory retrieval from study material without passive rereading", topic: baseTopic },
-        { term: "Conceptual Synthesis", detail: "Connecting definitions, mechanisms, and cause-and-effect relationships", topic: baseTopic },
-        { term: "Problem Analysis", detail: "Breaking complex ideas into verifiable steps and principles", topic: baseTopic }
-      );
+      return [];
     }
 
     const questions: any[] = [];
-    for (let i = 0; i < questionCount; i++) {
-      const fact = facts[i % facts.length];
+    const maxQuestions = Math.min(questionCount, facts.length);
+    for (let i = 0; i < maxQuestions; i++) {
+      const fact = facts[i];
       if (qType === "FillBlank") {
+        const escapedTerm = fact.term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const cleanDetail = fact.detail.replace(new RegExp(escapedTerm, "gi"), "_______");
         questions.push({
           id: `ai-quiz-${Date.now()}-${i}`,
-          question: `In ${fact.topic}, _______ refers to: ${fact.detail.replace(new RegExp(fact.term, "gi"), "_______")}`,
+          question: `_______ is described as: ${cleanDetail}.`,
           options: [fact.term],
           acceptedAnswers: [fact.term, fact.term.toLowerCase()],
           correctIndex: 0,
-          explanation: `"${fact.term}" matches the concept described: ${fact.detail}`,
+          explanation: `"${fact.term}" matches this concept: ${fact.detail}.`,
           difficulty: diffLevel,
           type: "FillBlank",
           topic: fact.topic
         });
       } else if (qType === "MatchFollowing") {
+        if (facts.length < 2) continue;
         const pairSlice: Array<{ id: string; left: string; right: string }> = [];
         const usedLefts = new Set<string>();
         const usedRights = new Set<string>();
         for (let p = 0; p < facts.length && pairSlice.length < 4; p++) {
           const item = facts[(i + p) % facts.length];
           const cleanLeft = String(item.term || "").trim();
-          const cleanRight = String(item.detail || "").slice(0, 110).trim();
+          const cleanRight = String(item.detail || "").slice(0, 120).trim();
           const leftKey = cleanLeft.toLowerCase();
           const rightKey = cleanRight.toLowerCase();
           if (cleanLeft && cleanRight && !usedLefts.has(leftKey) && !usedRights.has(rightKey)) {
@@ -5736,28 +5790,10 @@ Return a valid JSON object matching the requested schema.`
             });
           }
         }
-        const topicLabel = fact.topic || internetTopic || "Core Study Concept";
-        const supplementalPairs = [
-          { left: `${topicLabel} — Core Definition`, right: `Primary meaning and foundational rule of ${topicLabel}` },
-          { left: `${topicLabel} — Mechanism`, right: `How key steps and variables interact in ${topicLabel}` },
-          { left: `${topicLabel} — Key Application`, right: `Real-world or exam problem where ${topicLabel} is applied` },
-          { left: `${topicLabel} — Verification`, right: `Checking assumptions, units, and edge cases in ${topicLabel}` }
-        ];
-        for (const sup of supplementalPairs) {
-          if (pairSlice.length >= 4) break;
-          if (!usedLefts.has(sup.left.toLowerCase()) && !usedRights.has(sup.right.toLowerCase())) {
-            usedLefts.add(sup.left.toLowerCase());
-            usedRights.add(sup.right.toLowerCase());
-            pairSlice.push({
-              id: `pair-${i}-${pairSlice.length}`,
-              left: sup.left,
-              right: sup.right
-            });
-          }
-        }
+        if (pairSlice.length < 2) continue;
         questions.push({
           id: `ai-quiz-${Date.now()}-${i}`,
-          question: `Match each concept from ${fact.topic} with its accurate description:`,
+          question: `Match each concept with its accurate description:`,
           options: [],
           pairs: pairSlice,
           correctIndex: 0,
@@ -5769,28 +5805,26 @@ Return a valid JSON object matching the requested schema.`
       } else if (qType === "TF") {
         questions.push({
           id: `ai-quiz-${Date.now()}-${i}`,
-          question: `True or False: Regarding ${fact.topic}, ${fact.term} relates directly to ${fact.detail}.`,
+          question: `True or False: ${fact.term} refers to ${fact.detail}.`,
           options: ["True", "False"],
           correctIndex: 0,
-          explanation: `This statement accurately reflects the concept of ${fact.term} in ${fact.topic}.`,
+          explanation: `True — ${fact.term} refers to ${fact.detail}.`,
           difficulty: diffLevel,
           type: "TF",
           topic: fact.topic
         });
       } else {
-        const otherFacts = facts.filter((_, idx) => idx !== i % facts.length);
-        const distractors = [
-          otherFacts[0]?.term || "Unrelated baseline constant",
-          otherFacts[1]?.term || "Secondary observation hypothesis",
-          otherFacts[2]?.term || "Passive retention effect"
-        ];
-        const allOpts = [fact.term, ...distractors.slice(0, 3)];
+        const otherTerms = Array.from(
+          new Set(facts.filter((_, idx) => idx !== i).map((f) => f.term))
+        ).filter((t) => t.toLowerCase() !== fact.term.toLowerCase());
+        if (otherTerms.length < 3) continue;
+        const allOpts = [fact.term, ...otherTerms.slice(0, 3)];
         const shift = i % 4;
         const rotated = allOpts.map((_, idx) => allOpts[(idx - shift + 4) % 4]);
         const correctIdx = rotated.indexOf(fact.term);
         questions.push({
           id: `ai-quiz-${Date.now()}-${i}`,
-          question: `Which concept in "${fact.topic}" best matches: ${fact.detail}?`,
+          question: `Which term best matches the following description: "${fact.detail}"?`,
           options: rotated,
           correctIndex: correctIdx >= 0 ? correctIdx : 0,
           explanation: `${fact.term} directly represents this concept: ${fact.detail}.`,
@@ -5988,7 +6022,9 @@ ${typeInstruction}
 ${focusInstruction}
 
 Strict Content Quality Rules:
-- Test concrete facts, definitions, formulas, mechanisms, cause-and-effect relationships, and worked scenarios directly from the provided content.
+- Test ONLY the actual educational subject matter, definitions, laws, formulas, mechanisms, cause-and-effect relationships, and worked examples taught INSIDE the video, document, or notes.
+- NEVER ask questions about a file name, document title, video title, channel name, or metadata (for example, NEVER write "Which concept in '<File/Video Title>'...", "What is the title of...", or "According to the video title...").
+- NEVER generate vague, generic, or filler questions (such as "Active Recall", "Option 3", or meta-questions about studying). Every single question must test real academic knowledge from the material.
 - Write self-contained, clear questions without vague meta-references like "According to file #1" when the actual subject concept can be named directly.
 - Vary the correctIndex across MCQ questions so the answer is not always index 0.
 
@@ -6068,7 +6104,8 @@ Return ONLY valid JSON matching the requested schema.`;
       const prompt = `Generate EXACTLY ${questionCount} quiz questions of difficulty "${diffLevel}" and type "${qType}" strictly grounded in the materials/topic below:\n\n${sourceBlock}`;
 
       const quizParts: any[] = [{ text: prompt }];
-      for (const f of (Array.isArray(files) ? files : []).slice(0, 3)) {
+      let hasMediaOrVideoQuizPart = false;
+      for (const f of (Array.isArray(files) ? files : []).slice(0, 4)) {
         let rawB64 = String(f.fileBase64 || "");
         let mime = String(f.fileMimeType || "");
         if (!rawB64 && typeof f.url === "string" && f.url.startsWith("data:") && f.url.includes(";base64,")) {
@@ -6081,12 +6118,26 @@ Return ONLY valid JSON matching the requested schema.`;
         if (rawB64.includes(";base64,")) rawB64 = rawB64.split(";base64,")[1];
         if (rawB64 && rawB64.length > 20 && rawB64.length < 10_000_000 && (mime.startsWith("image/") || mime === "application/pdf")) {
           quizParts.push({ inlineData: { data: rawB64, mimeType: mime } });
+          hasMediaOrVideoQuizPart = true;
+        } else {
+          // Attach YouTube video URLs as native Gemini fileData so Gemini analyzes the actual video lecture content, not just its title
+          const ytId = TranscriptProcessor.extractYouTubeId(f.url || f.name || "");
+          if (ytId) {
+            quizParts.push({
+              fileData: {
+                fileUri: `https://www.youtube.com/watch?v=${ytId}`,
+                mimeType: "video/mp4"
+              }
+            });
+            hasMediaOrVideoQuizPart = true;
+          }
         }
       }
 
       const useSearchTool =
         hasInternet &&
         (!internetSourcesContext || internetSourcesContext.length < 150) &&
+        !hasMediaOrVideoQuizPart &&
         !isGoogleSearchOnCooldown();
       const quizConfig: Record<string, any> = {
         systemInstruction,
