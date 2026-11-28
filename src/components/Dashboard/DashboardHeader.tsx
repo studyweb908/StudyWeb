@@ -398,32 +398,17 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
         </div>
       )}
       <div className="flex items-center justify-between gap-2 sm:gap-3 lg:gap-4 min-w-0">
-        {/* Hamburger & Logo */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1 md:flex-initial overflow-hidden">
+        {/* Mobile Hamburger & Active Page Title */}
+        <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1 md:hidden overflow-hidden">
           <button
             onClick={onMenuToggle}
-            className="md:hidden p-1.5 -ml-1 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+            className="p-1.5 -ml-1 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
             aria-label="Open navigation sidebar"
             title="Open menu"
           >
             <Menu className="w-5 h-5" />
           </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('dashboard')}
-            className="flex items-center gap-2 cursor-pointer group shrink-0"
-            title="StudyWeb Home"
-          >
-            <img 
-              src="/logo-inner.png" 
-              alt="StudyWeb Logo" 
-              className="w-7 h-7 sm:w-8 sm:h-8 object-contain select-none shrink-0 group-hover:scale-105 transition-transform" 
-            />
-            <span className="hidden xl:inline-block text-sm font-extrabold tracking-tight text-[#151D3B] dark:text-white whitespace-nowrap">
-              StudyWeb
-            </span>
-          </button>
-          <span className="md:hidden text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white truncate min-w-0">
+          <span className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white truncate min-w-0">
             {tabLabels[activeTab] || 'Home'}
           </span>
         </div>
