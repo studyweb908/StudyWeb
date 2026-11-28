@@ -34,8 +34,15 @@ export function useThemeMode() {
     return false;
   });
 
-  // Function to set theme mode and notify other instances
+  // Function to set theme mode and notify other instances with smooth crossfade
   const setThemeMode = (mode: ThemeMode) => {
+    if (typeof document !== 'undefined') {
+      const root = document.documentElement;
+      root.classList.add('theme-transitioning');
+      window.setTimeout(() => {
+        root.classList.remove('theme-transitioning');
+      }, 450);
+    }
     localStorage.setItem('theme_mode', mode);
     setThemeModeState(mode);
     

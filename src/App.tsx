@@ -798,55 +798,124 @@ export default function App() {
         )}
 
         {/* Other Workspace Tabs (Overview, Notes, Flashcards, Quiz Center, Workspace Selector) */}
-        {isOtherWorkspaceTab && (
-          <div className="w-full min-w-0">
-            {targetWorkspace ? (
-              <WorkspaceContainer 
-                workspace={targetWorkspace} 
-                workspaces={workspaces}
-                onSwitchWorkspace={setActiveWorkspace}
-                onDeleteWorkspace={handleDeleteWorkspace}
-                onBack={() => {
-                  setTourWorkspaceSubTab(null);
-                  setActiveWorkspace(null);
-                }} 
-                onUpdateWorkspace={handleUpdateWorkspace}
-                initialTab={
-                  activeTab === 'workspaces' ? (tourWorkspaceSubTab || 'overview') : 
-                  activeTab === 'notes' ? 'notes' : 
-                  activeTab === 'flashcards' ? 'flashcards' : 'overview'
-                }
-              />
-            ) : (
-              <div className="w-full">
-                <WorkspaceSelector 
-                  workspaces={workspaces} 
-                  isLoading={isLoadingWorkspaces}
-                  onSelectWorkspace={handleSelectWorkspace} 
-                  onCreateWorkspace={handleCreateWorkspace}
-                  onUpdateWorkspace={handleUpdateWorkspace}
-                  onTogglePin={handleTogglePin}
-                  onToggleFavorite={handleToggleFavorite}
+        <AnimatePresence mode="wait">
+          {isOtherWorkspaceTab && (
+            <motion.div
+              key={`ws-${activeTab}`}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              className="w-full min-w-0"
+            >
+              {targetWorkspace ? (
+                <WorkspaceContainer 
+                  workspace={targetWorkspace} 
+                  workspaces={workspaces}
+                  onSwitchWorkspace={setActiveWorkspace}
                   onDeleteWorkspace={handleDeleteWorkspace}
-                  onReorderWorkspaces={handleReorderWorkspaces}
+                  onBack={() => {
+                    setTourWorkspaceSubTab(null);
+                    setActiveWorkspace(null);
+                  }} 
+                  onUpdateWorkspace={handleUpdateWorkspace}
+                  initialTab={
+                    activeTab === 'workspaces' ? (tourWorkspaceSubTab || 'overview') : 
+                    activeTab === 'notes' ? 'notes' : 
+                    activeTab === 'flashcards' ? 'flashcards' : 'overview'
+                  }
                 />
-              </div>
-            )}
-          </div>
-        )}
+              ) : (
+                <div className="w-full">
+                  <WorkspaceSelector 
+                    workspaces={workspaces} 
+                    isLoading={isLoadingWorkspaces}
+                    onSelectWorkspace={handleSelectWorkspace} 
+                    onCreateWorkspace={handleCreateWorkspace}
+                    onUpdateWorkspace={handleUpdateWorkspace}
+                    onTogglePin={handleTogglePin}
+                    onToggleFavorite={handleToggleFavorite}
+                    onDeleteWorkspace={handleDeleteWorkspace}
+                    onReorderWorkspaces={handleReorderWorkspaces}
+                  />
+                </div>
+              )}
+            </motion.div>
+          )}
 
-        {/* Critical-Path Views — Rendered synchronously in 0ms without lazy chunk delay */}
-        {(activeTab === 'dashboard' || !activeTab) && (
-          <DashboardHome 
-            setActiveTab={setActiveTab} 
-            setActiveWorkspace={setActiveWorkspace} 
-            workspaces={workspaces} 
-            activeWorkspace={activeWorkspace} 
-            isLoading={isLoadingWorkspaces}
-          />
-        )}
+          {/* Critical-Path Views — Rendered synchronously in 0ms without lazy chunk delay */}
+          {(activeTab === 'dashboard' || !activeTab) && (
+            <motion.div
+              key="tab-dashboard"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              className="w-full min-w-0"
+            >
+              <DashboardHome 
+                setActiveTab={setActiveTab} 
+                setActiveWorkspace={setActiveWorkspace} 
+                workspaces={workspaces} 
+                activeWorkspace={activeWorkspace} 
+                isLoading={isLoadingWorkspaces}
+              />
+            </motion.div>
+          )}
+          {activeTab === 'profile' && (
+            <motion.div
+              key="tab-profile"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              className="w-full min-w-0"
+            >
+              <ProfileSettingsHub />
+            </motion.div>
+          )}
+          {(activeTab === 'study-session' ||
+            activeTab === 'study-planner' ||
+            activeTab === 'subjects' ||
+            activeTab === 'resources' ||
+            activeTab === 'analytics' ||
+            activeTab === 'leaderboard' ||
+            activeTab === 'parent-dashboard' ||
+            activeTab === 'pdf-chat') && (
+            <motion.div
+              key={`tab-${activeTab}`}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              className="w-full min-w-0"
+            >
+              <Suspense fallback={null}>
+                {activeTab === 'study-session' && <StudySessionView />}
+                {activeTab === 'study-planner' && <StudyPlannerView />}
+                {activeTab === 'subjects' && <SubjectsView />}
+                {activeTab === 'resources' && <ResourcesView workspaces={workspaces} isLoading={isLoadingWorkspaces} />}
+                {activeTab === 'analytics' && <AnalyticsView />}
+                {activeTab === 'leaderboard' && <LeaderboardView />}
+                {activeTab === 'parent-dashboard' && <ParentDashboardView />}
+                {activeTab === 'pdf-chat' && (
+                  <PDFWorkspaceView 
+                    workspace={activeWorkspace || undefined}
+                    onUpdateWorkspace={handleUpdateWorkspace}
+                  />
+                )}
+              </Suspense>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {(activeTab === 'quiz-center' || hasVisitedQuizzes) && (
-          <div className={activeTab === 'quiz-center' ? 'w-full min-w-0' : 'hidden'}>
+          <motion.div
+            initial={false}
+            animate={activeTab === 'quiz-center' ? { opacity: 1, y: 0 } : { opacity: 0, y: 8 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className={activeTab === 'quiz-center' ? 'w-full min-w-0' : 'hidden'}
+          >
             <QuizCenterView
               workspaces={workspaces}
               activeWorkspace={activeWorkspace}
@@ -855,25 +924,8 @@ export default function App() {
               pendingQuizIntent={pendingQuizIntent}
               onClearPendingQuizIntent={() => setPendingQuizIntent(null)}
             />
-          </div>
+          </motion.div>
         )}
-        {activeTab === 'profile' && <ProfileSettingsHub />}
-
-        <Suspense fallback={null}>
-          {activeTab === 'study-session' && <StudySessionView />}
-          {activeTab === 'study-planner' && <StudyPlannerView />}
-          {activeTab === 'subjects' && <SubjectsView />}
-          {activeTab === 'resources' && <ResourcesView workspaces={workspaces} isLoading={isLoadingWorkspaces} />}
-          {activeTab === 'analytics' && <AnalyticsView />}
-          {activeTab === 'leaderboard' && <LeaderboardView />}
-          {activeTab === 'parent-dashboard' && <ParentDashboardView />}
-          {activeTab === 'pdf-chat' && (
-            <PDFWorkspaceView 
-              workspace={activeWorkspace || undefined}
-              onUpdateWorkspace={handleUpdateWorkspace}
-            />
-          )}
-        </Suspense>
       </div>
     );
   };

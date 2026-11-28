@@ -78,7 +78,20 @@
     overflow-x: hidden;
     max-width: 100%;
     width: 100%;
-    transition: background-color 0.3s ease, color 0.3s ease;
+    transition: background-color 0.35s cubic-bezier(0.22, 1, 0.36, 1), color 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* Smooth global theme crossfade when toggling between light and dark modes */
+  html.theme-transitioning,
+  html.theme-transitioning *,
+  html.theme-transitioning *::before,
+  html.theme-transitioning *::after {
+    transition: background-color 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+                color 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+                box-shadow 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+                fill 0.35s ease,
+                stroke 0.35s ease !important;
   }
 
   h1, h2, h3, h4, h5, h6 {

@@ -979,15 +979,15 @@ export function ProfileSettingsHub() {
             </div>
 
             {/* Real Scholar Identity Meta */}
-            <div className="space-y-1.5 sm:space-y-2 min-w-0 max-w-full">
+            <div className="space-y-2 min-w-0 w-full max-w-full">
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
-                <h1 className="text-xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight truncate max-w-full">
+                <h1 className="text-xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight break-words sm:truncate max-w-full">
                   {displayIdentityName}
                 </h1>
               </div>
 
               {heroMetadataItems.length > 0 && (
-                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-2 gap-y-1 text-xs text-slate-600 dark:text-slate-300 font-medium">
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-2 gap-y-1.5 text-xs text-slate-600 dark:text-slate-300 font-medium leading-relaxed">
                   {heroMetadataItems.map((item, idx) => (
                     <React.Fragment key={idx}>
                       {idx > 0 && (
@@ -995,7 +995,7 @@ export function ProfileSettingsHub() {
                           ·
                         </span>
                       )}
-                      <span className={`truncate max-w-[240px] sm:max-w-none ${item.includes('@') ? 'font-mono text-slate-500 dark:text-slate-400' : ''}`}>
+                      <span className={`break-all sm:break-normal ${item.includes('@') ? 'font-mono text-slate-500 dark:text-slate-400' : ''}`}>
                         {item}
                       </span>
                     </React.Fragment>
@@ -1004,7 +1004,7 @@ export function ProfileSettingsHub() {
               )}
 
               {targetAim ? (
-                <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 break-words">
+                <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 break-words leading-relaxed">
                   Aim: {targetAim}
                 </p>
               ) : null}
@@ -1013,33 +1013,33 @@ export function ProfileSettingsHub() {
         </div>
 
         {/* METRIC STRIP: Real-Time Personalized Tabular Figures */}
-        <div className="mt-5 sm:mt-7 pt-4 sm:pt-6 border-t border-slate-100 dark:border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+        <div className="mt-5 sm:mt-7 pt-4 sm:pt-6 border-t border-slate-100 dark:border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
           {/* Personalized Logged Study Hours Card */}
-          <div className="p-3.5 rounded-2xl bg-white/70 dark:bg-white/5 border border-slate-200/70 dark:border-white/5 shadow-xs hover:border-sky-500/30 transition-all flex flex-col justify-between min-w-0">
+          <div className="p-4 sm:p-3.5 rounded-2xl bg-slate-50/70 sm:bg-white/70 dark:bg-white/5 border border-slate-200/80 dark:border-white/10 shadow-xs hover:border-sky-500/30 transition-all flex flex-col justify-between min-w-0">
             <div>
-              <div className="flex items-center justify-between gap-2 mb-1">
+              <div className="flex items-start sm:items-center justify-between gap-2 mb-1.5">
                 <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 text-xs font-medium min-w-0">
                   <Clock className="w-4 h-4 text-sky-500 shrink-0" />
-                  <span className="truncate">Logged Study ({displayIdentityName.split(' ')[0]})</span>
+                  <span className="break-words sm:truncate">Logged Study ({displayIdentityName.split(' ')[0]})</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => handleLogStudySession(15)}
-                  className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-0.5 shrink-0"
+                  className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 sm:bg-transparent px-2 py-0.5 sm:p-0 rounded-lg hover:underline cursor-pointer flex items-center gap-0.5 shrink-0"
                   title="Quick log +15 minutes to your study profile"
                 >
                   <Plus className="w-3 h-3" />
                   <span>15m</span>
                 </button>
               </div>
-              <div className="text-lg sm:text-2xl font-mono font-bold tabular-nums text-slate-900 dark:text-white flex items-baseline gap-1.5 flex-wrap">
+              <div className="text-xl sm:text-2xl font-mono font-bold tabular-nums text-slate-900 dark:text-white flex items-baseline gap-1.5 flex-wrap">
                 <span>{studyHoursFormatted}</span>
-                <span className="text-xs font-sans text-slate-500 dark:text-slate-400 font-normal truncate">
+                <span className="text-xs font-sans text-slate-500 dark:text-slate-400 font-normal break-words">
                   Hours{subject ? ` · ${subject}` : ''}
                 </span>
               </div>
             </div>
-            <div className="mt-2 space-y-1">
+            <div className="mt-2.5 space-y-1.5">
               <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-medium">
                 <span className="font-mono tabular-nums">{todayMinutes}m / {dailyGoalMinutes}m today</span>
                 <span className="font-mono font-bold tabular-nums text-sky-600 dark:text-sky-400">{dailyGoalProgressPct}%</span>
@@ -1055,19 +1055,19 @@ export function ProfileSettingsHub() {
 
           <div
             onClick={() => setActiveTab('curriculum')}
-            className="p-3.5 rounded-2xl bg-white/70 dark:bg-white/5 border border-slate-200/70 dark:border-white/5 shadow-xs hover:border-purple-500/40 transition-all cursor-pointer min-w-0"
+            className="p-4 sm:p-3.5 rounded-2xl bg-slate-50/70 sm:bg-white/70 dark:bg-white/5 border border-slate-200/80 dark:border-white/10 shadow-xs hover:border-purple-500/40 transition-all cursor-pointer min-w-0 flex flex-col justify-between"
             title="Click to configure Next Core Exam Target Date"
           >
-            <div className="flex items-center justify-between gap-2 text-slate-500 dark:text-slate-400 text-xs font-medium mb-1">
-              <div className="flex items-center gap-1.5 truncate min-w-0">
+            <div className="flex items-start sm:items-center justify-between gap-2 text-slate-500 dark:text-slate-400 text-xs font-medium mb-1.5">
+              <div className="flex items-center gap-1.5 min-w-0">
                 <Target className="w-4 h-4 text-purple-500 shrink-0" />
-                <span className="truncate">{examName ? examName : 'Next Core Exam'}</span>
+                <span className="break-words sm:truncate">{examName ? examName : 'Next Core Exam'}</span>
               </div>
-              <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold shrink-0">
+              <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold shrink-0 whitespace-nowrap">
                 {examCountdown.hasDate ? examCountdown.formattedDate : 'Set Date →'}
               </span>
             </div>
-            <div className="text-lg sm:text-2xl font-mono font-bold tabular-nums text-slate-900 dark:text-white">
+            <div className="text-xl sm:text-2xl font-mono font-bold tabular-nums text-slate-900 dark:text-white">
               {examCountdown.hasDate ? (
                 <>
                   {examCountdown.daysRemaining}{' '}
@@ -1081,80 +1081,81 @@ export function ProfileSettingsHub() {
                 </span>
               )}
             </div>
-            <p className={`text-[11px] font-medium mt-0.5 truncate ${examCountdown.phaseColor}`}>
+            <p className={`text-[11px] font-medium mt-1 break-words sm:truncate ${examCountdown.phaseColor}`}>
               {examCountdown.phaseLabel}
             </p>
           </div>
         </div>
       </div>
 
-      {/* 2. SEGMENTED TABS (Equal-width 3-column grid — zero mobile overflow) */}
+      {/* 2. SEGMENTED TABS (Mobile-friendly stacked icon+label with animated sliding pill) */}
       <div
         data-tour="profile-tabs-bar"
-        className="grid grid-cols-3 gap-1 sm:gap-1.5 p-1 sm:p-1.5 bg-white/90 dark:bg-slate-900/85 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-xs transition-colors"
+        className="grid grid-cols-3 gap-1.5 p-1.5 bg-white/95 dark:bg-slate-900/90 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-sm transition-colors"
       >
-        <button
-          type="button"
-          onClick={() => setActiveTab('overview')}
-          className={`flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 px-2 sm:py-3 sm:px-4 rounded-xl text-[11px] sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap min-w-0 ${
-            activeTab === 'overview'
-              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/25'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/80 dark:hover:bg-white/5'
-          }`}
-        >
-          <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-          <span className="truncate">Overview</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('personal')}
-          className={`flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 px-2 sm:py-3 sm:px-4 rounded-xl text-[11px] sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap min-w-0 ${
-            activeTab === 'personal'
-              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/25'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/80 dark:hover:bg-white/5'
-          }`}
-        >
-          <User className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-          <span className="truncate">Personal Info</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('curriculum')}
-          className={`flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 px-2 sm:py-3 sm:px-4 rounded-xl text-[11px] sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap min-w-0 ${
-            activeTab === 'curriculum'
-              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/25'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/80 dark:hover:bg-white/5'
-          }`}
-        >
-          <GraduationCap className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-          <span className="truncate">Study Goals</span>
-        </button>
+        {(
+          [
+            { id: 'overview' as const, label: 'Overview', Icon: Sparkles },
+            { id: 'personal' as const, label: 'Personal Info', Icon: User },
+            { id: 'curriculum' as const, label: 'Study Goals', Icon: GraduationCap }
+          ]
+        ).map(({ id, label, Icon }) => {
+          const isActive = activeTab === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setActiveTab(id)}
+              className={`relative flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 py-2.5 px-1.5 sm:py-3 sm:px-4 rounded-xl text-[11px] sm:text-sm font-bold transition-colors cursor-pointer min-w-0 ${
+                isActive
+                  ? 'text-white'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/80 dark:hover:bg-white/5'
+              }`}
+            >
+              {isActive && (
+                <motion.div
+                  layoutId="profileSettingsTabPill"
+                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                  className="absolute inset-0 rounded-xl bg-indigo-600 shadow-sm shadow-indigo-600/25"
+                />
+              )}
+              <Icon className="relative z-10 w-4 h-4 shrink-0" />
+              <span className="relative z-10 text-center leading-tight sm:whitespace-nowrap">{label}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* 3. TAB CONTENT PANELS */}
-      <div className="transition-all duration-300 min-w-0">
+      <div className="min-w-0">
+        <AnimatePresence mode="wait">
         {/* ========================================================= */}
         {/* TAB 1: OVERVIEW (REAL PERSONAL INFO + STUDY GOALS + HOURS) */}
         {/* ========================================================= */}
         {activeTab === 'overview' && (
-          <div className="space-y-5 sm:space-y-6">
+          <motion.div
+            key="profile-tab-overview"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className="space-y-5 sm:space-y-6"
+          >
             {/* Row 1: Real Personal Info Summary & Study Goals Together */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6 items-stretch">
               {/* Card A: Real Personal & Academic Profile Summary + Quick Save */}
               <div
                 data-tour="profile-customization-card"
-                className="rounded-2xl sm:rounded-[28px] bg-white/90 dark:bg-slate-900/65 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-6 flex flex-col justify-between space-y-4 sm:space-y-5 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors min-w-0"
+                className="rounded-2xl sm:rounded-[28px] bg-white/95 dark:bg-slate-900/65 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-6 flex flex-col justify-between space-y-4 sm:space-y-5 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors min-w-0"
               >
                 <div className="space-y-4 sm:space-y-5">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3.5">
                     <div className="min-w-0">
                       <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                         <User className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                        <span className="truncate">Personal & Academic Profile</span>
+                        <span className="break-words sm:truncate">Personal & Academic Profile</span>
                       </h3>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
                         Your personal and academic details
                       </p>
                     </div>
@@ -1251,15 +1252,15 @@ export function ProfileSettingsHub() {
               </div>
 
               {/* Card B: Real Study Goals & Next Core Exam Countdown in Overview */}
-              <div className="rounded-2xl sm:rounded-[28px] bg-white/90 dark:bg-slate-900/65 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-6 flex flex-col justify-between space-y-4 sm:space-y-5 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors min-w-0">
+              <div className="rounded-2xl sm:rounded-[28px] bg-white/95 dark:bg-slate-900/65 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-6 flex flex-col justify-between space-y-4 sm:space-y-5 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors min-w-0">
                 <div className="space-y-4 sm:space-y-5">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3.5">
                     <div className="min-w-0">
                       <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                         <Target className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
-                        <span className="truncate">Study Goals & Exam Countdown</span>
+                        <span className="break-words sm:truncate">Study Goals & Exam Countdown</span>
                       </h3>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
                         Your active daily focus target, learning aim, and next core exam
                       </p>
                     </div>
@@ -1298,14 +1299,21 @@ export function ProfileSettingsHub() {
                 </div>
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* ========================================================= */}
         {/* TAB 2: PERSONAL INFORMATION FORM (NO CURRICULUM BOARD)    */}
         {/* ========================================================= */}
         {activeTab === 'personal' && (
-          <div className="rounded-2xl sm:rounded-[28px] bg-white/85 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-8 space-y-6 sm:space-y-8 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors">
+          <motion.div
+            key="profile-tab-personal"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className="rounded-2xl sm:rounded-[28px] bg-white/95 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-8 space-y-6 sm:space-y-8 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors"
+          >
             <div className="border-b border-slate-100 dark:border-slate-800 pb-4 sm:pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
               <div>
                 <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
@@ -1328,7 +1336,7 @@ export function ProfileSettingsHub() {
 
             <form onSubmit={handleSavePersonal} className="space-y-6">
               {/* Avatar Selector Strip */}
-              <div className="p-5 rounded-2xl bg-slate-50/80 dark:bg-white/5 border border-slate-200/60 dark:border-white/5 flex flex-col sm:flex-row items-center gap-6">
+              <div className="p-4 sm:p-5 rounded-2xl bg-slate-50/80 dark:bg-white/5 border border-slate-200/60 dark:border-white/5 flex flex-col sm:flex-row items-center gap-4 sm:gap-6">
                 <div className="w-16 h-16 rounded-2xl overflow-hidden border border-indigo-400/40 p-0.5 shrink-0 bg-white dark:bg-slate-900 shadow-sm">
                   <img
                     src={avatarUrl || getMonogramAvatar(displayIdentityName || userEmail || 'User')}
@@ -1339,12 +1347,12 @@ export function ProfileSettingsHub() {
 
                 <div className="flex-1 text-center sm:text-left space-y-1">
                   <h4 className="text-xs font-bold text-slate-900 dark:text-white">Profile Portrait</h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
                     Choose a personalized monogram badge, upload your own photo, or paste a custom image URL.
                   </p>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2 w-full sm:w-auto">
                   <button
                     type="button"
                     onClick={() => setShowAvatarPicker(true)}
@@ -1482,21 +1490,28 @@ export function ProfileSettingsHub() {
                 <button
                   type="submit"
                   disabled={isSaving}
-                  className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white font-bold text-xs shadow-md shadow-indigo-600/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  className="w-full sm:w-auto justify-center px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white font-bold text-xs shadow-md shadow-indigo-600/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   <span>{isSaving ? 'Saving...' : 'Save Profile Changes'}</span>
                 </button>
               </div>
             </form>
-          </div>
+          </motion.div>
         )}
 
         {/* ========================================================= */}
         {/* TAB 3: STUDY GOALS & IMPROVED NEXT CORE EXAM TARGET       */}
         {/* ========================================================= */}
         {activeTab === 'curriculum' && (
-          <div className="rounded-2xl sm:rounded-[28px] bg-white/85 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-8 space-y-6 sm:space-y-8 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors">
+          <motion.div
+            key="profile-tab-curriculum"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className="rounded-2xl sm:rounded-[28px] bg-white/95 dark:bg-slate-900/60 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-8 space-y-6 sm:space-y-8 shadow-md shadow-slate-200/30 dark:shadow-none transition-colors"
+          >
             <div className="border-b border-slate-100 dark:border-slate-800 pb-4 sm:pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
               <div>
                 <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
@@ -1625,30 +1640,32 @@ export function ProfileSettingsHub() {
                 </div>
 
                 {/* Quick Horizon Preset Buttons */}
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mr-1">
+                <div className="space-y-2 sm:space-y-0 sm:flex sm:flex-wrap sm:items-center sm:gap-2">
+                  <span className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 sm:mr-1">
                     Quick Target Horizon:
                   </span>
-                  {[
-                    { label: '+7 Days', days: 7 },
-                    { label: '+14 Days', days: 14 },
-                    { label: '+30 Days', days: 30 },
-                    { label: '+60 Days', days: 60 },
-                    { label: '+90 Days', days: 90 }
-                  ].map((preset) => (
-                    <button
-                      key={preset.days}
-                      type="button"
-                      onClick={() => setExamDateDaysFromNow(preset.days)}
-                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 border border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
+                  <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-2">
+                    {[
+                      { label: '+7 Days', days: 7 },
+                      { label: '+14 Days', days: 14 },
+                      { label: '+30 Days', days: 30 },
+                      { label: '+60 Days', days: 60 },
+                      { label: '+90 Days', days: 90 }
+                    ].map((preset) => (
+                      <button
+                        key={preset.days}
+                        type="button"
+                        onClick={() => setExamDateDaysFromNow(preset.days)}
+                        className="px-3 py-2 sm:py-1.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 border border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-xs font-semibold text-slate-700 dark:text-slate-300 transition-colors cursor-pointer text-center"
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Live Countdown Tracker Readout */}
-                <div className="p-4 sm:p-5 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
+                <div className="p-4 sm:p-5 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 divide-y divide-slate-100 dark:divide-slate-800 sm:divide-y-0 items-center">
                   <div className="space-y-1">
                     <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                       Live Exam Countdown
@@ -1669,11 +1686,11 @@ export function ProfileSettingsHub() {
                     </div>
                   </div>
 
-                  <div className="space-y-1">
+                  <div className="space-y-1 pt-3 sm:pt-0 min-w-0">
                     <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                       Target Exam & Schedule
                     </span>
-                    <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                    <div className="text-xs font-bold text-slate-900 dark:text-white break-words sm:truncate">
                       {examName || 'Core Exam Target'}
                     </div>
                     <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
@@ -1681,11 +1698,11 @@ export function ProfileSettingsHub() {
                     </div>
                   </div>
 
-                  <div className="space-y-1 sm:text-right">
+                  <div className="space-y-1 pt-3 sm:pt-0 sm:text-right min-w-0">
                     <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                       Preparation Pace
                     </span>
-                    <div className={`text-xs font-bold ${examCountdown.phaseColor}`}>
+                    <div className={`text-xs font-bold break-words ${examCountdown.phaseColor}`}>
                       {examCountdown.phaseLabel}
                     </div>
                     <div className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
@@ -1701,15 +1718,16 @@ export function ProfileSettingsHub() {
                 <button
                   type="submit"
                   disabled={isSavingGoals}
-                  className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white font-bold text-xs shadow-md shadow-indigo-600/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  className="w-full sm:w-auto justify-center px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white font-bold text-xs shadow-md shadow-indigo-600/20 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   {isSavingGoals ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   <span>{isSavingGoals ? 'Saving...' : 'Save Study Goals'}</span>
                 </button>
               </div>
             </form>
-          </div>
+          </motion.div>
         )}
+        </AnimatePresence>
 
         {/* ========================================================= */}
         {/* COMPLETE PROFILE DELETION SECTION (BOTTOM OF PROFILE)     */}

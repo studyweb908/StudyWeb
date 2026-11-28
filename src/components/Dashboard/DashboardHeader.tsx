@@ -547,17 +547,22 @@ export default function DashboardHeader({ onMenuToggle, activeTab, setActiveTab,
           {/* Theme Toggle Button */}
           <button
             onClick={toggleTheme}
-            className="flex items-center justify-center h-8 w-8 sm:h-9 sm:w-auto sm:px-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer group whitespace-nowrap shrink-0"
+            className="flex items-center justify-center h-8 w-8 sm:h-9 sm:w-auto sm:px-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-all duration-300 cursor-pointer group whitespace-nowrap shrink-0 active:scale-90"
             aria-label="Toggle theme mode"
             title={`Current: ${themeMode.charAt(0).toUpperCase() + themeMode.slice(1)} Mode`}
           >
-            {themeMode === 'system' ? (
-              <Monitor className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0" />
-            ) : themeMode === 'light' ? (
-              <Sun className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0" />
-            ) : (
-              <Moon className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0" />
-            )}
+            <span
+              key={themeMode}
+              className="inline-flex items-center justify-center transition-transform duration-300 group-hover:rotate-12"
+            >
+              {themeMode === 'system' ? (
+                <Monitor className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0" />
+              ) : themeMode === 'light' ? (
+                <Sun className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0 text-amber-500" />
+              ) : (
+                <Moon className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0 text-indigo-400" />
+              )}
+            </span>
             <span className="text-[10px] font-bold uppercase tracking-wider hidden xl:block ml-1.5 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
               {themeMode}
             </span>

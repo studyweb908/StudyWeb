@@ -2890,54 +2890,6 @@ export default function WorkspaceChat({
             </div>
           )}
 
-          {/* Inline YouTube / Web Link Analyzer Bar */}
-          {showLinkInput && (
-            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 p-2 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/70">
-              <Link2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400 ml-1 shrink-0" />
-              <input
-                type="url"
-                value={linkInputUrl}
-                onChange={(e) => setLinkInputUrl(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleAttachLink();
-                  }
-                }}
-                placeholder="Paste YouTube video link or article URL for full explanation..."
-                className="flex-1 min-w-0 bg-white dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                disabled={isAnalyzingLink}
-                autoFocus
-              />
-              <button
-                type="button"
-                onClick={handleAttachLink}
-                disabled={!linkInputUrl.trim() || isAnalyzingLink}
-                className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
-              >
-                {isAnalyzingLink ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Watching & Indexing...</span>
-                  </>
-                ) : (
-                  <span>Analyze Link</span>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowLinkInput(false);
-                  setLinkInputUrl('');
-                }}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
-                title="Close link input"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-
           {/* Hidden Native File Input */}
           <input
             ref={fileInputRef}
@@ -2966,25 +2918,6 @@ export default function WorkspaceChat({
               <Paperclip className="w-4 h-4 text-slate-500 group-hover:text-indigo-600 dark:text-slate-400 dark:group-hover:text-indigo-400 transition-colors" />
               <span className="text-xs font-bold hidden sm:inline text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-300">
                 Attach
-              </span>
-            </button>
-
-            {/* 1B. YOUTUBE / WEB LINK BUTTON */}
-            <button
-              type="button"
-              onClick={() => setShowLinkInput(prev => !prev)}
-              disabled={isThinking}
-              className={`h-9 w-9 sm:h-10 sm:w-auto sm:px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shrink-0 border shadow-2xs group mb-0.5 ${
-                showLinkInput
-                  ? 'bg-indigo-600 text-white border-indigo-700'
-                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-indigo-50/70 dark:hover:bg-slate-750 border-slate-200/90 dark:border-slate-700'
-              }`}
-              title="Attach a YouTube video or web link for full explanation"
-              aria-label="Attach YouTube or Web Link"
-            >
-              <Link2 className={`w-4 h-4 transition-colors ${showLinkInput ? 'text-white' : 'text-slate-500 group-hover:text-indigo-600 dark:text-slate-400 dark:group-hover:text-indigo-400'}`} />
-              <span className={`text-xs font-bold hidden sm:inline ${showLinkInput ? 'text-white' : 'text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-300'}`}>
-                Link
               </span>
             </button>
 
