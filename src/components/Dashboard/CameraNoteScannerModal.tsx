@@ -1262,7 +1262,9 @@ export default function CameraNoteScannerModal({
       qa: 'Create Q&A',
       quiz: 'Generate practice quiz',
       exam_points: 'Identify exam points',
-      solve: 'Solve step-by-step'
+      solve: 'Explain this step-by-step',
+      spot_mistakes: 'Spot any mistakes in my solution',
+      similar_practice: 'Generate 3 similar practice questions'
     };
 
     const displayPrompt = mode === 'ask' ? questionText : (actionLabels[mode] || questionText);
@@ -2051,6 +2053,46 @@ export default function CameraNoteScannerModal({
                                     : 'Ask any question about your scanned notes below, switch to Text & Translate to copy or translate, or tap Listen to hear it read aloud.')}
                               </p>
                             </div>
+
+                            {/* Snap-to-Solve + Similar Practice Generator (3 Instant Actions) */}
+                            <div className="rounded-2xl bg-gradient-to-br from-indigo-50/90 via-blue-50/70 to-purple-50/70 dark:from-indigo-950/40 dark:via-slate-900 dark:to-purple-950/30 border border-indigo-200/80 dark:border-indigo-800/60 p-3.5 sm:p-4 space-y-2.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5">
+                                  <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                                  <span>Snap-to-Solve &amp; Practice</span>
+                                </span>
+                                <span className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
+                                  1-Tap AI Actions
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <button
+                                  type="button"
+                                  disabled={isLensLoading}
+                                  onClick={() => runLensAction('solve')}
+                                  className="px-3 py-2.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 border border-indigo-200/80 dark:border-indigo-800/60 text-xs font-bold text-slate-800 dark:text-slate-100 transition-all cursor-pointer text-left shadow-2xs disabled:opacity-50"
+                                >
+                                  1. Explain This Step-by-Step
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isLensLoading}
+                                  onClick={() => runLensAction('spot_mistakes')}
+                                  className="px-3 py-2.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-amber-600 hover:text-white dark:hover:bg-amber-600 border border-amber-200/80 dark:border-amber-800/60 text-xs font-bold text-slate-800 dark:text-slate-100 transition-all cursor-pointer text-left shadow-2xs disabled:opacity-50"
+                                >
+                                  2. Spot Any Mistakes in My Solution
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isLensLoading}
+                                  onClick={() => runLensAction('similar_practice')}
+                                  className="px-3 py-2.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-emerald-600 hover:text-white dark:hover:bg-emerald-600 border border-emerald-200/80 dark:border-emerald-800/60 text-xs font-bold text-slate-800 dark:text-slate-100 transition-all cursor-pointer text-left shadow-2xs disabled:opacity-50"
+                                >
+                                  3. Generate 3 Similar Practice Questions
+                                </button>
+                              </div>
+                            </div>
+
                             {scanResult.extractedText ? (
                               <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 sm:p-4">
                                 <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -2164,6 +2206,9 @@ export default function CameraNoteScannerModal({
                         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
                           {(
                             [
+                              { mode: 'solve', label: 'Explain Step-by-Step' },
+                              { mode: 'spot_mistakes', label: 'Spot Mistakes' },
+                              { mode: 'similar_practice', label: '3 Similar Questions' },
                               { mode: 'clean_organize', label: 'Clean & Organize' },
                               { mode: 'summarize', label: 'Summarize' },
                               { mode: 'explain', label: 'Explain Notes' },
@@ -2172,8 +2217,7 @@ export default function CameraNoteScannerModal({
                               { mode: 'formulas', label: 'Formulas' },
                               { mode: 'qa', label: 'Q&A' },
                               { mode: 'quiz', label: 'Practice Quiz' },
-                              { mode: 'exam_points', label: 'Exam Points' },
-                              { mode: 'solve', label: 'Solve Step-by-Step' }
+                              { mode: 'exam_points', label: 'Exam Points' }
                             ] as Array<{ mode: ScanNotesOperationMode; label: string }>
                           ).map((item) => (
                             <button

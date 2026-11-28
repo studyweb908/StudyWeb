@@ -37,6 +37,7 @@ import {
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
 import QuickPreviewModal from './QuickPreviewModal';
 import EditWorkspaceModal from './EditWorkspaceModal';
+import CheatSheetModal from './CheatSheetModal';
 import {
   cleanNotebookLMTitle,
   getNotebookLMDisplayTitle,
@@ -105,6 +106,7 @@ export default function WorkspaceOverview({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editInitialTab, setEditInitialTab] = useState<'general' | 'logo' | 'banner'>('general');
+  const [showCheatSheet, setShowCheatSheet] = useState(false);
 
   // Ensure any existing URL-named file in workspace.files is automatically resolved to its analyzed NotebookLM title
   useEffect(() => {
@@ -297,6 +299,16 @@ export default function WorkspaceOverview({
                 >
                   <Sparkles className="w-3.5 h-3.5 shrink-0" />
                   <span>AI Tutor</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowCheatSheet(true)}
+                  className="w-full sm:w-auto h-10 px-3 sm:px-4 rounded-xl bg-white dark:bg-slate-900 hover:bg-purple-50/70 dark:hover:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200/80 dark:border-purple-800/70 text-xs font-bold transition-all inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 shadow-2xs cursor-pointer"
+                  title="Generate a 1-Page Last-Minute Revision Cheat Sheet & Formula PDF"
+                >
+                  <FileText className="w-3.5 h-3.5 shrink-0" />
+                  <span>Cheat Sheet</span>
                 </button>
 
                 <button
@@ -655,6 +667,13 @@ export default function WorkspaceOverview({
             })
           );
         }}
+      />
+
+      {/* 1-Page Cheat Sheet / Formula Sheet Builder Modal */}
+      <CheatSheetModal
+        isOpen={showCheatSheet}
+        onClose={() => setShowCheatSheet(false)}
+        workspace={workspace}
       />
     </div>
   );

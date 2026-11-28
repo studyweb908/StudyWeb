@@ -1172,6 +1172,8 @@ export type ScanNotesOperationMode =
   | 'quiz'
   | 'exam_points'
   | 'solve'
+  | 'spot_mistakes'
+  | 'similar_practice'
   | 'translate'
   | 'ask';
 
@@ -1193,6 +1195,8 @@ export function detectScanNotesOperationFromQuestion(
     m === 'quiz' ||
     m === 'exam_points' ||
     m === 'solve' ||
+    m === 'spot_mistakes' ||
+    m === 'similar_practice' ||
     m === 'translate'
   ) {
     return m;
@@ -1200,6 +1204,8 @@ export function detectScanNotesOperationFromQuestion(
 
   const q = String(question || '').toLowerCase().trim();
   if (!q) return 'summarize';
+  if (/\b(spot\s+(any\s+)?mistakes?|check\s+my\s+(solution|work|answer)|find\s+(the\s+)?error|grade\s+my)\b/.test(q)) return 'spot_mistakes';
+  if (/\b(similar\s+(practice\s+)?questions?|more\s+like\s+this|3\s+similar)\b/.test(q)) return 'similar_practice';
   if (/\b(extract\s+(all\s+)?text|transcribe|verbatim|raw\s+text)\b/.test(q)) return 'extract_text';
   if (/\b(clean|organize|reformat|structure\s+notes|tidy)\b/.test(q)) return 'clean_organize';
   if (/\b(revision\s+notes?|study\s+sheet|cheat\s+sheet)\b/.test(q)) return 'revision_notes';
@@ -1286,9 +1292,22 @@ C. Security:
     exam_points: `OPERATION: 10. Identify Important Examination Points
 - Highlight the highest-yield examination points, key testable definitions, critical formulas, and common exam takeaways from this scanned page.`,
 
-    solve: `OPERATION: Solve Step-by-Step
+    solve: `OPERATION: Explain This Step-by-Step
 - Examine all questions, problems, equations, or exercises visible in the scanned material.
-- Solve each problem step-by-step, showing every formula, calculation, and unit clearly without altering the original numbers.`,
+- Solve each problem step-by-step, showing every formula, substitution, calculation, unit, and the final boxed/bolded answer clearly without altering the original numbers.`,
+
+    spot_mistakes: `OPERATION: Spot Any Mistakes in My Solution
+- Carefully inspect the student's handwritten or printed solution shown in the scanned image step by step.
+- Structure your response clearly with:
+  1. **Solution Verdict:** State clearly whether the student's work is completely correct, partially correct, or contains an error.
+  2. **Mistake Breakdown:** Point out the exact line/step where any sign error, formula error, unit error, conceptual slip, or arithmetic mistake occurred (or confirm each step is valid if no mistake exists).
+  3. **Corrected Step-by-Step Solution:** Show the clean, accurate derivation and final answer.
+- If no worked solution is visible on the page, politely state that and solve the visible problem step-by-step instead.`,
+
+    similar_practice: `OPERATION: Generate 3 Similar Practice Questions
+- Analyze the exact topic, formula, and difficulty level of the problem or concept in this scan.
+- Generate **3 Similar Practice Questions** (labeled **Question 1**, **Question 2**, **Question 3**) using fresh numbers/scenarios so the student can practice the same skill.
+- Put a clear **Answers & Step-by-Step Hints** section at the very bottom so the student can attempt all 3 questions before checking.`,
 
     translate: `OPERATION: Translate Scanned Notes into ${options?.targetLanguage || 'English'}
 - Accurately translate all readable text from the scan into ${options?.targetLanguage || 'English'}.
