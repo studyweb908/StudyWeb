@@ -1622,15 +1622,7 @@ export default function QuizCenterView({
             <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
               Recent Quizzes
             </h2>
-            {swCacheStats?.swSupported && quizHistory.length > 0 && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-500/30 text-[11px] font-semibold">
-                <CheckCircle2 className="w-3 h-3 shrink-0" />
-                <span>
-                  Offline Cache Ready ({swCacheStats.cachedSessionCount}{' '}
-                  {swCacheStats.cachedSessionCount === 1 ? 'Quiz' : 'Quizzes'} · {swCacheStats.cachedQuestionCount} Qs)
-                </span>
-              </span>
-            )}
+
           </div>
           <span className="text-xs font-semibold text-slate-400 tabular-nums">
             {quizHistory.length} saved

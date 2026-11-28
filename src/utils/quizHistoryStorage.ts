@@ -183,6 +183,10 @@ export async function syncQuizHistoryToServiceWorkerCache(
 ): Promise<void> {
   if (typeof window === 'undefined') return;
   const uid = getActiveUid();
+  const deletedIds = getDeletedQuizIds();
+
+  // Filter out any deleted sessions before writing to cache
+  const safeSessions = sessions.filter((s) => s && s.id && !deletedIds.has(s.id));
 
   // 1. Write directly to shared CacheStorage so it is immediately available even before SW claims client
   if ('caches' in window) {
@@ -193,16 +197,24 @@ export async function syncQuizHistoryToServiceWorkerCache(
         createSwJsonResponse({
           uid,
           updatedAt: new Date().toISOString(),
-          sessions
+          sessions: safeSessions
         })
       );
       await Promise.all(
-        sessions.map((session) =>
+        safeSessions.map((session) =>
           session?.id
             ? cache.put(getSwSessionCacheUrl(session.id, uid), createSwJsonResponse(session))
             : Promise.resolve()
         )
       );
+      // Remove deleted session entries from cache
+      if (deletedIds.size > 0) {
+        await Promise.all(
+          Array.from(deletedIds).map((sessionId) =>
+            cache.delete(getSwSessionCacheUrl(sessionId, uid)).catch(() => {})
+          )
+        );
+      }
     } catch (err) {
       console.warn('[QuizHistoryStorage] CacheStorage write notice:', err);
     }
@@ -214,7 +226,7 @@ export async function syncQuizHistoryToServiceWorkerCache(
       navigator.serviceWorker.controller.postMessage({
         type: 'SYNC_QUIZ_HISTORY',
         uid,
-        sessions
+        sessions: safeSessions
       });
     } catch {}
   }

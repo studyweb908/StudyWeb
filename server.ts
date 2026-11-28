@@ -309,9 +309,9 @@ export function getAvailableCandidateModels(preferredModels: string[]): string[]
   const reordered = [...normalized].sort((a, b) => {
     const rank = (m: string) => {
       if (m === "gemini-3.5-transcribe") return 0;
-      if (m === "gemini-3-flash-preview") return 1;
-      if (m === "gemini-3.1-flash-lite") return 2;
-      if (m === "gemini-4-hydrogen") return 3;
+      if (m === "gemini-4-hydrogen") return 1;
+      if (m === "gemini-3-flash-preview") return 2;
+      if (m === "gemini-3.1-flash-lite") return 3;
       return 4;
     };
     return rank(a) - rank(b);
@@ -3794,11 +3794,11 @@ ${researchGuideline}`;
         sanitizeUntrustedDocumentText(groundedSourceContext).cleanText
       ].filter(Boolean).join('\n\n');
 
-      // Verified active Gemini models prioritized by speed and reliability
+      // Verified active Gemini models — hydrogen (thinking) first for accuracy, flash as fallback
       const baseCandidateModels: string[] = [
+        "gemini-4-hydrogen",
         "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite",
-        "gemini-4-hydrogen"
+        "gemini-3.1-flash-lite"
       ];
       const candidateModels: string[] = getAvailableCandidateModels(baseCandidateModels);
 
@@ -3962,7 +3962,7 @@ ${researchGuideline}`;
                   ? systemInstruction
                   : [resolvedTutorContext.systemInstruction, coreSystemInstruction, fileOverviewContext, groundedSourceContext].filter(Boolean).join('\n\n'),
                 ...(useSearch ? { tools: [{ googleSearch: {} }] } : {}),
-                ...(isHydrogen ? {} : { temperature: 0.6 }),
+                ...(isHydrogen ? {} : { temperature: 0.3 }),
                 ...(isHydrogen
                   ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
                   : supportsMinimalThinking
