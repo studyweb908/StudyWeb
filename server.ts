@@ -6495,81 +6495,109 @@ Return ONLY valid JSON matching the requested schema.`;
 
   // API Route: Generate One-Page Last-Minute Revision Cheat Sheet / Formula Sheet from Workspace Materials
   app.post("/api/generate-cheat-sheet", async (req, res) => {
-    try {
-      const {
-        workspaceId,
-        workspaceName = "Study Workspace",
-        subject = "General",
-        files = [],
-        notes = []
-      } = req.body || {};
+    const {
+      workspaceId,
+      workspaceName = "Study Workspace",
+      subject = "General",
+      files = [],
+      notes = [],
+      flashcards = [],
+      quizzes = []
+    } = req.body || {};
 
-      const hasFiles = Array.isArray(files) && files.length > 0;
-      const hasNotes = Array.isArray(notes) && notes.length > 0;
+    const buildLocalCheatSheet = () => {
+      const keyFormulas: Array<{ name: string; formula: string; note: string }> = [];
+      const coreDefinitions: Array<{ term: string; definition: string }> = [];
+      const keyDiagramsAndConcepts: Array<{ title: string; breakdown: string }> = [];
+      const examTraps: Array<{ trap: string; howToAvoid: string }> = [];
+      const lastMinuteChecklist: string[] = [];
 
-      if (!hasFiles && !hasNotes) {
-        res.status(400).json({ error: "Upload at least one file or note in this workspace to generate a Cheat Sheet." });
-        return;
-      }
-
-      const buildLocalCheatSheet = () => {
-        const keyFormulas: Array<{ name: string; formula: string; note: string }> = [];
-        const coreDefinitions: Array<{ term: string; definition: string }> = [];
-        const keyDiagramsAndConcepts: Array<{ title: string; breakdown: string }> = [];
-        const examTraps: Array<{ trap: string; howToAvoid: string }> = [];
-        const lastMinuteChecklist: string[] = [];
-
-        (Array.isArray(files) ? files : []).forEach((f: any) => {
-          const fname = String(f?.name || "Material").replace(/\.[^/.]+$/, "");
-          if (Array.isArray(f?.formulas)) {
-            f.formulas.slice(0, 6).forEach((eq: any, idx: number) => {
-              const s = String(eq || "").trim();
-              if (s) keyFormulas.push({ name: `${fname} Formula ${idx + 1}`, formula: s, note: "Check units before substituting values." });
-            });
-          }
-          if (Array.isArray(f?.highlights)) {
-            f.highlights.slice(0, 5).forEach((h: any) => {
-              const s = String(h || "").trim();
-              if (s && !isDummyMetadataLine(s)) {
-                keyDiagramsAndConcepts.push({ title: fname, breakdown: s });
-              }
-            });
-          }
-          const body = String(f?.summary || f?.transcription || f?.contentText || "").trim();
-          if (body) {
-            const sentences = body.split(/(?<=[.!?])\s+/).filter((s) => s.length > 25 && s.length < 220);
-            for (const s of sentences.slice(0, 6)) {
-              const defMatch = s.match(/^([A-Z][A-Za-z0-9\s\-()]{2,40}?)\s+(?:is defined as|is|are|refers to|means)\s+(.+)$/);
-              if (defMatch && coreDefinitions.length < 6) {
-                coreDefinitions.push({ term: defMatch[1].trim(), definition: defMatch[2].trim() });
-              }
+      (Array.isArray(files) ? files : []).forEach((f: any) => {
+        const fname = String(f?.name || "Material").replace(/\.[^/.]+$/, "");
+        if (Array.isArray(f?.formulas)) {
+          f.formulas.slice(0, 6).forEach((eq: any, idx: number) => {
+            const s = String(eq || "").trim();
+            if (s) keyFormulas.push({ name: `${fname} Formula ${idx + 1}`, formula: s, note: "Verify units before substituting values." });
+          });
+        }
+        if (Array.isArray(f?.highlights)) {
+          f.highlights.slice(0, 5).forEach((h: any) => {
+            const s = String(h || "").trim();
+            if (s && !isDummyMetadataLine(s)) {
+              keyDiagramsAndConcepts.push({ title: fname, breakdown: s });
+            }
+          });
+        }
+        const body = String(f?.summary || f?.transcription || f?.contentText || f?.content_text || "").trim();
+        if (body) {
+          const sentences = body.split(/(?<=[.!?])\s+/).filter((s) => s.length > 25 && s.length < 220);
+          for (const s of sentences.slice(0, 8)) {
+            const defMatch = s.match(/^([A-Z][A-Za-z0-9\s\-()]{2,40}?)\s+(?:is defined as|is|are|refers to|means|states that)\s+(.+)$/);
+            if (defMatch && coreDefinitions.length < 6) {
+              coreDefinitions.push({ term: defMatch[1].trim(), definition: defMatch[2].trim() });
+            } else if (keyDiagramsAndConcepts.length < 6 && !isDummyMetadataLine(s)) {
+              keyDiagramsAndConcepts.push({ title: fname, breakdown: s });
             }
           }
-          lastMinuteChecklist.push(`Review core concepts & solved examples in ${fname}`);
-        });
+        }
+        lastMinuteChecklist.push(`Review key concepts and examples in ${fname}`);
+      });
 
-        (Array.isArray(notes) ? notes : []).forEach((n: any) => {
-          const title = String(n?.title || "Study Note");
-          const content = String(n?.content || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-          if (content && keyDiagramsAndConcepts.length < 6) {
-            keyDiagramsAndConcepts.push({ title, breakdown: content.slice(0, 200) });
-          }
-        });
+      (Array.isArray(notes) ? notes : []).forEach((n: any) => {
+        const title = String(n?.title || "Study Note");
+        const content = String(n?.content || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        if (content && keyDiagramsAndConcepts.length < 6) {
+          keyDiagramsAndConcepts.push({ title, breakdown: content.slice(0, 220) });
+        }
+        if (title) lastMinuteChecklist.push(`Revise note: ${title}`);
+      });
 
-        return {
-          title: `${workspaceName} — 1-Page Cheat Sheet`,
-          subject,
-          subtitle: "High-Yield Formulas, Definitions, Concepts & Exam Traps",
-          keyFormulas: keyFormulas.slice(0, 8),
-          coreDefinitions: coreDefinitions.slice(0, 6),
-          keyDiagramsAndConcepts: keyDiagramsAndConcepts.slice(0, 6),
-          examTraps: examTraps.length > 0 ? examTraps : [
-            { trap: "Unit & sign mismatches in formulas", howToAvoid: "Convert all quantities to SI units and verify +/- sign conventions before calculating." },
-            { trap: "Confusing similar definitions under time pressure", howToAvoid: "Verify the exact condition or law each term applies to." }
-          ],
-          lastMinuteChecklist: Array.from(new Set(lastMinuteChecklist)).slice(0, 5)
-        };
+      (Array.isArray(flashcards) ? flashcards : []).slice(0, 6).forEach((c: any) => {
+        const term = String(c?.front || "").trim();
+        const def = String(c?.back || "").trim();
+        if (term && def && coreDefinitions.length < 6) {
+          coreDefinitions.push({ term, definition: def });
+        }
+      });
+
+      (Array.isArray(quizzes) ? quizzes : []).slice(0, 4).forEach((q: any) => {
+        const qText = String(q?.question || "").trim();
+        const exp = String(q?.explanation || "").trim();
+        if (qText && exp && examTraps.length < 4) {
+          examTraps.push({ trap: qText.slice(0, 110), howToAvoid: exp.slice(0, 160) });
+        }
+      });
+
+      if (keyDiagramsAndConcepts.length === 0 && coreDefinitions.length === 0) {
+        keyDiagramsAndConcepts.push({
+          title: workspaceName,
+          breakdown: `Core principles, laws, and problem-solving steps for ${subject || workspaceName}.`
+        });
+      }
+
+      if (lastMinuteChecklist.length === 0) {
+        lastMinuteChecklist.push(`Review core definitions and key formulas for ${workspaceName}`);
+        lastMinuteChecklist.push(`Practice 5 mixed problems without looking at notes`);
+      }
+
+      return {
+        title: `${workspaceName} — 1-Page Cheat Sheet`,
+        subject,
+        subtitle: "High-Yield Formulas, Definitions, Concepts & Exam Traps",
+        keyFormulas: keyFormulas.slice(0, 8),
+        coreDefinitions: coreDefinitions.slice(0, 6),
+        keyDiagramsAndConcepts: keyDiagramsAndConcepts.slice(0, 6),
+        examTraps: examTraps.length > 0 ? examTraps : [
+          { trap: "Unit & sign mismatches in formulas", howToAvoid: "Convert all quantities to SI units and verify +/- sign conventions before calculating." },
+          { trap: "Confusing similar definitions under time pressure", howToAvoid: "Verify the exact condition or law each term applies to." }
+        ],
+        lastMinuteChecklist: Array.from(new Set(lastMinuteChecklist)).slice(0, 5)
       };
+    };
+
+    try {
+      const hasFiles = Array.isArray(files) && files.length > 0;
+      const hasNotes = Array.isArray(notes) && notes.length > 0;
 
       const apiKey = getGeminiApiKey();
       if (!apiKey) {
@@ -6582,15 +6610,22 @@ Return ONLY valid JSON matching the requested schema.`;
         httpOptions: { headers: { "User-Agent": "aistudio-build" } }
       });
 
-      const ragText = await performAdvancedRAG(
-        ai,
-        `Extract all key formulas, equations, core definitions, diagram breakdowns, and common exam traps for a 1-page cheat sheet on ${workspaceName} (${subject}).`,
-        files,
-        notes,
-        24,
-        workspaceId,
-        req.headers.authorization
-      );
+      let ragText = "";
+      if (hasFiles || hasNotes) {
+        try {
+          ragText = await performAdvancedRAG(
+            ai,
+            `Extract all key formulas, equations, core definitions, diagram breakdowns, and common exam traps for a 1-page cheat sheet on ${workspaceName} (${subject}).`,
+            files,
+            notes,
+            24,
+            workspaceId,
+            req.headers.authorization
+          );
+        } catch (ragErr: any) {
+          console.warn("[Generate Cheat Sheet] RAG retrieval skipped:", summarizeModelError(ragErr));
+        }
+      }
 
       const directFilesContext = (Array.isArray(files) ? files : [])
         .slice(0, 8)
@@ -6607,24 +6642,47 @@ Return ONLY valid JSON matching the requested schema.`;
         .map((n: any, idx: number) => `Note #${idx + 1}: "${n.title || "Note"}"\n${String(n.content || "").replace(/<[^>]+>/g, " ").slice(0, 3000)}`)
         .join("\n\n");
 
+      const flashcardsContext = (Array.isArray(flashcards) ? flashcards : [])
+        .slice(0, 12)
+        .map((c: any) => `- ${c.front}: ${c.back}`)
+        .join("\n");
+
       const systemInstruction = `You are an elite academic revision-sheet designer.
-Create a crisp, ultra-high-yield ONE-PAGE Last-Minute Cheat Sheet / Formula Sheet from the provided workspace materials.
+Create a crisp, ultra-high-yield ONE-PAGE Last-Minute Cheat Sheet / Formula Sheet for "${workspaceName}" (${subject}).
 Rules:
 - Keep every entry concise, dense, and exam-ready so it fits cleanly on a single printable A4/Letter page.
 - Extract real formulas (with variable meanings/units), core definitions, key diagram/process breakdowns, and common exam traps/mistakes students make.
-- Ground everything strictly in the provided materials (never invent unrelated topics or generic fluff).
+- If workspace materials are provided, ground everything strictly in them. If no files are uploaded yet, create a high-yield 1-page revision sheet strictly covering the topic "${workspaceName}" (${subject}).
 - Return ONLY valid JSON matching the schema.`;
 
+      const contextPayload = [
+        directFilesContext,
+        directNotesContext,
+        flashcardsContext ? `Key Flashcards:\n${flashcardsContext}` : "",
+        ragText
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+
       const promptParts: any[] = [{
-        text: `Build a 1-Page Cheat Sheet for workspace "${workspaceName}" (Subject: ${subject}) from:\n\n${[directFilesContext, directNotesContext, ragText].filter(Boolean).join("\n\n")}`
+        text: contextPayload
+          ? `Build a 1-Page Cheat Sheet for workspace "${workspaceName}" (Subject: ${subject}) from:\n\n${contextPayload}`
+          : `Build a high-yield 1-Page Cheat Sheet for "${workspaceName}" (Subject: ${subject}) including key formulas, core definitions, concept breakdowns, exam traps, and a revision checklist.`
       }];
 
       for (const f of (Array.isArray(files) ? files : []).slice(0, 3)) {
-        const ytId = TranscriptProcessor.extractYouTubeId(f.url || f.name || "");
-        if (ytId) {
-          promptParts.push({
-            fileData: { fileUri: `https://www.youtube.com/watch?v=${ytId}`, mimeType: "video/mp4" }
-          });
+        let rawB64 = String(f.fileBase64 || "");
+        const mime = String(f.fileMimeType || "");
+        if (rawB64.includes(";base64,")) rawB64 = rawB64.split(";base64,")[1];
+        if (rawB64 && rawB64.length > 20 && rawB64.length < 8_000_000 && (mime.startsWith("image/") || mime === "application/pdf")) {
+          promptParts.push({ inlineData: { data: rawB64, mimeType: mime } });
+        } else {
+          const ytId = TranscriptProcessor.extractYouTubeId(f.url || f.name || "");
+          if (ytId) {
+            promptParts.push({
+              fileData: { fileUri: `https://www.youtube.com/watch?v=${ytId}`, mimeType: "video/mp4" }
+            });
+          }
         }
       }
 
@@ -6711,8 +6769,8 @@ Rules:
 
       return res.json({ cheatSheet: buildLocalCheatSheet(), fallback: true });
     } catch (err: any) {
-      console.warn("[Generate Cheat Sheet] Falling back to local synthesis:", summarizeModelError(err));
-      return res.status(500).json({ error: "Could not build cheat sheet right now. Please try again." });
+      console.warn("[Generate Cheat Sheet] Switching to local cheat sheet synthesis:", summarizeModelError(err));
+      return res.json({ cheatSheet: buildLocalCheatSheet(), fallback: true });
     }
   });
 

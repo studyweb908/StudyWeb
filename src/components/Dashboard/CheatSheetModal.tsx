@@ -42,6 +42,91 @@ export default function CheatSheetModal({ isOpen, onClose, workspace }: CheatShe
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const buildClientFallbackSheet = (): CheatSheetData => {
+    const keyFormulas: Array<{ name: string; formula: string; note?: string }> = [];
+    const coreDefinitions: Array<{ term: string; definition: string }> = [];
+    const keyDiagramsAndConcepts: Array<{ title: string; breakdown: string }> = [];
+    const examTraps: Array<{ trap: string; howToAvoid: string }> = [];
+    const lastMinuteChecklist: string[] = [];
+
+    (workspace.files || []).forEach((f) => {
+      const fname = String(f.name || 'Study Material').replace(/\.[^/.]+$/, '');
+      if (Array.isArray(f.formulas)) {
+        f.formulas.slice(0, 6).forEach((eq, idx) => {
+          const s = String(eq || '').trim();
+          if (s) keyFormulas.push({ name: `${fname} Formula ${idx + 1}`, formula: s, note: 'Verify units before calculating.' });
+        });
+      }
+      if (Array.isArray(f.highlights)) {
+        f.highlights.slice(0, 4).forEach((h) => {
+          const s = String(h || '').trim();
+          if (s) keyDiagramsAndConcepts.push({ title: fname, breakdown: s });
+        });
+      }
+      const body = String(f.summary || f.transcription || f.contentText || '').trim();
+      if (body) {
+        const sentences = body.split(/(?<=[.!?])\s+/).filter((s) => s.length > 25 && s.length < 220);
+        for (const s of sentences.slice(0, 6)) {
+          const defMatch = s.match(/^([A-Z][A-Za-z0-9\s\-()]{2,40}?)\s+(?:is defined as|is|are|refers to|means)\s+(.+)$/);
+          if (defMatch && coreDefinitions.length < 6) {
+            coreDefinitions.push({ term: defMatch[1].trim(), definition: defMatch[2].trim() });
+          } else if (keyDiagramsAndConcepts.length < 6) {
+            keyDiagramsAndConcepts.push({ title: fname, breakdown: s });
+          }
+        }
+      }
+      lastMinuteChecklist.push(`Review key concepts and examples from ${fname}`);
+    });
+
+    (workspace.notes || []).forEach((n) => {
+      const clean = String(n.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      if (clean && keyDiagramsAndConcepts.length < 6) {
+        keyDiagramsAndConcepts.push({ title: n.title || 'Note', breakdown: clean.slice(0, 220) });
+      }
+    });
+
+    (workspace.flashcards || []).slice(0, 6).forEach((c) => {
+      if (c.front && c.back && coreDefinitions.length < 6) {
+        coreDefinitions.push({ term: c.front, definition: c.back });
+      }
+    });
+
+    (workspace.quizzes || []).slice(0, 4).forEach((q) => {
+      if (q.question && q.explanation && examTraps.length < 4) {
+        examTraps.push({ trap: q.question.slice(0, 110), howToAvoid: q.explanation.slice(0, 160) });
+      }
+    });
+
+    if (keyDiagramsAndConcepts.length === 0 && coreDefinitions.length === 0) {
+      keyDiagramsAndConcepts.push({
+        title: workspace.name,
+        breakdown: `Key principles, laws, and worked concepts for ${workspace.subject || workspace.name}.`
+      });
+    }
+
+    if (lastMinuteChecklist.length === 0) {
+      lastMinuteChecklist.push(`Review core concepts & formulas in ${workspace.name}`);
+      lastMinuteChecklist.push('Test yourself on practice questions without peeking at notes');
+    }
+
+    return {
+      title: `${workspace.name} — 1-Page Cheat Sheet`,
+      subject: workspace.subject || 'General',
+      subtitle: 'High-Yield Formulas, Definitions, Concepts & Exam Traps',
+      keyFormulas: keyFormulas.slice(0, 8),
+      coreDefinitions: coreDefinitions.slice(0, 6),
+      keyDiagramsAndConcepts: keyDiagramsAndConcepts.slice(0, 6),
+      examTraps:
+        examTraps.length > 0
+          ? examTraps
+          : [
+              { trap: 'Unit & sign mismatches in formulas', howToAvoid: 'Convert all values to SI units and double-check +/- signs.' },
+              { trap: 'Mixing up closely related terms', howToAvoid: 'Review the exact condition each rule applies to before answering.' }
+            ],
+      lastMinuteChecklist: Array.from(new Set(lastMinuteChecklist)).slice(0, 5)
+    };
+  };
+
   const generateSheet = async () => {
     setIsLoading(true);
     setError(null);
@@ -49,16 +134,29 @@ export default function CheatSheetModal({ isOpen, onClose, workspace }: CheatShe
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData?.session?.access_token;
 
-      const compactFiles = (workspace.files || []).slice(0, 8).map((f) => ({
-        id: f.id,
-        name: f.name,
-        type: f.type,
-        summary: f.summary,
-        transcription: f.transcription || f.contentText,
-        highlights: f.highlights,
-        formulas: f.formulas,
-        url: typeof f.url === 'string' && !f.url.startsWith('data:') ? f.url : undefined
-      }));
+      const compactFiles = (workspace.files || []).slice(0, 8).map((f) => {
+        let hydratedB64 = typeof f.fileBase64 === 'string' ? f.fileBase64 : undefined;
+        let hydratedMime = f.fileMimeType;
+        if (!hydratedB64 && typeof f.url === 'string' && f.url.startsWith('data:')) {
+          const m = f.url.match(/^data:([^;]+);base64,(.+)$/);
+          if (m) {
+            hydratedMime = hydratedMime || m[1];
+            hydratedB64 = m[2];
+          }
+        }
+        return {
+          id: f.id,
+          name: f.name,
+          type: f.type,
+          summary: f.summary,
+          transcription: f.transcription || f.contentText,
+          highlights: f.highlights,
+          formulas: f.formulas,
+          url: typeof f.url === 'string' && !f.url.startsWith('data:') ? f.url : undefined,
+          fileBase64: hydratedB64 && hydratedB64.length < 4_000_000 ? hydratedB64 : undefined,
+          fileMimeType: hydratedMime
+        };
+      });
 
       const compactNotes = (workspace.notes || []).slice(0, 8).map((n) => ({
         id: n.id,
@@ -77,24 +175,29 @@ export default function CheatSheetModal({ isOpen, onClose, workspace }: CheatShe
           workspaceName: workspace.name,
           subject: workspace.subject || 'General',
           files: compactFiles,
-          notes: compactNotes
+          notes: compactNotes,
+          flashcards: (workspace.flashcards || []).slice(0, 12),
+          quizzes: (workspace.quizzes || []).slice(0, 6)
         })
       });
 
       const payload = await res.json().catch(() => null);
-      if (!res.ok || !payload?.cheatSheet) {
-        throw new Error(payload?.error || 'Could not generate Cheat Sheet right now.');
+      if (res.ok && payload?.cheatSheet) {
+        setCheatSheet(payload.cheatSheet);
+        return;
       }
-      setCheatSheet(payload.cheatSheet);
-    } catch (err: any) {
-      setError(err?.message || 'Unable to generate Cheat Sheet. Please try again.');
+      // Graceful fallback so Cheat Sheet always renders from available workspace materials
+      setCheatSheet(buildClientFallbackSheet());
+    } catch {
+      setCheatSheet(buildClientFallbackSheet());
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    if (isOpen && !cheatSheet && !isLoading) {
+    setCheatSheet(null);
+    if (isOpen) {
       generateSheet();
     }
   }, [isOpen, workspace.id]);
