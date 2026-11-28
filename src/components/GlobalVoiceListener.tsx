@@ -17,6 +17,7 @@ import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { useMicrophoneWaveform } from '../hooks/useMicrophoneWaveform';
 import { recordUserActivity } from '../utils/userActivity';
 import { Workspace } from './Dashboard/WorkspaceTypes';
+import MarkdownMathRenderer from './Dashboard/MarkdownMathRenderer';
 import { voiceResponseEngine } from '../services/voiceResponseEngine';
 import { processAuraInput, AuraContext } from '../services/auraIntelligence';
 
@@ -611,55 +612,9 @@ export default function GlobalVoiceListener({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
-  // Clean Markdown renderer for AURA speech bubble
+  // Clean GFM Markdown + KaTeX LaTeX/Chemistry renderer for AURA speech bubble
   const renderMessageContent = (text: string) => {
-    const lines = text.split('\n');
-    return (
-      <div className="space-y-1.5 text-xs sm:text-sm leading-relaxed text-slate-200">
-        {lines.map((line, idx) => {
-          const trimmed = line.trim();
-          if (!trimmed) return <div key={idx} className="h-1" />;
-
-          // Heading or title
-          if (trimmed.startsWith('# ') || trimmed.startsWith('## ') || trimmed.startsWith('### ')) {
-            const cleanTitle = trimmed.replace(/^#+\s*/, '');
-            return (
-              <h4 key={idx} className="font-bold text-white text-sm tracking-tight pt-0.5">
-                {cleanTitle}
-              </h4>
-            );
-          }
-
-          // Bullet points
-          if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-            const content = trimmed.substring(2);
-            return (
-              <div key={idx} className="flex items-start gap-2 pl-1">
-                <span className="text-cyan-400 mt-1 text-[10px]">●</span>
-                <span className="flex-1 text-slate-300">
-                  {formatInlineText(content)}
-                </span>
-              </div>
-            );
-          }
-
-          return <p key={idx}>{formatInlineText(line)}</p>;
-        })}
-      </div>
-    );
-  };
-
-  const formatInlineText = (text: string) => {
-    const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
-    return parts.map((part, i) => {
-      if (part.startsWith('**') && part.endsWith('**')) {
-        return <strong key={i} className="font-semibold text-cyan-300">{part.slice(2, -2)}</strong>;
-      }
-      if (part.startsWith('*') && part.endsWith('*')) {
-        return <em key={i} className="italic text-slate-300">{part.slice(1, -1)}</em>;
-      }
-      return part;
-    });
+    return <MarkdownMathRenderer content={text} tone="dark" className="text-xs sm:text-sm" />;
   };
 
   return (

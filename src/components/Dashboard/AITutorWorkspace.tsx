@@ -40,6 +40,7 @@ import { loadStoredWorkspaces, saveStoredWorkspaces } from '../../utils/workspac
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import { AITutorContextDebugPanel } from './AITutorContextDebugPanel';
 import AITutorAvatar from './AITutorAvatar';
+import MarkdownMathRenderer from './MarkdownMathRenderer';
 import { ShareContentModal, triggerNativeDeviceShare } from './ShareContentModal';
 import {
   fetchNaturalTtsAudio,
@@ -100,7 +101,7 @@ function parseTextWithHighlights(
   setActiveCitation: (cite: any) => void
 ) {
   if (!citations || citations.length === 0) {
-    return <span dangerouslySetInnerHTML={{ __html: text.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>') }} />;
+    return <MarkdownMathRenderer content={text} />;
   }
 
   const regex = /<cite id="(\d+)">([\s\S]*?)<\/cite>|\[(\d+)\]/g;
@@ -151,7 +152,7 @@ function parseTextWithHighlights(
   while ((match = regex.exec(text)) !== null) {
     const preText = text.substring(lastIndex, match.index);
     if (preText) {
-      parts.push(<span key={`pre-${match.index}`} dangerouslySetInnerHTML={{ __html: preText.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>') }} />);
+      parts.push(<MarkdownMathRenderer key={`pre-${match.index}`} content={preText} className="inline" />);
     }
 
     if (match[1]) {
@@ -175,7 +176,7 @@ function parseTextWithHighlights(
             onMouseLeave={() => setHoveredCitation(null)}
             onClick={() => setActiveCitation(citeData)}
           >
-            <span dangerouslySetInnerHTML={{ __html: citeContent.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>') }} />
+            <MarkdownMathRenderer content={citeContent} className="inline" />
             {renderTooltip(citeId, citeData)}
           </span>
         );
@@ -216,7 +217,7 @@ function parseTextWithHighlights(
 
   const postText = text.substring(lastIndex);
   if (postText) {
-    parts.push(<span key={`post-${lastIndex}`} dangerouslySetInnerHTML={{ __html: postText.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>') }} />);
+    parts.push(<MarkdownMathRenderer key={`post-${lastIndex}`} content={postText} className="inline" />);
   }
 
   return <>{parts}</>;

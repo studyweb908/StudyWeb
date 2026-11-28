@@ -302,3 +302,33 @@
 .dark .rich-editor-content code, .dark .rich-editor-content .rich-code {
   color: #f472b6; 
 }
+
+/* StudyWeb AI Chat Markdown + KaTeX Mathematical & Chemical Equations */
+.studyweb-markdown .katex {
+  font-size: 1.04em;
+  line-height: 1.25;
+}
+
+.studyweb-markdown .katex-display {
+  margin: 0.75rem 0;
+  padding: 0.65rem 0.85rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 0.75rem;
+  background-color: rgba(99, 102, 241, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.14);
+}
+
+.dark .studyweb-markdown .katex-display {
+  background-color: rgba(99, 102, 241, 0.1);
+  border-color: rgba(129, 140, 248, 0.2);
+}
+
+.studyweb-markdown .katex-display > .katex {
+  white-space: nowrap;
+}
+
+.studyweb-markdown input[type='checkbox'] {
+  margin-right: 0.45rem;
+  accent-color: #4f46e5;
+}

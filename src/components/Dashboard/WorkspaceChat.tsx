@@ -37,6 +37,7 @@ import { loadStoredWorkspaces } from '../../utils/workspaceStorage';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import { toValidUuid } from '../../utils/uuid';
 import AITutorAvatar from './AITutorAvatar';
+import MarkdownMathRenderer from './MarkdownMathRenderer';
 import { ShareContentModal, triggerNativeDeviceShare } from './ShareContentModal';
 import {
   fetchNaturalTtsAudio,
@@ -2030,97 +2031,9 @@ export default function WorkspaceChat({
     }
   };
 
-  // Minimalist Markdown Formatter with live ChatGPT-style streaming cursor support
+  // Full GFM Markdown + KaTeX LaTeX/Chemistry renderer with live streaming cursor support
   const renderMessageContent = (text: string, isStreaming = false) => {
-    const lines = text.split('\n');
-    const lastNonEmptyIdx = (() => {
-      for (let i = lines.length - 1; i >= 0; i--) {
-        if (lines[i].trim()) return i;
-      }
-      return lines.length - 1;
-    })();
-    const cursorHtml = isStreaming
-      ? ' <span class="inline-block w-2 h-2 ml-0.5 align-middle rounded-full bg-indigo-600 dark:bg-indigo-400 animate-pulse"></span>'
-      : '';
-
-    return (
-      <div className="space-y-2 text-sm sm:text-[15px] leading-relaxed">
-        {lines.map((line, idx) => {
-          const trimmed = line.trim();
-          const isLastLine = isStreaming && idx === lastNonEmptyIdx;
-          if (!trimmed) return <div key={idx} className="h-1.5" />;
-
-          // Heading 3
-          if (trimmed.startsWith('### ')) {
-            return (
-              <h4 key={idx} className="font-extrabold text-base text-slate-900 dark:text-white pt-1">
-                {trimmed.replace('### ', '')}
-                {isLastLine && <span className="inline-block w-2 h-2 ml-1 align-middle rounded-full bg-indigo-600 dark:bg-indigo-400 animate-pulse" />}
-              </h4>
-            );
-          }
-          // Heading 2 or 1
-          if (trimmed.startsWith('## ') || trimmed.startsWith('# ')) {
-            return (
-              <h3 key={idx} className="font-extrabold text-base sm:text-lg text-slate-900 dark:text-white pt-1">
-                {trimmed.replace(/^#+\s*/, '')}
-                {isLastLine && <span className="inline-block w-2 h-2 ml-1 align-middle rounded-full bg-indigo-600 dark:bg-indigo-400 animate-pulse" />}
-              </h3>
-            );
-          }
-
-          // Bullet points
-          if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-            const content = trimmed.substring(2);
-            return (
-              <div key={idx} className="flex items-start gap-2 pl-1">
-                <span className="text-indigo-600 dark:text-indigo-400 font-bold shrink-0 mt-0.5">•</span>
-                <span 
-                  className="flex-1"
-                  dangerouslySetInnerHTML={{ 
-                    __html: content
-                      .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>')
-                      .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>') + (isLastLine ? cursorHtml : '')
-                  }} 
-                />
-              </div>
-            );
-          }
-
-          // Numbered lists
-          const numMatch = trimmed.match(/^(\d+)\.\s+(.*)/);
-          if (numMatch) {
-            return (
-              <div key={idx} className="flex items-start gap-2 pl-1">
-                <span className="font-bold text-indigo-600 dark:text-indigo-400 shrink-0 font-mono text-xs mt-0.5">
-                  {numMatch[1]}.
-                </span>
-                <span 
-                  className="flex-1"
-                  dangerouslySetInnerHTML={{ 
-                    __html: numMatch[2]
-                      .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>')
-                      .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>') + (isLastLine ? cursorHtml : '')
-                  }} 
-                />
-              </div>
-            );
-          }
-
-          // Standard paragraph
-          return (
-            <p 
-              key={idx} 
-              dangerouslySetInnerHTML={{ 
-                __html: trimmed
-                  .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>')
-                  .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>') + (isLastLine ? cursorHtml : '')
-              }} 
-            />
-          );
-        })}
-      </div>
-    );
+    return <MarkdownMathRenderer content={text} isStreaming={isStreaming} />;
   };
 
   const renderWorkspaceLogo = (sizeClass = 'w-7 h-7 sm:w-8.5 sm:h-8.5', _textClass = 'text-base sm:text-lg') => {

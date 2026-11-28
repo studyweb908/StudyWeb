@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { Workspace, WorkspaceFile } from './WorkspaceTypes';
+import MarkdownMathRenderer from './MarkdownMathRenderer';
 import { toValidUuid } from '../../utils/uuid';
 import { WorkspaceSyncService } from '../../services/WorkspaceSyncService';
 import {
@@ -112,74 +113,8 @@ const TRANSLATE_LANGUAGES = [
   'Portuguese'
 ];
 
-/**
- * Cleanly formats inline bold/code text for Google Lens answers without external Markdown packages.
- */
-function renderInlineSegments(text: string): React.ReactNode[] {
-  const tokens = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  return tokens.map((token, idx) => {
-    if (token.startsWith('**') && token.endsWith('**') && token.length > 4) {
-      return (
-        <strong key={idx} className="font-semibold text-slate-900 dark:text-white">
-          {token.slice(2, -2)}
-        </strong>
-      );
-    }
-    if (token.startsWith('`') && token.endsWith('`') && token.length > 2) {
-      return (
-        <code
-          key={idx}
-          className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-slate-800 text-blue-700 dark:text-blue-300 font-mono text-[0.85em]"
-        >
-          {token.slice(1, -1)}
-        </code>
-      );
-    }
-    return <React.Fragment key={idx}>{token}</React.Fragment>;
-  });
-}
-
 function renderFormattedLensText(content: string): React.ReactNode {
-  const lines = content.split('\n');
-  return (
-    <div className="space-y-1.5 text-xs sm:text-sm text-slate-700 dark:text-slate-200 leading-relaxed">
-      {lines.map((rawLine, idx) => {
-        const line = rawLine.trim();
-        if (!line) {
-          return <div key={idx} className="h-1.5" />;
-        }
-        if (/^#{1,4}\s+/.test(line)) {
-          const headingText = line.replace(/^#{1,4}\s+/, '');
-          return (
-            <h5 key={idx} className="text-sm sm:text-[15px] font-bold text-slate-900 dark:text-white pt-1.5">
-              {renderInlineSegments(headingText)}
-            </h5>
-          );
-        }
-        if (/^[-*•]\s+/.test(line)) {
-          const itemText = line.replace(/^[-*•]\s+/, '');
-          return (
-            <div key={idx} className="flex items-start gap-2 pl-1">
-              <span className="text-blue-600 dark:text-blue-400 font-bold leading-5 select-none">•</span>
-              <span className="flex-1">{renderInlineSegments(itemText)}</span>
-            </div>
-          );
-        }
-        if (/^\d+[.)]\s+/.test(line)) {
-          const match = line.match(/^(\d+[.)])\s+(.*)$/);
-          if (match) {
-            return (
-              <div key={idx} className="flex items-start gap-2 pl-1">
-                <span className="text-blue-600 dark:text-blue-400 font-semibold tabular-nums shrink-0">{match[1]}</span>
-                <span className="flex-1">{renderInlineSegments(match[2])}</span>
-              </div>
-            );
-          }
-        }
-        return <p key={idx}>{renderInlineSegments(line)}</p>;
-      })}
-    </div>
-  );
+  return <MarkdownMathRenderer content={content} className="text-xs sm:text-sm" />;
 }
 
 /**
