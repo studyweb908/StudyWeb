@@ -65,10 +65,11 @@ test('3. Inline and block LaTeX equations ($...$, $$...$$, \\(...\\), \\[...\\])
   ].join('\n');
 
   const html = renderToStaticMarkup(<MarkdownMathRenderer content={md} />);
+  const withoutAnnotations = html.replace(/<annotation[\s\S]*?<\/annotation>/g, '');
   assert.ok(html.includes('class="katex"'), 'Expected KaTeX inline output');
   assert.ok(html.includes('class="katex-display"'), 'Expected KaTeX display block output');
-  assert.ok(!html.includes('\\frac{1}{2}'), 'Raw \\frac should not appear outside mathml annotation');
-  assert.ok(!html.includes('\\['), 'Raw \\[ delimiter should not appear');
+  assert.ok(!withoutAnnotations.includes('\\frac{1}{2}'), 'Raw \\frac should not appear outside mathml annotation');
+  assert.ok(!withoutAnnotations.includes('\\['), 'Raw \\[ delimiter should not appear');
 });
 
 test('4. Chemical formulas & reactions (mhchem \\ce, subscripts, superscripts, arrows) render cleanly', () => {
@@ -123,8 +124,8 @@ test('7. Untrusted raw HTML and scripts are blocked and never executed', () => {
   const html = renderToStaticMarkup(<MarkdownMathRenderer content={malicious} />);
   assert.ok(!html.includes('<script'), 'Script tag must not be emitted');
   assert.ok(!html.includes('<img'), 'Raw HTML img tag must not be emitted');
-  assert.ok(!html.includes('onerror='), 'Event handler attribute must not be emitted');
-  assert.ok(html.includes('<strong>Safe</strong>') || html.includes('Safe</strong>'), 'Safe Markdown still renders');
+  assert.ok(!/<[^>]*\bonerror\s*=/.test(html), 'Event handler attribute must not be emitted as an HTML attribute');
+  assert.ok(html.includes('Safe</strong>'), 'Safe Markdown still renders');
 });
 
 test('8. Currency amounts ($5 and $10) stay plain text rather than broken math', () => {

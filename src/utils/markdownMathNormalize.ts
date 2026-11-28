@@ -49,24 +49,54 @@ function normalizeMathSegment(segment: string, isStreaming: boolean): string {
   // 1. Convert \[ ... \] display math to $$ ... $$ blocks
   out = out.replace(/\\\[([\s\S]*?)\\\]/g, (_m, inner: string) => {
     const trimmed = inner.trim();
-    return trimmed ? `\n$$\n${trimmed}\n$$\n` : '';
+    return trimmed ? `\n\n$$\n${trimmed}\n$$\n\n` : '';
   });
 
-  // 2. Convert \( ... \) inline math to $...$
+  // 2. Ensure $$ ... $$ display math sits on its own lines so remark-math always renders display math
+  out = out.replace(/\$\$([\s\S]*?)\$\$/g, (_m, inner: string) => {
+    const trimmed = inner.trim();
+    return trimmed ? `\n\n$$\n${trimmed}\n$$\n\n` : '';
+  });
+
+  // 3. Convert \( ... \) inline math to $...$
   out = out.replace(/\\\(([\s\S]*?)\\\)/g, (_m, inner: string) => {
     const trimmed = inner.trim();
     return trimmed ? `$${trimmed}$` : '';
   });
 
-  // 3. Convert bare \ce{...} not already inside $...$ into $\ce{...}$
-  // First protect existing $...$ and $$...$$ spans temporarily
+  // 4. Protect existing $$...$$ blocks & real inline math, convert bare \ce{...}, and escape plain currency ($5, $10.99)
   const mathTokens: string[] = [];
-  out = out.replace(/(\$\$[\s\S]*?\$\$|\$[^\n$]+?\$)/g, (m) => {
+  out = out.replace(/(\$\$[\s\S]*?\$\$)/g, (m) => {
     const idx = mathTokens.length;
     mathTokens.push(m);
     return `\uE000MATH_${idx}\uE001`;
   });
 
+  // Escape currency amounts like "$5 and $10" so two currency figures on one line aren't paired as math
+  out = out.replace(/(^|[^\\$])\$(\d[\d,]*(?:\.\d+)?)(?=\s|$|[.,;:!?)\]])/gm, (_m, prefix: string, num: string, offset: number, fullStr: string) => {
+    const restOfLine = fullStr.slice(offset + prefix.length + 1 + num.length).split('\n')[0];
+    // If immediately followed by math operators/LaTeX before whitespace/next sentence (e.g. "$2x + 3 = 7$"), keep as math
+    const nextDollarIdx = restOfLine.indexOf('$');
+    if (nextDollarIdx !== -1) {
+      const between = `${num}${restOfLine.slice(0, nextDollarIdx)}`;
+      if (MATH_CONTENT_HINT.test(between) || /[+\-*/=<>^_]/.test(between)) {
+        return `${prefix}$${num}`;
+      }
+    }
+    return `${prefix}\\$${num}`;
+  });
+
+  // Protect remaining valid inline math spans
+  out = out.replace(/(^|[^\\])(\$[^\n$]+?\$)/gm, (_m, prefix: string, span: string) => {
+    const idx = mathTokens.length;
+    const inner = span.slice(1, -1);
+    const trimmed = inner.trim();
+    const cleanedSpan = trimmed && inner !== trimmed && MATH_CONTENT_HINT.test(trimmed) ? `$${trimmed}$` : span;
+    mathTokens.push(cleanedSpan);
+    return `${prefix}\uE000MATH_${idx}\uE001`;
+  });
+
+  // Convert bare \ce{...} not already inside $...$ into $\ce{...}$
   out = out.replace(/\\ce\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g, (m) => {
     const idx = mathTokens.length;
     mathTokens.push(`$${m}$`);
@@ -75,26 +105,13 @@ function normalizeMathSegment(segment: string, isStreaming: boolean): string {
 
   out = out.replace(/\uE000MATH_(\d+)\uE001/g, (_m, i) => mathTokens[Number(i)] || '');
 
-  // 4. Trim edge whitespace inside $ math $ when interior looks like LaTeX/chemistry
-  // (avoids touching currency expressions like "$5 and $10")
-  out = out.replace(/\$([^\n$]+?)\$/g, (full, inner: string) => {
-    const trimmed = inner.trim();
-    if (!trimmed) return full;
-    if (inner !== trimmed && MATH_CONTENT_HINT.test(trimmed)) {
-      return `$${trimmed}$`;
-    }
-    return full;
-  });
-
   // 5. During streaming, close any trailing unclosed $$ or \[ display math block
   if (isStreaming) {
-    // Handle unclosed \[ at tail
     const lastOpenBracket = out.lastIndexOf('\\[');
     if (lastOpenBracket !== -1 && out.indexOf('\\]', lastOpenBracket) === -1) {
-      out = `${out.slice(0, lastOpenBracket)}\n$$\n${out.slice(lastOpenBracket + 2).trim()}\n$$`;
+      out = `${out.slice(0, lastOpenBracket)}\n\n$$\n${out.slice(lastOpenBracket + 2).trim()}\n$$`;
     }
 
-    // Count $$ delimiters
     const blockMatches = out.match(/\$\$/g);
     if (blockMatches && blockMatches.length % 2 === 1) {
       out = `${out}\n$$`;
