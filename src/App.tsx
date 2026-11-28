@@ -946,13 +946,11 @@ export default function App() {
           workspaces={workspaces}
           activeWorkspace={activeWorkspace}
           setActiveWorkspace={handleSelectWorkspace}
-          isCollapsed={isSidebarCollapsed}
-          onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           onOpenScanner={() => setShowQuickScan(true)}
         />
 
-        {/* Workspace body Area */}
-        <div className={`${isFocusMode ? 'md:pl-0' : isSidebarCollapsed ? 'md:pl-20' : 'md:pl-64'} flex flex-col flex-1 min-w-0 h-[100dvh] overflow-hidden relative transition-[padding] duration-200 ease-out`}>
+        {/* Workspace body Area (fixed md:pl-20 so Instagram-style hover sidebar glides over cleanly without layout jump) */}
+        <div className={`${isFocusMode ? 'md:pl-0' : 'md:pl-20'} flex flex-col flex-1 min-w-0 h-[100dvh] overflow-hidden relative transition-[padding] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]`}>
           
           {/* Header Bar */}
           <DashboardHeader 
@@ -977,7 +975,7 @@ export default function App() {
           <nav 
             aria-label="Mobile Bottom Navigation"
             data-tour="mobile-bottom-nav"
-            className="md:hidden fixed bottom-0 left-0 right-0 h-[calc(4rem+env(safe-area-inset-bottom,0px))] bg-white/95 dark:bg-slate-900/95 border-t border-slate-200/80 dark:border-slate-800/80 backdrop-blur-lg grid grid-cols-5 items-center justify-items-center px-1 pb-[env(safe-area-inset-bottom,0px)] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.4)]"
+            className="md:hidden fixed bottom-0 left-0 right-0 h-[calc(4rem+env(safe-area-inset-bottom,0px))] bg-white/90 dark:bg-slate-900/90 border-t border-slate-200/80 dark:border-slate-800/80 backdrop-blur-xl grid grid-cols-5 items-center justify-items-center px-1.5 pb-[env(safe-area-inset-bottom,0px)] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.4)]"
           >
             {/* 1. Home / Dashboard */}
             <button
@@ -985,14 +983,21 @@ export default function App() {
                 setActiveWorkspace(null);
                 setActiveTab('dashboard');
               }}
-              className={`w-full min-h-[44px] h-full flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95 ${
+              className={`relative w-full min-h-[44px] h-12 my-auto flex flex-col items-center justify-center gap-0.5 rounded-2xl cursor-pointer transition-colors active:scale-95 ${
                 activeTab === 'dashboard' && activeWorkspace === null
-                  ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                  ? 'text-indigo-600 dark:text-indigo-300 font-bold'
                   : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
               }`}
             >
-              <LayoutDashboard className="w-5 h-5" />
-              <span className="text-[10px] font-bold">Home</span>
+              {activeTab === 'dashboard' && activeWorkspace === null && (
+                <motion.div
+                  layoutId="mobile-bottom-nav-pill"
+                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                  className="absolute inset-x-1 inset-y-0.5 rounded-2xl bg-indigo-50/90 dark:bg-indigo-500/20 border border-indigo-200/60 dark:border-indigo-400/25"
+                />
+              )}
+              <LayoutDashboard className="relative z-10 w-5 h-5" />
+              <span className="relative z-10 text-[10px] font-bold">Home</span>
             </button>
 
             {/* 2. Workspaces */}
@@ -1001,14 +1006,21 @@ export default function App() {
                 setActiveWorkspace(null);
                 setActiveTab('workspaces');
               }}
-              className={`w-full min-h-[44px] h-full flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95 ${
+              className={`relative w-full min-h-[44px] h-12 my-auto flex flex-col items-center justify-center gap-0.5 rounded-2xl cursor-pointer transition-colors active:scale-95 ${
                 activeTab === 'workspaces' && activeWorkspace === null
-                  ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                  ? 'text-indigo-600 dark:text-indigo-300 font-bold'
                   : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
               }`}
             >
-              <Folder className="w-5 h-5" />
-              <span className="text-[10px] font-bold">Spaces</span>
+              {activeTab === 'workspaces' && activeWorkspace === null && (
+                <motion.div
+                  layoutId="mobile-bottom-nav-pill"
+                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                  className="absolute inset-x-1 inset-y-0.5 rounded-2xl bg-indigo-50/90 dark:bg-indigo-500/20 border border-indigo-200/60 dark:border-indigo-400/25"
+                />
+              )}
+              <Folder className="relative z-10 w-5 h-5" />
+              <span className="relative z-10 text-[10px] font-bold">Spaces</span>
             </button>
 
             {/* 3. Center Camera Scan Action Button */}
@@ -1028,14 +1040,21 @@ export default function App() {
                 }
                 setActiveTab('ai-tutor');
               }}
-              className={`w-full min-h-[44px] h-full flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95 ${
+              className={`relative w-full min-h-[44px] h-12 my-auto flex flex-col items-center justify-center gap-0.5 rounded-2xl cursor-pointer transition-colors active:scale-95 ${
                 activeTab === 'ai-tutor'
-                  ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                  ? 'text-indigo-600 dark:text-indigo-300 font-bold'
                   : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
               }`}
             >
-              <Sparkles className="w-5 h-5" />
-              <span className="text-[10px] font-bold">AI Tutor</span>
+              {activeTab === 'ai-tutor' && (
+                <motion.div
+                  layoutId="mobile-bottom-nav-pill"
+                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                  className="absolute inset-x-1 inset-y-0.5 rounded-2xl bg-indigo-50/90 dark:bg-indigo-500/20 border border-indigo-200/60 dark:border-indigo-400/25"
+                />
+              )}
+              <Sparkles className="relative z-10 w-5 h-5" />
+              <span className="relative z-10 text-[10px] font-bold">AI Tutor</span>
             </button>
 
             {/* 5. Profile */}
@@ -1044,14 +1063,21 @@ export default function App() {
                 setActiveTab('profile');
                 setActiveWorkspace(null);
               }}
-              className={`w-full min-h-[44px] h-full flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95 ${
+              className={`relative w-full min-h-[44px] h-12 my-auto flex flex-col items-center justify-center gap-0.5 rounded-2xl cursor-pointer transition-colors active:scale-95 ${
                 activeTab === 'profile'
-                  ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                  ? 'text-indigo-600 dark:text-indigo-300 font-bold'
                   : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
               }`}
             >
-              <User className="w-5 h-5" />
-              <span className="text-[10px] font-bold">Profile</span>
+              {activeTab === 'profile' && (
+                <motion.div
+                  layoutId="mobile-bottom-nav-pill"
+                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                  className="absolute inset-x-1 inset-y-0.5 rounded-2xl bg-indigo-50/90 dark:bg-indigo-500/20 border border-indigo-200/60 dark:border-indigo-400/25"
+                />
+              )}
+              <User className="relative z-10 w-5 h-5" />
+              <span className="relative z-10 text-[10px] font-bold">Profile</span>
             </button>
           </nav>
 

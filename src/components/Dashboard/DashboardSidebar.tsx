@@ -53,10 +53,10 @@ export default function DashboardSidebar({
   workspaces = [],
   activeWorkspace = null,
   setActiveWorkspace,
-  isCollapsed = false,
-  onToggleCollapse,
   onOpenScanner
 }: SidebarProps) {
+  const [isDesktopHovered, setIsDesktopHovered] = React.useState(false);
+
   const menuItems = [
     { id: 'dashboard', label: 'Home', icon: <LayoutDashboard className="w-4 h-4" />, colorClass: 'text-blue-600 dark:text-blue-400', bgClass: 'bg-blue-50 dark:bg-blue-950' },
     { id: 'workspaces', label: 'Workspaces', icon: <Folder className="w-4 h-4" />, colorClass: 'text-orange-600 dark:text-orange-400', bgClass: 'bg-orange-50 dark:bg-orange-950' },
@@ -73,24 +73,24 @@ export default function DashboardSidebar({
     { id: 'parent-dashboard', label: 'Parent Link', icon: <Users className="w-4 h-4" />, colorClass: 'text-cyan-700 dark:text-cyan-300', bgClass: 'bg-cyan-50 dark:bg-cyan-950', comingSoon: true },
   ];
 
-  const renderSidebarContent = (_layoutIdPrefix: string, forceExpanded = false) => {
-    const isCollapsedState = isCollapsed && !forceExpanded;
+  const renderSidebarContent = (layoutIdPrefix: string, forceExpanded = false) => {
+    const isCollapsedState = !isDesktopHovered && !forceExpanded;
     return (
-      <div className="flex flex-col h-full w-full overflow-hidden transform-gpu will-change-transform bg-white dark:bg-[#0E1528] text-slate-800 dark:text-slate-100 border-r border-[#E2E8F0] dark:border-slate-800 selection:bg-[#5145F5] selection:text-white shadow-xs">
+      <div className="flex flex-col h-full w-full overflow-hidden transform-gpu will-change-transform bg-white/88 dark:bg-[#0E1528]/88 backdrop-blur-2xl text-slate-800 dark:text-slate-100 border-r border-slate-200/80 dark:border-slate-800/80 selection:bg-[#5145F5] selection:text-white shadow-sm">
         {/* Brand Logo Header - Fixed height to prevent vertical layout shifts */}
         <div
           className={`h-16 shrink-0 flex items-center justify-between ${
             isCollapsedState ? 'px-2.5' : 'px-4'
-          } border-b border-[#E2E8F0] dark:border-slate-800 bg-white dark:bg-[#0E1528] overflow-hidden`}
+          } border-b border-slate-200/70 dark:border-slate-800/80 bg-white/60 dark:bg-[#0E1528]/60 backdrop-blur-xl overflow-hidden transition-[padding] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]`}
         >
           <div className="flex items-center min-w-0 overflow-hidden">
             <img 
               src="/logo-inner.png" 
               alt="StudyWeb Logo" 
-              className="w-8 h-8 object-contain select-none shrink-0 transform-gpu transition-transform duration-200" 
+              className="w-8 h-8 object-contain select-none shrink-0 transform-gpu transition-transform duration-300" 
             />
             <div
-              className={`min-w-0 overflow-hidden whitespace-nowrap transform-gpu will-change-transform transition-[opacity,transform,max-width,margin] duration-200 ease-out ${
+              className={`min-w-0 overflow-hidden whitespace-nowrap transform-gpu will-change-transform transition-[opacity,transform,max-width,margin] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
                 isCollapsedState
                   ? '-translate-x-3 opacity-0 max-w-0 ml-0 pointer-events-none'
                   : 'translate-x-0 opacity-100 max-w-[160px] ml-2.5'
@@ -108,17 +108,6 @@ export default function DashboardSidebar({
           </div>
           
           <div className="flex items-center justify-center shrink-0">
-            {onToggleCollapse && !forceExpanded && (
-              <button
-                onClick={onToggleCollapse}
-                className="hidden md:flex items-center justify-center w-6 h-6 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
-                title={isCollapsedState ? "Expand Sidebar" : "Collapse Sidebar"}
-                aria-label={isCollapsedState ? "Expand Sidebar" : "Collapse Sidebar"}
-              >
-                <ChevronRight className={`w-4 h-4 transform-gpu transition-transform duration-200 ${isCollapsedState ? 'rotate-0' : 'rotate-180'}`} />
-              </button>
-            )}
-            
             <button 
               onClick={onClose}
               className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
@@ -163,21 +152,28 @@ export default function DashboardSidebar({
                   isCollapsedState ? 'justify-center px-0' : 'justify-start px-2.5'
                 } rounded-xl text-sm font-semibold relative group cursor-pointer overflow-hidden whitespace-nowrap transition-colors duration-200 ${
                   isActive 
-                    ? 'bg-[#5145F5] text-white shadow-sm shadow-[#5145F5]/25' 
-                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/80 dark:hover:bg-slate-800/80'
+                    ? 'text-white' 
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-slate-800/70'
                 }`}
                 title={isCollapsedState ? item.label : undefined}
               >
-                <span className={`flex items-center justify-center w-8 h-8 rounded-lg shrink-0 transition-colors duration-200 ${
+                {isActive && (
+                  <motion.div
+                    layoutId={`${layoutIdPrefix}-sidebar-active-pill`}
+                    transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                    className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#5145F5] to-indigo-500 shadow-md shadow-[#5145F5]/25"
+                  />
+                )}
+                <span className={`relative z-10 flex items-center justify-center w-8 h-8 rounded-lg shrink-0 transition-colors duration-200 ${
                   isActive 
                     ? 'bg-white/20 text-white' 
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 group-hover:text-[#5145F5] dark:group-hover:text-white group-hover:bg-indigo-50 dark:group-hover:bg-slate-700'
+                    : 'bg-slate-100/90 dark:bg-slate-800/90 text-slate-500 dark:text-slate-400 group-hover:text-[#5145F5] dark:group-hover:text-white group-hover:bg-indigo-50 dark:group-hover:bg-slate-700'
                 }`}>
                   {item.icon}
                 </span>
 
                 <div
-                  className={`flex items-center justify-between min-w-0 overflow-hidden transform-gpu will-change-transform transition-[opacity,transform,max-width,margin] duration-200 ease-out ${
+                  className={`relative z-10 flex items-center justify-between min-w-0 overflow-hidden transform-gpu will-change-transform transition-[opacity,transform,max-width,margin] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
                     isCollapsedState
                       ? '-translate-x-2 opacity-0 max-w-0 ml-0 pointer-events-none'
                       : 'translate-x-0 opacity-100 flex-1 max-w-full ml-2.5'
@@ -248,7 +244,7 @@ export default function DashboardSidebar({
         </div>
 
         {/* Footer / Settings & Logout */}
-        <div className="p-2.5 border-t border-[#E2E8F0] dark:border-slate-800 space-y-1 bg-slate-50/70 dark:bg-[#0B1020]/80 flex flex-col shrink-0 overflow-hidden">
+        <div className="p-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom,0px))] md:pb-2.5 border-t border-slate-200/70 dark:border-slate-800/80 space-y-1 bg-slate-50/70 dark:bg-[#0B1020]/70 backdrop-blur-xl flex flex-col shrink-0 overflow-hidden">
           <button
             onClick={() => {
               setActiveTab('profile');
@@ -258,20 +254,27 @@ export default function DashboardSidebar({
               isCollapsedState ? 'justify-center px-0' : 'justify-start px-2.5'
             } rounded-xl text-sm font-medium cursor-pointer relative group overflow-hidden whitespace-nowrap transition-colors duration-200 ${
               activeTab === 'profile' 
-                ? 'bg-[#5145F5] text-white shadow-sm shadow-[#5145F5]/25 font-bold' 
-                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white dark:hover:bg-slate-800 border border-transparent hover:border-slate-200 dark:hover:border-slate-700'
+                ? 'text-white font-bold' 
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/80 dark:hover:bg-slate-800/80 border border-transparent hover:border-slate-200/80 dark:hover:border-slate-700/80'
             }`}
             title="Settings"
           >
-            <span className={`flex items-center justify-center w-8 h-8 rounded-lg shrink-0 transition-colors duration-200 ${
+            {activeTab === 'profile' && (
+              <motion.div
+                layoutId={`${layoutIdPrefix}-sidebar-active-pill`}
+                transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#5145F5] to-indigo-500 shadow-md shadow-[#5145F5]/25"
+              />
+            )}
+            <span className={`relative z-10 flex items-center justify-center w-8 h-8 rounded-lg shrink-0 transition-colors duration-200 ${
               activeTab === 'profile'
                 ? 'bg-white/20 text-white'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 group-hover:text-[#5145F5] dark:group-hover:text-white'
+                : 'bg-slate-100/90 dark:bg-slate-800/90 text-slate-500 dark:text-slate-400 group-hover:text-[#5145F5] dark:group-hover:text-white'
             }`}>
               <Settings className="w-4 h-4" />
             </span>
             <span
-              className={`tracking-tight text-[13px] truncate transform-gpu will-change-transform transition-[opacity,transform,max-width,margin] duration-200 ease-out ${
+              className={`relative z-10 tracking-tight text-[13px] truncate transform-gpu will-change-transform transition-[opacity,transform,max-width,margin] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
                 isCollapsedState
                   ? '-translate-x-2 opacity-0 max-w-0 ml-0 pointer-events-none'
                   : 'translate-x-0 opacity-100 max-w-full ml-2.5'
@@ -306,12 +309,16 @@ export default function DashboardSidebar({
     );
   };
 
-  const widthClass = isCollapsed ? 'md:w-20' : 'md:w-64';
+  const widthClass = isDesktopHovered ? 'md:w-64 shadow-2xl shadow-slate-900/15 dark:shadow-black/50' : 'md:w-20';
 
   return (
     <div className="overflow-hidden shrink-0">
-      {/* Desktop/Tablet Permanent Sidebar */}
-      <aside className={`${isFocusMode ? 'hidden' : 'hidden md:block'} ${widthClass} h-full fixed top-0 left-0 z-20 transform-gpu will-change-transform translate-x-0 transition-[width,transform] duration-200 ease-out overflow-hidden`}>
+      {/* Desktop/Tablet Auto-Expanding Hover Sidebar (Instagram-style) */}
+      <aside
+        onMouseEnter={() => setIsDesktopHovered(true)}
+        onMouseLeave={() => setIsDesktopHovered(false)}
+        className={`${isFocusMode ? 'hidden' : 'hidden md:block'} ${widthClass} h-full fixed top-0 left-0 z-30 transform-gpu will-change-transform translate-x-0 transition-[width,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] overflow-hidden`}
+      >
         {renderSidebarContent('desktop')}
       </aside>
 
